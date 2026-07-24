@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+import { isMainModule } from "@/runtime/is-main";
+import type { Repo } from "@/db/repo";
+import { openDatabase, defaultDbPath } from "@/db/database";
+import { Repo as RepoClass } from "@/db/repo";
+import { nowIso } from "@/core/ids";
+import { createProvider } from "@/embeddings/index";
+import { EmbeddingWorker } from "@/embeddings/worker";
+import { ConsolidationWorker } from "@/consolidation/worker";
+import { createConsolidator } from "@/consolidation/index";
+import { consolidateIntervalMs } from "@/consolidation/config";
+import { isDaemonAlive, writeDaemonPid, clearDaemonPid } from "@/runtime/daemon-pid";
+
+// Standalone embedding drain. Outlives any Claude Code session: the MCP server
+// spawns it detached (see ensureDaemon in server.ts) and it keeps draining the
+// shared queue until the backlog is empty and it has been idle long enough to be
+// worth releasing the ~120MB model. Then it exits and the next session respawns
+// it. It is the canonical writer for embeddings; the worker_lease still guards
+// against any overlap with a fallback in-process worker.
+
+export interface DaemonOptions {
+  activeIntervalMs?: number; // poll cadence while there is a backlog
+  idleIntervalMs?: number; // poll cadence once the queue is empty
+  idleExitMs?: number; // exit after this long with an empty queue
+}
+
+// The model sustains hundreds of chunks/sec; a dedicated daemon should feed it in
+// large batches and loop with only an event-loop yield between ticks (not a real
+// sleep) while there is a backlog. The gentle 3s in-process fallback worker is a
+// different, politer citizen — this is not that.
+const ACTIVE_MS = Number(process.env.MEMORY_DAEMON_ACTIVE_MS) || 0;
+const IDLE_MS = 5000;
+const IDLE_EXIT_MS = Number(process.env.MEMORY_DAEMON_IDLE_MS) || 5 * 60_000;
+const BATCH = Number(process.env.MEMORY_EMBED_BATCH) || 64;
+
+export interface IdleState {
+  idleSinceMs: number | null;
+}
+
+// Pure idle-exit decision, extracted so it is testable without real timers.
+// `nowMs` is injected; `idleSinceMs` carries across calls. Once the queue has
+// been continuously empty for `idleExitMs`, signal exit.
+export function nextIdleState(
+  prev: IdleState,
+  backlog: number,
+  nowMs: number,
+  idleExitMs: number,
+): {
+  state: IdleState;
+  shouldExit: boolean;
+} {
+  if (backlog > 0) return { state: { idleSinceMs: null }, shouldExit: false };
+  const since = prev.idleSinceMs ?? nowMs;
+  return { state: { idleSinceMs: since }, shouldExit: nowMs - since >= idleExitMs };
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+export async function runDaemon(
+  repo: Repo,
+  worker: EmbeddingWorker,
+  opts: DaemonOptions & {
+    stopped?: () => boolean;
+    sleepMs?: (ms: number) => Promise<void>;
+    nowMs?: () => number;
+    consolidation?: ConsolidationWorker;
+    consolidateIntervalMs?: number;
+  } = {},
+): Promise<void> {
+  const active = opts.activeIntervalMs ?? ACTIVE_MS;
+  const idle = opts.idleIntervalMs ?? IDLE_MS;
+  const idleExit = opts.idleExitMs ?? IDLE_EXIT_MS;
+  const stopped = opts.stopped ?? (() => false);
+  const nap = opts.sleepMs ?? sleep;
+  const now = opts.nowMs ?? Date.now;
+  const consolidation = opts.consolidation;
+  const consolidateInterval = opts.consolidateIntervalMs ?? consolidateIntervalMs();
+
+  worker.reconcile();
+  let idleState: IdleState = { idleSinceMs: null };
+  let lastConsolidateMs = -Infinity;
+  while (!stopped()) {
+    await worker.tick();
+    const { backlog } = repo.embeddingStats();
+    // Consolidate only when caught up on embeddings (kNN over half-embedded content is
+    // noise) and no more than once per interval. Runs promptly on reaching idle, before
+    // the idle-exit countdown can retire the process.
+    if (consolidation && backlog === 0 && now() - lastConsolidateMs >= consolidateInterval) {
+      lastConsolidateMs = now();
+      await consolidation.tick();
+    }
+    const { state, shouldExit } = nextIdleState(idleState, backlog, now(), idleExit);
+    idleState = state;
+    if (shouldExit) return;
+    await nap(backlog > 0 ? active : idle);
+  }
+}
+
+async function main(): Promise<void> {
+  const dbPath = defaultDbPath();
+  if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
+  const db = openDatabase(dbPath);
+  const repo = new RepoClass(db);
+  const worker = new EmbeddingWorker(repo, createProvider(), nowIso, { batchSize: BATCH });
+  const consolidation = new ConsolidationWorker(repo, createConsolidator(), nowIso);
+
+  writeDaemonPid(dbPath);
+  let stopping = false;
+  const shutdown = () => {
+    stopping = true;
+    worker.stop();
+    consolidation.stop();
+    clearDaemonPid(dbPath);
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+
+  try {
+    await runDaemon(repo, worker, { stopped: () => stopping, consolidation });
+  } finally {
+    // `stopping` is flipped by the SIGTERM/SIGINT handler above; eslint's flow
+    // analysis can't see that closure mutation and reads it as always-false.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!stopping) {
+      worker.stop();
+      consolidation.stop();
+      clearDaemonPid(dbPath);
+    }
+  }
+}
+
+if (isMainModule(import.meta.url)) {
+  main().catch((err: unknown) => {
+    process.stderr.write(`cerebrium daemon failed: ${(err as Error).message}\n`);
+    clearDaemonPid();
+    process.exit(1);
+  });
+}

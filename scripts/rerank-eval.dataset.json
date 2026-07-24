@@ -1,0 +1,178 @@
+{
+  "note": "Offline relevance eval for the search reranker. Docs are short semantic facts; each query gives natural-language phrasing plus the ids of the genuinely relevant docs. The set is seeded to include lexical traps — distractors that share query keywords without answering, and relevant docs that use synonyms — so RRF alone is imperfect and a cross-encoder has room to help. Extend it; it is a seed, not a benchmark.",
+  "docs": [
+    {
+      "id": "d01",
+      "title": "Access token lifetime",
+      "content": "Access tokens are valid for 15 minutes; after that the client must mint a new one with its refresh token."
+    },
+    {
+      "id": "d02",
+      "title": "Refresh token rotation",
+      "content": "Refresh tokens rotate on every use and are revoked after 30 days of inactivity, forcing a full re-login."
+    },
+    {
+      "id": "d03",
+      "title": "Login page redesign",
+      "content": "The login screen was redesigned with a new logo and a single email-first field; no change to auth behaviour."
+    },
+    {
+      "id": "d04",
+      "title": "Password reset flow",
+      "content": "A reset email carries a one-time link valid for one hour; clicking it invalidates all existing sessions."
+    },
+    {
+      "id": "d05",
+      "title": "Billing invoice generation",
+      "content": "Invoices are generated nightly at 02:00 UTC and emailed to the account owner the next morning."
+    },
+    {
+      "id": "d06",
+      "title": "Payment retry policy",
+      "content": "A failed card charge is retried after 1, 3 and 5 days; the third failure downgrades the account to the free tier."
+    },
+    {
+      "id": "d07",
+      "title": "Refund handling",
+      "content": "Refunds are issued to the original payment method and can take five to ten business days to appear."
+    },
+    {
+      "id": "d08",
+      "title": "Billing pipeline deploy",
+      "content": "The billing service deploys nightly through the release runbook with a Slack notification to #payments."
+    },
+    {
+      "id": "d09",
+      "title": "Kafka ingestion topics",
+      "content": "The ingestion service consumes events from the orders and clicks Kafka topics and writes them to the warehouse."
+    },
+    {
+      "id": "d10",
+      "title": "Consumer lag alerting",
+      "content": "An alert fires when a consumer group falls more than 10k messages behind; the on-call is paged after five minutes."
+    },
+    {
+      "id": "d11",
+      "title": "Dead letter queue",
+      "content": "Messages that fail processing three times are parked on a dead-letter queue for manual replay the next day."
+    },
+    {
+      "id": "d12",
+      "title": "Warehouse nightly load",
+      "content": "The analytics warehouse is loaded from the raw event tables every night; late-arriving events are backfilled hourly."
+    },
+    {
+      "id": "d13",
+      "title": "Deploy freeze windows",
+      "content": "Deploys are frozen from Friday 18:00 to Monday 09:00 and during the last three days of the quarter."
+    },
+    {
+      "id": "d14",
+      "title": "Rollback procedure",
+      "content": "To undo a bad release, redeploy the previous image tag; database migrations must be reverted by a separate down-migration."
+    },
+    {
+      "id": "d15",
+      "title": "CI test suite",
+      "content": "The pipeline runs unit and integration tests on every push; a green run is required before the merge button unlocks."
+    },
+    {
+      "id": "d16",
+      "title": "Feature flag rollout",
+      "content": "New features ship dark behind a flag and are ramped 1%, 10%, 50%, 100% while error rates are watched."
+    },
+    {
+      "id": "d17",
+      "title": "SQLite WAL mode",
+      "content": "The database runs in write-ahead-logging mode so readers never block the single writer; checkpoints fold the WAL back."
+    },
+    {
+      "id": "d18",
+      "title": "Busy timeout tuning",
+      "content": "A 15-second busy timeout plus immediate transactions lets concurrent processes wait out a held write lock instead of erroring."
+    },
+    {
+      "id": "d19",
+      "title": "Vacuum schedule",
+      "content": "The database is compacted weekly during the maintenance window to reclaim pages left by deleted rows."
+    },
+    {
+      "id": "d20",
+      "title": "Redis cache eviction",
+      "content": "The cache uses an LRU policy with a 512MB ceiling; hot keys are pinned with a longer TTL to survive eviction."
+    },
+    {
+      "id": "d21",
+      "title": "Cache stampede guard",
+      "content": "On a cache miss a single request holds a lock and recomputes while others wait, so a cold key can't overwhelm the origin."
+    },
+    {
+      "id": "d22",
+      "title": "Rate limiting",
+      "content": "Public endpoints allow 100 requests per minute per IP; exceeding it returns 429 with a Retry-After header."
+    },
+    {
+      "id": "d23",
+      "title": "On-call rotation",
+      "content": "The on-call engineer changes every Monday; handover notes are posted in the incident channel before the shift ends."
+    },
+    {
+      "id": "d24",
+      "title": "Incident severity levels",
+      "content": "SEV1 is a full outage paged immediately; SEV3 is a minor degradation handled during business hours."
+    },
+    {
+      "id": "d25",
+      "title": "Postmortem template",
+      "content": "Every SEV1 gets a blameless writeup within three days covering timeline, root cause and follow-up actions."
+    },
+    {
+      "id": "d26",
+      "title": "Embedding model",
+      "content": "Text is embedded with multilingual-e5-small into 384-dim vectors; query and passage use different prompt prefixes."
+    },
+    {
+      "id": "d27",
+      "title": "Vector search recall",
+      "content": "Nearest-neighbour lookup returns the closest chunks by cosine distance; results feed the fusion stage before ranking."
+    },
+    {
+      "id": "d28",
+      "title": "Hybrid ranking",
+      "content": "Full-text and vector candidates are merged with reciprocal rank fusion, then time-decay and graph signals reorder them."
+    },
+    {
+      "id": "d29",
+      "title": "Memory decay",
+      "content": "Episodic records lose relevance with age on a two-week half-life, while durable facts keep a steady rank."
+    },
+    {
+      "id": "d30",
+      "title": "Graph expansion",
+      "content": "After fusion the top hits pull in one-hop neighbours over typed edges so related context surfaces without a keyword match."
+    }
+  ],
+  "queries": [
+    { "query": "how soon do I have to sign in again after my session starts", "relevant": ["d01"] },
+    { "query": "when am I forced to log back in completely", "relevant": ["d02"] },
+    { "query": "what happens when a customer's card is declined", "relevant": ["d06"] },
+    { "query": "how do I get my money back and how long does it take", "relevant": ["d07"] },
+    { "query": "when do invoices go out to customers", "relevant": ["d05"] },
+    {
+      "query": "messages are piling up unprocessed, what handles that",
+      "relevant": ["d10", "d11"]
+    },
+    { "query": "which events does the ingestion pipeline read", "relevant": ["d09"] },
+    { "query": "can I ship code on a Saturday", "relevant": ["d13"] },
+    { "query": "how do I undo a broken release", "relevant": ["d14"] },
+    { "query": "how are new features gradually turned on for users", "relevant": ["d16"] },
+    { "query": "why don't reads block while something is writing to the db", "relevant": ["d17"] },
+    { "query": "how do we stop a cold key from hammering the origin", "relevant": ["d21"] },
+    { "query": "what stops one IP from flooding the API", "relevant": ["d22"] },
+    { "query": "who gets paged during a total outage", "relevant": ["d24", "d23"] },
+    {
+      "query": "how are text and semantic search results combined and ordered",
+      "relevant": ["d28"]
+    }
+  ]
+}
