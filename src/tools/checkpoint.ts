@@ -1,7 +1,15 @@
-import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
+import { z } from "zod";
+import type { Ctx, ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { Envelope } from "@/core/types";
+
+// TODO: Move to a separate file
+type ToolResult =
+  | (Envelope & {
+      hints: string[];
+    })
+  | Envelope;
 
 export class CheckpointTool extends AbstractTool {
   name = ToolName.CHECKPOINT;
@@ -29,7 +37,7 @@ export class CheckpointTool extends AbstractTool {
       .describe("Ids of nodes this session touched; linked via 'references'."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<ToolResult> {
     const hints = touchOrCreate(ctx, args.session_id, args.project ?? null);
 
     const existing = (args.touched_node_ids ?? []).filter((id) => ctx.repo.nodeExists(id));
@@ -65,9 +73,13 @@ export class CheckpointTool extends AbstractTool {
 function buildBody(summary: string, decisions?: string[], openThreads?: string[]): string {
   const parts = [`## Summary\n${summary.trim()}`];
 
-  if (decisions?.length) parts.push(`## Decisions\n${decisions.map((d) => `- ${d}`).join("\n")}`);
-  if (openThreads?.length)
+  if (decisions?.length) {
+    parts.push(`## Decisions\n${decisions.map((d) => `- ${d}`).join("\n")}`);
+  }
+
+  if (openThreads?.length) {
     parts.push(`## Open threads\n${openThreads.map((t) => `- ${t}`).join("\n")}`);
+  }
 
   return parts.join("\n\n");
 }

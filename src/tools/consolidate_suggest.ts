@@ -1,5 +1,5 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
+import type { Ctx, ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { CONSOLIDATION_KINDS } from "@/core/vocab";
 import { AbstractTool, ToolName } from "@/tools/contracts";
@@ -22,10 +22,17 @@ export class ConsolidateSuggestTool extends AbstractTool {
       .enum(CONSOLIDATION_KINDS)
       .optional()
       .describe("Filter to one kind: distill | merge | link | prune. Omit for all pending."),
-    limit: z.number().int().min(1).max(50).default(20).describe("Max candidates (default 20)."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(20)
+      .describe("Max candidates (default 20).")
+      .optional(),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
     const candidates = ctx.repo.pendingCandidates({ kind: args.kind, limit: args.limit });
     const out: Record<string, unknown> = { candidates };

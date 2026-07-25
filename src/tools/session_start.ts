@@ -1,10 +1,18 @@
-import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
+import { z } from "zod";
+import type { Ctx, ToolArgs } from "@/tools/context";
 import { newId } from "@/core/ids";
 import { estimateTokensOf } from "@/core/tokens";
 import { embeddingNotes } from "@/tools/notes";
 import type { Envelope } from "@/db/repo";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+
+interface ToolResponse {
+  session_id: string;
+  project?: string | null;
+  working_set: Record<string, unknown>;
+  hints: string[];
+  context_notes?: string[];
+}
 
 export class SessionStartTool extends AbstractTool {
   name = ToolName.SESSION_START;
@@ -22,7 +30,7 @@ export class SessionStartTool extends AbstractTool {
       .describe("Project scope to focus the working set; omit for a global view."),
   };
 
-  public async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  public async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<ToolResponse> {
     const sessionId = newId();
     const project = args.project;
     ctx.repo.ensureSession(sessionId, project ?? null, ctx.now());
@@ -56,6 +64,7 @@ export class SessionStartTool extends AbstractTool {
       .sourceStatus(ctx.now())
       .filter((s) => s.stale)
       .map((s) => ({ id: s.id, label: s.label, hours_stale: s.hours_stale }));
+
     if (stale.length) working_set.stale_sources = take(stale);
 
     working_set.stats = ctx.repo.stats();

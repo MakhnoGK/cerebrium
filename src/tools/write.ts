@@ -1,7 +1,7 @@
-import { TypeOf, z, ZodObject } from "zod";
+import { z } from "zod";
 import type { Ctx, ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
-import { deriveSummary } from "@/db/repo";
+import { deriveSummary, Envelope } from "@/db/repo";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
 import { embeddingNotes } from "@/tools/notes";
@@ -21,6 +21,13 @@ interface SimilarExisting {
   score: number;
   suggestion: string;
 }
+
+type ToolResponse = Envelope & {
+  similar_existing?: unknown;
+  reconcile?: unknown;
+  hints?: string[];
+  context_notes?: unknown;
+};
 
 export class WriteTool extends AbstractTool {
   name = ToolName.WRITE;
@@ -57,7 +64,7 @@ export class WriteTool extends AbstractTool {
       .describe("Edges from this new node to existing nodes."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<ToolResponse> {
     const hints = touchOrCreate(ctx, args.session_id, args.project ?? null);
 
     if (args.memory_kind === "mirror") {
@@ -120,7 +127,7 @@ export class WriteTool extends AbstractTool {
       );
     }
 
-    const out: Record<string, unknown> = { ...envelope };
+    const out: ToolResponse = { ...envelope };
 
     if (similar.length) out.similar_existing = similar;
     if (reconcile) out.reconcile = reconcile;
