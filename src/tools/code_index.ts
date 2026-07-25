@@ -1,4 +1,4 @@
-import { TypeOf, z, ZodObject } from "zod";
+import { TypeOf, z, ZodBoolean, ZodObject, ZodOptional, ZodString } from "zod";
 import { basename } from "node:path";
 import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
@@ -73,6 +73,30 @@ export class CodeIndexTool extends AbstractTool {
       }
     }
 
+    const results = await this.getResults(targets, ctx, args);
+
+    const notes = embeddingNotes(ctx.repo);
+    const out: Record<string, unknown> =
+      results.length === 1 ? { ...results[0]! } : { repos: results };
+
+    const hints = touchOrCreate(ctx, args.session_id);
+    if (hints.length) out.hints = hints;
+    if (notes.length) out.context_notes = notes;
+
+    return out;
+  }
+  private async getResults(
+    targets: IndexTarget[],
+    ctx: Ctx,
+    args: TypeOf<
+      ZodObject<{
+        session_id: ZodString;
+        repo: ZodOptional<ZodString>;
+        path: ZodOptional<ZodString>;
+        force: ZodOptional<ZodBoolean>;
+      }>
+    >,
+  ) {
     const results = [];
 
     for (const target of targets) {
@@ -101,14 +125,6 @@ export class CodeIndexTool extends AbstractTool {
       results.push(stats);
     }
 
-    const notes = embeddingNotes(ctx.repo);
-    const out: Record<string, unknown> =
-      results.length === 1 ? { ...results[0]! } : { repos: results };
-
-    const hints = touchOrCreate(ctx, args.session_id);
-    if (hints.length) out.hints = hints;
-    if (notes.length) out.context_notes = notes;
-
-    return out;
+    return results;
   }
 }
