@@ -1,8 +1,8 @@
 import type { z } from "zod";
 import type { Repo } from "@/db/repo";
-import type { EmbeddingProvider } from "@/embeddings/index";
-import type { RerankProvider } from "@/rerank/index";
-import type { ConsolidationProvider } from "@/consolidation/index";
+import type { EmbeddingProvider } from "@/embeddings";
+import type { RerankProvider } from "@/rerank";
+import type { ConsolidationProvider } from "@/consolidation";
 
 export interface Ctx {
   repo: Repo;

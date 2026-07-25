@@ -10,17 +10,21 @@ const BACKLOG_NOTE_THRESHOLD = 20;
 export function embeddingNotes(repo: Repo): string[] {
   const { backlog, parked } = repo.embeddingStats();
   const notes: string[] = [];
+
   if (parked > 0) {
     notes.push(
       `${parked} memor${parked === 1 ? "y" : "ies"} failed to embed (parked); vector search is incomplete.`,
     );
   }
+
   if (backlog > BACKLOG_NOTE_THRESHOLD) {
     const stalled = !isDaemonAlive(repo.dbPath());
+
     notes.push(
       `${backlog} memories awaiting embedding — findable via text now, vectors catch up shortly.` +
         (stalled ? " No drain daemon is running; run `cerebrium-daemon` to work it off." : ""),
     );
   }
+
   return notes;
 }

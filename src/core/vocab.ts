@@ -67,6 +67,7 @@ export const EVENT_ACTIONS = [
   "consolidate_apply",
   "stats",
 ] as const;
+
 export type EventAction = (typeof EVENT_ACTIONS)[number];
 
 export function typeAllowedForKind(kind: WritableKind, type: string): boolean {

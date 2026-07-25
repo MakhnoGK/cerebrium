@@ -331,13 +331,16 @@ function resolveCalls(
 // MEMORY_CODE_ROOTS = "name=path,name2=path2"
 export function parseCodeRoots(env: string | undefined): IndexTarget[] {
   if (!env) return [];
-  const out: IndexTarget[] = [];
-  for (const part of env.split(",")) {
+
+  return env.split(",").reduce<IndexTarget[]>((acc, part) => {
     const eq = part.indexOf("=");
-    if (eq < 0) continue;
+    if (eq < 0) return acc;
+
     const name = part.slice(0, eq).trim();
     const root = part.slice(eq + 1).trim();
-    if (name && root) out.push({ name, root });
-  }
-  return out;
+
+    if (name && root) return [...acc, { name, root }];
+
+    return acc;
+  }, []);
 }

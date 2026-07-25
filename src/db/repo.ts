@@ -37,6 +37,7 @@ import {
   SessionsRepo,
   StatsRepo,
 } from "@/db/repositories";
+import { IndexTarget } from "@/code/indexer";
 
 // Domain types + pure mappers live in core; re-exported here so existing
 // `@/db/repo` importers keep resolving.
@@ -326,9 +327,11 @@ export class Repo {
   repoProvenance(repo: string): RepoProvenance | undefined {
     return this.code.repoProvenance(repo);
   }
-  storedRepoRoots(): { name: string; root: string }[] {
+
+  storedRepoRoots(): IndexTarget[] {
     return this.code.storedRepoRoots();
   }
+
   allRepoProvenance(): RepoProvenance[] {
     return this.code.allRepoProvenance();
   }
