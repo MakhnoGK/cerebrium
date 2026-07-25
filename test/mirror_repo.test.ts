@@ -61,7 +61,7 @@ describe("MirrorRepo — upsert lifecycle", () => {
     expect(r).toMatchObject({ added: 1, updated: 0, unchanged: 0 });
     const id = r.node_ids[0];
 
-    const full = repo.fullNode(id)!;
+    const full = repo.fullNode(id!)!;
     expect(full.envelope.kind).toBe("mirror");
     expect(full.envelope.type).toBe("incident");
     expect(full.envelope.project).toBe("acme");
@@ -94,13 +94,13 @@ describe("MirrorRepo — upsert lifecycle", () => {
     const again = repo.upsertMirrors(source, [INCIDENT], "sess", clock.t);
     expect(again).toMatchObject({ added: 0, updated: 0, unchanged: 1 });
     const id = again.node_ids[0];
-    expect(repo.listRevisions(id)).toHaveLength(1);
+    expect(repo.listRevisions(id!)).toHaveLength(1);
 
     // Changed content -> exactly one revision bump.
     const changed = { ...INCIDENT, content: INCIDENT.content + " Root cause: cache stampede." };
     const upd = repo.upsertMirrors(source, [changed], "sess", clock.t);
     expect(upd).toMatchObject({ added: 0, updated: 1, unchanged: 0 });
-    expect(repo.listRevisions(id)).toHaveLength(2);
+    expect(repo.listRevisions(id!)).toHaveLength(2);
   });
 
   it("accepts open-vocab types with no migration", () => {
@@ -112,14 +112,14 @@ describe("MirrorRepo — upsert lifecycle", () => {
       clock.t,
     );
     expect(r.added).toBe(1);
-    expect(repo.fullNode(r.node_ids[0])!.envelope.type).toBe("canvas");
+    expect(repo.fullNode(r.node_ids[0]!)!.envelope.type).toBe("canvas");
   });
 
   it("stores url + facets, retrievable via mirrorRecord, keyed by external_id", () => {
     const source = register();
     const r = repo.upsertMirrors(source, [INCIDENT], "sess", clock.t);
     const id = r.node_ids[0];
-    const rec = repo.mirrorRecord(id)!;
+    const rec = repo.mirrorRecord(id!)!;
     expect(rec.url).toBe(INCIDENT.url);
     expect(rec.facets).toEqual(INCIDENT.facets);
     expect(rec.native_id).toBe("INC-42");
@@ -134,7 +134,7 @@ describe("MirrorRepo — upsert lifecycle", () => {
       "sess",
       clock.t,
     );
-    expect(repo.fullNode(r.node_ids[0])!.envelope.project).toBe("checkout-team");
+    expect(repo.fullNode(r.node_ids[0]!)!.envelope.project).toBe("checkout-team");
   });
 });
 
@@ -142,17 +142,17 @@ describe("MirrorRepo — freshness", () => {
   it("computes staleness and node_count against a fixed clock", () => {
     const source = register(); // freshness_hours = 24
     // Never synced yet, but enabled + threshold set -> stale.
-    expect(repo.sourceStatus(clock.t)[0]).toMatchObject({ stale: true, node_count: 0 });
+    expect(repo.sourceStatus(clock.t)[0]!).toMatchObject({ stale: true, node_count: 0 });
 
     repo.upsertMirrors(source, [INCIDENT], "sess", clock.t);
     // Just synced -> within window.
-    let st = repo.sourceStatus(clock.t)[0];
+    let st = repo.sourceStatus(clock.t)[0]!;
     expect(st).toMatchObject({ stale: false, node_count: 1 });
     expect(st.hours_stale).toBeCloseTo(0, 5);
 
     // Advance 25h -> past the 24h threshold.
     clock.advanceMs(25 * 3_600_000);
-    st = repo.sourceStatus(clock.t)[0];
+    st = repo.sourceStatus(clock.t)[0]!;
     expect(st.stale).toBe(true);
     expect(st.hours_stale).toBeCloseTo(25, 1);
   });
