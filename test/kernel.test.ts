@@ -175,7 +175,7 @@ describe("FTS stays consistent across write -> update -> invalidate", () => {
       limit: 10,
     });
     expect(hist.total_matches).toBe(1);
-    expect((hist.results as Envelope[])[0]!.invalidated).toBe(true);
+    expect(hist.results[0]!.invalidated).toBe(true);
   });
 });
 

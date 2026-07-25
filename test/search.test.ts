@@ -14,7 +14,7 @@ async function session(ctx: Ctx): Promise<string> {
   return (await session_start.invoke(ctx, {})).session_id;
 }
 function ids(res: Awaited<ReturnType<typeof search.invoke>>): string[] {
-  return (res.results as Envelope[]).map((e) => e.id);
+  return res.results.map((e) => e.id);
 }
 
 describe("ranking blends text relevance with the memory model", () => {
@@ -135,6 +135,6 @@ describe("search is robust and filterable", () => {
       limit: 10,
     });
     expect(onlySemantic.total_matches).toBe(1);
-    expect((onlySemantic.results as Envelope[])[0]!.kind).toBe("semantic");
+    expect(onlySemantic.results[0]!.kind).toBe("semantic");
   });
 });

@@ -24,7 +24,7 @@ export function deployPipeline(): void {}
 let root: string;
 
 function ids(res: Awaited<ReturnType<typeof search.invoke>>): string[] {
-  return (res.results as Envelope[]).map((e) => e.id);
+  return res.results.map((e) => e.id);
 }
 
 // A three-node corpus for "deploy pipeline": a strong fact (title match on both terms),

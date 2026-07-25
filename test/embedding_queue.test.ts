@@ -15,13 +15,13 @@ async function session(ctx: Ctx): Promise<string> {
 }
 
 async function writeFact(ctx: Ctx, s: string, title: string): Promise<Envelope> {
-  return (await write.invoke(ctx, {
+  return await write.invoke(ctx, {
     session_id: s,
     memory_kind: "semantic",
     type: "fact",
     title,
     content: `a durable fact about ${title} with a few words of body text`,
-  })) as unknown as Envelope;
+  });
 }
 
 // Always-throwing provider (dim matches so the ctx builds) to drive retry/backoff.
