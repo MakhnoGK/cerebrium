@@ -23,8 +23,10 @@ const BY_EXT: Record<string, LangDef> = {
 
 export function langForPath(path: string): LangDef | undefined {
   const dot = path.lastIndexOf(".");
-  if (dot < 0) return undefined;
+
+  if (dot < 0) {
+    return undefined;
+  }
+
   return BY_EXT[path.slice(dot).toLowerCase()];
 }
-
-export const SUPPORTED_LANGS = ["typescript", "tsx", "javascript", "php", "rust"] as const;

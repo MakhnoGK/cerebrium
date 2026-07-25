@@ -69,19 +69,21 @@ function signatureOf(node: Node, body: Node | null): string {
 }
 
 function docFromComment(comment: Node): string | null {
-  let t = comment.text.trim();
-  if (t.startsWith("/*")) t = t.replace(/^\/\*+/, "").replace(/\*+\/$/, "");
-  const lines = t
-    .split("\n")
-    .map((l) =>
-      l
-        .replace(/^\s*\*+\s?/, "")
-        .replace(/^\s*\/\/+\s?/, "")
-        .replace(/^!\s?/, "") // Rust inner-doc marker (`//!` / `/*!`)
-        .trim(),
-    )
-    .filter(Boolean);
-  return lines[0] ?? null;
+  return (
+    comment.text
+      .trim()
+      .replace(/^\/\*+/, "")
+      .replace(/\*+\/$/, "")
+      .split("\n")
+      .map((l) =>
+        l
+          .replace(/^\s*\*+\s?/, "")
+          .replace(/^\s*\/\/+\s?/, "")
+          .replace(/^!\s?/, "") // Rust inner-doc marker (`//!` / `/*!`)
+          .trim(),
+      )
+      .find(Boolean) ?? null
+  );
 }
 
 // First meaningful line of the doc-comment immediately preceding `node`, if any.
