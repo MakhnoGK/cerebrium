@@ -280,9 +280,12 @@ function resolveImports(
 ): { src: string; dst: string }[] {
   const src = r.moduleByPath.get(path);
   if (!src) return [];
+
   const pairs: { src: string; dst: string }[] = [];
+
   for (const imp of ex.imports) {
     let dst: string | undefined;
+
     if (imp.byName) {
       dst = r.byName.get(imp.name); // e.g. PHP `use` — no path to resolve against
     } else {
@@ -291,10 +294,17 @@ function resolveImports(
         if (dst) break;
       }
     }
+
     if (dst) pairs.push({ src, dst });
   }
+
   return pairs;
 }
+
+// PHP and Rust resolve imports by namespace/path prefix, not a relative file path —
+// fall back to a repo-wide name match (best-effort; TS/JS keep the stricter
+// same-file/imported resolution).
+const NAMESPACED_IMPORTS = new Set(["php", "rust"]);
 
 function resolveCalls(
   r: Resolver,
@@ -303,26 +313,34 @@ function resolveCalls(
   ex: FileExtract,
 ): { src: string; dst: string }[] {
   const importByName = new Map<string, string[]>();
-  for (const imp of ex.imports)
-    if (!imp.namespace && !imp.byName) importByName.set(imp.name, imp.candidatePaths);
+
+  for (const imp of ex.imports) {
+    if (!imp.namespace && !imp.byName) {
+      importByName.set(imp.name, imp.candidatePaths);
+    }
+  }
 
   const pairs: { src: string; dst: string }[] = [];
+
   for (const call of ex.calls) {
     const src = r.byQualified.get(call.srcQualified);
-    if (!src) continue;
     let dst = r.byPathName.get(pathNameKey(path, call.callee)); // same-file
+
+    if (!src) {
+      continue;
+    }
+
     if (!dst) {
       for (const cp of importByName.get(call.callee) ?? []) {
         dst = r.byPathName.get(pathNameKey(cp, call.callee));
         if (dst) break;
       }
     }
-    // PHP and Rust resolve imports by namespace/path prefix, not a relative file path —
-    // fall back to a repo-wide name match (best-effort; TS/JS keep the stricter
-    // same-file/imported resolution).
-    if (!dst && (lang === "php" || lang === "rust")) dst = r.byName.get(call.callee);
+
+    if (!dst && NAMESPACED_IMPORTS.has(lang)) dst = r.byName.get(call.callee);
     if (dst && dst !== src) pairs.push({ src, dst });
   }
+
   return pairs;
 }
 
@@ -339,8 +357,6 @@ export function parseCodeRoots(env: string | undefined): IndexTarget[] {
     const name = part.slice(0, eq).trim();
     const root = part.slice(eq + 1).trim();
 
-    if (name && root) return [...acc, { name, root }];
-
-    return acc;
+    return name && root ? [...acc, { name, root }] : acc;
   }, []);
 }

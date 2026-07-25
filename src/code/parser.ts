@@ -3,7 +3,7 @@ import type { Tree } from "web-tree-sitter";
 import { createRequire } from "node:module";
 
 // tree-sitter runs in-process via WASM (no native build, no daemon), matching the
-// embedding worker's "in the one server process" model. Parser.init() loads the
+// embedding worker's "in the one-server process" model. Parser.init() loads the
 // runtime once; grammars are loaded lazily per language and cached for the process.
 const require = createRequire(import.meta.url);
 
