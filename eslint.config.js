@@ -1,6 +1,6 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
-import prettier from "eslint-config-prettier";
+import prettierRecommended from "eslint-plugin-prettier/recommended";
 
 export default tseslint.config(
   { ignores: ["dist", "node_modules", ".tmp", "coverage", "test/fixtures"] },
@@ -57,5 +57,13 @@ export default tseslint.config(
     files: ["**/*.mjs", "**/*.js"],
     extends: [tseslint.configs.disableTypeChecked],
   },
-  prettier,
+  {
+    files: ["**/*.cjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: { __dirname: "readonly", __filename: "readonly" },
+    },
+  },
+  prettierRecommended,
 );

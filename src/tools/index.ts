@@ -1,19 +1,36 @@
-// Public entry for the MCP tool modules — each exposes { schema, description,
-// handler }. The server registers from here. Tools import their shared helpers
-// (context, notes) by direct path, never through this barrel, to avoid cycles.
-export * as session_start from "@/tools/session_start";
-export * as search from "@/tools/search";
-export * as get from "@/tools/get";
-export * as write from "@/tools/write";
-export * as update from "@/tools/update";
-export * as invalidate from "@/tools/invalidate";
-export * as checkpoint from "@/tools/checkpoint";
-export * as link from "@/tools/link";
-export * as code_index from "@/tools/code_index";
-export * as code_lookup from "@/tools/code_lookup";
-export * as source_register from "@/tools/source_register";
-export * as mirror_upsert from "@/tools/mirror_upsert";
-export * as mirror_status from "@/tools/mirror_status";
-export * as consolidate_suggest from "@/tools/consolidate_suggest";
-export * as consolidate_apply from "@/tools/consolidate_apply";
-export * as stats from "@/tools/stats";
+import { AbstractTool } from "./contracts";
+import { SearchTool } from "./search";
+import { SessionStartTool } from "./session_start";
+import { GetTool } from "./get";
+import { WriteTool } from "./write";
+import { UpdateTool } from "./update";
+import { InvalidateTool } from "./invalidate";
+import { CheckpointTool } from "./checkpoint";
+import { LinkTool } from "./link";
+import { CodeIndexTool } from "./code_index";
+import { CodeLookupTool } from "./code_lookup";
+import { SourceRegisterTool } from "./source_register";
+import { MirrorUpsertTool } from "./mirror_upsert";
+import { MirrorStatusTool } from "./mirror_status";
+import { ConsolidateSuggestTool } from "./consolidate_suggest";
+import { ConsolidateApplyTool } from "./consolidate_apply";
+import { StatsTool } from "./stats";
+
+export const TOOLS: AbstractTool[] = [
+  new SessionStartTool(),
+  new SearchTool(),
+  new GetTool(),
+  new WriteTool(),
+  new UpdateTool(),
+  new InvalidateTool(),
+  new CheckpointTool(),
+  new LinkTool(),
+  new CodeIndexTool(),
+  new CodeLookupTool(),
+  new SourceRegisterTool(),
+  new MirrorUpsertTool(),
+  new MirrorStatusTool(),
+  new ConsolidateSuggestTool(),
+  new ConsolidateApplyTool(),
+  new StatsTool(),
+];

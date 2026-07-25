@@ -26,6 +26,7 @@ export function touchOrCreate(
   project: string | null = null,
 ): string[] {
   const { created } = ctx.repo.ensureSession(sessionId, project, ctx.now());
+
   return created
     ? [
         `Unknown session_id — created a new session ${sessionId}. Call session_start next time to get one.`,
