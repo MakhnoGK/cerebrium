@@ -38,10 +38,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      # Tests are not yet type-clean; surface errors as annotations without blocking.
-      # Drop continue-on-error once test/ + scripts/ typecheck clean.
-      - run: npm run typecheck:test
-        continue-on-error: true
+      # Once the suite is clean, replace this whole step with `npm run typecheck:test`.
+      - name: Typecheck tests (warnings, non-blocking)
+        run: |
+          out=$(npm run --silent typecheck:test 2>&1) || true
+          echo "$out"
+          echo "$out" \
+            | sed -nE 's|^(.+)\(([0-9]+),([0-9]+)\): error TS[0-9]+: (.*)$|::warning file=\1,line=\2,col=\3::\4|p'
+          count=$(printf '%s\n' "$out" | grep -cE '\([0-9]+,[0-9]+\): error TS' || true)
+          echo "### ⚠️ Test typecheck: ${count} unresolved type issue(s) — tracked, not blocking" >> "$GITHUB_STEP_SUMMARY"
 
   test-unit:
     runs-on: ubuntu-latest
