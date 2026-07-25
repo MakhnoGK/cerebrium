@@ -2,15 +2,20 @@ import { describe, it, expect } from "vitest";
 import { makeCtx } from "./helpers";
 import { LocalNullReranker } from "@/rerank/local-null";
 import type { RerankProvider } from "@/rerank/index";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as link from "@/tools/link";
-import * as search from "@/tools/search";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+import { LinkTool } from "../src/tools/link";
+import { SearchTool } from "../src/tools/search";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const link = new LinkTool();
+const search = new SearchTool();
 
 async function session(ctx: Ctx, project?: string): Promise<string> {
-  return (await session_start.handler(ctx, { project })).session_id;
+  return (await session_start.invoke(ctx, { project })).session_id;
 }
 function w(
   ctx: Ctx,
@@ -20,7 +25,7 @@ function w(
   title: string,
   content: string,
 ) {
-  return write.handler(ctx, {
+  return write.invoke(ctx, {
     session_id: s,
     memory_kind: kind,
     type,
@@ -64,14 +69,14 @@ describe("rerank stage", () => {
     const sOff = await session(off.ctx);
     const strongOff = await w(off.ctx, sOff, "semantic", "fact", "Strong", strong);
     const weakOff = await w(off.ctx, sOff, "semantic", "fact", "Weak", weak);
-    const baseline = ids(await search.handler(off.ctx, { session_id: sOff, query, limit: 10 }));
+    const baseline = ids(await search.invoke(off.ctx, { session_id: sOff, query, limit: 10 }));
     expect(baseline).toEqual([strongOff.id, weakOff.id]); // RRF: stronger bm25 first
 
     const on = makeCtx({ reranker: new MarkerReranker("zzqmarker") });
     const sOn = await session(on.ctx);
     const strongOn = await w(on.ctx, sOn, "semantic", "fact", "Strong", strong);
     const weakOn = await w(on.ctx, sOn, "semantic", "fact", "Weak", weak);
-    const reranked = ids(await search.handler(on.ctx, { session_id: sOn, query, limit: 10 }));
+    const reranked = ids(await search.invoke(on.ctx, { session_id: sOn, query, limit: 10 }));
     expect(reranked).toEqual([weakOn.id, strongOn.id]); // reranker promotes the marked doc
   });
 
@@ -96,9 +101,9 @@ describe("rerank stage", () => {
       "PaymentService",
       "PaymentService internal component details",
     );
-    await link.handler(ctx, { session_id: s, src: howto.id, dst: entity.id, type: "documents" });
+    await link.invoke(ctx, { session_id: s, src: howto.id, dst: entity.id, type: "documents" });
 
-    const res = (await search.handler(ctx, {
+    const res = (await search.invoke(ctx, {
       session_id: s,
       query: "billing pipeline deploy",
       limit: 10,
@@ -123,7 +128,7 @@ describe("rerank stage", () => {
     await worker.tick();
 
     const res = ids(
-      await search.handler(ctx, { session_id: s, query: "deploy pipeline", limit: 10 }),
+      await search.invoke(ctx, { session_id: s, query: "deploy pipeline", limit: 10 }),
     );
     expect(res).toEqual([fact.id, fresh.id, old.id]); // decay still orders the ties
   });
@@ -137,14 +142,14 @@ describe("rerank stage", () => {
     const sOff = await session(off.ctx);
     const a = await w(off.ctx, sOff, "semantic", "fact", "Strong", strong);
     const b = await w(off.ctx, sOff, "semantic", "fact", "Weak", weak);
-    const baseline = ids(await search.handler(off.ctx, { session_id: sOff, query, limit: 10 }));
+    const baseline = ids(await search.invoke(off.ctx, { session_id: sOff, query, limit: 10 }));
 
     const broken = makeCtx({ reranker: new BrokenReranker() });
     const sBroken = await session(broken.ctx);
     const a2 = await w(broken.ctx, sBroken, "semantic", "fact", "Strong", strong);
     const b2 = await w(broken.ctx, sBroken, "semantic", "fact", "Weak", weak);
     const degraded = ids(
-      await search.handler(broken.ctx, { session_id: sBroken, query, limit: 10 }),
+      await search.invoke(broken.ctx, { session_id: sBroken, query, limit: 10 }),
     );
 
     expect(baseline).toEqual([a.id, b.id]);
@@ -160,9 +165,9 @@ describe("rerank usage in stats", () => {
     await w(ctx, s, "semantic", "fact", "Two", "alpha gamma");
     await w(ctx, s, "semantic", "fact", "Three", "delta unique");
 
-    await search.handler(ctx, { session_id: s, query: "alpha", limit: 10 }); // 2 candidates → reranked
-    await search.handler(ctx, { session_id: s, query: "alpha", mode: "text", limit: 10 }); // not eligible
-    await search.handler(ctx, { session_id: s, query: "delta", limit: 10 }); // 1 candidate → eligible, not reranked
+    await search.invoke(ctx, { session_id: s, query: "alpha", limit: 10 }); // 2 candidates → reranked
+    await search.invoke(ctx, { session_id: s, query: "alpha", mode: "text", limit: 10 }); // not eligible
+    await search.invoke(ctx, { session_id: s, query: "delta", limit: 10 }); // 1 candidate → eligible, not reranked
 
     const u = repo.techStats(clock.t).rerank_usage;
     expect(u.eligible_searches).toBe(2);

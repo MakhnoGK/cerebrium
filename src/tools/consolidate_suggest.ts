@@ -25,7 +25,7 @@ export class ConsolidateSuggestTool extends AbstractTool {
     limit: z.number().int().min(1).max(50).default(20).describe("Max candidates (default 20)."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
     const candidates = ctx.repo.pendingCandidates({ kind: args.kind, limit: args.limit });
     const out: Record<string, unknown> = { candidates };

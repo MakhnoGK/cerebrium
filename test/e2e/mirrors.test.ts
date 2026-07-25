@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "../helpers";
-import * as session_start from "@/tools/session_start";
-import * as source_register from "@/tools/source_register";
-import * as mirror_upsert from "@/tools/mirror_upsert";
-import * as write from "@/tools/write";
-import * as link from "@/tools/link";
-import * as search from "@/tools/search";
+import { SessionStartTool } from "../../src/tools/session_start";
+import { SourceRegisterTool } from "../../src/tools/source_register";
+import { MirrorUpsertTool } from "../../src/tools/mirror_upsert";
+import { WriteTool } from "../../src/tools/write";
+import { LinkTool } from "../../src/tools/link";
+import { SearchTool } from "../../src/tools/search";
 
 const P = "acme";
 
@@ -13,11 +13,18 @@ const P = "acme";
 // relate them → document the incident with a decision → search surfaces the incident and
 // expands to its neighbors → the source goes stale after its window and clears on re-sync.
 describe("external mirrors — end-to-end", () => {
+  const session_start = new SessionStartTool();
+  const source_register = new SourceRegisterTool();
+  const mirror_upsert = new MirrorUpsertTool();
+  const write = new WriteTool();
+  const link = new LinkTool();
+  const search = new SearchTool();
+
   it("mirrors, links, surfaces via graph expansion, and tracks freshness", async () => {
     const { ctx, clock, worker } = makeCtx();
-    const sid = (await session_start.handler(ctx, { project: P })).session_id;
+    const sid = ((await session_start.invoke(ctx, { project: P })) as any).session_id;
 
-    await source_register.handler(ctx, {
+    await source_register.invoke(ctx, {
       session_id: sid,
       id: "grafana-prod",
       kind: "grafana",
@@ -25,7 +32,7 @@ describe("external mirrors — end-to-end", () => {
       project: P,
       freshness_hours: 24,
     });
-    await source_register.handler(ctx, {
+    await source_register.invoke(ctx, {
       session_id: sid,
       id: "sentry",
       kind: "sentry",
@@ -33,7 +40,7 @@ describe("external mirrors — end-to-end", () => {
       freshness_hours: 24,
     });
 
-    const inc = (await mirror_upsert.handler(ctx, {
+    const inc = (await mirror_upsert.invoke(ctx, {
       session_id: sid,
       source_id: "grafana-prod",
       items: [
@@ -49,7 +56,7 @@ describe("external mirrors — end-to-end", () => {
     })) as { node_ids: string[] };
     const incidentId = inc.node_ids[0];
 
-    const iss = (await mirror_upsert.handler(ctx, {
+    const iss = (await mirror_upsert.invoke(ctx, {
       session_id: sid,
       source_id: "sentry",
       items: [
@@ -65,15 +72,15 @@ describe("external mirrors — end-to-end", () => {
     const issueId = iss.node_ids[0];
 
     // Relate the two mirror records across sources.
-    await link.handler(ctx, {
+    await link.invoke(ctx, {
       session_id: sid,
-      src: incidentId,
-      dst: issueId,
+      src: incidentId!,
+      dst: issueId!,
       type: "relates_to",
     });
 
     // A decision documents the incident — the payoff link.
-    const decision = (await write.handler(ctx, {
+    const decision = (await write.invoke(ctx, {
       session_id: sid,
       memory_kind: "semantic",
       type: "decision",
@@ -81,10 +88,11 @@ describe("external mirrors — end-to-end", () => {
       content: "After the checkout latency incident we jitter cache TTLs to avoid a stampede.",
       project: P,
     })) as { id: string };
-    await link.handler(ctx, {
+
+    await link.invoke(ctx, {
       session_id: sid,
       src: decision.id,
-      dst: incidentId,
+      dst: incidentId!,
       type: "documents",
     });
 
@@ -96,18 +104,20 @@ describe("external mirrors — end-to-end", () => {
 
     // Searching the decision's topic surfaces the incident (via documents) and reaches the
     // related Sentry issue through the graph.
-    const found = (await search.handler(ctx, {
+    const found = (await search.invoke(ctx, {
       session_id: sid,
       query: "cache stampede jitter checkout",
       project: P,
+      limits: undefined,
     })) as { results: { id: string }[] };
+
     const ids = found.results.map((r) => r.id);
     expect(ids).toContain(incidentId);
     expect(ids).toContain(decision.id);
 
     // Freshness: advance past the window → grafana-prod is flagged stale in session_start.
     const staleIds = async (): Promise<string[]> => {
-      const ws = (await session_start.handler(ctx, { project: P })).working_set as {
+      const ws = ((await session_start.invoke(ctx, { project: P })) as any).working_set as {
         stale_sources?: { id: string }[];
       };
       return (ws.stale_sources ?? []).map((s) => s.id);
@@ -116,7 +126,7 @@ describe("external mirrors — end-to-end", () => {
     expect(await staleIds()).toContain("grafana-prod");
 
     // Re-sync clears staleness.
-    await mirror_upsert.handler(ctx, {
+    await mirror_upsert.invoke(ctx, {
       session_id: sid,
       source_id: "grafana-prod",
       items: [

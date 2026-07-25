@@ -57,7 +57,7 @@ export class WriteTool extends AbstractTool {
       .describe("Edges from this new node to existing nodes."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id, args.project ?? null);
 
     if (args.memory_kind === "mirror") {

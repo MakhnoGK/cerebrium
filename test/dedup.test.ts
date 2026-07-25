@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
 import type { Ctx } from "@/tools/context";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 async function session(ctx: Ctx, project?: string): Promise<string> {
-  return (await session_start.handler(ctx, { project })).session_id;
+  return (await session_start.invoke(ctx, { project })).session_id;
 }
 type WriteOut = Record<string, unknown> & {
   id: string;
@@ -19,7 +22,7 @@ function writeFact(
   content: string,
   project?: string,
 ): Promise<WriteOut> {
-  return write.handler(ctx, {
+  return write.invoke(ctx, {
     session_id: s,
     memory_kind: "semantic",
     type: "fact",
@@ -64,7 +67,7 @@ describe("duplicate detection at write time", () => {
     await writeFact(ctx, s, "Token TTL", ORIGINAL, P);
     await worker.tick();
 
-    const note = (await write.handler(ctx, {
+    const note = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "episodic",
       type: "event_note",

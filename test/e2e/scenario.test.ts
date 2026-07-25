@@ -1,12 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "../helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as get from "@/tools/get";
-import * as search from "@/tools/search";
-import * as update from "@/tools/update";
-import * as checkpoint from "@/tools/checkpoint";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../../src/tools/session_start";
+import { WriteTool } from "../../src/tools/write";
+import { GetTool } from "../../src/tools/get";
+import { SearchTool } from "../../src/tools/search";
+import { UpdateTool } from "../../src/tools/update";
+import { CheckpointTool } from "../../src/tools/checkpoint";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const get = new GetTool();
+const search = new SearchTool();
+const update = new UpdateTool();
+const checkpoint = new CheckpointTool();
 
 const P = "auth-service";
 
@@ -17,8 +24,8 @@ describe("multi-session hand-off", () => {
     const { ctx } = makeCtx();
 
     // ---- Session A: write 3 facts + 1 checkpoint --------------------------
-    const a = (await session_start.handler(ctx, { project: P })).session_id;
-    const f1 = (await write.handler(ctx, {
+    const a = (await session_start.invoke(ctx, { project: P })).session_id;
+    const f1 = (await write.invoke(ctx, {
       session_id: a,
       memory_kind: "semantic",
       type: "fact",
@@ -26,7 +33,7 @@ describe("multi-session hand-off", () => {
       content: "access tokens live 15 minutes",
       project: P,
     })) as Envelope;
-    await write.handler(ctx, {
+    await write.invoke(ctx, {
       session_id: a,
       memory_kind: "semantic",
       type: "decision",
@@ -34,7 +41,7 @@ describe("multi-session hand-off", () => {
       content: "sign JWTs with RS256, not HS256",
       project: P,
     });
-    await write.handler(ctx, {
+    await write.invoke(ctx, {
       session_id: a,
       memory_kind: "semantic",
       type: "fact",
@@ -42,7 +49,7 @@ describe("multi-session hand-off", () => {
       content: "refresh tokens rotate on use",
       project: P,
     });
-    await checkpoint.handler(ctx, {
+    await checkpoint.invoke(ctx, {
       session_id: a,
       project: P,
       summary: "wired up JWT auth end to end",
@@ -52,7 +59,7 @@ describe("multi-session hand-off", () => {
     });
 
     // ---- Session B: orient via session_start ------------------------------
-    const bStart = await session_start.handler(ctx, { project: P });
+    const bStart = await session_start.invoke(ctx, { project: P });
     const b = bStart.session_id;
     expect(b).not.toBe(a);
     const ws = bStart.working_set as {
@@ -63,7 +70,7 @@ describe("multi-session hand-off", () => {
     expect(ws.semantic.map((e) => e.title)).toContain("Token TTL");
 
     // ---- Session B: search, get, update a fact ----------------------------
-    const found = await search.handler(ctx, {
+    const found = await search.invoke(ctx, {
       session_id: b,
       query: "access tokens",
       project: P,
@@ -73,11 +80,11 @@ describe("multi-session hand-off", () => {
     expect(hit).toBeDefined();
 
     const full = ((get) => (get as { nodes: { content: string }[] }).nodes[0])(
-      await get.handler(ctx, { session_id: b, ids: [f1.id] }),
+      await get.invoke(ctx, { session_id: b, ids: [f1.id] }),
     );
     expect(full!.content).toContain("15 minutes");
 
-    await update.handler(ctx, {
+    await update.invoke(ctx, {
       session_id: b,
       id: f1.id,
       content: "access tokens live 10 minutes",
@@ -87,7 +94,7 @@ describe("multi-session hand-off", () => {
     // ---- Revision history shows both sessions -----------------------------
     const withRevs = ((r) =>
       (r as { nodes: { revisions: { rev: number; session_id: string }[] }[] }).nodes[0])(
-      await get.handler(ctx, { session_id: b, ids: [f1.id], include_revisions: true }),
+      await get.invoke(ctx, { session_id: b, ids: [f1.id], include_revisions: true }),
     );
     const revSessions = withRevs!.revisions.map((rv) => rv.session_id);
     expect(revSessions).toEqual([a, b]);

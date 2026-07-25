@@ -4,16 +4,20 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as stats from "@/tools/stats";
 import type { Ctx } from "@/tools/context";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+import { StatsTool } from "../src/tools/stats";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const stats = new StatsTool();
 
 async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.handler(ctx, {})).session_id;
+  return (await session_start.invoke(ctx, {})).session_id;
 }
 async function writeFact(ctx: Ctx, s: string, title: string): Promise<void> {
-  await write.handler(ctx, {
+  await write.invoke(ctx, {
     session_id: s,
     memory_kind: "semantic",
     type: "fact",
@@ -66,7 +70,7 @@ describe("stats tool", () => {
     const s = await session(ctx);
     await writeFact(ctx, s, "x");
 
-    const out = (await stats.handler(ctx, { session_id: s })) as Record<string, any>;
+    const out = (await stats.invoke(ctx, { session_id: s })) as Record<string, any>;
     expect(out.queue.backlog).toBe(1);
     expect(out.drain.provider).toBe("local-null@1");
     expect(out.drain).toHaveProperty("daemon_alive");
@@ -79,7 +83,7 @@ describe("stats tool", () => {
 
   it("works without a session_id and logs no event", async () => {
     const { ctx, db } = makeCtx();
-    const out = (await stats.handler(ctx, {})) as Record<string, any>;
+    const out = (await stats.invoke(ctx, {})) as Record<string, any>;
     expect(out.queue.total).toBe(0);
     const ev = db.prepare("SELECT COUNT(*) c FROM events WHERE action = 'stats'").get() as {
       c: number;

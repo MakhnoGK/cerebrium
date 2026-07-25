@@ -24,6 +24,7 @@ describe("MCP wire layer", () => {
     const client = await connect();
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
+
     expect(names).toEqual([
       "checkpoint",
       "code_index",
@@ -42,6 +43,7 @@ describe("MCP wire layer", () => {
       "update",
       "write",
     ]);
+
     for (const t of tools) expect(t.description?.length).toBeGreaterThan(20);
   });
 
@@ -49,6 +51,7 @@ describe("MCP wire layer", () => {
     const client = await connect();
     const start = payload(await client.callTool({ name: "session_start", arguments: {} }));
     const sid = start.session_id as string;
+
     expect(sid).toBeTruthy();
 
     const written = payload(
@@ -63,16 +66,19 @@ describe("MCP wire layer", () => {
         },
       }),
     );
+
     expect(written.id).toBeTruthy();
 
     const found = payload(
       await client.callTool({ name: "search", arguments: { session_id: sid, query: "hello" } }),
     );
+
     expect(found.total_matches).toBe(1);
 
     const got = payload(
       await client.callTool({ name: "get", arguments: { session_id: sid, ids: [written.id] } }),
     );
+
     expect((got.nodes as { content: string }[])[0]!.content).toBe("hello over MCP");
   });
 
@@ -92,10 +98,12 @@ describe("MCP wire layer", () => {
         },
       }),
     );
+
     const res = (await client.callTool({
       name: "update",
       arguments: { session_id: sid, id: note.id, content: "y" },
     })) as { isError?: boolean; content: { text: string }[] };
+
     expect(res.isError).toBe(true);
     expect(res.content[0]!.text).toMatch(/write-once/);
   });

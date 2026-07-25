@@ -4,7 +4,7 @@ import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
 
 export class MirrorStatusTool extends AbstractTool {
-  name = ToolName.MIRROR_UPSERT;
+  name = ToolName.MIRROR_STATUS;
 
   description =
     "List the registered external mirror sources for this deployment with their freshness: last sync time, hours " +
@@ -20,7 +20,7 @@ export class MirrorStatusTool extends AbstractTool {
       .describe("Narrow to one registered source; omit to list them all."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
     const sources = ctx.repo.sourceStatus(ctx.now(), args.source_id);
     const out: Record<string, unknown> = { sources };

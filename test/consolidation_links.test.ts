@@ -1,15 +1,18 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
 import type { EmbeddingWorker } from "@/embeddings/worker";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 async function newNode(ctx: Ctx, s: string, title: string, content: string): Promise<string> {
   return (
-    (await write.handler(ctx, {
+    (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -21,7 +24,7 @@ async function newNode(ctx: Ctx, s: string, title: string, content: string): Pro
 
 async function newEpisodic(ctx: Ctx, s: string, title: string, content: string): Promise<string> {
   return (
-    (await write.handler(ctx, {
+    (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "episodic",
       type: "event_note",
@@ -32,7 +35,7 @@ async function newEpisodic(ctx: Ctx, s: string, title: string, content: string):
 }
 
 async function seed(ctx: Ctx, worker: EmbeddingWorker) {
-  const s = (await session_start.handler(ctx, {})).session_id;
+  const s = (await session_start.invoke(ctx, {})).session_id;
   // Two nodes with identical content → identical local-null vectors (cosine 1.0);
   // a third, disjoint node stays unlinked.
   const dup = "the http client retries three times with exponential backoff";
@@ -55,7 +58,7 @@ afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_SIM;
 });
 
-describe("similar_to link discovery (P5 §7)", () => {
+describe("similar_to link discovery", () => {
   it("auto (default) writes a system similar_to edge between near-identical nodes only", async () => {
     const { ctx, repo, worker } = makeCtx();
     const { twinA, twinB, other } = await seed(ctx, worker);
@@ -115,7 +118,7 @@ describe("similar_to link discovery (P5 §7)", () => {
 describe("orphan episodic repair — link discovery reconnects unlinked episodics", () => {
   it("links an unlinked episodic to its nearest semantic neighbor", async () => {
     const { ctx, repo, worker } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const topic = "the http client retries three times with exponential backoff";
     const fact = await newNode(ctx, s, "Retry budget", topic);
     const orphan = await newEpisodic(ctx, s, "Touched the retry logic", topic);
@@ -131,7 +134,7 @@ describe("orphan episodic repair — link discovery reconnects unlinked episodic
 
   it("re-seeds nothing once the episodic has an edge (idempotent)", async () => {
     const { ctx, repo, worker } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const topic = "the http client retries three times with exponential backoff";
     await newNode(ctx, s, "Retry budget", topic);
     await newEpisodic(ctx, s, "Touched the retry logic", topic);

@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "./helpers";
 import { chunkContent } from "@/core/chunk";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as update from "@/tools/update";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+import { UpdateTool } from "../src/tools/update";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const update = new UpdateTool();
 
 const NOTE = `# Intro
 This is the introduction paragraph with enough words to stand on its own as a chunk.
@@ -17,7 +21,7 @@ Ranking blends full text search with vector similarity via reciprocal rank fusio
 Episodic memories decay with age while semantic facts stay steady over time.`;
 
 async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.handler(ctx, {})).session_id;
+  return (await session_start.invoke(ctx, {})).session_id;
 }
 
 describe("content-addressed chunking", () => {
@@ -57,7 +61,7 @@ describe("embedding diff: only genuinely-new chunks re-embed", () => {
   it("re-embeds exactly the changed section on update", async () => {
     const { ctx, repo, worker, db } = makeCtx();
     const s = await session(ctx);
-    const node = (await write.handler(ctx, {
+    const node = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "howto",
@@ -73,7 +77,7 @@ describe("embedding diff: only genuinely-new chunks re-embed", () => {
       "via reciprocal rank fusion",
       "via reciprocal rank fusion, tuned carefully",
     );
-    await update.handler(ctx, {
+    await update.invoke(ctx, {
       session_id: s,
       id: node.id,
       content: edited,

@@ -54,7 +54,7 @@ export class MirrorUpsertTool extends AbstractTool {
       .describe("The curated records to mirror. Idempotent by (source, native_id)."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
     const source = ctx.repo.getSource(args.source_id);
 

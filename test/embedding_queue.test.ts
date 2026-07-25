@@ -2,17 +2,20 @@ import { describe, it, expect } from "vitest";
 import { makeCtx } from "./helpers";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import type { EmbeddingProvider } from "@/embeddings/index";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.handler(ctx, {})).session_id;
+  return (await session_start.invoke(ctx, {})).session_id;
 }
 
 async function writeFact(ctx: Ctx, s: string, title: string): Promise<Envelope> {
-  return (await write.handler(ctx, {
+  return (await write.invoke(ctx, {
     session_id: s,
     memory_kind: "semantic",
     type: "fact",

@@ -107,7 +107,7 @@ export class SearchTool extends AbstractTool {
       .describe("Max results (default 10, max 25)."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";

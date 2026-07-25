@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { makeCtx } from "./helpers";
 import { indexRepo } from "@/code/indexer";
 import { readGitProvenance } from "@/code/git";
-import * as code_index from "@/tools/code_index";
+import { CodeIndexTool } from "../src/tools/code_index";
+
+const code_index = new CodeIndexTool();
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -127,14 +129,14 @@ describe("code_index remembers roots for name-based re-index", () => {
     writeFileSync(join(root, "y.ts"), "export const answer = 42;\n");
 
     // First index by explicit path — should remember the root.
-    const first = (await code_index.handler(ctx, { session_id: "s", path: root })) as Record<
+    const first = (await code_index.invoke(ctx, { session_id: "s", path: root })) as Record<
       string,
       any
     >;
     const name = first.repo as string;
 
     // Now re-index by NAME alone, still with no MEMORY_CODE_ROOTS — resolves from the store.
-    const again = (await code_index.handler(ctx, { session_id: "s", repo: name })) as Record<
+    const again = (await code_index.invoke(ctx, { session_id: "s", repo: name })) as Record<
       string,
       any
     >;
@@ -146,7 +148,7 @@ describe("code_index remembers roots for name-based re-index", () => {
   it("errors clearly for an unknown, never-indexed repo name", async () => {
     delete process.env.MEMORY_CODE_ROOTS;
     const { ctx } = makeCtx();
-    await expect(code_index.handler(ctx, { session_id: "s", repo: "ghost" })).rejects.toThrow(
+    await expect(code_index.invoke(ctx, { session_id: "s", repo: "ghost" })).rejects.toThrow(
       /has not been indexed/,
     );
   });

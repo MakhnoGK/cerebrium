@@ -1,20 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { SessionStartTool } from "../src/tools/session_start";
+import { CodeIndexTool } from "../src/tools/code_index";
+import { CodeLookupTool } from "../src/tools/code_lookup";
+import { GetTool } from "../src/tools/get";
+import { WriteTool } from "../src/tools/write";
+import { UpdateTool } from "../src/tools/update";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as code_index from "@/tools/code_index";
-import * as code_lookup from "@/tools/code_lookup";
-import * as get from "@/tools/get";
-import * as write from "@/tools/write";
-import * as update from "@/tools/update";
+
+const session_start = new SessionStartTool();
+const code_index = new CodeIndexTool();
+const code_lookup = new CodeLookupTool();
+const get = new GetTool();
+const write = new WriteTool();
+const update = new UpdateTool();
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
 
 async function indexed() {
   const t = makeCtx();
-  const s = await session_start.handler(t.ctx, {});
-  const stats = (await code_index.handler(t.ctx, { session_id: s.session_id, path: FIXTURE })) as {
+  const s = await session_start.invoke(t.ctx, {});
+  const stats = (await code_index.invoke(t.ctx, { session_id: s.session_id, path: FIXTURE })) as {
     files_indexed: number;
     symbols_added: number;
     repo: string;
@@ -34,7 +41,7 @@ describe("code_index tool", () => {
 
   it("errors actionably when repo is unknown and no path given", async () => {
     const { ctx, session_id } = await indexed();
-    await expect(code_index.handler(ctx, { session_id, repo: "nope" })).rejects.toThrow(
+    await expect(code_index.invoke(ctx, { session_id, repo: "nope" })).rejects.toThrow(
       /not configured/,
     );
   });
@@ -43,7 +50,7 @@ describe("code_index tool", () => {
 describe("code_lookup tool", () => {
   it("resolves by name with neighbor stubs", async () => {
     const { ctx, session_id } = await indexed();
-    const res = (await code_lookup.handler(ctx, {
+    const res = (await code_lookup.invoke(ctx, {
       session_id,
       name: "AuthService",
       limit: 10,
@@ -63,7 +70,7 @@ describe("code_lookup tool", () => {
 
   it("lists a file's symbols", async () => {
     const { ctx, session_id } = await indexed();
-    const res = (await code_lookup.handler(ctx, {
+    const res = (await code_lookup.invoke(ctx, {
       session_id,
       file: "util/crypto.ts",
       limit: 10,
@@ -77,7 +84,7 @@ describe("code_lookup tool", () => {
 
   it("requires name or file", async () => {
     const { ctx, session_id } = await indexed();
-    await expect(code_lookup.handler(ctx, { session_id, limit: 10 })).rejects.toThrow(/provide/);
+    await expect(code_lookup.invoke(ctx, { session_id, limit: 10 })).rejects.toThrow(/provide/);
   });
 });
 
@@ -86,7 +93,7 @@ describe("get on a symbol", () => {
     const { ctx, session_id } = await indexed();
     const found = ctx.repo.findSymbolsByName("AuthService", undefined, 1);
     const id = found[0]!.envelope.id;
-    const res = (await get.handler(ctx, { session_id, ids: [id] })) as {
+    const res = (await get.invoke(ctx, { session_id, ids: [id] })) as {
       nodes: { source: string; symbol: { signature: string; symbol_kind: string; path: string } }[];
     };
     expect(res.nodes[0]!.source).toContain("class AuthService");
@@ -99,7 +106,7 @@ describe("mirror discipline", () => {
   it("write with memory_kind:'mirror' is rejected", async () => {
     const { ctx, session_id } = await indexed();
     await expect(
-      write.handler(ctx, {
+      write.invoke(ctx, {
         session_id,
         memory_kind: "mirror",
         type: "symbol",
@@ -112,7 +119,7 @@ describe("mirror discipline", () => {
   it("update on a symbol node is rejected with an actionable message", async () => {
     const { ctx, session_id } = await indexed();
     const id = ctx.repo.findSymbolsByName("AuthService", undefined, 1)[0]!.envelope.id;
-    await expect(update.handler(ctx, { session_id, id, content: "hand edit" })).rejects.toThrow(
+    await expect(update.invoke(ctx, { session_id, id, content: "hand edit" })).rejects.toThrow(
       /re-indexed|code_index/,
     );
   });

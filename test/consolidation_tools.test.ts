@@ -1,13 +1,18 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as consolidate_suggest from "@/tools/consolidate_suggest";
-import * as consolidate_apply from "@/tools/consolidate_apply";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
 import type { ConsolidationCandidate } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+import { ConsolidateSuggestTool } from "../src/tools/consolidate_suggest";
+import { ConsolidateApplyTool } from "../src/tools/consolidate_apply";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const consolidate_suggest = new ConsolidateSuggestTool();
+const consolidate_apply = new ConsolidateApplyTool();
 
 async function twinsWithSuggestedLink(
   ctx: Ctx,
@@ -15,11 +20,11 @@ async function twinsWithSuggestedLink(
     tick: () => Promise<{ embedded: number; failed: number }>;
   },
 ) {
-  const s = (await session_start.handler(ctx, {})).session_id;
+  const s = (await session_start.invoke(ctx, {})).session_id;
   const dup = "circuit breaker opens after five consecutive downstream failures";
   const mk = async (title: string) =>
     (
-      (await write.handler(ctx, {
+      (await write.invoke(ctx, {
         session_id: s,
         memory_kind: "semantic",
         type: "fact",
@@ -50,13 +55,13 @@ describe("consolidate_suggest / consolidate_apply (P5 §9)", () => {
     const { s, a, b } = await twinsWithSuggestedLink(ctx, worker);
     await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
 
-    const listed = candidates(await consolidate_suggest.handler(ctx, { session_id: s, limit: 20 }));
+    const listed = candidates(await consolidate_suggest.invoke(ctx, { session_id: s, limit: 20 }));
     expect(listed).toHaveLength(1);
     const cand = listed[0]!;
     expect(cand.kind).toBe("link");
     expect(cand.member_ids.sort()).toEqual([a, b].sort());
 
-    const applied = (await consolidate_apply.handler(ctx, {
+    const applied = (await consolidate_apply.invoke(ctx, {
       session_id: s,
       id: cand.id,
       decision: "accept",
@@ -75,9 +80,9 @@ describe("consolidate_suggest / consolidate_apply (P5 §9)", () => {
     const { ctx, repo, worker } = makeCtx();
     const { s, a, b } = await twinsWithSuggestedLink(ctx, worker);
     await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
-    const cand = candidates(await consolidate_suggest.handler(ctx, { session_id: s }))[0]!;
+    const cand = candidates(await consolidate_suggest.invoke(ctx, { session_id: s }))[0]!;
 
-    const rejected = (await consolidate_apply.handler(ctx, {
+    const rejected = (await consolidate_apply.invoke(ctx, {
       session_id: s,
       id: cand.id,
       decision: "reject",
@@ -86,21 +91,21 @@ describe("consolidate_suggest / consolidate_apply (P5 §9)", () => {
     expect(repo.edgesOf(a).some((e) => e.id === b && e.edge === "similar_to")).toBe(false);
 
     await expect(
-      consolidate_apply.handler(ctx, { session_id: s, id: cand.id, decision: "accept" }),
+      consolidate_apply.invoke(ctx, { session_id: s, id: cand.id, decision: "accept" }),
     ).rejects.toThrow(/already dismissed/);
   });
 
   it("errors on an unknown candidate id", async () => {
     const { ctx } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     await expect(
-      consolidate_apply.handler(ctx, { session_id: s, id: "nope", decision: "accept" }),
+      consolidate_apply.invoke(ctx, { session_id: s, id: "nope", decision: "accept" }),
     ).rejects.toThrow(/no consolidation candidate/);
   });
 
   it("suggest returns an empty list when nothing is queued", async () => {
     const { ctx } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
-    expect(candidates(await consolidate_suggest.handler(ctx, { session_id: s }))).toEqual([]);
+    const s = (await session_start.invoke(ctx, {})).session_id;
+    expect(candidates(await consolidate_suggest.invoke(ctx, { session_id: s }))).toEqual([]);
   });
 });

@@ -24,7 +24,7 @@ export class StatsTool extends AbstractTool {
       .describe("The id from session_start (auto-created if unknown). Omit for a read-only peek."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = args.session_id ? touchOrCreate(ctx, args.session_id) : [];
     const stats = ctx.repo.techStats(ctx.now());
 

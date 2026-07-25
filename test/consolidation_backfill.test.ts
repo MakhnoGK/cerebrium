@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { ConsolidationProvider } from "@/consolidation/provider";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 const stub: ConsolidationProvider = {
   name: "stub",
@@ -37,7 +40,7 @@ const rejectStub: ConsolidationProvider = {
 
 async function mk(ctx: Ctx, s: string, title: string): Promise<string> {
   return (
-    (await write.handler(ctx, {
+    (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -50,7 +53,7 @@ async function mk(ctx: Ctx, s: string, title: string): Promise<string> {
 describe("proposal backfill (manual→provider upgrade)", () => {
   it("fills proposals for pending distill/merge candidates lacking them", async () => {
     const { ctx, repo } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const a = await mk(ctx, s, "Alpha");
     const b = await mk(ctx, s, "Beta");
     // a proposal-less merge candidate, as queued under the manual provider
@@ -75,7 +78,7 @@ describe("proposal backfill (manual→provider upgrade)", () => {
 
   it("auto-dismisses a candidate the provider judges not a real duplicate, keeping the reason", async () => {
     const { ctx, repo } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const a = await mk(ctx, s, "crm-backend deps");
     const b = await mk(ctx, s, "chat-socket deps");
     const id = repo.insertCandidate({

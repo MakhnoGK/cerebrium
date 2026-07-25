@@ -3,16 +3,22 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as code_index from "@/tools/code_index";
-import * as write from "@/tools/write";
-import * as search from "@/tools/search";
-import * as consolidate_apply from "@/tools/consolidate_apply";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Ctx } from "@/tools/context";
 import type BetterSqlite3 from "better-sqlite3";
 import type { Repo } from "@/db/repo";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { CodeIndexTool } from "../src/tools/code_index";
+import { WriteTool } from "../src/tools/write";
+import { SearchTool } from "../src/tools/search";
+import { ConsolidateApplyTool } from "../src/tools/consolidate_apply";
+
+const session_start = new SessionStartTool();
+const code_index = new CodeIndexTool();
+const write = new WriteTool();
+const search = new SearchTool();
+const consolidate_apply = new ConsolidateApplyTool();
 
 const SRC = `/** prunable widget helper for the gadget subsystem */
 export function prunableWidget(): number {
@@ -29,8 +35,8 @@ async function orphanSymbol(
   repo: Repo,
   db: BetterSqlite3.Database,
 ): Promise<{ s: string; symbolId: string }> {
-  const s = (await session_start.handler(ctx, {})).session_id;
-  const stats = (await code_index.handler(ctx, { session_id: s, path: root })) as { repo: string };
+  const s = (await session_start.invoke(ctx, {})).session_id;
+  const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as { repo: string };
   const symbolId = repo.findSymbolsByName("prunableWidget", stats.repo, 1)[0]!.envelope.id;
   db.prepare("DELETE FROM code_files WHERE repo = ?").run(stats.repo);
   return { s, symbolId };
@@ -57,7 +63,7 @@ describe("Tier-1 mirror prune (P5 §9-bis)", () => {
     expect(repo.envelope(symbolId)!.invalidated).toBe(true);
 
     // gone from default search, present under history
-    const normal = (await search.handler(ctx, {
+    const normal = (await search.invoke(ctx, {
       session_id: s,
       query: "prunable widget gadget",
       types: ["symbol"],
@@ -65,7 +71,7 @@ describe("Tier-1 mirror prune (P5 §9-bis)", () => {
       limit: 10,
     })) as { results: Envelope[] };
     expect(normal.results.some((x) => x.id === symbolId)).toBe(false);
-    const hist = (await search.handler(ctx, {
+    const hist = (await search.invoke(ctx, {
       session_id: s,
       query: "prunable widget gadget",
       types: ["symbol"],
@@ -79,7 +85,7 @@ describe("Tier-1 mirror prune (P5 §9-bis)", () => {
   it("never touches authored memory", async () => {
     const { ctx, repo, db } = makeCtx();
     const { s } = await orphanSymbol(ctx, repo, db);
-    const fact = (await write.handler(ctx, {
+    const fact = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -106,7 +112,7 @@ describe("Tier-1 mirror prune (P5 §9-bis)", () => {
       .pendingCandidates({ kind: "prune" })
       .find((c) => c.member_ids[0] === symbolId);
     expect(cand).toBeDefined();
-    await consolidate_apply.handler(ctx, { session_id: s, id: cand!.id, decision: "accept" });
+    await consolidate_apply.invoke(ctx, { session_id: s, id: cand!.id, decision: "accept" });
     expect(repo.envelope(symbolId)!.invalidated).toBe(true);
   });
 

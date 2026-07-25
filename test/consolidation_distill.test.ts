@@ -1,12 +1,16 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as consolidate_apply from "@/tools/consolidate_apply";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { ConsolidationProvider } from "@/consolidation/provider";
 import type { Ctx } from "@/tools/context";
 import type { EmbeddingWorker } from "@/embeddings/worker";
+import { WriteTool } from "../src/tools/write";
+import { SessionStartTool } from "../src/tools/session_start";
+import { ConsolidateApplyTool } from "../src/tools/consolidate_apply";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const consolidate_apply = new ConsolidateApplyTool();
 
 const BASE = "the deployment rollback procedure drains connections and flips the feature flag";
 
@@ -16,11 +20,11 @@ async function seedEpisodics(
   worker: EmbeddingWorker,
   n = 3,
 ): Promise<{ s: string; ids: string[] }> {
-  const s = (await session_start.handler(ctx, {})).session_id;
+  const s = (await session_start.invoke(ctx, {})).session_id;
   const ids: string[] = [];
   const tags = ["one", "two", "three", "four"];
   for (let i = 0; i < n; i++) {
-    const env = (await write.handler(ctx, {
+    const env = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "episodic",
       type: "event_note",
@@ -76,7 +80,7 @@ describe("episodic → semantic distillation (P5 §6)", () => {
     await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
     const [cand] = repo.pendingCandidates({ kind: "distill" });
 
-    const applied = (await consolidate_apply.handler(ctx, {
+    const applied = (await consolidate_apply.invoke(ctx, {
       session_id: s,
       id: cand!.id,
       decision: "accept",
@@ -114,7 +118,7 @@ describe("episodic → semantic distillation (P5 §6)", () => {
     const [cand] = repo.pendingCandidates({ kind: "distill" });
 
     await expect(
-      consolidate_apply.handler(ctx, { session_id: s, id: cand!.id, decision: "accept" }),
+      consolidate_apply.invoke(ctx, { session_id: s, id: cand!.id, decision: "accept" }),
     ).rejects.toThrow(/no proposal/);
   });
 

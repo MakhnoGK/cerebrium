@@ -1,8 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type BetterSqlite3 from "better-sqlite3";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
+
 import { ConsolidationWorker } from "@/consolidation/worker";
 import { toFtsMatch } from "@/core/fts";
 import type { Ctx } from "@/tools/context";
@@ -14,6 +13,11 @@ import type {
   ConsolidationResult,
   ReconcileResult,
 } from "@/consolidation/provider";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 // An enabled provider that only annotates. `generate`/`reconcile` are unused here.
 class FakeAnnotator implements ConsolidationProvider {
@@ -42,7 +46,7 @@ const KEYWORD = "resilience";
 
 async function writeFact(ctx: Ctx, s: string): Promise<string> {
   return (
-    (await write.handler(ctx, {
+    (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -81,7 +85,7 @@ describe("write-time attribute enrichment (annotate)", () => {
       context: "how the client survives a primary outage",
     }));
     const { ctx, repo, db } = makeCtx({ consolidator: provider });
-    const s = (await session_start.handler(ctx, { project: "infra" })).session_id;
+    const s = (await session_start.invoke(ctx, { project: "infra" })).session_id;
     const id = await writeFact(ctx, s);
 
     // Before enrichment: the injected keyword finds nothing.
@@ -104,7 +108,7 @@ describe("write-time attribute enrichment (annotate)", () => {
   it("is idempotent — a second sweep re-annotates nothing", async () => {
     const provider = new FakeAnnotator(() => ({ keywords: [KEYWORD], tags: [], context: "" }));
     const { ctx, repo } = makeCtx({ consolidator: provider });
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     await writeFact(ctx, s);
 
     // One worker (one lease holder) across both sweeps, so the second sweep tests
@@ -117,7 +121,7 @@ describe("write-time attribute enrichment (annotate)", () => {
   it("re-annotates the new revision after an update (annotation is per-rev)", async () => {
     const provider = new FakeAnnotator(() => ({ keywords: [KEYWORD], tags: [], context: "" }));
     const { ctx, repo } = makeCtx({ consolidator: provider });
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const id = await writeFact(ctx, s);
     const cw = new ConsolidationWorker(repo, provider, ctx.now);
     await cw.tick();
@@ -136,7 +140,7 @@ describe("write-time attribute enrichment (annotate)", () => {
 
   it("does nothing under the default offline (manual) provider", async () => {
     const { ctx, repo } = makeCtx(); // manual, enabled=false
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const id = await writeFact(ctx, s);
     const r = await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
     expect(r.annotated).toBe(0);
@@ -147,7 +151,7 @@ describe("write-time attribute enrichment (annotate)", () => {
     process.env.MEMORY_CONSOLIDATE_ANNOTATE = "off";
     const provider = new FakeAnnotator(() => ({ keywords: [KEYWORD], tags: [], context: "" }));
     const { ctx, repo } = makeCtx({ consolidator: provider });
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const id = await writeFact(ctx, s);
     const r = await new ConsolidationWorker(repo, provider, ctx.now).tick();
     expect(r.annotated).toBe(0);
@@ -165,7 +169,7 @@ describe("write-time attribute enrichment (annotate)", () => {
       annotate: () => Promise.reject(new Error("model down")),
     };
     const { ctx, repo } = makeCtx({ consolidator: boom });
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
     const id = await writeFact(ctx, s);
     const r = await new ConsolidationWorker(repo, boom, ctx.now).tick();
     expect(r.annotated).toBe(0);

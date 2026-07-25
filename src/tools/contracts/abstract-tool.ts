@@ -1,5 +1,5 @@
 import type { Ctx } from "@/tools/context";
-import { z } from "zod";
+import { TypeOf, z, ZodObject } from "zod";
 import { ToolName } from "./tool-name";
 
 export abstract class AbstractTool {
@@ -7,10 +7,7 @@ export abstract class AbstractTool {
   public abstract description: string;
   public abstract schema: z.ZodRawShape;
 
-  protected abstract invoke(
-    ctx: Ctx,
-    args: z.infer<z.ZodObject<typeof this.schema>>,
-  ): Promise<unknown>;
+  abstract invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown>;
 
   public async callback(ctx: Ctx, args: z.infer<z.ZodObject<z.ZodRawShape>>) {
     return this.invoke(ctx, args)

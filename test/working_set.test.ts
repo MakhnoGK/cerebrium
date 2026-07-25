@@ -1,18 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as checkpoint from "@/tools/checkpoint";
 import { estimateTokensOf } from "@/core/tokens";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+import { CheckpointTool } from "../src/tools/checkpoint";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
+const checkpoint = new CheckpointTool();
 
 const P = "proj";
 
 describe("session_start builds a budgeted working set", () => {
   it("surfaces semantic facts, checkpoint content, and open tasks", async () => {
     const { ctx } = makeCtx();
-    const s = (await session_start.handler(ctx, { project: P })).session_id;
-    await write.handler(ctx, {
+    const s = (await session_start.invoke(ctx, { project: P })).session_id;
+    await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -20,7 +24,7 @@ describe("session_start builds a budgeted working set", () => {
       content: "the sky is blue",
       project: P,
     });
-    await write.handler(ctx, {
+    await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "task",
@@ -28,14 +32,14 @@ describe("session_start builds a budgeted working set", () => {
       content: "ship the thing",
       project: P,
     });
-    await checkpoint.handler(ctx, {
+    await checkpoint.invoke(ctx, {
       session_id: s,
       project: P,
       summary: "left off mid-refactor",
       decisions: ["use RRF"],
     });
 
-    const res = await session_start.handler(ctx, { project: P });
+    const res = await session_start.invoke(ctx, { project: P });
     const ws = res.working_set as {
       semantic: Envelope[];
       checkpoints: { envelope: Envelope; content: string }[];
@@ -53,9 +57,9 @@ describe("session_start builds a budgeted working set", () => {
   it("respects the token budget", async () => {
     const budget = 120;
     const { ctx } = makeCtx({ budget });
-    const s = (await session_start.handler(ctx, { project: P })).session_id;
+    const s = (await session_start.invoke(ctx, { project: P })).session_id;
     for (let i = 0; i < 20; i++) {
-      await write.handler(ctx, {
+      await write.invoke(ctx, {
         session_id: s,
         memory_kind: "semantic",
         type: "fact",
@@ -65,7 +69,7 @@ describe("session_start builds a budgeted working set", () => {
       });
     }
 
-    const res = await session_start.handler(ctx, { project: P });
+    const res = await session_start.invoke(ctx, { project: P });
     const ws = res.working_set as { semantic: Envelope[] };
     expect(ws.semantic.length).toBeLessThan(20); // budget forced a cut
     const spent = ws.semantic.reduce((sum, e) => sum + estimateTokensOf(e), 0);

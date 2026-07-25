@@ -3,13 +3,20 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeCtx } from "../helpers";
-import * as session_start from "@/tools/session_start";
-import * as code_index from "@/tools/code_index";
-import * as search from "@/tools/search";
-import * as get from "@/tools/get";
-import * as write from "@/tools/write";
-import * as link from "@/tools/link";
 import type { EmbeddingWorker } from "@/embeddings/worker";
+import { SessionStartTool } from "../../src/tools/session_start";
+import { CodeIndexTool } from "../../src/tools/code_index";
+import { SearchTool } from "../../src/tools/search";
+import { GetTool } from "../../src/tools/get";
+import { WriteTool } from "../../src/tools/write";
+import { LinkTool } from "../../src/tools/link";
+
+const session_start = new SessionStartTool();
+const code_index = new CodeIndexTool();
+const search = new SearchTool();
+const get = new GetTool();
+const write = new WriteTool();
+const link = new LinkTool();
 
 const CRYPTO = `export function hashToken(input: string): string {
   return input.split("").reverse().join("");
@@ -58,10 +65,10 @@ interface Res {
 describe("code indexing end-to-end", () => {
   it("carries a note→code documents link across a re-index", async () => {
     const { ctx, repo, clock, worker, db } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
+    const s = (await session_start.invoke(ctx, {})).session_id;
 
     // 1. index the repo
-    const stats = (await code_index.handler(ctx, { session_id: s, path: root })) as {
+    const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as {
       repo: string;
     };
     const repoName = stats.repo;
@@ -75,7 +82,7 @@ describe("code indexing end-to-end", () => {
         }
       ).p,
     ).toBe(1);
-    const byText = (await search.handler(ctx, {
+    const byText = (await search.invoke(ctx, {
       session_id: s,
       query: "validate login",
       mode: "text",
@@ -84,13 +91,13 @@ describe("code indexing end-to-end", () => {
     expect(byText.results.some((r) => r.id === validateId)).toBe(true);
 
     // 3. get shows the raw source
-    const got = (await get.handler(ctx, { session_id: s, ids: [validateId] })) as {
+    const got = (await get.invoke(ctx, { session_id: s, ids: [validateId] })) as {
       nodes: { source: string }[];
     };
     expect(got.nodes[0]!.source).toContain("hashToken(pw)");
 
     // 4. write a decision ABOUT the code + link it with a documents edge
-    const note = (await write.handler(ctx, {
+    const note = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "decision",
@@ -98,10 +105,10 @@ describe("code indexing end-to-end", () => {
       content: "We validate credentials by signing with RS256 rather than HS256.",
       project: repoName,
     })) as { id: string };
-    await link.handler(ctx, { session_id: s, src: note.id, dst: validateId, type: "documents" });
+    await link.invoke(ctx, { session_id: s, src: note.id, dst: validateId, type: "documents" });
 
     // 5. searching the NOTE's topic surfaces the symbol via graph expansion
-    const viaGraph = (await search.handler(ctx, {
+    const viaGraph = (await search.invoke(ctx, {
       session_id: s,
       query: "RS256 signing",
       limit: 10,
@@ -112,7 +119,7 @@ describe("code indexing end-to-end", () => {
 
     // 6. after embeddings drain, vector search finds the symbol by meaning
     await drain(worker);
-    const byVec = (await search.handler(ctx, {
+    const byVec = (await search.invoke(ctx, {
       session_id: s,
       query: "validate login boolean",
       mode: "vector",
@@ -129,7 +136,7 @@ describe("code indexing end-to-end", () => {
       ),
     );
     clock.advanceDays(1);
-    await code_index.handler(ctx, { session_id: s, path: root });
+    await code_index.invoke(ctx, { session_id: s, path: root });
 
     expect(repo.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id).toBe(validateId); // stable id
     const edge = db
@@ -138,7 +145,7 @@ describe("code indexing end-to-end", () => {
       )
       .get(note.id) as { dst: string } | undefined;
     expect(edge?.dst).toBe(validateId);
-    const stillGraph = (await search.handler(ctx, {
+    const stillGraph = (await search.invoke(ctx, {
       session_id: s,
       query: "RS256 signing",
       limit: 10,
@@ -148,13 +155,13 @@ describe("code indexing end-to-end", () => {
 
   it("mirror symbols are code-scoped and do not decay", async () => {
     const { ctx, clock } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
-    const stats = (await code_index.handler(ctx, { session_id: s, path: root })) as {
+    const s = (await session_start.invoke(ctx, {})).session_id;
+    const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as {
       repo: string;
     };
 
     // an equally-matching episodic note that WILL decay
-    await write.handler(ctx, {
+    await write.invoke(ctx, {
       session_id: s,
       memory_kind: "episodic",
       type: "event_note",
@@ -164,7 +171,7 @@ describe("code indexing end-to-end", () => {
     });
 
     // types filter scopes strictly to code
-    const scoped = (await search.handler(ctx, {
+    const scoped = (await search.invoke(ctx, {
       session_id: s,
       query: "validate",
       types: ["symbol"],
@@ -177,7 +184,7 @@ describe("code indexing end-to-end", () => {
 
     // age 60 days: the symbol (no decay) outranks the decayed episodic note
     clock.advanceDays(60);
-    const aged = (await search.handler(ctx, {
+    const aged = (await search.invoke(ctx, {
       session_id: s,
       query: "validate",
       mode: "text",

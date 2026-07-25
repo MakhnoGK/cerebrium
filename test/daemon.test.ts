@@ -13,8 +13,11 @@ import {
   isProcessAlive,
 } from "@/runtime/daemon-pid";
 import { ensureDaemon } from "@/runtime/ensure-daemon";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 const DB = join(tmpdir(), `mk-daemon-${process.pid}.db`);
 afterEach(() => {
@@ -59,8 +62,8 @@ describe("daemon pidfile", () => {
 describe("runDaemon loop", () => {
   it("drains the backlog to empty then exits on idle", async () => {
     const { ctx, repo, worker } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
-    await write.handler(ctx, {
+    const s = (await session_start.invoke(ctx, {})).session_id;
+    await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",

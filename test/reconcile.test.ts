@@ -1,7 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
 import type { Ctx } from "@/tools/context";
 import type {
   ConsolidationProvider,
@@ -9,6 +7,11 @@ import type {
   ReconcileResult,
   ReconcileTask,
 } from "@/consolidation/provider";
+import { SessionStartTool } from "../src/tools/session_start";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const write = new WriteTool();
 
 // An enabled provider double: it only judges duplicates. `generate` is unused here.
 class FakeJudge implements ConsolidationProvider {
@@ -37,10 +40,10 @@ type WriteOut = Record<string, unknown> & {
 };
 
 async function session(ctx: Ctx, project?: string): Promise<string> {
-  return (await session_start.handler(ctx, { project })).session_id;
+  return (await session_start.invoke(ctx, { project })).session_id;
 }
 function writeFact(ctx: Ctx, s: string, title: string, content: string): Promise<WriteOut> {
-  return write.handler(ctx, {
+  return write.invoke(ctx, {
     session_id: s,
     memory_kind: "semantic",
     type: "fact",

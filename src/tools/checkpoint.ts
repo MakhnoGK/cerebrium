@@ -29,7 +29,7 @@ export class CheckpointTool extends AbstractTool {
       .describe("Ids of nodes this session touched; linked via 'references'."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id, args.project ?? null);
 
     const existing = (args.touched_node_ids ?? []).filter((id) => ctx.repo.nodeExists(id));

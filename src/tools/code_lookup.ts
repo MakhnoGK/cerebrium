@@ -36,7 +36,7 @@ export class CodeLookupTool extends AbstractTool {
       .describe("Max symbols to return (default 10, max 25)."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
 
     if (!args.name && !args.file) {

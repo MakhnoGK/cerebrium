@@ -24,7 +24,7 @@ export class UpdateTool extends AbstractTool {
     reason: z.string().optional().describe("Why this revision — stored in the node's history."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
     const current = ctx.repo.envelope(args.id);
 

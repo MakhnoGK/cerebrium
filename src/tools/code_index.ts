@@ -35,7 +35,7 @@ export class CodeIndexTool extends AbstractTool {
       .describe("Re-parse every file, bypassing the per-file hash-gate (default false)."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     let targets: IndexTarget[];
 
     if (args.path) {

@@ -23,7 +23,7 @@ export class InvalidateTool extends AbstractTool {
       ),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
 
     if (!ctx.repo.nodeExists(args.id)) throw new Error(`node ${args.id} does not exist.`);

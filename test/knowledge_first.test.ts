@@ -3,12 +3,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as code_index from "@/tools/code_index";
-import * as write from "@/tools/write";
-import * as search from "@/tools/search";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session_start";
+import { CodeIndexTool } from "../src/tools/code_index";
+import { SearchTool } from "../src/tools/search";
+import { WriteTool } from "../src/tools/write";
+
+const session_start = new SessionStartTool();
+const code_index = new CodeIndexTool();
+const write = new WriteTool();
+const search = new SearchTool();
 
 const DEPLOY = `/**
  * deploy pipeline deploy pipeline
@@ -18,7 +23,7 @@ export function deployPipeline(): void {}
 
 let root: string;
 
-function ids(res: Awaited<ReturnType<typeof search.handler>>): string[] {
+function ids(res: Awaited<ReturnType<typeof search.invoke>>): string[] {
   return (res.results as Envelope[]).map((e) => e.id);
 }
 
@@ -29,11 +34,11 @@ function ids(res: Awaited<ReturnType<typeof search.handler>>): string[] {
 async function corpus(
   ctx: Ctx,
 ): Promise<{ s: string; strong: string; symbol: string; weak: string }> {
-  const s = (await session_start.handler(ctx, {})).session_id;
-  const stats = (await code_index.handler(ctx, { session_id: s, path: root })) as { repo: string };
+  const s = (await session_start.invoke(ctx, {})).session_id;
+  const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as { repo: string };
   const symbol = ctx.repo.findSymbolsByName("deployPipeline", stats.repo, 1)[0]!.envelope.id;
   const strong = (
-    (await write.handler(ctx, {
+    (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -42,7 +47,7 @@ async function corpus(
     })) as Envelope
   ).id;
   const weak = (
-    (await write.handler(ctx, {
+    (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -63,12 +68,12 @@ afterEach(() => {
   delete process.env.MEMORY_SYMBOL_WEIGHT;
 });
 
-describe("knowledge-first ranking (P5 §3)", () => {
+describe("knowledge-first ranking", () => {
   it("down-weights code symbols by default so authored knowledge ranks first", async () => {
     const { ctx } = makeCtx();
     const { s, strong, symbol } = await corpus(ctx);
     const def = ids(
-      await search.handler(ctx, {
+      await search.invoke(ctx, {
         session_id: s,
         query: "deploy pipeline",
         mode: "text",
@@ -85,7 +90,7 @@ describe("knowledge-first ranking (P5 §3)", () => {
 
     process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // heavy penalty → symbol sinks to the bottom
     const low = ids(
-      await search.handler(ctx, {
+      await search.invoke(ctx, {
         session_id: s,
         query: "deploy pipeline",
         mode: "text",
@@ -96,7 +101,7 @@ describe("knowledge-first ranking (P5 §3)", () => {
 
     process.env.MEMORY_SYMBOL_WEIGHT = "100"; // heavy boost → symbol climbs above other matches
     const high = ids(
-      await search.handler(ctx, {
+      await search.invoke(ctx, {
         session_id: s,
         query: "deploy pipeline",
         mode: "text",
@@ -113,7 +118,7 @@ describe("knowledge-first ranking (P5 §3)", () => {
 
     process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // would sink the symbol to the bottom...
     const plain = ids(
-      await search.handler(ctx, {
+      await search.invoke(ctx, {
         session_id: s,
         query: "deploy pipeline",
         mode: "text",
@@ -122,7 +127,7 @@ describe("knowledge-first ranking (P5 §3)", () => {
     );
     // ...but an explicit symbol request ignores the weight, restoring the raw position.
     const escaped = ids(
-      await search.handler(ctx, {
+      await search.invoke(ctx, {
         session_id: s,
         query: "deploy pipeline",
         types: ["symbol", "fact"],

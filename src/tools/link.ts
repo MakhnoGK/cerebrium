@@ -26,7 +26,7 @@ export class LinkTool extends AbstractTool {
     weight: z.number().min(0).max(1).optional().describe("Edge strength 0–1 (default 1.0)."),
   };
 
-  protected async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
     const hints = touchOrCreate(ctx, args.session_id);
 
     if ((SYSTEM_EDGE_TYPES as readonly string[]).includes(args.type)) {
