@@ -108,7 +108,7 @@ describe("external mirrors — end-to-end", () => {
       session_id: sid,
       query: "cache stampede jitter checkout",
       project: P,
-      limits: undefined,
+      limit: 10,
     })) as { results: { id: string }[] };
 
     const ids = found.results.map((r) => r.id);
