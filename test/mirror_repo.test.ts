@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type BetterSqlite3 from "better-sqlite3";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { mirrorExternalId } from "@/db/repositories/mirror";
 import type { Repo } from "@/db/repo";
-import type { Clock } from "./helpers";
+import type { Clock } from "@test/helpers";
 import type { MirrorSource } from "@/core/types";
 
 let repo: Repo;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
 import { candidateHash } from "@/db/repositories/consolidation";
+import { makeCtx } from "@test/helpers";
 
 describe("ConsolidationRepo — candidate queue", () => {
   it("inserts a candidate and reads it back with parsed members + proposal", () => {

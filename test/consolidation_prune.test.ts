@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Ctx } from "@/tools/context";
 import type BetterSqlite3 from "better-sqlite3";

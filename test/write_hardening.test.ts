@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { withBusyRetry, isBusy } from "@/db/retry";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import type { Ctx } from "@/tools/context";

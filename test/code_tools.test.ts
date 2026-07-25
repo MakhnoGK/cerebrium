@@ -7,7 +7,7 @@ import { CodeLookupTool } from "../src/tools/code_lookup";
 import { GetTool } from "../src/tools/get";
 import { WriteTool } from "../src/tools/write";
 import { UpdateTool } from "../src/tools/update";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 
 const session_start = new SessionStartTool();
 const code_index = new CodeIndexTool();

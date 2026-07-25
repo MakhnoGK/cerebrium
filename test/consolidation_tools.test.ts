@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "../helpers";
+import { makeCtx } from "@test/helpers";
 import type { EmbeddingWorker } from "@/embeddings/worker";
 import { SessionStartTool } from "../../src/tools/session_start";
 import { CodeIndexTool } from "../../src/tools/code_index";

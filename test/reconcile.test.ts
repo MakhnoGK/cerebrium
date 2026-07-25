@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import type { Ctx } from "@/tools/context";
 import type {
   ConsolidationProvider,

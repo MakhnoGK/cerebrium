@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import type { ExtractedSymbol, FileIndexInput } from "@/db/repo";
 
 const REPO = "demo";

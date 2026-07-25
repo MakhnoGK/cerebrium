@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { chunkContent } from "@/core/chunk";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";

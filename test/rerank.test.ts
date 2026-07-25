@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { LocalNullReranker } from "@/rerank/local-null";
 import type { RerankProvider } from "@/rerank/index";
 import type { Ctx } from "@/tools/context";
@@ -107,7 +107,7 @@ describe("rerank stage", () => {
       session_id: s,
       query: "billing pipeline deploy",
       limit: 10,
-    })) as {
+    })) as unknown as {
       results: Result[];
     };
     const surfaced = res.results.find((r) => r.id === entity.id);

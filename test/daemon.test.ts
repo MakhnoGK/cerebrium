@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { nextIdleState, runDaemon } from "@/daemon";
 import {
   daemonPidPath,

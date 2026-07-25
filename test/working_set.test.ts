@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { estimateTokensOf } from "@/core/tokens";
 import type { Envelope } from "@/db/repo";
 import { SessionStartTool } from "../src/tools/session_start";

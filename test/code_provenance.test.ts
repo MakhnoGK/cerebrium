@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { indexRepo } from "@/code/indexer";
 import { readGitProvenance } from "@/code/git";
 import { CodeIndexTool } from "../src/tools/code_index";

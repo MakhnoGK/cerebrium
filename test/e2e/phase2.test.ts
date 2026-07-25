@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "../helpers";
+import { makeCtx } from "@test/helpers";
 import type { Envelope } from "@/db/repo";
 import { SessionStartTool } from "../../src/tools/session_start";
 import { WriteTool } from "../../src/tools/write";

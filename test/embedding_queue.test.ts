@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import type { EmbeddingProvider } from "@/embeddings/index";
 import type { Ctx } from "@/tools/context";

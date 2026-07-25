@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "../helpers";
+import { makeCtx } from "@test/helpers";
 import { SessionStartTool } from "../../src/tools/session_start";
 import { SourceRegisterTool } from "../../src/tools/source_register";
 import { MirrorUpsertTool } from "../../src/tools/mirror_upsert";

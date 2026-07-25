@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type BetterSqlite3 from "better-sqlite3";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 
 import { ConsolidationWorker } from "@/consolidation/worker";
 import { toFtsMatch } from "@/core/fts";

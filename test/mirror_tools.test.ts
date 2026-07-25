@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
-import type { TestCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
+import type { TestCtx } from "@test/helpers";
 import type { MirrorSourceStatus } from "@/core/types";
 import { SessionStartTool } from "../src/tools/session_start";
 import { SourceRegisterTool } from "../src/tools/source_register";

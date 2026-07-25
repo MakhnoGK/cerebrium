@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeCtx } from "./helpers";
+import { makeCtx } from "@test/helpers";
 import { indexRepo } from "@/code/indexer";
 import { stableSymbolId } from "@/code/extract";
 
