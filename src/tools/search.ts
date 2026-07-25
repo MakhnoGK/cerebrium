@@ -2,7 +2,7 @@ import { TypeOf, z, ZodObject } from "zod";
 import type { Ctx, ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { toFtsMatch } from "@/core/fts";
-import type { EnrichedRow, SearchRow, VectorRow } from "@/db/repo";
+import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
 import { deriveSummary, toEnvelope } from "@/db/repo";
 import { embeddingNotes } from "@/tools/notes";
 import { MEMORY_KINDS } from "@/core/vocab";
@@ -46,6 +46,13 @@ interface Entry {
   matched: "text" | "vector" | "both" | "graph";
   best_chunk?: string;
   via?: { node: string; edge: string };
+}
+
+interface ToolResponse {
+  results: Envelope[];
+  total_matches: number;
+  hints?: string[];
+  context_notes?: string[];
 }
 
 export class SearchTool extends AbstractTool {
@@ -107,13 +114,13 @@ export class SearchTool extends AbstractTool {
       .describe("Max results (default 10, max 25)."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<ToolResponse> {
     const hints = touchOrCreate(ctx, args.session_id);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : symbolWeight();
-
     const match = toFtsMatch(args.query);
+
     if (!match) {
       ctx.repo.logEvent(
         "search",
@@ -122,16 +129,24 @@ export class SearchTool extends AbstractTool {
         { query: args.query, empty: true },
         ctx.now(),
       );
-      const empty: Record<string, unknown> = { results: [], total_matches: 0 };
-      if (hints.length) empty.hints = hints;
+
+      const empty: ToolResponse = { results: [], total_matches: 0 };
+
+      if (hints.length) {
+        empty.hints = hints;
+      }
+
       return empty;
     }
 
-    if (mode === "text") return this.textSearch(ctx, args, match, history, penalty, hints);
+    if (mode === "text") {
+      return this.textSearch(ctx, args, match, history, penalty, hints);
+    }
 
     // ---- candidate generation (branches independent; either may be empty) ----
     let ftsRows: SearchRow[] = [];
     let ftsTotal = 0;
+
     if (mode !== "vector") {
       const r = ctx.repo.search({
         match,
@@ -141,13 +156,16 @@ export class SearchTool extends AbstractTool {
         history,
         cap: CANDIDATE_CAP,
       });
+
       ftsRows = r.rows.slice(0, FUSE_CAP);
       ftsTotal = r.total;
     }
 
     let vecRows: VectorRow[] = [];
+
     try {
       const [qvec] = await ctx.provider.embed([args.query], "query");
+
       if (qvec) {
         vecRows = ctx.repo.vectorSearch(qvec, {
           project: args.project,
@@ -167,23 +185,34 @@ export class SearchTool extends AbstractTool {
       string,
       { row: Row; rrf: number; text: boolean; vector: boolean; best_chunk?: string }
     >();
+
     ftsRows.forEach((row, i) => {
       const e = fused.get(row.id) ?? { row, rrf: 0, text: false, vector: false };
+
       e.rrf += 1 / (RRF_K + i + 1);
       e.text = true;
+
       fused.set(row.id, e);
     });
+
     vecRows.forEach((row, i) => {
       const e = fused.get(row.id) ?? { row, rrf: 0, text: false, vector: false };
+
       e.rrf += 1 / (RRF_K + i + 1);
       e.vector = true;
-      if (!e.best_chunk) e.best_chunk = row.chunk_text.slice(0, BEST_CHUNK_CHARS);
+
+      if (!e.best_chunk) {
+        e.best_chunk = row.chunk_text.slice(0, BEST_CHUNK_CHARS);
+      }
+
       fused.set(row.id, e);
     });
 
     const entries = new Map<string, Entry>();
+
     for (const e of fused.values()) {
       const matched = e.text && e.vector ? "both" : e.vector ? "vector" : "text";
+
       entries.set(e.row.id, {
         row: e.row,
         score: e.rrf * memoryFactor(e.row, now, history) * symbolFactor(e.row, penalty),
@@ -199,15 +228,24 @@ export class SearchTool extends AbstractTool {
     // score = rerankRelevance × memoryFactor, keeping the memory model intact.
     let reranked = false;
     let rerankCandidates = 0;
+
     if (ctx.reranker.enabled && entries.size >= MIN_RERANK) {
       const base = [...entries.values()];
+
       try {
         const scores = await ctx.reranker.rerank(args.query, base.map(rerankDoc));
-        base.forEach((e, i) => {
-          const rel = scores[i];
-          if (rel == null || Number.isNaN(rel)) return;
-          e.score = rel * memoryFactor(e.row, now, history) * symbolFactor(e.row, penalty);
+
+        base.forEach((entry, index) => {
+          const rel = scores[index];
+
+          if (rel == null || Number.isNaN(rel)) {
+            return;
+          }
+
+          entry.score =
+            rel * memoryFactor(entry.row, now, history) * symbolFactor(entry.row, penalty);
         });
+
         reranked = true;
         rerankCandidates = base.length;
       } catch {
@@ -220,12 +258,21 @@ export class SearchTool extends AbstractTool {
       const top = [...entries.values()].sort((a, b) => b.score - a.score).slice(0, EXPAND_PARENTS);
       const parentScore = new Map(top.map((t) => [t.row.id, t.score]));
       const graphAdds = new Map<string, Entry>();
+
       for (const nb of ctx.repo.neighborsOf(top.map((t) => t.row.id))) {
-        if (entries.has(nb.node.id)) continue; // already surfaced directly; don't downgrade to graph
+        if (entries.has(nb.node.id)) {
+          continue; // already surfaced directly; don't downgrade to graph
+        }
+
         const weight = EDGE_WEIGHTS[nb.edge] ?? 0;
         const score = GRAPH_BASE * (parentScore.get(nb.parent) ?? 0) * weight;
-        if (score <= 0) continue;
+
+        if (score <= 0) {
+          continue;
+        }
+
         const prev = graphAdds.get(nb.node.id);
+
         if (!prev || score > prev.score) {
           graphAdds.set(nb.node.id, {
             row: nb.node,
@@ -235,6 +282,7 @@ export class SearchTool extends AbstractTool {
           });
         }
       }
+
       for (const [id, entry] of graphAdds) entries.set(id, entry);
     }
 
@@ -248,14 +296,25 @@ export class SearchTool extends AbstractTool {
       )
       .slice(0, args.limit);
 
-    const results = ranked.map((e) => {
-      const env: Record<string, unknown> = { ...toEnvelope(e.row), matched: e.matched };
+    const results = ranked.map((entry) => {
+      const envelope: Envelope & {
+        matched: "text" | "vector" | "graph" | "both";
+        best_chunk?: string;
+        via?: { node: string; edge: string };
+      } = {
+        ...toEnvelope(entry.row),
+        matched: entry.matched,
+      };
 
-      if (e.best_chunk && (e.matched === "vector" || e.matched === "both"))
-        env.best_chunk = e.best_chunk;
-      if (e.via) env.via = e.via;
+      if (entry.best_chunk && (entry.matched === "vector" || entry.matched === "both")) {
+        envelope.best_chunk = entry.best_chunk;
+      }
 
-      return env;
+      if (entry.via) {
+        envelope.via = entry.via;
+      }
+
+      return envelope;
     });
 
     ctx.repo.logEvent(
@@ -268,19 +327,27 @@ export class SearchTool extends AbstractTool {
 
     const notes = contextNotes(ctx, ranked);
 
-    const out: Record<string, unknown> = {
+    const out: ToolResponse = {
       results,
       total_matches: mode === "vector" ? vecRows.length : ftsTotal,
     };
 
-    if (hints.length) out.hints = hints;
-    if (notes.length) out.context_notes = notes;
+    if (hints.length) {
+      out.hints = hints;
+    }
+
+    if (notes.length) {
+      out.context_notes = notes;
+    }
 
     return out;
   }
 
   private wantsSymbols(args: ToolArgs<typeof this.schema>): boolean {
-    if (args.types?.includes("symbol")) return true;
+    if (args.types?.includes("symbol")) {
+      return true;
+    }
+
     return args.kinds?.length === 1 && args.kinds[0] === "mirror";
   }
 
@@ -305,6 +372,7 @@ export class SearchTool extends AbstractTool {
 
     const now = Date.parse(ctx.now());
     const best = Math.min(...rows.map((r) => r.bm25));
+
     const ranked = rows
       .map((row) => {
         const normalized = best < 0 ? row.bm25 / best : 1;
@@ -329,8 +397,13 @@ export class SearchTool extends AbstractTool {
       { query: args.query, mode: "text", total },
       ctx.now(),
     );
-    const out: Record<string, unknown> = { results: ranked, total_matches: total };
-    if (hints.length) out.hints = hints;
+
+    const out: ToolResponse = { results: ranked, total_matches: total };
+
+    if (hints.length) {
+      out.hints = hints;
+    }
+
     return out;
   }
 }
@@ -338,9 +411,11 @@ export class SearchTool extends AbstractTool {
 function contextNotes(ctx: Ctx, ranked: Entry[]): string[] {
   const notes = [...embeddingNotes(ctx.repo)];
   const superseded = ctx.repo.supersededInfo(ranked.map((e) => e.row.id));
+
   for (const [id, info] of superseded) {
     notes.push(`${id} was superseded by ${info.by} on ${info.at.slice(0, 10)}.`);
   }
+
   return notes;
 }
 
@@ -349,13 +424,17 @@ function contextNotes(ctx: Ctx, ranked: Entry[]): string[] {
 // the full node content — token economy holds through the rerank stage too.
 function rerankDoc(e: Entry): string {
   const body = e.best_chunk ?? deriveSummary(e.row.content);
+
   return `${e.row.title}\n${body}`.slice(0, RERANK_DOC_CHARS);
 }
 
 function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
-  if (history) return 1; // history queries drop episodic decay (superseded nodes included, flagged)
-  if (row.memory_kind !== "episodic") return 1;
+  if (history || row.memory_kind !== "episodic") {
+    return 1; // history queries drop episodic decay (superseded nodes included, flagged)
+  }
+
   const ageDays = Math.max(0, (now - Date.parse(row.valid_from)) / 86_400_000);
+
   return Math.exp(-ageDays / DECAY_DAYS);
 }
 

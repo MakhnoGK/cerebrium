@@ -76,7 +76,7 @@ describe("multi-session hand-off", () => {
       project: P,
       limit: 5,
     });
-    const hit = (found.results as Envelope[]).find((e) => e.id === f1.id);
+    const hit = found.results.find((e) => e.id === f1.id);
     expect(hit).toBeDefined();
 
     const full = ((get) => (get as { nodes: { content: string }[] }).nodes[0])(
