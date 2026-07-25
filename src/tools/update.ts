@@ -1,10 +1,11 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
 const MAX_CONTENT = 50_000;
 
+@tool()
 export class UpdateTool extends AbstractTool {
   name = ToolName.UPDATE;
 
@@ -24,9 +25,9 @@ export class UpdateTool extends AbstractTool {
     reason: z.string().optional().describe("Why this revision — stored in the node's history."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
-    const current = ctx.repo.envelope(args.id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
+    const current = this.ctx.repo.envelope(args.id);
 
     if (!current) throw new Error(`node ${args.id} does not exist.`);
     if (current.kind === "episodic") {
@@ -50,20 +51,20 @@ export class UpdateTool extends AbstractTool {
       );
     }
 
-    const envelope = ctx.repo.addRevision(args.id, {
+    const envelope = this.ctx.repo.addRevision(args.id, {
       content: args.content,
       title: args.title,
       session_id: args.session_id,
       reason: args.reason ?? null,
-      ts: ctx.now(),
+      ts: this.ctx.now(),
     });
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "update",
       args.session_id,
       args.id,
       { rev: envelope.rev, reason: args.reason ?? null },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     return hints.length ? { ...envelope, hints } : envelope;

@@ -1,8 +1,9 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx, ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class InvalidateTool extends AbstractTool {
   name = ToolName.INVALIDATE;
 
@@ -23,18 +24,18 @@ export class InvalidateTool extends AbstractTool {
       ),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
 
-    if (!ctx.repo.nodeExists(args.id)) throw new Error(`node ${args.id} does not exist.`);
-    if (args.superseded_by && !ctx.repo.nodeExists(args.superseded_by)) {
+    if (!this.ctx.repo.nodeExists(args.id)) throw new Error(`node ${args.id} does not exist.`);
+    if (args.superseded_by && !this.ctx.repo.nodeExists(args.superseded_by)) {
       throw new Error(`superseded_by node ${args.superseded_by} does not exist.`);
     }
 
     // Code mirrors are maintained by the indexer; retiring one by hand would just come
     // back on the next re-index. External mirrors (origin != 'repo') are agent-curated,
     // so the agent legitimately retires a stale record here.
-    const prov = ctx.repo.nodeOrigin(args.id);
+    const prov = this.ctx.repo.nodeOrigin(args.id);
 
     if (prov?.memory_kind === "mirror" && prov.origin === "repo") {
       throw new Error(
@@ -42,18 +43,18 @@ export class InvalidateTool extends AbstractTool {
       );
     }
 
-    const envelope = ctx.repo.invalidateNode(args.id, {
-      ts: ctx.now(),
+    const envelope = this.ctx.repo.invalidateNode(args.id, {
+      ts: this.ctx.now(),
       superseded_by: args.superseded_by,
       session_id: args.session_id,
     });
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "invalidate",
       args.session_id,
       args.id,
       { reason: args.reason, superseded_by: args.superseded_by ?? null },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     return hints.length ? { ...envelope, hints } : envelope;

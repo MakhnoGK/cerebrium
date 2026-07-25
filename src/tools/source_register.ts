@@ -1,8 +1,9 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class SourceRegisterTool extends AbstractTool {
   name = ToolName.SOURCE_REGISTER;
 
@@ -50,10 +51,10 @@ export class SourceRegisterTool extends AbstractTool {
       ),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
 
-    const source = ctx.repo.registerSource({
+    const source = this.ctx.repo.registerSource({
       id: args.id,
       kind: args.kind,
       label: args.label ?? null,
@@ -61,15 +62,15 @@ export class SourceRegisterTool extends AbstractTool {
       freshness_hours: args.freshness_hours ?? null,
       recipe: args.recipe ?? null,
       enabled: args.enabled,
-      ts: ctx.now(),
+      ts: this.ctx.now(),
     });
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "source_register",
       args.session_id,
       null,
       { id: args.id, kind: args.kind },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     return hints.length ? { source, hints } : { source };

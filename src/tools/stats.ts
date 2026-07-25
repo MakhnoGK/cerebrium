@@ -1,9 +1,10 @@
-import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { TypeOf, z, ZodObject } from "zod";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class StatsTool extends AbstractTool {
   name = ToolName.STATS;
 
@@ -24,12 +25,12 @@ export class StatsTool extends AbstractTool {
       .describe("The id from session_start (auto-created if unknown). Omit for a read-only peek."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = args.session_id ? touchOrCreate(ctx, args.session_id) : [];
-    const stats = ctx.repo.techStats(ctx.now());
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = args.session_id ? touchOrCreate(this.ctx, args.session_id) : [];
+    const stats = this.ctx.repo.techStats(this.ctx.now());
 
     if (args.session_id) {
-      ctx.repo.logEvent("stats", args.session_id, null, null, ctx.now());
+      this.ctx.repo.logEvent("stats", args.session_id, null, null, this.ctx.now());
     }
 
     const { rerank_usage, ...rest } = stats;
@@ -37,13 +38,13 @@ export class StatsTool extends AbstractTool {
       ...rest,
       drain: {
         ...stats.drain,
-        provider: `${ctx.provider.name}@${ctx.provider.version}`,
+        provider: `${this.ctx.provider.name}@${this.ctx.provider.version}`,
         daemon_alive: isDaemonAlive(stats.storage.db_path),
         daemon_pid: readDaemonPid(stats.storage.db_path),
       },
       rerank: {
-        provider: `${ctx.reranker.name}@${ctx.reranker.version}`,
-        enabled: ctx.reranker.enabled,
+        provider: `${this.ctx.reranker.name}@${this.ctx.reranker.version}`,
+        enabled: this.ctx.reranker.enabled,
         ...rerank_usage,
       },
     };

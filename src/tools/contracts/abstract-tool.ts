@@ -1,16 +1,18 @@
-import type { Ctx } from "@/tools/context";
 import { TypeOf, z, ZodObject } from "zod";
 import { ToolName } from "./tool-name";
+import type { Context } from "@/core/context";
 
 export abstract class AbstractTool {
   public abstract name: ToolName;
   public abstract description: string;
   public abstract schema: z.ZodRawShape;
 
-  abstract invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown>;
+  constructor(protected readonly ctx: Context) {}
 
-  public async callback(ctx: Ctx, args: z.infer<z.ZodObject<z.ZodRawShape>>) {
-    return this.invoke(ctx, args)
+  abstract invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown>;
+
+  public async callback(args: z.infer<z.ZodObject<z.ZodRawShape>>) {
+    return this.invoke(args)
       .then((data) => ({
         content: [{ type: "text" as const, text: JSON.stringify(data) }],
       }))

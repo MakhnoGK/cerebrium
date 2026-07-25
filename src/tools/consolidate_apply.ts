@@ -1,8 +1,9 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class ConsolidateApplyTool extends AbstractTool {
   name = ToolName.CONSOLIDATE_APPLY;
 
@@ -33,20 +34,20 @@ export class ConsolidateApplyTool extends AbstractTool {
       ),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
-    const candidate = ctx.repo.getCandidate(args.id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
+    const candidate = this.ctx.repo.getCandidate(args.id);
 
     if (!candidate) throw new Error(`no consolidation candidate ${args.id}.`);
     if (candidate.status !== "pending") {
       throw new Error(`candidate ${args.id} is already ${candidate.status}.`);
     }
 
-    const now = ctx.now();
+    const now = this.ctx.now();
 
     if (args.decision === "reject") {
-      ctx.repo.resolveCandidate(args.id, "dismissed", args.session_id, now);
-      ctx.repo.logEvent(
+      this.ctx.repo.resolveCandidate(args.id, "dismissed", args.session_id, now);
+      this.ctx.repo.logEvent(
         "consolidate_apply",
         args.session_id,
         null,
@@ -64,8 +65,16 @@ export class ConsolidateApplyTool extends AbstractTool {
       const [src, dst] = candidate.member_ids;
 
       if (!src || !dst) throw new Error(`link candidate ${args.id} is malformed.`);
-      ctx.repo.insertEdge(src, dst, "similar_to", "system", args.session_id, now, candidate.score);
-      ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.ctx.repo.insertEdge(
+        src,
+        dst,
+        "similar_to",
+        "system",
+        args.session_id,
+        now,
+        candidate.score,
+      );
+      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
     } else if (candidate.kind === "distill") {
       const result = args.override ?? candidate.proposal;
 
@@ -75,7 +84,7 @@ export class ConsolidateApplyTool extends AbstractTool {
         );
       }
 
-      ctx.repo.applyDistillation({
+      this.ctx.repo.applyDistillation({
         title: result.title,
         content: result.body,
         project: candidate.project,
@@ -83,7 +92,7 @@ export class ConsolidateApplyTool extends AbstractTool {
         session_id: args.session_id,
         ts: now,
       });
-      ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
     } else if (candidate.kind === "merge") {
       const survivor = candidate.canonical_id;
       const loser = candidate.member_ids.find((mid) => mid !== survivor);
@@ -91,24 +100,24 @@ export class ConsolidateApplyTool extends AbstractTool {
       if (!survivor || !loser) throw new Error(`merge candidate ${args.id} is malformed.`);
       const merged = args.override ?? candidate.proposal;
 
-      ctx.repo.applyMerge({
+      this.ctx.repo.applyMerge({
         survivorId: survivor,
         loserId: loser,
         session_id: args.session_id,
         ts: now,
         merged: merged ? { title: merged.title, body: merged.body } : undefined,
       });
-      ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
     } else {
       // prune: soft-invalidate the dead mirror node
       const [target] = candidate.member_ids;
       if (!target) throw new Error(`prune candidate ${args.id} is malformed.`);
 
-      ctx.repo.invalidateNode(target, { ts: now, session_id: args.session_id });
-      ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.ctx.repo.invalidateNode(target, { ts: now, session_id: args.session_id });
+      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
     }
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "consolidate_apply",
       args.session_id,
       null,

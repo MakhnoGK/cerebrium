@@ -1,9 +1,10 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import type { SymbolLookup } from "@/db/repo";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class CodeLookupTool extends AbstractTool {
   name = ToolName.CODE_LOOKUP;
 
@@ -36,23 +37,23 @@ export class CodeLookupTool extends AbstractTool {
       .describe("Max symbols to return (default 10, max 25)."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
 
     if (!args.name && !args.file) {
       throw new Error("provide `name` (resolve a symbol) or `file` (list a file's symbols).");
     }
 
     const found = args.name
-      ? ctx.repo.findSymbolsByName(args.name, args.repo, args.limit)
-      : ctx.repo.findSymbolsInFile(args.repo, args.file!, args.limit);
+      ? this.ctx.repo.findSymbolsByName(args.name, args.repo, args.limit)
+      : this.ctx.repo.findSymbolsInFile(args.repo, args.file!, args.limit);
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "code_lookup",
       args.session_id,
       null,
       { name: args.name ?? null, file: args.file ?? null, hits: found.length },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     const out: Record<string, unknown> = { symbols: found.map(present) };

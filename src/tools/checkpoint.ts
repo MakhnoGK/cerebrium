@@ -1,8 +1,9 @@
 import { z } from "zod";
-import type { Ctx, ToolArgs } from "@/tools/context";
+import type { ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
 import { Envelope } from "@/core/types";
+import { tool } from "@/tools/contracts/tool";
 
 // TODO: Move to a separate file
 type ToolResult =
@@ -11,6 +12,7 @@ type ToolResult =
     })
   | Envelope;
 
+@tool()
 export class CheckpointTool extends AbstractTool {
   name = ToolName.CHECKPOINT;
 
@@ -37,33 +39,33 @@ export class CheckpointTool extends AbstractTool {
       .describe("Ids of nodes this session touched; linked via 'references'."),
   };
 
-  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<ToolResult> {
-    const hints = touchOrCreate(ctx, args.session_id, args.project ?? null);
+  async invoke(args: ToolArgs<typeof this.schema>): Promise<ToolResult> {
+    const hints = touchOrCreate(this.ctx, args.session_id, args.project ?? null);
 
-    const existing = (args.touched_node_ids ?? []).filter((id) => ctx.repo.nodeExists(id));
-    const dropped = (args.touched_node_ids ?? []).filter((id) => !ctx.repo.nodeExists(id));
+    const existing = (args.touched_node_ids ?? []).filter((id) => this.ctx.repo.nodeExists(id));
+    const dropped = (args.touched_node_ids ?? []).filter((id) => !this.ctx.repo.nodeExists(id));
 
     if (dropped.length) {
       hints.push(`Ignored ${dropped.length} unknown touched_node_ids: ${dropped.join(", ")}.`);
     }
 
-    const envelope = ctx.repo.createNode({
+    const envelope = this.ctx.repo.createNode({
       memory_kind: "episodic",
       type: "checkpoint",
       title: args.summary.split("\n")[0]!.slice(0, 120),
       content: buildBody(args.summary, args.decisions, args.open_threads),
       project: args.project ?? null,
       session_id: args.session_id,
-      ts: ctx.now(),
+      ts: this.ctx.now(),
       links: existing.map((dst) => ({ dst, type: "references" as const })),
     });
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "checkpoint",
       args.session_id,
       envelope.id,
       { touched: existing.length },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     return hints.length ? { ...envelope, hints } : envelope;

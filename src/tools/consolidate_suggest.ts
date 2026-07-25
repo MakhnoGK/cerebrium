@@ -1,9 +1,11 @@
-import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx, ToolArgs } from "@/tools/context";
+import { z } from "zod";
+import type { ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { CONSOLIDATION_KINDS } from "@/core/vocab";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class ConsolidateSuggestTool extends AbstractTool {
   name = ToolName.CONSOLIDATE_SUGGEST;
 
@@ -32,17 +34,17 @@ export class ConsolidateSuggestTool extends AbstractTool {
       .optional(),
   };
 
-  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
-    const candidates = ctx.repo.pendingCandidates({ kind: args.kind, limit: args.limit });
+  async invoke(args: ToolArgs<typeof this.schema>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
+    const candidates = this.ctx.repo.pendingCandidates({ kind: args.kind, limit: args.limit });
     const out: Record<string, unknown> = { candidates };
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "consolidate_suggest",
       args.session_id,
       null,
       { kind: args.kind ?? null, count: candidates.length },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     if (hints.length) out.hints = hints;

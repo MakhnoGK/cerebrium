@@ -1,9 +1,10 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { embeddingNotes } from "@/tools/notes";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class MirrorUpsertTool extends AbstractTool {
   name = ToolName.MIRROR_UPSERT;
 
@@ -54,9 +55,9 @@ export class MirrorUpsertTool extends AbstractTool {
       .describe("The curated records to mirror. Idempotent by (source, native_id)."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
-    const source = ctx.repo.getSource(args.source_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
+    const source = this.ctx.repo.getSource(args.source_id);
 
     if (!source) {
       throw new Error(
@@ -70,9 +71,9 @@ export class MirrorUpsertTool extends AbstractTool {
       );
     }
 
-    const result = ctx.repo.upsertMirrors(source, args.items, args.session_id, ctx.now());
+    const result = this.ctx.repo.upsertMirrors(source, args.items, args.session_id, this.ctx.now());
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "mirror_upsert",
       args.session_id,
       null,
@@ -82,10 +83,10 @@ export class MirrorUpsertTool extends AbstractTool {
         updated: result.updated,
         unchanged: result.unchanged,
       },
-      ctx.now(),
+      this.ctx.now(),
     );
 
-    const notes = embeddingNotes(ctx.repo);
+    const notes = embeddingNotes(this.ctx.repo);
     const out: Record<string, unknown> = { ...result };
 
     if (hints.length) out.hints = hints;

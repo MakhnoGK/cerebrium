@@ -1,10 +1,11 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { embeddingNotes } from "@/tools/notes";
 import { EDGE_TYPES, SYSTEM_EDGE_TYPES } from "@/core/vocab";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class LinkTool extends AbstractTool {
   name = ToolName.LINK;
 
@@ -26,8 +27,8 @@ export class LinkTool extends AbstractTool {
     weight: z.number().min(0).max(1).optional().describe("Edge strength 0–1 (default 1.0)."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
 
     if ((SYSTEM_EDGE_TYPES as readonly string[]).includes(args.type)) {
       throw new Error(
@@ -36,21 +37,31 @@ export class LinkTool extends AbstractTool {
     }
 
     if (args.src === args.dst) throw new Error("cannot link a node to itself.");
-    if (!ctx.repo.nodeExists(args.src)) throw new Error(`src node ${args.src} does not exist.`);
-    if (!ctx.repo.nodeExists(args.dst)) throw new Error(`dst node ${args.dst} does not exist.`);
+    if (!this.ctx.repo.nodeExists(args.src))
+      throw new Error(`src node ${args.src} does not exist.`);
+    if (!this.ctx.repo.nodeExists(args.dst))
+      throw new Error(`dst node ${args.dst} does not exist.`);
 
     const weight = args.weight ?? 1.0;
 
-    ctx.repo.insertEdge(args.src, args.dst, args.type, "agent", args.session_id, ctx.now(), weight);
-    ctx.repo.logEvent(
+    this.ctx.repo.insertEdge(
+      args.src,
+      args.dst,
+      args.type,
+      "agent",
+      args.session_id,
+      this.ctx.now(),
+      weight,
+    );
+    this.ctx.repo.logEvent(
       "link",
       args.session_id,
       args.src,
       { dst: args.dst, type: args.type, weight },
-      ctx.now(),
+      this.ctx.now(),
     );
 
-    const notes = embeddingNotes(ctx.repo);
+    const notes = embeddingNotes(this.ctx.repo);
     const out: Record<string, unknown> = {
       ok: true,
       src: args.src,

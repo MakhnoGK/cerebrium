@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { basename } from "node:path";
-import type { Ctx, ToolArgs } from "@/tools/context";
+import type { ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { embeddingNotes } from "@/tools/notes";
 import { AbstractTool, ToolName } from "@/tools/contracts";
 import type { IndexStats, IndexTarget } from "@/code/indexer";
 import { indexRepo, parseCodeRoots } from "@/code/indexer";
+import { tool } from "@/tools/contracts/tool";
 
 // TODO: Separate file
 class RepositoryNotConfiguredError extends Error {
@@ -38,6 +39,7 @@ type CodeIndexResult =
       context_notes?: string[];
     };
 
+@tool()
 export class CodeIndexTool extends AbstractTool {
   name = ToolName.CODE_INDEX;
 
@@ -66,14 +68,14 @@ export class CodeIndexTool extends AbstractTool {
       .describe("Re-parse every file, bypassing the per-file hash-gate (default false)."),
   };
 
-  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<CodeIndexResult> {
+  async invoke(args: ToolArgs<typeof this.schema>): Promise<CodeIndexResult> {
     // TODO: Move both to "app layer"
-    const targets = this.getTargets(args, ctx);
-    const results = await this.getIndexingResults(targets, ctx, args);
+    const targets = this.getTargets(args);
+    const results = await this.getIndexingResults(targets, args);
 
     // TODO: Move both to "app layer"
-    const notes = embeddingNotes(ctx.repo);
-    const hints = touchOrCreate(ctx, args.session_id);
+    const notes = embeddingNotes(this.ctx.repo);
+    const hints = touchOrCreate(this.ctx, args.session_id);
 
     const out: CodeIndexResult = results.length === 1 ? { ...results[0]! } : { repos: results };
 
@@ -83,7 +85,7 @@ export class CodeIndexTool extends AbstractTool {
     return out;
   }
 
-  private getTargets(args: ToolArgs<typeof this.schema>, ctx: Ctx): IndexTarget[] {
+  private getTargets(args: ToolArgs<typeof this.schema>): IndexTarget[] {
     if (args.path) {
       return [{ name: basename(args.path.replace(/\/+$/, "")) || args.path, root: args.path }];
     }
@@ -93,7 +95,7 @@ export class CodeIndexTool extends AbstractTool {
     // can later be re-indexed by `repo` name with no env config.
     const byName = new Map<string, IndexTarget>();
 
-    ctx.repo.storedRepoRoots().forEach((root) => byName.set(root.name, root));
+    this.ctx.repo.storedRepoRoots().forEach((root) => byName.set(root.name, root));
     parseCodeRoots(process.env.MEMORY_CODE_ROOTS).forEach((root) => byName.set(root.name, root));
 
     if (args.repo) {
@@ -115,20 +117,16 @@ export class CodeIndexTool extends AbstractTool {
     return known;
   }
 
-  private async getIndexingResults(
-    targets: IndexTarget[],
-    ctx: Ctx,
-    args: ToolArgs<typeof this.schema>,
-  ) {
+  private async getIndexingResults(targets: IndexTarget[], args: ToolArgs<typeof this.schema>) {
     return Promise.all(
       targets.map(async (target) => {
-        const stats = await indexRepo(ctx.repo, target, {
+        const stats = await indexRepo(this.ctx.repo, target, {
           session_id: args.session_id,
-          now: ctx.now,
+          now: this.ctx.now.bind(this.ctx),
           force: args.force,
         });
 
-        ctx.repo.logEvent(
+        this.ctx.repo.logEvent(
           "code_index",
           args.session_id,
           null,
@@ -141,7 +139,7 @@ export class CodeIndexTool extends AbstractTool {
             branch: stats.branch,
             commit: stats.commit,
           },
-          ctx.now(),
+          this.ctx.now(),
         );
 
         return stats;

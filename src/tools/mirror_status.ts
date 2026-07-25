@@ -1,8 +1,9 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class MirrorStatusTool extends AbstractTool {
   name = ToolName.MIRROR_STATUS;
 
@@ -20,17 +21,17 @@ export class MirrorStatusTool extends AbstractTool {
       .describe("Narrow to one registered source; omit to list them all."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
-    const sources = ctx.repo.sourceStatus(ctx.now(), args.source_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
+    const sources = this.ctx.repo.sourceStatus(this.ctx.now(), args.source_id);
     const out: Record<string, unknown> = { sources };
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "mirror_status",
       args.session_id,
       null,
       { source_id: args.source_id ?? null, count: sources.length },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     if (hints.length) out.hints = hints;

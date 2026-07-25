@@ -7,6 +7,7 @@ import { deriveSummary, toEnvelope } from "@/db/repo";
 import { embeddingNotes } from "@/tools/notes";
 import { MEMORY_KINDS } from "@/core/vocab";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
 // Candidate ceiling before JS re-rank. Episodic decay only lowers scores, so the
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap
@@ -55,6 +56,7 @@ interface ToolResponse {
   context_notes?: string[];
 }
 
+@tool()
 export class SearchTool extends AbstractTool {
   name = ToolName.SEARCH;
 
@@ -114,20 +116,20 @@ export class SearchTool extends AbstractTool {
       .describe("Max results (default 10, max 25)."),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<ToolResponse> {
-    const hints = touchOrCreate(ctx, args.session_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<ToolResponse> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : symbolWeight();
     const match = toFtsMatch(args.query);
 
     if (!match) {
-      ctx.repo.logEvent(
+      this.ctx.repo.logEvent(
         "search",
         args.session_id,
         null,
         { query: args.query, empty: true },
-        ctx.now(),
+        this.ctx.now(),
       );
 
       const empty: ToolResponse = { results: [], total_matches: 0 };
@@ -140,7 +142,7 @@ export class SearchTool extends AbstractTool {
     }
 
     if (mode === "text") {
-      return this.textSearch(ctx, args, match, history, penalty, hints);
+      return this.textSearch(this.ctx, args, match, history, penalty, hints);
     }
 
     // ---- candidate generation (branches independent; either may be empty) ----
@@ -148,7 +150,7 @@ export class SearchTool extends AbstractTool {
     let ftsTotal = 0;
 
     if (mode !== "vector") {
-      const r = ctx.repo.search({
+      const r = this.ctx.repo.search({
         match,
         project: args.project,
         kinds: args.kinds,
@@ -164,10 +166,10 @@ export class SearchTool extends AbstractTool {
     let vecRows: VectorRow[] = [];
 
     try {
-      const [qvec] = await ctx.provider.embed([args.query], "query");
+      const [qvec] = await this.ctx.provider.embed([args.query], "query");
 
       if (qvec) {
-        vecRows = ctx.repo.vectorSearch(qvec, {
+        vecRows = this.ctx.repo.vectorSearch(qvec, {
           project: args.project,
           kinds: args.kinds,
           types: args.types,
@@ -180,7 +182,7 @@ export class SearchTool extends AbstractTool {
     }
 
     // ---- RRF fusion ----------------------------------------------------------
-    const now = Date.parse(ctx.now());
+    const now = Date.parse(this.ctx.now());
     const fused = new Map<
       string,
       { row: Row; rrf: number; text: boolean; vector: boolean; best_chunk?: string }
@@ -224,16 +226,16 @@ export class SearchTool extends AbstractTool {
     // ---- rerank (base hits only, before graph expansion) ---------------------
     // Precision stage on top of RRF recall: a cross-encoder rescoring of the fused
     // text/vector hits. Graph neighbors are deliberately excluded (they earn their
-    // place structurally, not by query relevance). Decay stays a post-multiplier so
+    // place structurally, not by query relevance). Decay stays a post-multiplier, so
     // score = rerankRelevance × memoryFactor, keeping the memory model intact.
     let reranked = false;
     let rerankCandidates = 0;
 
-    if (ctx.reranker.enabled && entries.size >= MIN_RERANK) {
+    if (this.ctx.reranker.enabled && entries.size >= MIN_RERANK) {
       const base = [...entries.values()];
 
       try {
-        const scores = await ctx.reranker.rerank(args.query, base.map(rerankDoc));
+        const scores = await this.ctx.reranker.rerank(args.query, base.map(rerankDoc));
 
         base.forEach((entry, index) => {
           const rel = scores[index];
@@ -259,7 +261,7 @@ export class SearchTool extends AbstractTool {
       const parentScore = new Map(top.map((t) => [t.row.id, t.score]));
       const graphAdds = new Map<string, Entry>();
 
-      for (const nb of ctx.repo.neighborsOf(top.map((t) => t.row.id))) {
+      for (const nb of this.ctx.repo.neighborsOf(top.map((t) => t.row.id))) {
         if (entries.has(nb.node.id)) {
           continue; // already surfaced directly; don't downgrade to graph
         }
@@ -317,15 +319,15 @@ export class SearchTool extends AbstractTool {
       return envelope;
     });
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "search",
       args.session_id,
       null,
       { query: args.query, mode, total: ftsTotal, reranked, rerank_candidates: rerankCandidates },
-      ctx.now(),
+      this.ctx.now(),
     );
 
-    const notes = contextNotes(ctx, ranked);
+    const notes = contextNotes(this.ctx, ranked);
 
     const out: ToolResponse = {
       results,
@@ -351,7 +353,7 @@ export class SearchTool extends AbstractTool {
     return args.kinds?.length === 1 && args.kinds[0] === "mirror";
   }
 
-  // Phase-1 text-only path, byte-compatible: bm25 normalized by best match × the
+  // Phase-1 text-only path, byte-compatible: bm25 normalized by the best match × the
   // memory-kind factor. No RRF, no vectors, no graph, no context_notes.
   private textSearch(
     ctx: Ctx,
@@ -440,7 +442,7 @@ function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
 
 // Knowledge-first ranking: code `symbol` mirrors are down-weighted as base hits
 // so authored + external-mirror knowledge isn't buried under the 100k+ indexed symbols.
-// A relevance multiplier, not a filter — symbols still surface, just below equally-matched
+// A relevance multiplier, not a filter — symbols still surface, just below equally matched
 // knowledge. Not applied to graph neighbors (a note->symbol edge earns its place
 // structurally) nor when the caller explicitly asks for symbols (wantsSymbols).
 function symbolWeight(): number {

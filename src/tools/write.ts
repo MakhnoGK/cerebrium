@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Ctx, ToolArgs } from "@/tools/context";
+import type { ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { deriveSummary, Envelope } from "@/db/repo";
 import { chunkContent } from "@/core/chunk";
@@ -9,6 +9,7 @@ import { reconcilePosture } from "@/consolidation/config";
 import type { ReconcileResult } from "@/consolidation/provider";
 import { EDGE_TYPES, MEMORY_KINDS, NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
 const MAX_CONTENT = 50_000;
 const DEDUP_CANDIDATES = 5;
@@ -29,6 +30,7 @@ type ToolResponse = Envelope & {
   context_notes?: unknown;
 };
 
+@tool()
 export class WriteTool extends AbstractTool {
   name = ToolName.WRITE;
 
@@ -64,8 +66,8 @@ export class WriteTool extends AbstractTool {
       .describe("Edges from this new node to existing nodes."),
   };
 
-  async invoke(ctx: Ctx, args: ToolArgs<typeof this.schema>): Promise<ToolResponse> {
-    const hints = touchOrCreate(ctx, args.session_id, args.project ?? null);
+  async invoke(args: ToolArgs<typeof this.schema>): Promise<ToolResponse> {
+    const hints = touchOrCreate(this.ctx, args.session_id, args.project ?? null);
 
     if (args.memory_kind === "mirror") {
       throw new Error(
@@ -89,7 +91,7 @@ export class WriteTool extends AbstractTool {
     }
 
     for (const link of args.links ?? []) {
-      if (!ctx.repo.nodeExists(link.dst)) {
+      if (!this.ctx.repo.nodeExists(link.dst)) {
         throw new Error(
           `link destination '${link.dst}' does not exist. Create it first or fix the id.`,
         );
@@ -97,29 +99,35 @@ export class WriteTool extends AbstractTool {
     }
 
     // Dedup probe before insert — semantic only, checkpoints exempt. Never blocks.
-    const similar = kind === "semantic" ? await this.dedupProbe(ctx, args) : [];
+    const similar = kind === "semantic" ? await this.dedupProbe(args) : [];
 
-    const envelope = ctx.repo.createNode({
+    const envelope = this.ctx.repo.createNode({
       memory_kind: kind,
       type: args.type,
       title: args.title,
       content: args.content,
       project: args.project ?? null,
       session_id: args.session_id,
-      ts: ctx.now(),
+      ts: this.ctx.now(),
       links: args.links,
     });
 
-    ctx.repo.logEvent("write", args.session_id, envelope.id, { type: args.type, kind }, ctx.now());
+    this.ctx.repo.logEvent(
+      "write",
+      args.session_id,
+      envelope.id,
+      { type: args.type, kind },
+      this.ctx.now(),
+    );
 
     // When a duplicate is found and a judging provider is configured, sharpen the advisory
     // hint into a specific action. Never blocks, never applies — the agent decides.
     const reconcile =
-      similar.length && ctx.consolidator.enabled && reconcilePosture() !== "off"
-        ? await this.tryReconcile(ctx, args, similar)
+      similar.length && this.ctx.consolidator.enabled && reconcilePosture() !== "off"
+        ? await this.tryReconcile(args, similar)
         : null;
 
-    const notes = embeddingNotes(ctx.repo);
+    const notes = embeddingNotes(this.ctx.repo);
 
     if (similar.length) {
       notes.unshift(
@@ -139,10 +147,9 @@ export class WriteTool extends AbstractTool {
 
   // Ask the provider to judge the new draft against its nearest existing records: keep,
   // update one, or supersede one. Reads full content for the top few candidates (they
-  // already cleared the dedup threshold). Advisory: any failure returns null so the write
-  // is unaffected, and a non-noop verdict must name a real candidate or it decays to noop.
+  // already cleared the dedup threshold). Advisory: any failure returns null, so the writing
+  // is unaffected, and a non-noop verdict must name a real candidate, or it decays to noop.
   private async tryReconcile(
-    ctx: Ctx,
     args: ToolArgs<typeof this.schema>,
     similar: SimilarExisting[],
   ): Promise<ReconcileResult | null> {
@@ -150,14 +157,14 @@ export class WriteTool extends AbstractTool {
       const candidates = similar
         .slice(0, RECONCILE_CANDIDATES)
         .map((s) => {
-          const full = ctx.repo.fullNode(s.id);
+          const full = this.ctx.repo.fullNode(s.id);
           return full ? { id: s.id, title: full.envelope.title, content: full.content } : null;
         })
         .filter((c): c is { id: string; title: string; content: string } => c !== null);
 
       if (!candidates.length) return null;
 
-      const res = await ctx.consolidator.reconcile({
+      const res = await this.ctx.consolidator.reconcile({
         draft: { title: args.title, type: args.type, content: args.content },
         project: args.project ?? null,
         candidates,
@@ -174,12 +181,9 @@ export class WriteTool extends AbstractTool {
   }
 
   // Cheap hybrid probe with the new title + first chunk. Prefers vector cosine; when
-  // nothing is embedded yet (or the provider is down) it falls back to lexical
+  // nothing is embedded yet (or the provider is down), it falls back to lexical
   // Jaccard over the FTS candidates, so it never blocks and never throws.
-  private async dedupProbe(
-    ctx: Ctx,
-    args: ToolArgs<typeof this.schema>,
-  ): Promise<SimilarExisting[]> {
+  private async dedupProbe(args: ToolArgs<typeof this.schema>): Promise<SimilarExisting[]> {
     try {
       const firstChunk = chunkContent("probe", args.content)[0]?.text ?? args.content;
       const probe = `${args.title}\n${firstChunk}`;
@@ -191,10 +195,10 @@ export class WriteTool extends AbstractTool {
       };
 
       let scored: SimilarExisting[] = [];
-      const [qvec] = await ctx.provider.embed([probe], "query");
+      const [qvec] = await this.ctx.provider.embed([probe], "query");
 
       if (qvec) {
-        scored = ctx.repo.vectorSearch(qvec, opts).map((r) => ({
+        scored = this.ctx.repo.vectorSearch(qvec, opts).map((r) => ({
           id: r.id,
           title: r.title,
           summary: deriveSummary(r.content),
@@ -207,7 +211,7 @@ export class WriteTool extends AbstractTool {
         const match = toFtsMatch(probe);
         if (match) {
           const probeTokens = tokenSet(probe);
-          scored = ctx.repo
+          scored = this.ctx.repo
             .search({
               match,
               project: args.project,
@@ -233,12 +237,12 @@ export class WriteTool extends AbstractTool {
         .slice(0, 3)
         .map((c) => ({ ...c, score: Math.round(c.score * 100) / 100 }));
     } catch {
-      return []; // dedup is advisory; a probe failure must never block the write
+      return []; // dedup is advisory; a probe failure must never block the writing
     }
   }
 }
 
-// Read at call time so it is tunable per-run (and per-test) via env.
+// Read at call time, so it is tunable per-run (and per-test) via env.
 function dedupThreshold(): number {
   return Number(process.env.MEMORY_DEDUP_THRESHOLD) || 0.82;
 }

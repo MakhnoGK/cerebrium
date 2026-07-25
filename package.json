@@ -37,8 +37,10 @@
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
+    "reflect-metadata": "^0.2.2",
     "sqlite-vec": "^0.1.9",
     "tree-sitter-wasms": "^0.1.13",
+    "tsyringe": "^4.10.0",
     "ulid": "^2.3.0",
     "web-tree-sitter": "^0.25.10",
     "zod": "^3.23.8"

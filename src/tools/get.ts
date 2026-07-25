@@ -1,8 +1,9 @@
 import { TypeOf, z, ZodObject } from "zod";
-import type { Ctx } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { AbstractTool, ToolName } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 
+@tool()
 export class GetTool extends AbstractTool {
   name = ToolName.GET;
 
@@ -34,8 +35,8 @@ export class GetTool extends AbstractTool {
       ),
   };
 
-  async invoke(ctx: Ctx, args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(ctx, args.session_id);
+  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+    const hints = touchOrCreate(this.ctx, args.session_id);
 
     if (args.rev !== undefined && args.ids.length !== 1) {
       throw new Error("`rev` can only be used when `ids` has exactly one element.");
@@ -45,7 +46,7 @@ export class GetTool extends AbstractTool {
     const notFound: string[] = [];
 
     for (const id of args.ids) {
-      const full = ctx.repo.fullNode(id);
+      const full = this.ctx.repo.fullNode(id);
 
       if (!full) {
         notFound.push(id);
@@ -59,7 +60,7 @@ export class GetTool extends AbstractTool {
       };
 
       if (full.envelope.type === "symbol") {
-        const detail = ctx.repo.symbolDetail(id);
+        const detail = this.ctx.repo.symbolDetail(id);
 
         if (detail) {
           // For a code mirror, `get` is the sanctioned place to return the raw source
@@ -71,7 +72,7 @@ export class GetTool extends AbstractTool {
       } else if (full.envelope.kind === "mirror") {
         // For an external mirror, `get` also carries the source back-reference, the
         // deep-link URL, and the opaque facet metadata (search returns envelopes only).
-        const rec = ctx.repo.mirrorRecord(id);
+        const rec = this.ctx.repo.mirrorRecord(id);
 
         if (rec) {
           node.mirror = { source_id: rec.source_id, native_id: rec.native_id };
@@ -81,21 +82,21 @@ export class GetTool extends AbstractTool {
       }
 
       if (args.rev !== undefined) {
-        const old = ctx.repo.revisionContent(id, args.rev);
+        const old = this.ctx.repo.revisionContent(id, args.rev);
         if (old === undefined) throw new Error(`node ${id} has no revision ${args.rev}.`);
         node.content = old;
         node.shown_rev = args.rev;
       }
-      if (args.include_revisions) node.revisions = ctx.repo.listRevisions(id);
+      if (args.include_revisions) node.revisions = this.ctx.repo.listRevisions(id);
       nodes.push(node);
     }
 
-    ctx.repo.logEvent(
+    this.ctx.repo.logEvent(
       "get",
       args.session_id,
       args.ids[0] ?? null,
       { count: args.ids.length },
-      ctx.now(),
+      this.ctx.now(),
     );
 
     const out: Record<string, unknown> = { nodes };
