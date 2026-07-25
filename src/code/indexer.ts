@@ -108,7 +108,7 @@ function walk(root: string): Candidate[] {
         recur(join(dir, entry.name), childRel, localMatchers);
       } else if (entry.isFile()) {
         const def = langForPath(entry.name);
-        if (!def) continue; // no grammar → not a code file
+        if (!def) continue; // no grammar -> not a code file
         if (localMatchers.some((m) => m(childRel, false))) continue;
         out.push({ rel: childRel, abs: join(dir, entry.name), lang: def.lang, wasm: def.wasm });
       }
@@ -192,7 +192,7 @@ export async function indexRepo(
     if (stats.files_indexed % YIELD_EVERY === 0) await yieldToLoop();
   }
 
-  // ---- Sweep: files gone from disk → invalidate their symbols ----
+  // ---- Sweep: files gone from disk -> invalidate their symbols ----
   for (const path of repo.listCodeFilePaths(target.name)) {
     if (!onDisk.has(path))
       stats.symbols_invalidated += repo.removeFile(target.name, path, opts.now());
@@ -249,7 +249,7 @@ interface Resolver {
   byQualified: Map<string, string>;
   byPathName: Map<string, string>;
   moduleByPath: Map<string, string>;
-  byName: Map<string, string>; // repo-wide name → node_id (first-wins); used when path resolution is unavailable
+  byName: Map<string, string>; // repo-wide name -> node_id (first-wins); used when path resolution is unavailable
 }
 
 function pathNameKey(path: string, name: string): string {

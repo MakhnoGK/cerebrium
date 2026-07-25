@@ -196,7 +196,7 @@ describe("HttpConsolidator (injected fetch)", () => {
     expect((body.messages as { role: string }[])[0]!.role).toBe("system");
   });
 
-  it("throws on non-2xx and on a missing content field (→ caller degrades)", async () => {
+  it("throws on non-2xx and on a missing content field (-> caller degrades)", async () => {
     const bad: FetchFn = () => Promise.resolve(new Response("", { status: 503 }));
     await expect(new HttpConsolidator({ fetchFn: bad }).generate(TASK)).rejects.toThrow(/HTTP 503/);
 

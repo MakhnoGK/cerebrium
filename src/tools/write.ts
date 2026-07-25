@@ -43,7 +43,7 @@ export class WriteTool extends AbstractTool {
     type: z
       .string()
       .describe(
-        "Node type: episodic → checkpoint|event_note; semantic → fact|decision|entity|howto|task.",
+        "Node type: episodic -> checkpoint|event_note; semantic -> fact|decision|entity|howto|task.",
       ),
     title: z.string().min(1).describe("Short human-readable title; shown in every envelope."),
     content: z

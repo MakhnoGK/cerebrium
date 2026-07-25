@@ -1,6 +1,6 @@
 -- 000_baseline — frozen snapshot of the schema as of 2026-07-17, the point at which
 -- migrations became the single source of truth. FRESH databases build from here by
--- running 000 → NNN in order. This file is IMMUTABLE: never edit it again — any change
+-- running 000 -> NNN in order. This file is IMMUTABLE: never edit it again — any change
 -- goes in a new numbered migration. On an existing DB (which already has 001–006
 -- recorded) this runs as an idempotent no-op and is simply recorded.
 --
@@ -111,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, ts);
 CREATE INDEX IF NOT EXISTS idx_chunks_node ON chunks(node_id, stale);
 
 -- Phase 3b: code indexing. `code_files` is per-file operational state (content hash
--- → skip unchanged files on re-index); `symbols` holds the structured facets + raw
+-- -> skip unchanged files on re-index); `symbols` holds the structured facets + raw
 -- source for `symbol` mirror nodes (memory_kind='mirror', type='symbol'). The node's
 -- revision content is a compact summary (FTS + embedded); the raw source lives here
 -- and is only returned via `get`. Symbols are written by the in-process indexer via

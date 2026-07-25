@@ -4,7 +4,7 @@
 -- mirrors the end state in schema.sql. No existing table is altered — symbols are
 -- ordinary `nodes` rows (memory_kind='mirror', type='symbol') plus a `symbols` facet row.
 
--- Per-file content hash → skip unchanged files on re-index. DB-only operational state.
+-- Per-file content hash -> skip unchanged files on re-index. DB-only operational state.
 CREATE TABLE IF NOT EXISTS code_files (
   repo        TEXT NOT NULL,        -- logical repo name (see MEMORY_CODE_ROOTS)
   path        TEXT NOT NULL,        -- repo-relative posix path

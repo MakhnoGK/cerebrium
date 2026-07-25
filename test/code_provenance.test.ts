@@ -75,7 +75,7 @@ describe("repo provenance store", () => {
   it("storedRepoRoots exposes remembered roots as index targets", () => {
     const { repo, clock } = makeCtx();
     repo.setRepoProvenance("api", "/repos/api", null, null, false, clock.t);
-    repo.setRepoProvenance("web", null, null, null, false, clock.t); // no root → excluded
+    repo.setRepoProvenance("web", null, null, null, false, clock.t); // no root -> excluded
     expect(repo.storedRepoRoots()).toEqual([{ name: "api", root: "/repos/api" }]);
   });
 });

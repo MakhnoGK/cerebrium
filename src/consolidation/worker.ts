@@ -104,7 +104,7 @@ export class ConsolidationWorker {
   }
 
   // similar_to link discovery. Deterministic kNN over stored vectors; no
-  // generation. auto → write system similar_to edges; suggest → queue; off → skip.
+  // generation. auto -> write system similar_to edges; suggest -> queue; off -> skip.
   private discoverLinks(now: string, result: ConsolidationTickResult): void {
     const posture = linksPosture();
     if (posture === "off") return;
@@ -126,7 +126,7 @@ export class ConsolidationWorker {
     }
   }
 
-  // Episodic → semantic distillation. Cluster decayed episodics; auto (with a
+  // Episodic -> semantic distillation. Cluster decayed episodics; auto (with a
   // generating provider) writes the durable fact directly; suggest queues a candidate,
   // pre-generating a proposal when a provider is available. A generation failure degrades
   // to a proposal-less suggestion — a weak model can never corrupt memory.
@@ -147,7 +147,7 @@ export class ConsolidationWorker {
         project: cluster.project,
         inputs: this.repo.candidateInputs(cluster.member_ids),
       });
-      // Provider judged these not worth consolidating → record a dismissed candidate
+      // Provider judged these not worth consolidating -> record a dismissed candidate
       // (with the reason) so it is auditable and never re-proposed.
       if (gen?.recommendation === "reject") {
         const id = this.repo.insertCandidate({
@@ -207,7 +207,7 @@ export class ConsolidationWorker {
         project: pair.project,
         inputs: this.repo.candidateInputs(pair.member_ids),
       });
-      // Provider judged these distinct (not a true duplicate) → dismiss with the reason.
+      // Provider judged these distinct (not a true duplicate) -> dismiss with the reason.
       if (gen?.recommendation === "reject") {
         const id = this.repo.insertCandidate({
           kind: "merge",
@@ -259,7 +259,7 @@ export class ConsolidationWorker {
       const inputs = this.repo.candidateInputs(cand.member_ids);
       if (!inputs.length) continue;
       const gen = await this.tryGenerate({ kind: cand.kind, project: cand.project, inputs });
-      if (!gen) continue; // generation failed → leave for a later sweep
+      if (!gen) continue; // generation failed -> leave for a later sweep
       this.repo.setCandidateProposal(cand.id, gen);
       // Store the verdict either way; auto-dismiss the ones judged not worth consolidating
       // so the Review inbox surfaces only genuine duplicates.

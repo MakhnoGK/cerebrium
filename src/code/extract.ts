@@ -4,13 +4,13 @@ import type { Node } from "web-tree-sitter";
 import type { ExtractedSymbol } from "@/db/repo";
 
 // Per-file extraction result. Symbols become mirror nodes; defines are local
-// (container → member) and resolvable immediately; imports/calls carry enough to be
+// (container -> member) and resolvable immediately; imports/calls carry enough to be
 // resolved against the whole-repo symbol directory in the indexer's second pass.
 export interface ImportRef {
   name: string; // imported binding name; for namespace/default, the target module is used
   candidatePaths: string[]; // repo-relative candidate file paths the specifier may resolve to
-  namespace: boolean; // `* as X` / default import → link module → target module
-  byName?: boolean; // no path resolution available (e.g. PHP `use`) → resolve by symbol name repo-wide
+  namespace: boolean; // `* as X` / default import -> link module -> target module
+  byName?: boolean; // no path resolution available (e.g. PHP `use`) -> resolve by symbol name repo-wide
 }
 
 export interface CallRef {
@@ -95,7 +95,7 @@ function summaryOf(signature: string, doc: string | null): string {
   return doc ? `${signature}\n${doc}` : signature;
 }
 
-// A `const`/`let`/`var` initializer that is really a function → still `const` per the
+// A `const`/`let`/`var` initializer that is really a function -> still `const` per the
 // vocab, but it gets a body for call extraction and a nicer signature.
 function fnBodyOf(value: Node | null): Node | null {
   if (!value) return null;
@@ -255,7 +255,7 @@ function handleTopLevel(ctx: Ctx, stmt: Node, moduleExt: string): void {
 }
 
 // Resolve an import specifier to candidate repo-relative file paths. Bare/aliased
-// specifiers (no leading '.') resolve to nothing → their edges are dropped.
+// specifiers (no leading '.') resolve to nothing -> their edges are dropped.
 function candidatePaths(fromPath: string, spec: string): string[] {
   if (!spec.startsWith(".")) return [];
   const base = posix.normalize(posix.join(posix.dirname(fromPath), spec)).replace(/\/$/, "");
@@ -372,8 +372,8 @@ function collectCallsPhp(ctx: Ctx, srcQualified: string, body: Node | null): voi
   }
 }
 
-// PHP `use App\Util\Hasher [as X];` → the imported binding's short name. Resolution
-// is by-name repo-wide (PSR-4 namespace→file mapping needs composer autoload config,
+// PHP `use App\Util\Hasher [as X];` -> the imported binding's short name. Resolution
+// is by-name repo-wide (PSR-4 namespace->file mapping needs composer autoload config,
 // out of scope), so no path candidates are computed.
 function handlePhpUse(node: Node): ImportRef[] {
   const refs: ImportRef[] = [];
@@ -419,7 +419,7 @@ function phpTopLevel(ctx: Ctx, stmt: Node, moduleExt: string, imports: ImportRef
       imports.push(...handlePhpUse(stmt));
       return;
     case "namespace_definition": {
-      // Braced `namespace App { … }` → its body holds the declarations.
+      // Braced `namespace App { … }` -> its body holds the declarations.
       const block = named(stmt).find(
         (c) => c.type === "compound_statement" || c.type === "declaration_list",
       );
@@ -525,7 +525,7 @@ function docForRust(node: Node): string | null {
   return first ? docFromComment(first) : null;
 }
 
-// The base identifier of a (possibly generic/referenced) type: `Wrap<T>` → `Wrap`.
+// The base identifier of a (possibly generic/referenced) type: `Wrap<T>` -> `Wrap`.
 function rustTypeName(node: Node): string {
   if (node.type === "type_identifier") return node.text;
   const id = node.descendantsOfType("type_identifier").find((n): n is Node => n != null);
@@ -569,7 +569,7 @@ function useBindings(arg: Node | null): string[] {
       return list ? named(list).flatMap((item) => useBindings(item)) : [];
     }
     default:
-      return []; // use_wildcard (`::*`), `self`, etc. → no single binding
+      return []; // use_wildcard (`::*`), `self`, etc. -> no single binding
   }
 }
 

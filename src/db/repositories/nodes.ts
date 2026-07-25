@@ -127,7 +127,7 @@ export class NodesRepo extends BaseRepo {
   // Merge apply: fold `loserId` into `survivorId`, atomically. Optionally revise
   // the survivor to a merged body, re-point the loser's authored edges onto the survivor
   // (system edges like similar_to are left to be recomputed), then invalidate the loser
-  // with supersedes → survivor. The loser stays queryable via history.
+  // with supersedes -> survivor. The loser stays queryable via history.
   applyMerge(input: {
     survivorId: string;
     loserId: string;
@@ -163,7 +163,7 @@ export class NodesRepo extends BaseRepo {
         invalidateEdge.run({ ts: input.ts, src: e.src, dst: e.dst, type: e.type });
         const nsrc = e.src === input.loserId ? input.survivorId : e.src;
         const ndst = e.dst === input.loserId ? input.survivorId : e.dst;
-        if (nsrc === ndst) continue; // self-loop after re-point → drop
+        if (nsrc === ndst) continue; // self-loop after re-point -> drop
         this.edges.insertEdge(
           nsrc,
           ndst,

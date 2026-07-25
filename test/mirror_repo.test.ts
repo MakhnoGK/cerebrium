@@ -47,7 +47,7 @@ describe("MirrorRepo — source registry", () => {
     expect(got.enabled).toBe(true);
     expect(repo.listSources()).toHaveLength(1);
 
-    // Re-register with a changed label → update in place, still one row.
+    // Re-register with a changed label -> update in place, still one row.
     repo.registerSource({ id: "grafana-prod", kind: "grafana", label: "Prod", ts: clock.t });
     expect(repo.getSource("grafana-prod")!.label).toBe("Prod");
     expect(repo.listSources()).toHaveLength(1);
@@ -90,13 +90,13 @@ describe("MirrorRepo — upsert lifecycle", () => {
     const source = register();
     repo.upsertMirrors(source, [INCIDENT], "sess", clock.t);
 
-    // Same content again → no new revision, no re-embed.
+    // Same content again -> no new revision, no re-embed.
     const again = repo.upsertMirrors(source, [INCIDENT], "sess", clock.t);
     expect(again).toMatchObject({ added: 0, updated: 0, unchanged: 1 });
     const id = again.node_ids[0];
     expect(repo.listRevisions(id)).toHaveLength(1);
 
-    // Changed content → exactly one revision bump.
+    // Changed content -> exactly one revision bump.
     const changed = { ...INCIDENT, content: INCIDENT.content + " Root cause: cache stampede." };
     const upd = repo.upsertMirrors(source, [changed], "sess", clock.t);
     expect(upd).toMatchObject({ added: 0, updated: 1, unchanged: 0 });
@@ -141,16 +141,16 @@ describe("MirrorRepo — upsert lifecycle", () => {
 describe("MirrorRepo — freshness", () => {
   it("computes staleness and node_count against a fixed clock", () => {
     const source = register(); // freshness_hours = 24
-    // Never synced yet, but enabled + threshold set → stale.
+    // Never synced yet, but enabled + threshold set -> stale.
     expect(repo.sourceStatus(clock.t)[0]).toMatchObject({ stale: true, node_count: 0 });
 
     repo.upsertMirrors(source, [INCIDENT], "sess", clock.t);
-    // Just synced → within window.
+    // Just synced -> within window.
     let st = repo.sourceStatus(clock.t)[0];
     expect(st).toMatchObject({ stale: false, node_count: 1 });
     expect(st.hours_stale).toBeCloseTo(0, 5);
 
-    // Advance 25h → past the 24h threshold.
+    // Advance 25h -> past the 24h threshold.
     clock.advanceMs(25 * 3_600_000);
     st = repo.sourceStatus(clock.t)[0];
     expect(st.stale).toBe(true);

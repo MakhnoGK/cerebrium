@@ -26,7 +26,7 @@ export class LocalReranker implements RerankProvider {
       truncation: true,
     });
     const { logits } = await model(inputs);
-    // ms-marco cross-encoders emit one relevance logit per pair; sigmoid → [0,1].
+    // ms-marco cross-encoders emit one relevance logit per pair; sigmoid -> [0,1].
     return logits.tolist().map((row) => sigmoid(row[0] ?? 0));
   }
 

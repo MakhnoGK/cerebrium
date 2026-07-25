@@ -37,7 +37,7 @@ export type EdgeType = (typeof EDGE_TYPES)[number];
 
 // System-only edge types: agents may not create these via the `link` tool. The
 // code edges (imports/calls/defines) are drawn only by the indexer; `documents`
-// stays agent-creatable — that is the note→code link the agent draws by hand.
+// stays agent-creatable — that is the note->code link the agent draws by hand.
 export const SYSTEM_EDGE_TYPES = ["similar_to", "imports", "calls", "defines"] as const;
 
 // Consolidation: the kind of a queued consolidation candidate and its

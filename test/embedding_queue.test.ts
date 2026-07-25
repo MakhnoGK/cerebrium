@@ -35,7 +35,7 @@ class BrokenProvider implements EmbeddingProvider {
 }
 
 describe("embedding queue drains", () => {
-  it("moves a node from pending → embedded on tick", async () => {
+  it("moves a node from pending -> embedded on tick", async () => {
     const { ctx, repo, worker, db } = makeCtx();
     const s = await session(ctx);
     const node = await writeFact(ctx, s, "TTL");
@@ -79,7 +79,7 @@ describe("retry with backoff, then park", () => {
       if (n < 5) expect(repo.queueRows(10)[0]!.attempts).toBe(n);
     }
 
-    // attempts === 5 → parked, excluded from the eligible queue
+    // attempts === 5 -> parked, excluded from the eligible queue
     expect(repo.queueRows(10).length).toBe(0);
     expect(repo.embeddingStats().parked).toBe(1);
     expect(repo.embeddingStats().backlog).toBe(0);

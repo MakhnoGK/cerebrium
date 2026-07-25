@@ -88,7 +88,7 @@ describe("knowledge-first ranking", () => {
     const { ctx } = makeCtx();
     const { s, symbol } = await corpus(ctx);
 
-    process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // heavy penalty → symbol sinks to the bottom
+    process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // heavy penalty -> symbol sinks to the bottom
     const low = ids(
       await search.invoke(ctx, {
         session_id: s,
@@ -99,7 +99,7 @@ describe("knowledge-first ranking", () => {
     );
     expect(low[low.length - 1]).toBe(symbol);
 
-    process.env.MEMORY_SYMBOL_WEIGHT = "100"; // heavy boost → symbol climbs above other matches
+    process.env.MEMORY_SYMBOL_WEIGHT = "100"; // heavy boost -> symbol climbs above other matches
     const high = ids(
       await search.invoke(ctx, {
         session_id: s,

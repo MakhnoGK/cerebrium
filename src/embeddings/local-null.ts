@@ -28,7 +28,7 @@ export class LocalNullProvider implements EmbeddingProvider {
     }
     const norm = Math.hypot(...v);
     if (norm === 0) {
-      v[0] = 1; // empty text → a fixed unit vector, never NaN
+      v[0] = 1; // empty text -> a fixed unit vector, never NaN
       return v;
     }
     return v.map((x) => x / norm);

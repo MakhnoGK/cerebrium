@@ -50,7 +50,7 @@ async function mk(ctx: Ctx, s: string, title: string): Promise<string> {
   ).id;
 }
 
-describe("proposal backfill (manual→provider upgrade)", () => {
+describe("proposal backfill (manual->provider upgrade)", () => {
   it("fills proposals for pending distill/merge candidates lacking them", async () => {
     const { ctx, repo } = makeCtx();
     const s = (await session_start.invoke(ctx, {})).session_id;

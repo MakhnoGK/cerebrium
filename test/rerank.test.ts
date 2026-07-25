@@ -119,7 +119,7 @@ describe("rerank stage", () => {
   it("keeps episodic decay as a post-rerank multiplier", async () => {
     const { ctx, clock, worker } = makeCtx({ reranker: new LocalNullReranker() });
     const s = await session(ctx);
-    const content = "deploy the release pipeline"; // identical → equal rerank relevance
+    const content = "deploy the release pipeline"; // identical -> equal rerank relevance
     const old = await w(ctx, s, "episodic", "event_note", "Deploy", content);
     clock.advanceDays(59);
     const fresh = await w(ctx, s, "episodic", "event_note", "Deploy", content);
@@ -165,9 +165,9 @@ describe("rerank usage in stats", () => {
     await w(ctx, s, "semantic", "fact", "Two", "alpha gamma");
     await w(ctx, s, "semantic", "fact", "Three", "delta unique");
 
-    await search.invoke(ctx, { session_id: s, query: "alpha", limit: 10 }); // 2 candidates → reranked
+    await search.invoke(ctx, { session_id: s, query: "alpha", limit: 10 }); // 2 candidates -> reranked
     await search.invoke(ctx, { session_id: s, query: "alpha", mode: "text", limit: 10 }); // not eligible
-    await search.invoke(ctx, { session_id: s, query: "delta", limit: 10 }); // 1 candidate → eligible, not reranked
+    await search.invoke(ctx, { session_id: s, query: "delta", limit: 10 }); // 1 candidate -> eligible, not reranked
 
     const u = repo.techStats(clock.t).rerank_usage;
     expect(u.eligible_searches).toBe(2);

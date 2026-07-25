@@ -97,7 +97,7 @@ export class ConsolidationRepo extends BaseRepo {
 
   // Pending distill/merge candidates that still need a *judged* proposal — either none
   // at all, or one drafted before the provider produced recommendations. The backlog a
-  // newly-enabled provider backfills (e.g. after switching manual → http).
+  // newly-enabled provider backfills (e.g. after switching manual -> http).
   pendingNeedingProposal(limit: number): ConsolidationCandidate[] {
     return (
       this.db

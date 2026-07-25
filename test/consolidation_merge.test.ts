@@ -33,7 +33,7 @@ async function mk(ctx: Ctx, s: string, title: string, content: string): Promise<
   ).id;
 }
 
-// Two near-identical semantic facts (cosine > 0.92) → a merge candidate.
+// Two near-identical semantic facts (cosine > 0.92) -> a merge candidate.
 async function seedDupes(ctx: Ctx, worker: EmbeddingWorker) {
   const s = (await session_start.invoke(ctx, {})).session_id;
   const a = await mk(ctx, s, "Payments A", SHARED);

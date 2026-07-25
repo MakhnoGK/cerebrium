@@ -60,10 +60,10 @@ interface Res {
   results: { id: string; kind: string; type: string; via?: { edge: string; node: string } }[];
 }
 
-// Acceptance §9.3 — index → search → get → link a note → note-topic search surfaces
-// the symbol via graph expansion → edit + re-index keeps the documents edge.
+// Acceptance §9.3 — index -> search -> get -> link a note -> note-topic search surfaces
+// the symbol via graph expansion -> edit + re-index keeps the documents edge.
 describe("code indexing end-to-end", () => {
-  it("carries a note→code documents link across a re-index", async () => {
+  it("carries a note->code documents link across a re-index", async () => {
     const { ctx, repo, clock, worker, db } = makeCtx();
     const s = (await session_start.invoke(ctx, {})).session_id;
 
@@ -127,7 +127,7 @@ describe("code indexing end-to-end", () => {
     })) as unknown as Res;
     expect(byVec.results.some((r) => r.id === validateId)).toBe(true);
 
-    // 7. edit the symbol's source + re-index → same node, revised; documents edge intact
+    // 7. edit the symbol's source + re-index -> same node, revised; documents edge intact
     writeFile(
       "auth/auth.service.ts",
       AUTH.replace("length > 0", "length > 1").replace(

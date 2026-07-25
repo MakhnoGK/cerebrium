@@ -18,7 +18,7 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 
 ## Schema changes
 
-- **Migrations are the single source of truth.** `openDatabase()` builds a DB purely by running `src/db/migrations/000_baseline.sql → NNN` in order; it never executes `schema.sql`. `000_baseline.sql` is a frozen snapshot and must never be edited — any change is a new idempotent, numbered migration (`src/db/migrations/NNN_name.sql`). A migration needing computation SQLite can't express (e.g. recomputing a content-addressed hash) may be a `.cjs` module exporting `up(db)`, applied synchronously by the runner in filename order.
+- **Migrations are the single source of truth.** `openDatabase()` builds a DB purely by running `src/db/migrations/000_baseline.sql -> NNN` in order; it never executes `schema.sql`. `000_baseline.sql` is a frozen snapshot and must never be edited — any change is a new idempotent, numbered migration (`src/db/migrations/NNN_name.sql`). A migration needing computation SQLite can't express (e.g. recomputing a content-addressed hash) may be a `.cjs` module exporting `up(db)`, applied synchronously by the runner in filename order.
 - `src/db/schema.sql` is a **derived, human-readable snapshot** of the current end state — never executed. Keep it updated in the same commit as a migration; the drift-guard test (`test/migrations.test.ts`) fails if it stops matching what the migrations build.
 - Any schema change requires: migration + updated schema.sql snapshot + tests exercising the new columns/tables + a line in the CHANGELOG section of README.
 - Enum-like vocabularies (`memory_kind`, node `type`, edge `type`) are defined once in `src/core/vocab.ts` and referenced by validation and tests. Extending a vocabulary is a normal change; repurposing an existing value is forbidden.
@@ -27,7 +27,7 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 
 - TypeScript strict mode (`strictTypeChecked` lint); no `any` in exported signatures. `npm run check` (typecheck + eslint + prettier + tests) gates every commit.
 - No ORM. All SQL lives in the per-aggregate repositories under `src/db/repositories/*` (prepared statements, named clearly), behind the `Repo` composition root in `src/db/repo.ts`. The cross-aggregate write/read primitives are in `src/db/repositories/internal.ts`. Tools contain no SQL.
-- Module layout: pure domain in `src/core/` (ids, vocab, tokens, chunk, fts, types — no db/fs/process deps); process/IO in `src/runtime/`; data layer in `src/db/`; MCP handlers in `src/tools/`. Import via the `@/*` alias (→ `src/*`); no `.js` extension on relative imports. Barrels (`index.ts`) are the public entry for a folder — members import each other by direct path to avoid cycles.
+- Module layout: pure domain in `src/core/` (ids, vocab, tokens, chunk, fts, types — no db/fs/process deps); process/IO in `src/runtime/`; data layer in `src/db/`; MCP handlers in `src/tools/`. Import via the `@/*` alias (-> `src/*`); no `.js` extension on relative imports. Barrels (`index.ts`) are the public entry for a folder — members import each other by direct path to avoid cycles.
 - One file per MCP tool under `src/tools/`. Tool input validation with Zod at the boundary (derive the arg type with `ToolArgs<typeof schema>`); repo layer assumes valid input.
 - IDs are ULIDs; timestamps are UTC ISO-8601 strings. Everywhere.
 - MCP tool descriptions are user-facing documentation for consuming agents: every change to a tool's behavior updates its description string in the same commit.

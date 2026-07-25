@@ -9,9 +9,9 @@ import { SearchTool } from "../../src/tools/search";
 
 const P = "acme";
 
-// Phase 3a §9.4: register two sources → mirror a Grafana incident + a Sentry issue →
-// relate them → document the incident with a decision → search surfaces the incident and
-// expands to its neighbors → the source goes stale after its window and clears on re-sync.
+// Phase 3a §9.4: register two sources -> mirror a Grafana incident + a Sentry issue ->
+// relate them -> document the incident with a decision -> search surfaces the incident and
+// expands to its neighbors -> the source goes stale after its window and clears on re-sync.
 describe("external mirrors — end-to-end", () => {
   const session_start = new SessionStartTool();
   const source_register = new SourceRegisterTool();
@@ -115,7 +115,7 @@ describe("external mirrors — end-to-end", () => {
     expect(ids).toContain(incidentId);
     expect(ids).toContain(decision.id);
 
-    // Freshness: advance past the window → grafana-prod is flagged stale in session_start.
+    // Freshness: advance past the window -> grafana-prod is flagged stale in session_start.
     const staleIds = async (): Promise<string[]> => {
       const ws = ((await session_start.invoke(ctx, { project: P })) as any).working_set as {
         stale_sources?: { id: string }[];

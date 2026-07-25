@@ -128,7 +128,7 @@ async function main() {
     onRec: [] as number[],
   };
 
-  console.log("per-query nDCG@10 (baseline → reranked):");
+  console.log("per-query nDCG@10 (baseline -> reranked):");
   for (const q of data.queries) {
     const gold = goldOf(q);
     const offIds = await rankedIds(ctxOff, sid, q.query);
@@ -144,7 +144,7 @@ async function main() {
     a.offRec.push(recallAtK(offIds, gold, K));
     a.onRec.push(recallAtK(onIds, gold, K));
     const arrow = onND > offND + 1e-9 ? "↑" : onND < offND - 1e-9 ? "↓" : "=";
-    console.log(`  ${arrow} ${pct(offND)} → ${pct(onND)}   "${q.query.slice(0, 52)}"`);
+    console.log(`  ${arrow} ${pct(offND)} -> ${pct(onND)}   "${q.query.slice(0, 52)}"`);
   }
 
   const row = (label: string, off: number[], on: number[]) => {
@@ -152,10 +152,10 @@ async function main() {
       n = mean(on),
       d = n - o;
     console.log(
-      `  ${label.padEnd(12)} ${pct(o)}  →  ${pct(n)}   (${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)} pts)`,
+      `  ${label.padEnd(12)} ${pct(o)}  ->  ${pct(n)}   (${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)} pts)`,
     );
   };
-  console.log("\naggregate (mean, baseline → reranked):");
+  console.log("\naggregate (mean, baseline -> reranked):");
   row("MRR", a.offRR, a.onRR);
   row("nDCG@10", a.offND, a.onND);
   row("P@1", a.offP1, a.onP1);

@@ -24,15 +24,15 @@ function results(res: unknown): Result[] {
   return (res as { results: Result[] }).results;
 }
 
-// Acceptance §9.3: write → FTS-findable while pending → worker drains → vector-findable
-// → near-duplicate flagged → invalidate w/ superseded_by → old node only via history,
+// Acceptance §9.3: write -> FTS-findable while pending -> worker drains -> vector-findable
+// -> near-duplicate flagged -> invalidate w/ superseded_by -> old node only via history,
 // never via graph expansion.
 describe("phase 2 end-to-end retrieval lifecycle", () => {
   it("carries a fact through the full retrieval lifecycle", async () => {
     const { ctx, repo, worker, db } = makeCtx();
     const s = (await session_start.invoke(ctx, { project: P })).session_id;
 
-    // 1) write a fact → immediately findable via FTS while pending_embedding = 1
+    // 1) write a fact -> immediately findable via FTS while pending_embedding = 1
     const fact = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
@@ -69,7 +69,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     );
     expect(vecEmpty.some((r) => r.id === fact.id)).toBe(false);
 
-    // 2) worker drains → vector search now finds it, with a best_chunk snippet
+    // 2) worker drains -> vector search now finds it, with a best_chunk snippet
     await worker.tick();
     expect(
       (db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as { p: number })
@@ -88,7 +88,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     expect(hit?.matched).toBe("vector");
     expect(hit?.best_chunk?.length).toBeGreaterThan(0);
 
-    // 3) write a near-duplicate → similar_existing returned
+    // 3) write a near-duplicate -> similar_existing returned
     const dup = (await write.invoke(ctx, {
       session_id: s,
       memory_kind: "semantic",
@@ -99,7 +99,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     })) as { id: string; similar_existing?: { id: string }[] };
     expect(dup.similar_existing?.some((c) => c.id === fact.id)).toBe(true);
 
-    // 4) invalidate the original with superseded_by → only via history, never via graph
+    // 4) invalidate the original with superseded_by -> only via history, never via graph
     await invalidate.invoke(ctx, {
       session_id: s,
       id: fact.id,

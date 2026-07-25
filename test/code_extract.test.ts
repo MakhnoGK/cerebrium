@@ -40,7 +40,7 @@ describe("TS extraction", () => {
     expect(validate.summary).toContain("Validate a set of login credentials");
   });
 
-  it("emits defines edges: module→members and class→methods", async () => {
+  it("emits defines edges: module->members and class->methods", async () => {
     const ex = await extract("auth/auth.service.ts");
     const id = (q: string) => ex.symbols.find((s) => s.qualified === q)!.external_id;
     const has = (src: string, dst: string) =>
@@ -55,9 +55,9 @@ describe("TS extraction", () => {
 
   it("resolves relative import candidates and drops bare specifiers", async () => {
     const ex = await extract("auth/auth.service.ts");
-    // '@nestjs/common' is bare → no import ref at all.
+    // '@nestjs/common' is bare -> no import ref at all.
     expect(ex.imports.some((i) => i.name === "Injectable")).toBe(false);
-    // '../util/crypto' → repo-relative candidates including util/crypto.ts.
+    // '../util/crypto' -> repo-relative candidates including util/crypto.ts.
     const hashImport = ex.imports.find((i) => i.name === "hashToken");
     expect(hashImport).toBeDefined();
     expect(hashImport!.candidatePaths).toContain("util/crypto.ts");
@@ -115,7 +115,7 @@ describe("PHP extraction", () => {
       true,
     );
 
-    // `use App\Util\Hasher;` → by-name import ref for 'Hasher'
+    // `use App\Util\Hasher;` -> by-name import ref for 'Hasher'
     const hasherImport = ex.imports.find((i) => i.name === "Hasher");
     expect(hasherImport).toMatchObject({ byName: true });
 
@@ -165,7 +165,7 @@ describe("Rust extraction", () => {
     expect(validate.signature).toContain("fn validate");
   });
 
-  it("emits defines edges: module→items, impl→methods, trait→methods", async () => {
+  it("emits defines edges: module->items, impl->methods, trait->methods", async () => {
     const ex = await extract("auth.rs", "fixtures/rust-repo");
     const id = (q: string) => ex.symbols.find((s) => s.qualified === q)!.external_id;
     const has = (src: string, dst: string) =>

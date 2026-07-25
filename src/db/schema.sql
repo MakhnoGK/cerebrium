@@ -1,5 +1,5 @@
 -- cerebrium schema — DERIVED, human-readable snapshot of the current end state.
--- NEVER executed at runtime: migrations (src/db/migrations/000_baseline → NNN) are the
+-- NEVER executed at runtime: migrations (src/db/migrations/000_baseline -> NNN) are the
 -- single source of truth; a fresh DB is built entirely by running them in order. This
 -- file exists so the schema is reviewable in one place; a drift-guard test asserts it
 -- stays byte-equivalent (normalized) to the schema the migrations actually build. When
@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, ts);
 CREATE INDEX IF NOT EXISTS idx_chunks_node ON chunks(node_id, stale);
 
 -- Phase 3b: code indexing. `code_files` is per-file operational state (content hash
--- → skip unchanged files on re-index); `symbols` holds the structured facets + raw
+-- -> skip unchanged files on re-index); `symbols` holds the structured facets + raw
 -- source for `symbol` mirror nodes (memory_kind='mirror', type='symbol'). The node's
 -- revision content is a compact summary (FTS + embedded); the raw source lives here
 -- and is only returned via `get`. Symbols are written by the in-process indexer via

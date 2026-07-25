@@ -152,7 +152,7 @@ describe("invalidate guard + session_start freshness", () => {
 });
 
 describe("link payoff: note documents a mirror record", () => {
-  it("a decision → mirror `documents` edge surfaces the mirror via graph expansion", async () => {
+  it("a decision -> mirror `documents` edge surfaces the mirror via graph expansion", async () => {
     const { ctx, sid, worker } = await boot();
     await registerGrafana(ctx, sid);
     const r = (await mirror_upsert.invoke(ctx, {

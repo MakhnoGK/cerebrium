@@ -137,7 +137,7 @@ describe("invalidate is a soft delete with a supersedes edge", () => {
   });
 });
 
-describe("FTS stays consistent across write → update → invalidate", () => {
+describe("FTS stays consistent across write -> update -> invalidate", () => {
   it("indexes current content only, and excludes invalidated unless history", async () => {
     const { ctx } = makeCtx();
     const s = await newSession(ctx);

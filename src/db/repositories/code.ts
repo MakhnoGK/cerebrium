@@ -248,7 +248,7 @@ export class CodeRepo extends BaseRepo {
     return n;
   }
 
-  // Whole-repo sweep: a file gone from disk → invalidate its symbol nodes (never
+  // Whole-repo sweep: a file gone from disk -> invalidate its symbol nodes (never
   // deleted; history + documents edges survive) and drop the code_files bookkeeping.
   removeFile(repo: string, path: string, ts: string): number {
     let invalidated = 0;

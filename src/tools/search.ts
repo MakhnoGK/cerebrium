@@ -25,7 +25,7 @@ const BEST_CHUNK_CHARS = 120;
 // fused base hits before graph expansion; replaces the RRF relevance core with a
 // cross-encoder score. Kept small for interactive latency.
 const RERANK_DOC_CHARS = 400; // per-candidate text budget handed to the reranker
-const MIN_RERANK = 2; // fewer fused candidates than this → nothing to reorder
+const MIN_RERANK = 2; // fewer fused candidates than this -> nothing to reorder
 
 // Edge-type weights for 1-hop expansion. `supersedes` is 0: a superseded node
 // must never be surfaced this way.
@@ -158,7 +158,7 @@ export class SearchTool extends AbstractTool {
         });
       }
     } catch {
-      // Provider unavailable → skip the vector branch; FTS still answers (graceful degradation).
+      // Provider unavailable -> skip the vector branch; FTS still answers (graceful degradation).
     }
 
     // ---- RRF fusion ----------------------------------------------------------
@@ -211,7 +211,7 @@ export class SearchTool extends AbstractTool {
         reranked = true;
         rerankCandidates = base.length;
       } catch {
-        // Reranker unavailable → keep the RRF ordering (graceful degradation).
+        // Reranker unavailable -> keep the RRF ordering (graceful degradation).
       }
     }
 
@@ -362,7 +362,7 @@ function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
 // Knowledge-first ranking: code `symbol` mirrors are down-weighted as base hits
 // so authored + external-mirror knowledge isn't buried under the 100k+ indexed symbols.
 // A relevance multiplier, not a filter — symbols still surface, just below equally-matched
-// knowledge. Not applied to graph neighbors (a note→symbol edge earns its place
+// knowledge. Not applied to graph neighbors (a note->symbol edge earns its place
 // structurally) nor when the caller explicitly asks for symbols (wantsSymbols).
 function symbolWeight(): number {
   return Number(process.env.MEMORY_SYMBOL_WEIGHT) || 0.5;

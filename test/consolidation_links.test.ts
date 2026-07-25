@@ -36,7 +36,7 @@ async function newEpisodic(ctx: Ctx, s: string, title: string, content: string):
 
 async function seed(ctx: Ctx, worker: EmbeddingWorker) {
   const s = (await session_start.invoke(ctx, {})).session_id;
-  // Two nodes with identical content → identical local-null vectors (cosine 1.0);
+  // Two nodes with identical content -> identical local-null vectors (cosine 1.0);
   // a third, disjoint node stays unlinked.
   const dup = "the http client retries three times with exponential backoff";
   const twinA = await newNode(ctx, s, "Retry budget", dup);

@@ -26,11 +26,11 @@ decisions. Never the whole site or every view.
 
 ## Fetch
 
-1. `list-workbooks` / `list-views` (or a maintained allow-list) → `get-workbook` / `get-view`
+1. `list-workbooks` / `list-views` (or a maintained allow-list) -> `get-workbook` / `get-view`
    for the ones that matter.
-2. `list-all-pulse-metric-definitions` → the key metric definitions.
+2. `list-all-pulse-metric-definitions` -> the key metric definitions.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|
@@ -43,5 +43,5 @@ decisions. Never the whole site or every view.
 
 ## Link
 
-- `documents` from a `decision` note that cited a metric/view → the record.
+- `documents` from a `decision` note that cited a metric/view -> the record.
 - `relates_to` an Amplitude `chart` measuring the same thing.

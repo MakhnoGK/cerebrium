@@ -22,8 +22,8 @@ export interface ConsolidationResult {
 
 // A write-time duplicate judgment. When a new semantic write resembles existing
 // records, the provider decides whether the draft is genuinely new (`noop`), refines
-// ONE existing record (`update` → the agent should revise that node), or replaces one
-// (`supersede` → invalidate + supersedes). The provider only judges; the write tool
+// ONE existing record (`update` -> the agent should revise that node), or replaces one
+// (`supersede` -> invalidate + supersedes). The provider only judges; the write tool
 // surfaces the verdict and never auto-applies it.
 export interface ReconcileTask {
   draft: { title: string; type: string; content: string };

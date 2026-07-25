@@ -24,7 +24,7 @@ export type CommandRunner = (input: string) => Promise<string>;
 
 // The universal "bring your own model/agent/api" adapter: the daemon pipes a task as JSON
 // on stdin to a user-configured command and reads a ConsolidationResult (or the raw
-// {title,summary,body} JSON) on stdout. Any failure throws → caller degrades to suggest.
+// {title,summary,body} JSON) on stdout. Any failure throws -> caller degrades to suggest.
 // `runner` is injectable so the stdin/stdout contract is testable without spawning.
 export class CommandConsolidator implements ConsolidationProvider {
   readonly name = "command";

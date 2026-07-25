@@ -31,10 +31,10 @@ Do **not** mirror: every MR/issue in the group, pipeline logs, comment-by-commen
 
 1. `glab -R <group>/<project> mr list --state merged --per-page 20` and `... --state opened`;
    `glab -R <group>/<project> mr view <iid>` for the description + decisions.
-2. `glab -R <group>/<project> issue list --state opened` → `issue view <iid>` for the ones with
+2. `glab -R <group>/<project> issue list --state opened` -> `issue view <iid>` for the ones with
    real decision content.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 **Merge request:**
 
@@ -52,5 +52,5 @@ facets `{ state, author, labels, milestone }`.
 
 ## Link
 
-- A `decision` note → `documents` the MR that implemented it.
+- A `decision` note -> `documents` the MR that implemented it.
 - `relates_to` between an MR and the Sentry `issue` / Grafana `incident` it fixed.

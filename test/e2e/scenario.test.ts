@@ -17,8 +17,8 @@ const checkpoint = new CheckpointTool();
 
 const P = "auth-service";
 
-// Acceptance §8.2: session A writes → session B orients, searches, gets, updates
-// → revision history shows both sessions.
+// Acceptance §8.2: session A writes -> session B orients, searches, gets, updates
+// -> revision history shows both sessions.
 describe("multi-session hand-off", () => {
   it("carries context from one session to the next", async () => {
     const { ctx } = makeCtx();

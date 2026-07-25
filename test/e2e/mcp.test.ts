@@ -47,7 +47,7 @@ describe("MCP wire layer", () => {
     for (const t of tools) expect(t.description?.length).toBeGreaterThan(20);
   });
 
-  it("round-trips a write → search → get through the transport", async () => {
+  it("round-trips a write -> search -> get through the transport", async () => {
     const client = await connect();
     const start = payload(await client.callTool({ name: "session_start", arguments: {} }));
     const sid = start.session_id as string;

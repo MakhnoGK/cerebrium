@@ -12,7 +12,7 @@
 
 CREATE TABLE IF NOT EXISTS mirror_sources (
   id              TEXT PRIMARY KEY,   -- instance id, e.g. 'grafana-prod', 'sentry', 'gitlab'
-  kind            TEXT NOT NULL,      -- source kind → becomes each node's `origin`, e.g. 'grafana'
+  kind            TEXT NOT NULL,      -- source kind -> becomes each node's `origin`, e.g. 'grafana'
   label           TEXT,               -- human label, e.g. 'Grafana (prod)'
   project         TEXT,               -- default `project` scope for this source's mirror nodes
   freshness_hours INTEGER,            -- staleness threshold; NULL = never reported stale

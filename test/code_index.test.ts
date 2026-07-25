@@ -100,7 +100,7 @@ describe("indexer — incremental hash-gate", () => {
     const issueId = idOf("auth/auth.service.ts:AuthService.issue");
     const cryptoFnId = idOf("util/crypto.ts:hashToken");
 
-    // Change validate's doc + body (its summary changes → it re-embeds).
+    // Change validate's doc + body (its summary changes -> it re-embeds).
     write(
       "auth/auth.service.ts",
       AUTH.replace("/** Validate a login. */", "/** Validate a login attempt securely. */").replace(
@@ -211,7 +211,7 @@ describe("indexer — edges", () => {
     expect(edge(validate, hashToken, "calls")?.provenance).toBe("system"); // imported-symbol call
     expect(edge(issue, validate, "calls")?.provenance).toBe("system"); // same-file this.method() call
 
-    // The bare `@nestjs/common` import produced no edge → exactly one imports edge from the module.
+    // The bare `@nestjs/common` import produced no edge -> exactly one imports edge from the module.
     const importCount = db
       .prepare(
         "SELECT COUNT(*) AS c FROM edges WHERE src = ? AND type = 'imports' AND invalidated_at IS NULL",
@@ -261,8 +261,8 @@ describe("indexer — PHP", () => {
           "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
         )
         .get(src, dst, type);
-    expect(edge(authMod, hasher, "imports")).toBeTruthy(); // use App\Util\Hasher → Hasher class, by name
-    expect(edge(validate, hashM, "calls")).toBeTruthy(); // Hasher::hash() → Hasher.hash, by name
+    expect(edge(authMod, hasher, "imports")).toBeTruthy(); // use App\Util\Hasher -> Hasher class, by name
+    expect(edge(validate, hashM, "calls")).toBeTruthy(); // Hasher::hash() -> Hasher.hash, by name
   });
 });
 

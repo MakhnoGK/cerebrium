@@ -14,7 +14,7 @@ const consolidate_apply = new ConsolidateApplyTool();
 
 const BASE = "the deployment rollback procedure drains connections and flips the feature flag";
 
-// Three near-identical episodics (one distinct token each) → tight cluster, distinct nodes.
+// Three near-identical episodics (one distinct token each) -> tight cluster, distinct nodes.
 async function seedEpisodics(
   ctx: Ctx,
   worker: EmbeddingWorker,
@@ -57,7 +57,7 @@ afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_LINKS;
 });
 
-describe("episodic → semantic distillation (P5 §6)", () => {
+describe("episodic -> semantic distillation (P5 §6)", () => {
   it("suggest (default, manual) queues a distill candidate with no proposal", async () => {
     const { ctx, repo, worker, clock } = makeCtx();
     const { ids } = await seedEpisodics(ctx, worker);
@@ -124,7 +124,7 @@ describe("episodic → semantic distillation (P5 §6)", () => {
 
   it("does not distill episodics younger than the age floor", async () => {
     const { ctx, repo, worker } = makeCtx();
-    await seedEpisodics(ctx, worker); // no clock advance → too young
+    await seedEpisodics(ctx, worker); // no clock advance -> too young
     const r = await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
     expect(r.distill_suggested).toBe(0);
     expect(repo.pendingCandidates({ kind: "distill" })).toHaveLength(0);

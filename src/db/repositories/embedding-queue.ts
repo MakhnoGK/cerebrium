@@ -76,7 +76,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
     });
   }
 
-  // Node fully embedded → clear pending + dequeue. Otherwise a batch made partial
+  // Node fully embedded -> clear pending + dequeue. Otherwise a batch made partial
   // progress, so clear the failure backoff and leave it queued for the next tick.
   finalizeNode(nodeId: string, ts: string): void {
     if (countUnembedded(this.db, nodeId) === 0) {

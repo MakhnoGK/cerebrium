@@ -2,7 +2,7 @@
 // session) open it. WAL serializes writers; `busy_timeout` makes better-sqlite3
 // sleep-retry while acquiring a lock. This wrapper is the residual safety net:
 // even with a generous timeout, a contended write can still surface SQLITE_BUSY
-// (notably SQLITE_BUSY_SNAPSHOT on a deferred read→write upgrade). Re-run the
+// (notably SQLITE_BUSY_SNAPSHOT on a deferred read->write upgrade). Re-run the
 // whole transaction a few times with short backoff before giving up.
 
 const SLEEP_BUF = new Int32Array(new SharedArrayBuffer(4));

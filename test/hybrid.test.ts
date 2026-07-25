@@ -53,9 +53,9 @@ describe("RRF fusion", () => {
     const body = "reciprocal rank fusion ranking algorithm for retrieval";
 
     const both = await w(ctx, s, "semantic", "fact", "Alpha", body);
-    await worker.tick(); // embed Alpha → it lands in the vector branch too
+    await worker.tick(); // embed Alpha -> it lands in the vector branch too
 
-    const textOnly = await w(ctx, s, "semantic", "fact", "Beta", body); // not drained → FTS only
+    const textOnly = await w(ctx, s, "semantic", "fact", "Beta", body); // not drained -> FTS only
 
     const res = results(
       await search.invoke(ctx, { session_id: s, query: "reciprocal rank fusion", limit: 10 }),
@@ -87,7 +87,7 @@ describe("memory-model factors hold in hybrid mode", () => {
 
     const fact = await w(ctx, s, "semantic", "fact", "Deploy", content);
 
-    await worker.tick(); // embed all three → vector branch active
+    await worker.tick(); // embed all three -> vector branch active
 
     const res = results(
       await search.invoke(ctx, { session_id: s, query: "deploy pipeline", limit: 10 }),

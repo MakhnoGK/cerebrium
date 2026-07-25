@@ -29,7 +29,7 @@ export function openDatabase(dbPath = defaultDbPath()): Database.Database {
   sqliteVec.load(db);
 
   // Migrations are the single source of truth: a fresh DB is built entirely by
-  // running 000_baseline → NNN in order. schema.sql is a derived snapshot, never
+  // running 000_baseline -> NNN in order. schema.sql is a derived snapshot, never
   // executed here (a drift-guard test keeps it accurate).
   runMigrations(db);
   return db;
