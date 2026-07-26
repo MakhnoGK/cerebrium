@@ -6,6 +6,7 @@ import { injectable } from "tsyringe";
 // Sessions and the events audit log — provenance for every tool call.
 @injectable()
 export class SessionsRepo extends BaseRepo {
+  /** @deprecated */
   ensureSession(id: string, project: string | null, ts: string): { created: boolean } {
     const row = this.db.prepare("SELECT id FROM sessions WHERE id = ?").get(id);
 

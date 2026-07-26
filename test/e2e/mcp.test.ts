@@ -1,16 +1,22 @@
+import "reflect-metadata";
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { openDatabase } from "@/db/database";
-import { buildCtx, createServer } from "@/server";
+import { container } from "tsyringe";
+import { Server } from "../../src/core/server";
+import { DB_TOKEN } from "../../src/db/repositories/base";
+import { openDatabase } from "../../src/db/database";
+
+container.register(DB_TOKEN, { useValue: openDatabase(":memory") });
 
 async function connect() {
-  const ctx = buildCtx(openDatabase(":memory:"));
-  const server = createServer(ctx);
-  const [clientT, serverT] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverT);
+  const server = container.resolve(Server);
   const client = new Client({ name: "test", version: "0.0.0" });
-  await client.connect(clientT);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
   return client;
 }
 
@@ -19,8 +25,8 @@ function payload(res: unknown): Record<string, unknown> {
   return JSON.parse(content[0]!.text) as Record<string, unknown>;
 }
 
-describe("MCP wire layer", () => {
-  it("exposes all sixteen tools with descriptions", async () => {
+describe("MCP Server", () => {
+  it("should expose all sixteen tools when connected", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -47,7 +53,15 @@ describe("MCP wire layer", () => {
     for (const t of tools) expect(t.description?.length).toBeGreaterThan(20);
   });
 
-  it("round-trips a write -> search -> get through the transport", async () => {
+  it("should create session when connected", async () => {
+    const client = await connect();
+    const start = payload(await client.callTool({ name: "session_start", arguments: {} }));
+    const sid = start.session_id as string;
+
+    expect(sid).toBeTruthy();
+  });
+
+  it("should round-trips a search -> get through the transport when written", async () => {
     const client = await connect();
     const start = payload(await client.callTool({ name: "session_start", arguments: {} }));
     const sid = start.session_id as string;
@@ -82,7 +96,7 @@ describe("MCP wire layer", () => {
     expect((got.nodes as { content: string }[])[0]!.content).toBe("hello over MCP");
   });
 
-  it("returns an actionable error for an episodic update", async () => {
+  it("should return an actionable error when an episodic update", async () => {
     const client = await connect();
     const start = payload(await client.callTool({ name: "session_start", arguments: {} }));
     const sid = start.session_id as string;

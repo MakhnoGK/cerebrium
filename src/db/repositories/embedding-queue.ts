@@ -6,11 +6,13 @@ import {
   refreshQueue,
   syncChunks,
 } from "@/db/repositories/internal";
+import { injectable } from "tsyringe";
 
 // The async-embedding drain side of the queue: candidate selection, vector commits,
 // per-node finalization, failure backoff, worker-lease election, and startup
 // reconciliation. The write-side enqueue (refreshQueue) lives with the node write in
 // internal.ts; this repo owns everything the daemon touches while draining.
+@injectable()
 export class EmbeddingQueueRepo extends BaseRepo {
   // Nodes eligible for an embedding attempt: not parked (attempts < max), oldest first.
   queueRows(limit: number): QueueRow[] {

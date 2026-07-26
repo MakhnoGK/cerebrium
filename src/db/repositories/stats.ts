@@ -1,9 +1,10 @@
 import type Database from "better-sqlite3";
 import { statSync } from "node:fs";
 import type { TechStats } from "@/core/types";
-import { BaseRepo } from "@/db/repositories/base";
+import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { CodeRepo } from "@/db/repositories/code";
 import { EmbeddingQueueRepo } from "@/db/repositories/embedding-queue";
+import { inject, injectable } from "tsyringe";
 
 function walBytes(dbPath: string): number {
   if (dbPath === ":memory:" || !dbPath) return 0;
@@ -16,9 +17,10 @@ function walBytes(dbPath: string): number {
 
 // Aggregate counters for the session working set (`stats`) and the deep operational
 // snapshot (`techStats`). Composes the queue and code repos for their sub-counts.
+@injectable()
 export class StatsRepo extends BaseRepo {
   constructor(
-    db: Database.Database,
+    @inject(DB_TOKEN) db: Database.Database,
     private readonly queue: EmbeddingQueueRepo,
     private readonly code: CodeRepo,
   ) {

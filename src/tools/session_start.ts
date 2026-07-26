@@ -1,12 +1,12 @@
 import { z } from "zod";
+import { ulid } from "ulid";
 import type { ToolArgs } from "@/tools/context";
-import { embeddingNotes } from "@/tools/notes";
 import { AbstractTool, ToolName } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { ulid } from "ulid";
 import { Context } from "@/core/context";
 import { MemoryService } from "@/tools/services/memory.service";
 import { SessionService } from "@/tools/services/session.service";
+import { EmbeddingService } from "@/tools/services/embedding.service";
 
 interface ToolResponse {
   session_id: string;
@@ -37,6 +37,7 @@ export class SessionStartTool extends AbstractTool {
     protected readonly ctx: Context,
     private readonly sessionService: SessionService,
     private readonly memoryService: MemoryService,
+    private readonly embeddingService: EmbeddingService,
   ) {
     super(ctx);
   }
@@ -49,11 +50,10 @@ export class SessionStartTool extends AbstractTool {
     await this.sessionService.ensureSession(sessionId, project, now);
 
     // TODO: Custom logger
-    this.ctx.repo.logEvent("session_start", sessionId, null, { project: project }, this.ctx.now());
+    // this.ctx.repo.logEvent("session_start", sessionId, null, { project: project }, this.ctx.now());
 
     const workingSet = this.memoryService.getWorkingSet(project ?? undefined);
-    // TODO: Move to service
-    const notes = embeddingNotes(this.ctx.repo);
+    const notes = this.embeddingService.getEmbeddingNotes();
 
     return {
       project,

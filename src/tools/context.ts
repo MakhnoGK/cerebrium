@@ -5,7 +5,6 @@ import type { RerankProvider } from "@/rerank";
 import type { ConsolidationProvider } from "@/consolidation";
 
 export interface Ctx {
-  repo: Repo;
   now: () => string;
   workingSetBudget: number;
   provider: EmbeddingProvider;
@@ -25,9 +24,9 @@ export function touchOrCreate(
   sessionId: string,
   project: string | null = null,
 ): string[] {
-  const { created } = ctx.repo.ensureSession(sessionId, project, ctx.now());
+  // const { created } = ctx.repo.ensureSession(sessionId, project, ctx.now());
 
-  return created
+  return true
     ? [
         `Unknown session_id — created a new session ${sessionId}. Call session_start next time to get one.`,
       ]

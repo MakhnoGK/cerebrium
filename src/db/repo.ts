@@ -38,6 +38,7 @@ import {
   StatsRepo,
 } from "@/db/repositories";
 import { IndexTarget } from "@/code/indexer";
+import { injectable } from "tsyringe";
 
 // Domain types + pure mappers live in core; re-exported here so existing
 // `@/db/repo` importers keep resolving.

@@ -4,8 +4,13 @@ import "reflect-metadata";
 import { container } from "tsyringe";
 import { isMainModule } from "@/runtime/is-main";
 import { Server } from "@/core/server";
+import Database from "better-sqlite3";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { openDatabase } from "@/db/database";
 
 async function main(): Promise<void> {
+  container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase() });
+
   const server = container.resolve(Server);
   await server.connect();
 

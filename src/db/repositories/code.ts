@@ -11,17 +11,19 @@ import type {
   SymbolLookup,
 } from "@/core/types";
 import { toEnvelope } from "@/core/types";
-import { BaseRepo } from "@/db/repositories/base";
+import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
+import { inject, injectable } from "tsyringe";
 
 // The code mirror: symbol nodes + their facet rows, per-file hash gate,
 // incremental index application, cross-file edge resolution, structural lookups, and
 // per-repo provenance. Symbol writes reuse the shared node-write primitives; edges
 // are delegated to EdgesRepo.
+@injectable()
 export class CodeRepo extends BaseRepo {
   constructor(
-    db: Database.Database,
+    @inject(DB_TOKEN) db: Database.Database,
     private readonly edges: EdgesRepo,
   ) {
     super(db);

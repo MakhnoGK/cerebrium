@@ -112,13 +112,14 @@ export class WriteTool extends AbstractTool {
       links: args.links,
     });
 
-    this.ctx.repo.logEvent(
-      "write",
-      args.session_id,
-      envelope.id,
-      { type: args.type, kind },
-      this.ctx.now(),
-    );
+    // TODO: Custom logger
+    // this.ctx.repo.logEvent(
+    //   "write",
+    //   args.session_id,
+    //   envelope.id,
+    //   { type: args.type, kind },
+    //   this.ctx.now(),
+    // );
 
     // When a duplicate is found and a judging provider is configured, sharpen the advisory
     // hint into a specific action. Never blocks, never applies — the agent decides.
