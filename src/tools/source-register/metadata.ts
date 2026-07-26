@@ -1,20 +1,17 @@
-import { TypeOf, z, ZodObject } from "zod";
-import { touchOrCreate } from "@/tools/context";
-import { AbstractTool, ToolName } from "@/tools/contracts";
-import { tool } from "@/tools/contracts/tool";
+import { ToolName } from "@/tools/contracts";
+import { z } from "zod";
 
-@tool()
-export class SourceRegisterTool extends AbstractTool {
-  name = ToolName.SOURCE_REGISTER;
+export const metadata = {
+  name: ToolName.SOURCE_REGISTER,
 
-  description =
+  description:
     "Register (or update) an external mirror source for THIS deployment before mirroring records to it. `id` is a " +
     "local instance (e.g. 'grafana-prod'); `kind` becomes the `origin` of every mirror node from it. This stores NO " +
     "credentials and connects to nothing — you fetch from the source with your own MCP tools, then write curated " +
     "records with `mirror_upsert`. Re-registering the same `id` updates it in place. The registry is empty in a fresh " +
-    "deployment, so a Cerebrium with a different toolset simply registers different sources. Returns the stored source.";
+    "deployment, so a Cerebrium with a different toolset simply registers different sources. Returns the stored source.",
 
-  schema = {
+  schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
     id: z
       .string()
@@ -49,30 +46,5 @@ export class SourceRegisterTool extends AbstractTool {
       .describe(
         "Whether the source is active (default true); set false to pause without forgetting.",
       ),
-  };
-
-  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-
-    const source = this.ctx.repo.registerSource({
-      id: args.id,
-      kind: args.kind,
-      label: args.label ?? null,
-      project: args.project ?? null,
-      freshness_hours: args.freshness_hours ?? null,
-      recipe: args.recipe ?? null,
-      enabled: args.enabled,
-      ts: this.ctx.now(),
-    });
-
-    this.ctx.repo.logEvent(
-      "source_register",
-      args.session_id,
-      null,
-      { id: args.id, kind: args.kind },
-      this.ctx.now(),
-    );
-
-    return hints.length ? { source, hints } : { source };
-  }
-}
+  },
+};

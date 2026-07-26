@@ -1,40 +1,13 @@
-import { TypeOf, z, ZodObject } from "zod";
-import { touchOrCreate } from "@/tools/context";
-import { AbstractTool, ToolName } from "@/tools/contracts";
+import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
+import { metadata } from "@/tools/consolidate-apply/metadata";
 
 @tool()
-export class ConsolidateApplyTool extends AbstractTool {
-  name = ToolName.CONSOLIDATE_APPLY;
+export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"], unknown> {
+  public getMetadata = () => metadata;
 
-  description =
-    "Resolve a pending consolidation candidate from `consolidate_suggest`. reject dismisses it (the exact cluster is " +
-    "never re-proposed). accept applies it: a `link` candidate writes the system similar_to edge between its members; " +
-    "a `distill` candidate writes a durable semantic fact from its `override` (or its generated proposal), links it " +
-    "`derived_from` each source, and stamps the sources consolidated; a `merge` candidate folds the duplicate into the " +
-    "canonical survivor — optionally rewriting it from `override`/proposal — re-points authored edges, and supersedes " +
-    "the loser; a `prune` candidate soft-invalidates a dead mirror node. Superseded/consolidated/pruned nodes stay " +
-    "queryable via history. Idempotent per candidate — one already applied or dismissed cannot be resolved again.";
-
-  schema = {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("The consolidation candidate id (from consolidate_suggest)."),
-    decision: z
-      .enum(["accept", "reject"])
-      .describe("accept: apply the consolidation. reject: dismiss it (never re-proposed)."),
-    override: z
-      .object({
-        title: z.string().min(1),
-        summary: z.string().min(1),
-        body: z.string().min(1),
-      })
-      .optional()
-      .describe(
-        "For accepting a distill/merge candidate: the summary/merged body to write, overriding any generated proposal. Required for distill when the candidate has no proposal (e.g. the manual provider); optional for merge.",
-      ),
-  };
-
-  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
     const hints = touchOrCreate(this.ctx, args.session_id);
     const candidate = this.ctx.repo.getCandidate(args.id);
 

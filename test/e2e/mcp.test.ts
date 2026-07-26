@@ -4,10 +4,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { container } from "tsyringe";
 import { Server } from "../../src/core/server";
-import { DB_TOKEN } from "../../src/db/repositories/base";
-import { openDatabase } from "../../src/db/database";
-
-container.register(DB_TOKEN, { useValue: openDatabase(":memory") });
 
 async function connect() {
   const server = container.resolve(Server);

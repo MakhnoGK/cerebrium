@@ -1,30 +1,13 @@
-import { TypeOf, z, ZodObject } from "zod";
-import { touchOrCreate } from "@/tools/context";
-import { AbstractTool, ToolName } from "@/tools/contracts";
+import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
+import { metadata } from "@/tools/invalidate/metadata";
 
 @tool()
-export class InvalidateTool extends AbstractTool {
-  name = ToolName.INVALIDATE;
+export class InvalidateTool implements McpTool<(typeof metadata)["schema"], unknown> {
+  public getMetadata = () => metadata;
 
-  description =
-    "Soft-delete a node: mark it invalid so it stops appearing in normal search, while keeping it fully reconstructable " +
-    "(nothing is ever hard-deleted; the node stays visible with `history:true`). When a newer node replaces this one, " +
-    "pass `superseded_by` to record the link. Prefer this over leaving stale facts around. Returns the invalidated envelope.";
-
-  schema = {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("Id of the node to invalidate (soft-delete)."),
-    reason: z.string().min(1).describe("Why it's no longer valid — recorded in the activity log."),
-    superseded_by: z
-      .string()
-      .optional()
-      .describe(
-        "Id of the node that replaces this one; creates a 'supersedes' edge from the new node to this one.",
-      ),
-  };
-
-  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
     const hints = touchOrCreate(this.ctx, args.session_id);
 
     if (!this.ctx.repo.nodeExists(args.id)) throw new Error(`node ${args.id} does not exist.`);

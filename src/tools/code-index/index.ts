@@ -1,12 +1,12 @@
-import { z } from "zod";
 import { basename } from "node:path";
 import type { ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
 import { embeddingNotes } from "@/tools/notes";
-import { AbstractTool, ToolName } from "@/tools/contracts";
+import { McpTool } from "@/tools/contracts";
 import type { IndexStats, IndexTarget } from "@/code/indexer";
 import { indexRepo, parseCodeRoots } from "@/code/indexer";
 import { tool } from "@/tools/contracts/tool";
+import { metadata } from "@/tools/code-index/metadata";
 
 // TODO: Separate file
 class RepositoryNotConfiguredError extends Error {
@@ -28,7 +28,7 @@ class CodeRootsNotConfiguredError extends Error {
 }
 
 // TODO: Separate file
-type CodeIndexResult =
+type ToolResponse =
   | (IndexStats & {
       hints?: string[];
       context_notes?: string[];
@@ -40,35 +40,10 @@ type CodeIndexResult =
     };
 
 @tool()
-export class CodeIndexTool extends AbstractTool {
-  name = ToolName.CODE_INDEX;
+export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+  public getMetadata = () => metadata;
 
-  description =
-    "Index the owner's source repositories into `symbol` mirror nodes and code edges (defines/imports/calls). Run this " +
-    "AFTER pulling or changing a repo. It is kernel-side and incremental: unchanged files are hash-gated and cost nothing, " +
-    "changed files re-parse and re-embed only the symbols that changed, and files/symbols removed from source are soft- " +
-    "invalidated (never deleted). Pass `repo` (a configured MEMORY_CODE_ROOTS name) or `path` (a directory), or neither to " +
-    "index all configured roots; `force:true` re-parses everything. It does NOT read code back to you — it returns only a " +
-    "compact per-repo summary (files scanned/indexed/skipped, symbols added/updated/invalidated, edges, timing). To read " +
-    "the code afterwards use `search` (by meaning) or `code_lookup` (by structure), then `get` for a symbol's source.";
-
-  schema = {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    repo: z
-      .string()
-      .optional()
-      .describe("Name of a configured repo (from MEMORY_CODE_ROOTS). Omit to index all roots."),
-    path: z
-      .string()
-      .optional()
-      .describe("Explicit repo-root directory to index instead of a configured name."),
-    force: z
-      .boolean()
-      .optional()
-      .describe("Re-parse every file, bypassing the per-file hash-gate (default false)."),
-  };
-
-  async invoke(args: ToolArgs<typeof this.schema>): Promise<CodeIndexResult> {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
     // TODO: Move both to "app layer"
     const targets = this.getTargets(args);
     const results = await this.getIndexingResults(targets, args);
@@ -77,7 +52,7 @@ export class CodeIndexTool extends AbstractTool {
     const notes = embeddingNotes(this.ctx.repo);
     const hints = touchOrCreate(this.ctx, args.session_id);
 
-    const out: CodeIndexResult = results.length === 1 ? { ...results[0]! } : { repos: results };
+    const out: ToolResponse = results.length === 1 ? { ...results[0]! } : { repos: results };
 
     if (hints.length) out.hints = hints;
     if (notes.length) out.context_notes = notes;

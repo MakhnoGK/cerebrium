@@ -1,45 +1,22 @@
-import { z } from "zod";
 import type { ToolArgs } from "@/tools/context";
 import { touchOrCreate } from "@/tools/context";
-import { AbstractTool, ToolName } from "@/tools/contracts";
+import { McpTool } from "@/tools/contracts";
 import { Envelope } from "@/core/types";
 import { tool } from "@/tools/contracts/tool";
+import { metadata } from "./metadata";
 
 // TODO: Move to a separate file
-type ToolResult =
+type ToolResponse =
   | (Envelope & {
       hints: string[];
     })
   | Envelope;
 
 @tool()
-export class CheckpointTool extends AbstractTool {
-  name = ToolName.CHECKPOINT;
+export class CheckpointTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+  public getMetadata = () => metadata;
 
-  description =
-    "Record a session checkpoint before ending a work block. This is the tool to call when you're about to stop: it " +
-    "writes an episodic `checkpoint` node (Summary / Decisions / Open threads) and links it to the nodes you touched, so " +
-    "the next session's `session_start` can show you exactly where you left off. Returns the checkpoint's envelope.";
-
-  schema = {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    project: z.string().optional().describe("Project scope; omit for a global checkpoint."),
-    summary: z
-      .string()
-      .min(1)
-      .describe("What happened in this work block — the 'where did I leave off' paragraph."),
-    decisions: z.array(z.string()).optional().describe("Decisions made, each with its reason."),
-    open_threads: z
-      .array(z.string())
-      .optional()
-      .describe("Unfinished work / questions to pick up next time."),
-    touched_node_ids: z
-      .array(z.string())
-      .optional()
-      .describe("Ids of nodes this session touched; linked via 'references'."),
-  };
-
-  async invoke(args: ToolArgs<typeof this.schema>): Promise<ToolResult> {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
     const hints = touchOrCreate(this.ctx, args.session_id, args.project ?? null);
 
     const existing = (args.touched_node_ids ?? []).filter((id) => this.ctx.repo.nodeExists(id));

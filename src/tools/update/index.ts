@@ -1,31 +1,15 @@
-import { TypeOf, z, ZodObject } from "zod";
-import { touchOrCreate } from "@/tools/context";
-import { AbstractTool, ToolName } from "@/tools/contracts";
+import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
+import { metadata } from "@/tools/update/metadata";
 
 const MAX_CONTENT = 50_000;
 
 @tool()
-export class UpdateTool extends AbstractTool {
-  name = ToolName.UPDATE;
+export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown> {
+  public getMetadata = () => metadata;
 
-  description =
-    "Revise a semantic node by appending a new revision (history is preserved; the old text stays reachable via " +
-    "`get` with `rev`). Use this to correct or extend a fact/decision rather than writing a near-duplicate. Episodic " +
-    "nodes are write-once and CANNOT be updated — record what changed as a new node instead. Returns the updated envelope.";
-
-  schema = {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("Id of the SEMANTIC node to revise."),
-    content: z
-      .string()
-      .optional()
-      .describe("New markdown body (replaces current). Omit to change only the title."),
-    title: z.string().min(1).optional().describe("New title."),
-    reason: z.string().optional().describe("Why this revision — stored in the node's history."),
-  };
-
-  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
     const hints = touchOrCreate(this.ctx, args.session_id);
     const current = this.ctx.repo.envelope(args.id);
 

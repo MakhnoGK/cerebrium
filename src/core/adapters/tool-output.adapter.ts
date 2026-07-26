@@ -1,10 +1,11 @@
-import { AbstractTool } from "@/tools/contracts";
+import { McpTool } from "@/tools/contracts";
 import { ToolArgs } from "@/tools/context";
+import { ZodRawShape } from "zod";
 
 export class ToolOutputAdapter {
-  constructor(private tool: AbstractTool) {}
+  constructor(private tool: McpTool<ZodRawShape, unknown>) {}
 
-  public async transform(args: ToolArgs<typeof this.tool.schema>) {
+  public async transform(args: ToolArgs<ZodRawShape>) {
     return this.tool
       .invoke(args)
       .then((data) => ({

@@ -1,23 +1,19 @@
-import { TypeOf, z, ZodObject } from "zod";
-import { touchOrCreate } from "@/tools/context";
-import { embeddingNotes } from "@/tools/notes";
-import { AbstractTool, ToolName } from "@/tools/contracts";
-import { tool } from "@/tools/contracts/tool";
+import { ToolName } from "@/tools/contracts";
+import { z } from "zod";
 
-@tool()
-export class MirrorUpsertTool extends AbstractTool {
-  name = ToolName.MIRROR_UPSERT;
+export const metadata = {
+  name: ToolName.MIRROR_UPSERT,
 
-  description =
+  description:
     "Upsert curated external records into `mirror` nodes for a registered source. Supply only decision-worthy records " +
     "you fetched yourself via the source's MCP tools — NOT bulk exports (that would flood retrieval). `content` is a " +
     "compact markdown summary you compose; `url` deep-links back; `facets` is opaque metadata. Idempotent by " +
     "(source, native_id): re-syncing identical content is a no-op, changed content adds a revision. It does NOT remove " +
     "records absent from the batch — retire a stale record with `invalidate` on its node id. To connect a record to " +
     "your own notes or to another record, draw a `documents`/`references`/`relates_to` edge with `link`. Returns a " +
-    "compact count summary plus the affected node ids (never record content).";
+    "compact count summary plus the affected node ids (never record content).",
 
-  schema = {
+  schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
     source_id: z
       .string()
@@ -53,45 +49,5 @@ export class MirrorUpsertTool extends AbstractTool {
       )
       .min(1)
       .describe("The curated records to mirror. Idempotent by (source, native_id)."),
-  };
-
-  async invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-    const source = this.ctx.repo.getSource(args.source_id);
-
-    if (!source) {
-      throw new Error(
-        `source '${args.source_id}' is not registered. Register it first with \`source_register\`.`,
-      );
-    }
-
-    if (!source.enabled) {
-      throw new Error(
-        `source '${args.source_id}' is disabled. Re-enable it with \`source_register\` (enabled:true) before mirroring.`,
-      );
-    }
-
-    const result = this.ctx.repo.upsertMirrors(source, args.items, args.session_id, this.ctx.now());
-
-    this.ctx.repo.logEvent(
-      "mirror_upsert",
-      args.session_id,
-      null,
-      {
-        source_id: source.id,
-        added: result.added,
-        updated: result.updated,
-        unchanged: result.unchanged,
-      },
-      this.ctx.now(),
-    );
-
-    const notes = embeddingNotes(this.ctx.repo);
-    const out: Record<string, unknown> = { ...result };
-
-    if (hints.length) out.hints = hints;
-    if (notes.length) out.context_notes = notes;
-
-    return out;
-  }
-}
+  },
+};
