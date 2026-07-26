@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { ToolArgs } from "@/tools/context";
-import { newId } from "@/core/ids";
-import { estimateTokensOf } from "@/core/tokens";
 import { embeddingNotes } from "@/tools/notes";
-import type { Envelope } from "@/db/repo";
 import { AbstractTool, ToolName } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
+import { ulid } from "ulid";
+import { Context } from "@/core/context";
+import { MemoryService } from "@/tools/services/memory.service";
+import { SessionService } from "@/tools/services/session.service";
 
 interface ToolResponse {
   session_id: string;
@@ -32,59 +33,32 @@ export class SessionStartTool extends AbstractTool {
       .describe("Project scope to focus the working set; omit for a global view."),
   };
 
+  constructor(
+    protected readonly ctx: Context,
+    private readonly sessionService: SessionService,
+    private readonly memoryService: MemoryService,
+  ) {
+    super(ctx);
+  }
+
   public async invoke(args: ToolArgs<typeof this.schema>): Promise<ToolResponse> {
-    const sessionId = newId();
-    const project = args.project;
-    this.ctx.repo.ensureSession(sessionId, project ?? null, this.ctx.now());
+    const now = new Date().toISOString();
+    const sessionId = ulid();
+    const project = args.project ?? null;
 
-    let spent = 0;
-    const budget = this.ctx.workingSetBudget;
+    await this.sessionService.ensureSession(sessionId, project, now);
 
-    const fits = (item: unknown): boolean => {
-      const t = estimateTokensOf(item);
-      if (spent + t > budget) return false;
-      spent += t;
-      return true;
-    };
+    // TODO: Custom logger
+    this.ctx.repo.logEvent("session_start", sessionId, null, { project: project }, this.ctx.now());
 
-    const take = <T>(items: T[]): T[] => items.filter(fits);
-
-    const working_set: Record<string, unknown> = {};
-    if (project !== undefined) {
-      working_set.semantic = take<Envelope>(this.ctx.repo.validSemantic(project, 15));
-    } else {
-      working_set.recent = take<Envelope>(this.ctx.repo.recentValid(undefined, 15));
-    }
-
-    working_set.checkpoints = take(this.ctx.repo.lastCheckpoints(project, 2));
-    working_set.tasks = take<Envelope>(this.ctx.repo.validTasks(project, 10));
-
-    // Freshness hook: nudge the agent to re-sync external mirror sources that are past
-    // their freshness window. Only registered, enabled, stale sources; omitted entirely
-    // when there are none (a deployment with no sources sees no change).
-    const stale = this.ctx.repo
-      .sourceStatus(this.ctx.now())
-      .filter((s) => s.stale)
-      .map((s) => ({ id: s.id, label: s.label, hours_stale: s.hours_stale }));
-
-    if (stale.length) working_set.stale_sources = take(stale);
-
-    working_set.stats = this.ctx.repo.stats();
-
-    this.ctx.repo.logEvent(
-      "session_start",
-      sessionId,
-      null,
-      { project: project ?? null },
-      this.ctx.now(),
-    );
-
+    const workingSet = this.memoryService.getWorkingSet(project ?? undefined);
+    // TODO: Move to service
     const notes = embeddingNotes(this.ctx.repo);
 
     return {
+      project,
       session_id: sessionId,
-      project: project ?? null,
-      working_set,
+      working_set: workingSet,
       hints: ["Search before writing. Prefer update/link over creating near-duplicates."],
       ...(notes.length ? { context_notes: notes } : {}),
     };

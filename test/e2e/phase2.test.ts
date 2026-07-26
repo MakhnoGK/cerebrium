@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import { describe, it, expect } from "vitest";
 import { makeCtx } from "@test/helpers";
 import type { Envelope } from "@/db/repo";
@@ -5,11 +6,7 @@ import { SessionStartTool } from "../../src/tools/session_start";
 import { WriteTool } from "../../src/tools/write";
 import { SearchTool } from "../../src/tools/search";
 import { InvalidateTool } from "../../src/tools/invalidate";
-
-const session_start = new SessionStartTool();
-const write = new WriteTool();
-const search = new SearchTool();
-const invalidate = new InvalidateTool();
+import { container } from "tsyringe";
 
 const P = "auth-service";
 const FACT =
@@ -24,16 +21,21 @@ function results(res: unknown): Result[] {
   return (res as { results: Result[] }).results;
 }
 
-// Acceptance §9.3: write -> FTS-findable while pending -> worker drains -> vector-findable
+// write -> FTS-findable while pending -> worker drains -> vector-findable
 // -> near-duplicate flagged -> invalidate w/ superseded_by -> old node only via history,
 // never via graph expansion.
 describe("phase 2 end-to-end retrieval lifecycle", () => {
+  const session_start = container.resolve(SessionStartTool);
+  const write = container.resolve(WriteTool);
+  const search = container.resolve(SearchTool);
+  const invalidate = container.resolve(InvalidateTool);
+
   it("carries a fact through the full retrieval lifecycle", async () => {
-    const { ctx, repo, worker, db } = makeCtx();
-    const s = (await session_start.invoke(ctx, { project: P })).session_id;
+    const { repo, worker, db } = makeCtx();
+    const s = (await session_start.invoke({ project: P })).session_id;
 
     // 1) write a fact -> immediately findable via FTS while pending_embedding = 1
-    const fact = (await write.invoke(ctx, {
+    const fact = (await write.invoke({
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -47,7 +49,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
         .p,
     ).toBe(1);
     const textHit = results(
-      await search.invoke(ctx, {
+      await search.invoke({
         session_id: s,
         query: "access tokens expire",
         project: P,
@@ -59,7 +61,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
 
     // vector search finds nothing yet (not embedded)
     const vecEmpty = results(
-      await search.invoke(ctx, {
+      await search.invoke({
         session_id: s,
         query: "access tokens expire",
         project: P,
@@ -76,7 +78,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
         .p,
     ).toBe(0);
     const vecHit = results(
-      await search.invoke(ctx, {
+      await search.invoke({
         session_id: s,
         query: "access tokens expire",
         project: P,
@@ -89,7 +91,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     expect(hit?.best_chunk?.length).toBeGreaterThan(0);
 
     // 3) write a near-duplicate -> similar_existing returned
-    const dup = (await write.invoke(ctx, {
+    const dup = (await write.invoke({
       session_id: s,
       memory_kind: "semantic",
       type: "fact",
@@ -100,7 +102,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     expect(dup.similar_existing?.some((c) => c.id === fact.id)).toBe(true);
 
     // 4) invalidate the original with superseded_by -> only via history, never via graph
-    await invalidate.invoke(ctx, {
+    await invalidate.invoke({
       session_id: s,
       id: fact.id,
       reason: "duplicate",
@@ -108,7 +110,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     });
 
     const normal = results(
-      await search.invoke(ctx, {
+      await search.invoke({
         session_id: s,
         query: "access tokens expire",
         project: P,
@@ -118,7 +120,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     expect(normal.some((r) => r.id === fact.id)).toBe(false);
 
     const hist = results(
-      await search.invoke(ctx, {
+      await search.invoke({
         session_id: s,
         query: "access tokens expire",
         project: P,

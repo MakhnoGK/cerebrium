@@ -10,15 +10,4 @@ export abstract class AbstractTool {
   constructor(protected readonly ctx: Context) {}
 
   abstract invoke(args: TypeOf<ZodObject<typeof this.schema>>): Promise<unknown>;
-
-  public async callback(args: z.infer<z.ZodObject<z.ZodRawShape>>) {
-    return this.invoke(args)
-      .then((data) => ({
-        content: [{ type: "text" as const, text: JSON.stringify(data) }],
-      }))
-      .catch((reason: unknown) => ({
-        isError: true as const,
-        content: [{ type: "text" as const, text: (reason as Error).message }],
-      }));
-  }
 }
