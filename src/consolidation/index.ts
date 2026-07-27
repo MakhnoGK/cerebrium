@@ -26,12 +26,15 @@ class DisabledConsolidator implements ConsolidationProvider {
   readonly name = "off";
   readonly version = "1";
   readonly enabled = false;
+
   generate(): Promise<ConsolidationResult> {
     return Promise.reject(new Error("consolidation is off"));
   }
+
   reconcile(): Promise<ReconcileResult> {
     return Promise.reject(new Error("consolidation is off"));
   }
+
   annotate(): Promise<AnnotateResult> {
     return Promise.reject(new Error("consolidation is off"));
   }
@@ -47,5 +50,6 @@ export function createConsolidator(
   if (name === "off") return new DisabledConsolidator();
   if (name === "http") return new HttpConsolidator();
   if (name === "command") return new CommandConsolidator();
+
   return new ManualConsolidator();
 }

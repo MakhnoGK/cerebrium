@@ -3,23 +3,25 @@ import { newId } from "@/core/ids";
 import type { EdgeType } from "@/core/vocab";
 import type { Envelope, NeighborStub, NewNode, RevisionMeta } from "@/core/types";
 import { toEnvelope } from "@/core/types";
-import { BaseRepo } from "@/db/repositories/base";
+import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
+import { inject, injectable } from "tsyringe";
 
 // The authored-node write path (nodes + revisions + FTS + chunks/queue, atomically)
 // and node reads. The append-only-revisions and FTS-in-write-transaction invariants
 // live here, explicit in SQL. Edge writes are delegated to EdgesRepo so the graph
 // stays a single owner.
+@injectable()
 export class NodesRepo extends BaseRepo {
   constructor(
-    db: Database.Database,
+    @inject(DB_TOKEN) db: Database.Database,
     private readonly edges: EdgesRepo,
   ) {
     super(db);
   }
 
-  nodeExists(id: string): boolean {
+  async exists(id: string): Promise<boolean> {
     return !!this.db.prepare("SELECT 1 FROM nodes WHERE id = ?").get(id);
   }
 
@@ -36,9 +38,12 @@ export class NodesRepo extends BaseRepo {
     return row ? toEnvelope(row) : undefined;
   }
 
-  fullNode(id: string): { envelope: Envelope; content: string; edges: NeighborStub[] } | undefined {
+  async fullNode(
+    id: string,
+  ): Promise<{ envelope: Envelope; content: string; edges: NeighborStub[] } | undefined> {
     const row = enrichedById(this.db, id);
     if (!row) return undefined;
+
     return { envelope: toEnvelope(row), content: row.content, edges: this.edges.edgesOf(id) };
   }
 
@@ -52,10 +57,11 @@ export class NodesRepo extends BaseRepo {
     const row = this.db
       .prepare("SELECT content FROM revisions WHERE node_id = ? AND rev = ?")
       .get(id, rev) as { content: string } | undefined;
+
     return row?.content;
   }
 
-  createNode(input: NewNode): Envelope {
+  async createNode(input: NewNode): Promise<Envelope> {
     const id = newId();
     this.tx(() => {
       this.db

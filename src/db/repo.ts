@@ -115,7 +115,7 @@ export class Repo {
 
   // ---- nodes ---------------------------------------------------------------
   nodeExists(id: string): boolean {
-    return this.nodes.nodeExists(id);
+    return this.nodes.exists(id);
   }
   nodeOrigin(id: string): { memory_kind: string; origin: string | null } | undefined {
     return this.nodes.nodeOrigin(id);

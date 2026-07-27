@@ -51,6 +51,7 @@ export default tseslint.config(
       // Tests cast dynamic tool JSON to `any` and poke fields; that ergonomics is fine
       // in fixtures, unlike production code where the no-any rule stays on.
       "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-type-parameters": "off",
     },
   },
   {

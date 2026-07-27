@@ -26,7 +26,10 @@ async function connect(): Promise<Client> {
   return client;
 }
 
-type RawResult = { isError?: boolean; content: { type: string; text: string }[] };
+interface RawResult {
+  isError?: boolean;
+  content: { type: string; text: string }[];
+}
 
 // Parse a successful tool result's JSON payload. Throws (surfacing the tool's error text)
 // if the call came back as an MCP error, so a broken tool fails loudly, not silently.

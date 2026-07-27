@@ -1,18 +1,19 @@
 import type { ToolArgs } from "@/tools/context";
-import { touchOrCreate } from "@/tools/context";
 import { deriveSummary, Envelope } from "@/db/repo";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
 import { reconcilePosture } from "@/consolidation/config";
-import type { ReconcileResult } from "@/consolidation/provider";
-import { NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/write/metadata";
+import { HintsService } from "@/tools/services/hints.service";
+import { Context } from "@/core/context";
+import { EmbeddingService } from "@/tools/services/embedding.service";
+import { NodeService } from "@/tools/services/node.service";
+import { ConsolidationService } from "../services/consolidation.service";
+import { SearchRepo } from "@/db/repositories";
 
-const MAX_CONTENT = 50_000;
 const DEDUP_CANDIDATES = 5;
-const RECONCILE_CANDIDATES = 3;
 
 interface SimilarExisting {
   id: string;
@@ -31,51 +32,27 @@ type ToolResponse = Envelope & {
 
 @tool()
 export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+  constructor(
+    private readonly ctx: Context,
+    private readonly hintsService: HintsService,
+    private readonly embeddingsService: EmbeddingService,
+    private readonly nodeService: NodeService,
+    private readonly consolidationService: ConsolidationService,
+    private readonly searchRepo: SearchRepo,
+  ) {}
+
   public getMetadata = () => metadata;
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const hints = touchOrCreate(this.ctx, args.session_id, args.project ?? null);
+  public async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
+    const project = args.project ?? null;
 
-    if (args.memory_kind === "mirror") {
-      throw new Error(
-        "mirror memories (e.g. code symbols) are maintained by the indexer, not written by hand. Run `code_index` to " +
-          "index code; write 'semantic' for a decision/gotcha ABOUT code and `link` it to the symbol with a 'documents' edge.",
-      );
-    }
-
-    const kind = args.memory_kind;
-
-    if (!typeAllowedForKind(kind, args.type)) {
-      throw new Error(
-        `type '${args.type}' is not valid for ${kind} memories. Allowed: ${NODE_TYPES[kind].join(", ")}.`,
-      );
-    }
-
-    if (args.content.length > MAX_CONTENT) {
-      throw new Error(
-        `content is ${args.content.length} chars; the limit is ${MAX_CONTENT}. Split this into smaller linked notes.`,
-      );
-    }
-
-    for (const link of args.links ?? []) {
-      if (!this.ctx.repo.nodeExists(link.dst)) {
-        throw new Error(
-          `link destination '${link.dst}' does not exist. Create it first or fix the id.`,
-        );
-      }
-    }
-
-    // Dedup probe before insert — semantic only, checkpoints exempt. Never blocks.
-    const similar = kind === "semantic" ? await this.dedupProbe(args) : [];
-
-    const envelope = this.ctx.repo.createNode({
-      memory_kind: kind,
-      type: args.type,
+    const envelope = await this.nodeService.createNode({
+      project,
       title: args.title,
       content: args.content,
-      project: args.project ?? null,
+      type: args.type,
+      memory_kind: args.memory_kind,
       session_id: args.session_id,
-      ts: this.ctx.now(),
       links: args.links,
     });
 
@@ -90,12 +67,19 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
 
     // When a duplicate is found and a judging provider is configured, sharpen the advisory
     // hint into a specific action. Never blocks, never applies — the agent decides.
+    const similar = args.memory_kind === "semantic" ? await this.dedupProbe(args) : [];
+
     const reconcile =
       similar.length && this.ctx.consolidator.enabled && reconcilePosture() !== "off"
-        ? await this.tryReconcile(args, similar)
+        ? await this.consolidationService.reconcile({
+            similar,
+            project,
+            draft: { type: args.type, title: args.title, content: args.content },
+          })
         : null;
 
-    const notes = embeddingNotes(this.ctx.repo);
+    const hints = await this.hintsService.getUnknownSessionHints(args.session_id, project);
+    const notes = this.embeddingsService.getEmbeddingNotes();
 
     if (similar.length) {
       notes.unshift(
@@ -103,55 +87,21 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       );
     }
 
-    const out: ToolResponse = { ...envelope };
-
-    if (similar.length) out.similar_existing = similar;
-    if (reconcile) out.reconcile = reconcile;
-    if (hints.length) out.hints = hints;
-    if (notes.length) out.context_notes = notes;
-
-    return out;
-  }
-
-  // Ask the provider to judge the new draft against its nearest existing records: keep,
-  // update one, or supersede one. Reads full content for the top few candidates (they
-  // already cleared the dedup threshold). Advisory: any failure returns null, so the writing
-  // is unaffected, and a non-noop verdict must name a real candidate, or it decays to noop.
-  private async tryReconcile(
-    args: ToolArgs<typeof this.schema>,
-    similar: SimilarExisting[],
-  ): Promise<ReconcileResult | null> {
-    try {
-      const candidates = similar
-        .slice(0, RECONCILE_CANDIDATES)
-        .map((s) => {
-          const full = this.ctx.repo.fullNode(s.id);
-          return full ? { id: s.id, title: full.envelope.title, content: full.content } : null;
-        })
-        .filter((c): c is { id: string; title: string; content: string } => c !== null);
-
-      if (!candidates.length) return null;
-
-      const res = await this.ctx.consolidator.reconcile({
-        draft: { title: args.title, type: args.type, content: args.content },
-        project: args.project ?? null,
-        candidates,
-      });
-
-      if (res.action !== "noop" && !candidates.some((c) => c.id === res.target_id)) {
-        return { action: "noop", target_id: null, reason: res.reason };
-      }
-
-      return res;
-    } catch {
-      return null;
-    }
+    return {
+      ...envelope,
+      ...(similar.length ? { similar_existing: similar } : {}),
+      ...(notes.length ? { context_notes: notes } : {}),
+      ...(hints.length ? { hints } : {}),
+      ...(reconcile ? { reconcile } : {}),
+    };
   }
 
   // Cheap hybrid probe with the new title + first chunk. Prefers vector cosine; when
   // nothing is embedded yet (or the provider is down), it falls back to lexical
   // Jaccard over the FTS candidates, so it never blocks and never throws.
-  private async dedupProbe(args: ToolArgs<typeof this.schema>): Promise<SimilarExisting[]> {
+  private async dedupProbe(
+    args: ToolArgs<(typeof metadata)["schema"]>,
+  ): Promise<SimilarExisting[]> {
     try {
       const firstChunk = chunkContent("probe", args.content)[0]?.text ?? args.content;
       const probe = `${args.title}\n${firstChunk}`;
@@ -166,7 +116,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       const [qvec] = await this.ctx.provider.embed([probe], "query");
 
       if (qvec) {
-        scored = this.ctx.repo.vectorSearch(qvec, opts).map((r) => ({
+        scored = this.searchRepo.vectorSearch(qvec, opts).map((r) => ({
           id: r.id,
           title: r.title,
           summary: deriveSummary(r.content),
@@ -179,7 +129,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
         const match = toFtsMatch(probe);
         if (match) {
           const probeTokens = tokenSet(probe);
-          scored = this.ctx.repo
+          scored = this.searchRepo
             .search({
               match,
               project: args.project,
