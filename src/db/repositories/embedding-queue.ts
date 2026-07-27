@@ -118,7 +118,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
   // after this call. A live lease held by someone else is left untouched (no write);
   // an expired one or the caller's own is (re)claimed atomically, so concurrent
   // server processes converge on a single active worker.
-  holdWorkerLease(role: string, owner: string, ttlMs: number, now: string): boolean {
+  async holdWorkerLease(role: string, owner: string, ttlMs: number, now: string): Promise<boolean> {
     const expires = new Date(Date.parse(now) + ttlMs).toISOString();
     const cur = this.db
       .prepare("SELECT owner, expires_at FROM worker_lease WHERE role = ?")
@@ -143,7 +143,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
     return after?.owner === owner;
   }
 
-  releaseWorkerLease(role: string, owner: string): void {
+  async releaseWorkerLease(role: string, owner: string): Promise<void> {
     this.tx(() => {
       this.db.prepare("DELETE FROM worker_lease WHERE role = ? AND owner = ?").run(role, owner);
     });

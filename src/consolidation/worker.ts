@@ -1,4 +1,3 @@
-import type { Repo } from "@/db/repo";
 import { newId } from "@/core/ids";
 import {
   annotationFtsText,
@@ -23,6 +22,10 @@ import {
   prunePosture,
   simThreshold,
 } from "@/consolidation/config";
+import { inject, injectable } from "tsyringe";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
+import { SessionService } from "@/tools/services/session.service";
 
 const CONSOLIDATION_LEASE = "consolidation";
 
@@ -45,21 +48,32 @@ export interface ConsolidationTickResult {
 // competing with the embedding drain (the daemon ticks this only when the embedding
 // backlog is empty). Detection is deterministic SQL; generation goes through the
 // pluggable ConsolidationProvider.
+@injectable()
 export class ConsolidationWorker {
   private readonly ownerId = newId();
   private readonly leaseTtlMs: number;
 
   constructor(
-    private readonly repo: Repo,
+    @inject(CONSOLIDATOR_TOKEN)
     private readonly consolidator: ConsolidationProvider,
-    private readonly now: () => string,
-    opts: { leaseTtlMs?: number } = {},
+
+    private readonly queueRepo: EmbeddingQueueRepo,
+    private readonly consolidationRepo: ConsolidationRepo,
+    private readonly edgesRepo: EdgesRepo,
+    private readonly nodesRepo: NodesRepo,
+
+    private readonly sessionService: SessionService,
   ) {
-    this.leaseTtlMs = opts.leaseTtlMs ?? 60_000;
+    // TODO: Config service
+    this.leaseTtlMs = 60_000;
   }
 
-  stop(): void {
-    this.repo.releaseWorkerLease(CONSOLIDATION_LEASE, this.ownerId);
+  private now() {
+    return new Date().toISOString();
+  }
+
+  async stop(): Promise<void> {
+    await this.queueRepo.releaseWorkerLease(CONSOLIDATION_LEASE, this.ownerId);
   }
 
   // One consolidation pass. Side-effecting; tests call it directly with a fixed clock.
@@ -79,23 +93,37 @@ export class ConsolidationWorker {
       rejected: 0,
       annotated: 0,
     };
-    if (!this.repo.holdWorkerLease(CONSOLIDATION_LEASE, this.ownerId, this.leaseTtlMs, now)) {
+
+    const isWorkerReleased = await this.queueRepo.holdWorkerLease(
+      CONSOLIDATION_LEASE,
+      this.ownerId,
+      this.leaseTtlMs,
+      this.now(),
+    );
+
+    if (!isWorkerReleased) {
       return result;
     }
-    this.repo.ensureSession(this.ownerId, null, now);
+
+    await this.sessionService.ensureSession(this.ownerId, null, now);
+
     this.discoverLinks(now, result);
     await this.distill(now, result);
     await this.mergeDuplicates(now, result);
     this.pruneMirrors(now, result);
     await this.backfillProposals(now, result);
     await this.annotate(now, result);
+
     return result;
   }
 
   // Generate a judged proposal for a cluster; null if no provider or generation fails
   // (caller degrades to a proposal-less suggestion, never blocks).
   private async tryGenerate(task: ConsolidationTask): Promise<ConsolidationResult | null> {
-    if (!this.consolidator.enabled) return null;
+    if (!this.consolidator.enabled) {
+      return null;
+    }
+
     try {
       return await this.consolidator.generate(task);
     } catch {
@@ -107,21 +135,32 @@ export class ConsolidationWorker {
   // generation. auto -> write system similar_to edges; suggest -> queue; off -> skip.
   private discoverLinks(now: string, result: ConsolidationTickResult): void {
     const posture = linksPosture();
-    if (posture === "off") return;
-    const pairs = this.repo.similarLinkCandidates({ minScore: simThreshold(), limit: linkBatch() });
+
+    if (posture === "off") {
+      return;
+    }
+
+    const pairs = this.consolidationRepo.similarLinkCandidates({
+      minScore: simThreshold(),
+      limit: linkBatch(),
+    });
+
     for (const p of pairs) {
       if (posture === "auto") {
-        this.repo.insertEdge(p.src, p.dst, "similar_to", "system", this.ownerId, now, p.score);
+        this.edgesRepo.insertEdge(p.src, p.dst, "similar_to", "system", this.ownerId, now, p.score);
         result.links_added++;
       } else {
-        const id = this.repo.insertCandidate({
+        const id = this.consolidationRepo.insertCandidate({
           kind: "link",
           member_ids: [p.src, p.dst],
           canonical_id: p.dst,
           score: p.score,
           detected_at: now,
         });
-        if (id) result.links_suggested++;
+
+        if (id) {
+          result.links_suggested++;
+        }
       }
     }
   }
@@ -132,25 +171,34 @@ export class ConsolidationWorker {
   // to a proposal-less suggestion — a weak model can never corrupt memory.
   private async distill(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = distillPosture();
-    if (posture === "off") return;
+
+    if (posture === "off") {
+      return;
+    }
+
     const cutoff = new Date(Date.parse(now) - minAgeDays() * 86_400_000).toISOString();
-    const clusters = this.repo.staleEpisodicClusters({
+    const clusters = this.consolidationRepo.staleEpisodicClusters({
       minScore: simThreshold(),
       minCluster: minCluster(),
       cutoff,
       limit: distillBatch(),
     });
+
     for (const cluster of clusters) {
-      if (this.repo.candidateExists("distill", cluster.member_ids)) continue;
+      if (this.consolidationRepo.candidateExists("distill", cluster.member_ids)) {
+        continue;
+      }
+
       const gen = await this.tryGenerate({
         kind: "distill",
         project: cluster.project,
-        inputs: this.repo.candidateInputs(cluster.member_ids),
+        inputs: this.consolidationRepo.candidateInputs(cluster.member_ids),
       });
+
       // Provider judged these not worth consolidating -> record a dismissed candidate
       // (with the reason) so it is auditable and never re-proposed.
       if (gen?.recommendation === "reject") {
-        const id = this.repo.insertCandidate({
+        const id = this.consolidationRepo.insertCandidate({
           kind: "distill",
           project: cluster.project,
           member_ids: cluster.member_ids,
@@ -158,14 +206,17 @@ export class ConsolidationWorker {
           proposal: gen,
           detected_at: now,
         });
+
         if (id) {
-          this.repo.resolveCandidate(id, "dismissed", this.ownerId, now);
+          this.consolidationRepo.resolveCandidate(id, "dismissed", this.ownerId, now);
           result.rejected++;
         }
+
         continue;
       }
+
       if (posture === "auto" && gen) {
-        this.repo.applyDistillation({
+        this.nodesRepo.applyDistillation({
           title: gen.title,
           content: gen.body,
           project: cluster.project,
@@ -173,10 +224,13 @@ export class ConsolidationWorker {
           session_id: this.ownerId,
           ts: now,
         });
+
         result.distilled++;
+
         continue;
       }
-      const id = this.repo.insertCandidate({
+
+      const id = this.consolidationRepo.insertCandidate({
         kind: "distill",
         project: cluster.project,
         member_ids: cluster.member_ids,
@@ -184,7 +238,10 @@ export class ConsolidationWorker {
         proposal: gen,
         detected_at: now,
       });
-      if (id) result.distill_suggested++;
+
+      if (id) {
+        result.distill_suggested++;
+      }
     }
   }
 
@@ -193,23 +250,36 @@ export class ConsolidationWorker {
   // suggestion. Never auto-merges authored knowledge without a mind or a model.
   private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = mergePosture();
-    if (posture === "off") return;
-    const pairs = this.repo.duplicateSemanticPairs({
+
+    if (posture === "off") {
+      return;
+    }
+
+    const pairs = this.consolidationRepo.duplicateSemanticPairs({
       minScore: mergeSimThreshold(),
       limit: mergeBatch(),
     });
+
     for (const pair of pairs) {
-      if (this.repo.candidateExists("merge", pair.member_ids)) continue;
+      if (this.consolidationRepo.candidateExists("merge", pair.member_ids)) {
+        continue;
+      }
+
       const loser = pair.member_ids.find((id) => id !== pair.canonical_id);
-      if (!loser) continue;
+
+      if (!loser) {
+        continue;
+      }
+
       const gen = await this.tryGenerate({
         kind: "merge",
         project: pair.project,
-        inputs: this.repo.candidateInputs(pair.member_ids),
+        inputs: this.consolidationRepo.candidateInputs(pair.member_ids),
       });
+
       // Provider judged these distinct (not a true duplicate) -> dismiss with the reason.
       if (gen?.recommendation === "reject") {
-        const id = this.repo.insertCandidate({
+        const id = this.consolidationRepo.insertCandidate({
           kind: "merge",
           project: pair.project,
           member_ids: pair.member_ids,
@@ -218,24 +288,30 @@ export class ConsolidationWorker {
           proposal: gen,
           detected_at: now,
         });
+
         if (id) {
-          this.repo.resolveCandidate(id, "dismissed", this.ownerId, now);
+          this.consolidationRepo.resolveCandidate(id, "dismissed", this.ownerId, now);
           result.rejected++;
         }
+
         continue;
       }
+
       if (posture === "auto" && gen) {
-        this.repo.applyMerge({
+        this.nodesRepo.applyMerge({
           survivorId: pair.canonical_id,
           loserId: loser,
           session_id: this.ownerId,
           ts: now,
           merged: { title: gen.title, body: gen.body },
         });
+
         result.merged++;
+
         continue;
       }
-      const id = this.repo.insertCandidate({
+
+      const id = this.consolidationRepo.insertCandidate({
         kind: "merge",
         project: pair.project,
         member_ids: pair.member_ids,
@@ -244,7 +320,10 @@ export class ConsolidationWorker {
         proposal: gen,
         detected_at: now,
       });
-      if (id) result.merge_suggested++;
+
+      if (id) {
+        result.merge_suggested++;
+      }
     }
   }
 
@@ -253,18 +332,33 @@ export class ConsolidationWorker {
   // `http`). Provider-gated; leaves a candidate untouched on generation failure (retried
   // next sweep). Bounded by `backfillBatch` so a tick stays reasonable.
   private async backfillProposals(now: string, result: ConsolidationTickResult): Promise<void> {
-    if (!this.consolidator.enabled) return;
-    for (const cand of this.repo.pendingNeedingProposal(backfillBatch())) {
-      if (cand.kind !== "distill" && cand.kind !== "merge") continue;
-      const inputs = this.repo.candidateInputs(cand.member_ids);
-      if (!inputs.length) continue;
+    if (!this.consolidator.enabled) {
+      return;
+    }
+
+    for (const cand of this.consolidationRepo.pendingNeedingProposal(backfillBatch())) {
+      if (cand.kind !== "distill" && cand.kind !== "merge") {
+        continue;
+      }
+
+      const inputs = this.consolidationRepo.candidateInputs(cand.member_ids);
+
+      if (!inputs.length) {
+        continue;
+      }
+
       const gen = await this.tryGenerate({ kind: cand.kind, project: cand.project, inputs });
-      if (!gen) continue; // generation failed -> leave for a later sweep
-      this.repo.setCandidateProposal(cand.id, gen);
+
+      if (!gen) {
+        continue; // generation failed -> leave for a later sweep
+      }
+
+      this.consolidationRepo.setCandidateProposal(cand.id, gen);
+
       // Store the verdict either way; auto-dismiss the ones judged not worth consolidating
       // so the Review inbox surfaces only genuine duplicates.
       if (gen.recommendation === "reject") {
-        this.repo.resolveCandidate(cand.id, "dismissed", this.ownerId, now);
+        this.consolidationRepo.resolveCandidate(cand.id, "dismissed", this.ownerId, now);
         result.rejected++;
       } else {
         result.proposals_backfilled++;
@@ -277,19 +371,26 @@ export class ConsolidationWorker {
   // suggest queues a prune candidate; off skips. Never touches authored memory.
   private pruneMirrors(now: string, result: ConsolidationTickResult): void {
     const posture = prunePosture();
-    if (posture === "off") return;
-    for (const id of this.repo.deadMirrorNodes(pruneBatch())) {
+
+    if (posture === "off") {
+      return;
+    }
+
+    for (const id of this.consolidationRepo.deadMirrorNodes(pruneBatch())) {
       if (posture === "auto") {
-        this.repo.invalidateNode(id, { ts: now, session_id: this.ownerId });
+        this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;
       } else {
-        const cid = this.repo.insertCandidate({
+        const cid = this.consolidationRepo.insertCandidate({
           kind: "prune",
           member_ids: [id],
           score: 1,
           detected_at: now,
         });
-        if (cid) result.prune_suggested++;
+
+        if (cid) {
+          result.prune_suggested++;
+        }
       }
     }
   }
@@ -300,9 +401,13 @@ export class ConsolidationWorker {
   // gains terms. A generation failure skips that node (retried next sweep) and never
   // blocks the rest. `suggest` has nothing to review, so it behaves as `auto`; `off` skips.
   private async annotate(now: string, result: ConsolidationTickResult): Promise<void> {
-    if (!this.consolidator.enabled || annotatePosture() === "off") return;
-    for (const node of this.repo.unannotatedSemantic(annotateBatch())) {
+    if (!this.consolidator.enabled || annotatePosture() === "off") {
+      return;
+    }
+
+    for (const node of this.consolidationRepo.unannotatedSemantic(annotateBatch())) {
       let a;
+
       try {
         a = await this.consolidator.annotate({
           title: node.title,
@@ -312,14 +417,18 @@ export class ConsolidationWorker {
       } catch {
         continue;
       }
-      const ok = this.repo.applyAnnotation({
+
+      const ok = this.nodesRepo.applyAnnotation({
         nodeId: node.id,
         rev: node.rev,
         annotationsJson: JSON.stringify(a),
         ftsText: annotationFtsText(a),
         ts: now,
       });
-      if (ok) result.annotated++;
+
+      if (ok) {
+        result.annotated++;
+      }
     }
   }
 }
