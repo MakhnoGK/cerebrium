@@ -324,6 +324,7 @@ describe("indexer — walk filters", () => {
       { name: NAME, root },
       opts(() => clock.t),
     );
+
     expect(res.files_scanned).toBe(2); // only util/crypto.ts + auth/auth.service.ts
     expect(repo.findSymbolsByName("x", NAME, 5)).toHaveLength(0);
     expect(repo.findSymbolsByName("k", NAME, 5)).toHaveLength(0);
@@ -340,6 +341,7 @@ describe("indexer — walk filters", () => {
       { name: NAME, root },
       opts(() => clock.t),
     );
+
     expect(res.files_indexed).toBe(3); // crypto + auth + nul/sep
     expect(repo.findSymbolsByName("join", NAME, 5)).toHaveLength(1);
   });

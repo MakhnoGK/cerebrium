@@ -7,11 +7,13 @@ import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/write/metadata";
 import { HintsService } from "@/tools/services/hints.service";
-import { Context } from "@/core/context";
 import { EmbeddingService } from "@/tools/services/embedding.service";
 import { NodeService } from "@/tools/services/node.service";
 import { ConsolidationService } from "../services/consolidation.service";
 import { SearchRepo } from "@/db/repositories";
+import { _MemoryKind } from "@/core/vocab";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
+import { inject } from "tsyringe";
 
 const DEDUP_CANDIDATES = 5;
 
@@ -33,12 +35,13 @@ type ToolResponse = Envelope & {
 @tool()
 export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
   constructor(
-    private readonly ctx: Context,
     private readonly hintsService: HintsService,
     private readonly embeddingsService: EmbeddingService,
     private readonly nodeService: NodeService,
     private readonly consolidationService: ConsolidationService,
-    private readonly searchRepo: SearchRepo,
+    private readonly search: SearchRepo,
+    // TODO: Move to service ?
+    @inject(EMBEDDING_PROVIDER_TOKEN) private readonly embeddings: EmbeddingProvider,
   ) {}
 
   public getMetadata = () => metadata;
@@ -67,16 +70,17 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
 
     // When a duplicate is found and a judging provider is configured, sharpen the advisory
     // hint into a specific action. Never blocks, never applies — the agent decides.
-    const similar = args.memory_kind === "semantic" ? await this.dedupProbe(args) : [];
+    const similar =
+      args.memory_kind === _MemoryKind.SEMANTIC ? await this.dedupProbe(args, envelope) : [];
 
-    const reconcile =
-      similar.length && this.ctx.consolidator.enabled && reconcilePosture() !== "off"
-        ? await this.consolidationService.reconcile({
-            similar,
-            project,
-            draft: { type: args.type, title: args.title, content: args.content },
-          })
-        : null;
+    const shouldReconcile = similar.length && "off" !== reconcilePosture();
+    const reconcile = shouldReconcile
+      ? await this.consolidationService.reconcile({
+          similar,
+          project,
+          draft: { type: args.type, title: args.title, content: args.content },
+        })
+      : null;
 
     const hints = await this.hintsService.getUnknownSessionHints(args.session_id, project);
     const notes = this.embeddingsService.getEmbeddingNotes();
@@ -101,6 +105,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
   // Jaccard over the FTS candidates, so it never blocks and never throws.
   private async dedupProbe(
     args: ToolArgs<(typeof metadata)["schema"]>,
+    envelope: Envelope,
   ): Promise<SimilarExisting[]> {
     try {
       const firstChunk = chunkContent("probe", args.content)[0]?.text ?? args.content;
@@ -113,10 +118,10 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       };
 
       let scored: SimilarExisting[] = [];
-      const [qvec] = await this.ctx.provider.embed([probe], "query");
+      const [qvec] = await this.embeddings.embed([probe], "query");
 
       if (qvec) {
-        scored = this.searchRepo.vectorSearch(qvec, opts).map((r) => ({
+        scored = this.search.vectorSearch(qvec, opts).map((r) => ({
           id: r.id,
           title: r.title,
           summary: deriveSummary(r.content),
@@ -127,9 +132,11 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
 
       if (!scored.length) {
         const match = toFtsMatch(probe);
+
         if (match) {
           const probeTokens = tokenSet(probe);
-          scored = this.searchRepo
+
+          scored = this.search
             .search({
               match,
               project: args.project,
@@ -150,7 +157,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       const threshold = dedupThreshold();
 
       return scored
-        .filter((c) => c.score >= threshold)
+        .filter((c) => c.score >= threshold && c.id !== envelope.id)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3)
         .map((c) => ({ ...c, score: Math.round(c.score * 100) / 100 }));

@@ -1,4 +1,4 @@
-import { EDGE_TYPES, MEMORY_KINDS } from "@/core/vocab";
+import { _MemoryKind, EDGE_TYPES, MEMORY_KINDS } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 import z from "zod";
 
@@ -18,7 +18,7 @@ export const metadata = {
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
     memory_kind: z
-      .enum(MEMORY_KINDS)
+      .nativeEnum(_MemoryKind)
       .describe("'episodic' (what happened, write-once) or 'semantic' (a durable fact)."),
     type: z
       .string()

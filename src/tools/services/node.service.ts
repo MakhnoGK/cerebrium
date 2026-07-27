@@ -1,5 +1,5 @@
 import { injectable } from "tsyringe";
-import { type EdgeType, MemoryKind, NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
+import { _MemoryKind, type EdgeType, NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
 import { NodesRepo } from "@/db/repositories";
 
 const MAX_CONTENT = 50_000;
@@ -19,13 +19,13 @@ export class NodeService {
   }: object & {
     title: string;
     content: string;
-    memory_kind: MemoryKind;
+    memory_kind: _MemoryKind;
     type: string;
     project: string | null;
     session_id: string;
     links: { dst: string; type: EdgeType }[] | undefined;
   }) {
-    if (memory_kind === "mirror") {
+    if (memory_kind === _MemoryKind.MIRROR) {
       throw new Error(
         "Mirror memories (e.g. code symbols) are maintained by the indexer, not written by hand. Run `code_index` to " +
           "index code; write 'semantic' for a decision/gotcha ABOUT code and `link` it to the symbol with a 'documents' edge.",

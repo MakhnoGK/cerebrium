@@ -4,6 +4,12 @@
 export const MEMORY_KINDS = ["episodic", "semantic", "mirror"] as const;
 export type MemoryKind = (typeof MEMORY_KINDS)[number];
 
+export enum _MemoryKind {
+  EPISODIC = "episodic",
+  SEMANTIC = "semantic",
+  MIRROR = "mirror",
+}
+
 // Writable kinds through the `write` tool. `mirror` exists in the schema but is
 // non-writable by hand — mirror nodes (code `symbol`s) are maintained by
 // the indexer via the repo layer, never through `write`/`update`.

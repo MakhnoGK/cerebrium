@@ -14,6 +14,7 @@ export class SessionService {
     }
 
     await this.sessionRepo.create({ id, project, started_at: ts, last_seen: ts });
+
     return { created: true };
   }
 }

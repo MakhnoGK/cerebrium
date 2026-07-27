@@ -1,6 +1,5 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, afterAll } from "vitest";
 import { makeCtx } from "@test/helpers";
-import type { Ctx } from "@/tools/context";
 import type {
   ConsolidationProvider,
   ConsolidationResult,
@@ -11,12 +10,15 @@ import { SessionStartTool } from "../src/tools/session-start";
 import { WriteTool } from "../src/tools/write";
 import { container } from "tsyringe";
 import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { createProvider, EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "../src/embeddings";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "../src/embeddings";
 import { EmbeddingWorker } from "../src/embeddings/worker";
 import { LocalNullProvider } from "../src/embeddings/local-null";
+import Database from "better-sqlite3";
+import { DB_TOKEN } from "../src/db/repositories/base";
+import { openDatabase } from "../src/db/database";
+import { createConsolidator } from "../src/consolidation";
 
 const session_start = container.resolve(SessionStartTool);
-const write = container.resolve(WriteTool);
 
 // An enabled provider double: it only judges duplicates. `generate` is unused here.
 class FakeJudge implements ConsolidationProvider {
@@ -52,6 +54,8 @@ async function session(project?: string): Promise<string> {
 }
 
 function writeFact(s: string, title: string, content: string): Promise<WriteOut> {
+  const write = container.resolve(WriteTool);
+
   return write.invoke({
     session_id: s,
     memory_kind: "semantic",
@@ -62,11 +66,29 @@ function writeFact(s: string, title: string, content: string): Promise<WriteOut>
   }) as Promise<WriteOut>;
 }
 
+beforeEach(() => {
+  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, {
+    useValue: new LocalNullProvider(),
+  });
+});
+
 afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_RECONCILE;
 });
 
 describe("write-time reconcile", () => {
+  beforeEach(() => {
+    container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator("manual") });
+  });
+
+  afterEach(() => {
+    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+  });
+
+  afterAll(() => {
+    container.resolve<Database.Database>(DB_TOKEN).close();
+  });
+
   it("sharpens a near-duplicate into a judged action naming the target", async () => {
     const judge = new FakeJudge((t) => ({
       action: "update",
@@ -74,14 +96,10 @@ describe("write-time reconcile", () => {
       reason: "refines the existing token TTL fact",
     }));
 
-    container.register(CONSOLIDATOR_TOKEN, { useValue: judge });
-    container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, {
-      useValue: new LocalNullProvider(),
-    });
-
+    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
     const worker = container.resolve(EmbeddingWorker);
-    const s = await session(P);
 
+    const s = await session(P);
     const original = await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick(); // embed the original so the vector dedup probe finds it
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
@@ -98,12 +116,15 @@ describe("write-time reconcile", () => {
 
   it("stays silent when there is no near-duplicate (no judge call)", async () => {
     const judge = new FakeJudge(() => ({ action: "update", target_id: "x", reason: "" }));
+
+    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
     const worker = container.resolve(EmbeddingWorker);
+
     const s = await session(P);
     await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
-
     const unrelated = await writeFact(s, "Deploy cadence", "we ship the app every thursday");
+
     expect(unrelated.similar_existing).toBeUndefined();
     expect(unrelated.reconcile).toBeUndefined();
     expect(judge.calls).toBe(0);
@@ -115,12 +136,15 @@ describe("write-time reconcile", () => {
       target_id: "01NOTACANDIDATE",
       reason: "hallucinated target",
     }));
-    const { worker } = makeCtx({ consolidator: judge });
+
+    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
+    const worker = container.resolve(EmbeddingWorker);
+
     const s = await session(P);
     await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
-
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
+
     expect(dup.reconcile).toEqual({
       action: "noop",
       target_id: null,
@@ -130,29 +154,34 @@ describe("write-time reconcile", () => {
 
   it("is disabled by MEMORY_CONSOLIDATE_RECONCILE=off (advisory hint still fires)", async () => {
     process.env.MEMORY_CONSOLIDATE_RECONCILE = "off";
+
     const judge = new FakeJudge((t) => ({
       action: "update",
       target_id: t.candidates[0]!.id,
       reason: "x",
     }));
-    const { worker } = makeCtx({ consolidator: judge });
+
+    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
+    const worker = container.resolve(EmbeddingWorker);
+
     const s = await session(P);
     const original = await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
-
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
+
     expect(dup.similar_existing?.[0]?.id).toBe(original.id); // probe unaffected
     expect(dup.reconcile).toBeUndefined();
     expect(judge.calls).toBe(0);
   });
 
   it("never fires under the default offline (manual) provider", async () => {
-    const { ctx, worker } = makeCtx(); // default manual consolidator, enabled=false
-    const s = await session(ctx, P);
-    await writeFact(ctx, s, "Token TTL", ORIGINAL);
-    await worker.tick();
+    const worker = container.resolve(EmbeddingWorker);
 
-    const dup = await writeFact(ctx, s, "Token TTL", ORIGINAL);
+    const s = await session(P);
+    await writeFact(s, "Token TTL", ORIGINAL);
+    await worker.tick();
+    const dup = await writeFact(s, "Token TTL", ORIGINAL);
+
     expect(dup.similar_existing).toBeDefined();
     expect(dup.reconcile).toBeUndefined();
   });
@@ -165,12 +194,16 @@ describe("write-time reconcile", () => {
       generate: () => Promise.reject(new Error("no")),
       reconcile: () => Promise.reject(new Error("provider down")),
     };
-    const { ctx, worker } = makeCtx({ consolidator: boom });
-    const s = await session(ctx, P);
-    const original = await writeFact(ctx, s, "Token TTL", ORIGINAL);
+
+    container.registerInstance(CONSOLIDATOR_TOKEN, boom);
+    const worker = container.resolve(EmbeddingWorker);
+
+    const s = await session(P);
+    const original = await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
 
-    const dup = await writeFact(ctx, s, "Token TTL", ORIGINAL);
+    const dup = await writeFact(s, "Token TTL", ORIGINAL);
+
     expect(dup.id).toBeDefined();
     expect(dup.similar_existing?.[0]?.id).toBe(original.id);
     expect(dup.reconcile).toBeUndefined();

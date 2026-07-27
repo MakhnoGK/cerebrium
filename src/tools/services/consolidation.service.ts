@@ -1,6 +1,6 @@
-import { ConsolidationProvider, createConsolidator } from "@/consolidation";
+import { ConsolidationProvider } from "@/consolidation";
 import { NodesRepo } from "@/db/repositories";
-import { container, inject, injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 
 const RECONCILE_CANDIDATES = 3;
 
@@ -25,8 +25,6 @@ interface ReconcileVO {
 }
 
 export const CONSOLIDATOR_TOKEN = Symbol("consolidator-token");
-
-container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
 
 @injectable()
 export class ConsolidationService {

@@ -43,13 +43,14 @@ export class SessionsRepo extends BaseRepo {
       .run(...Object.values(data), ...Object.values(filter));
   }
 
-  async create(data: Record<string, number | string | boolean | null>) {
-    const fields = Object.keys(data).join(", ");
-    const values = Array.from({ length: Object.keys(data).length }, () => "?").join(", ");
+  async create(data: Record<string, unknown>) {
+    const fields = Object.keys(data);
+    const columns = fields.join(", ");
 
-    this.db
-      .prepare(`INSERT INTO sessions (${fields}) VALUES (${values})`)
-      .run(...Object.values(data));
+    const params = fields.map((field) => `@${field}`).join(", ");
+    const sql = `INSERT INTO sessions (${columns}) VALUES (${params})`;
+
+    this.db.prepare(sql).run(data);
   }
 
   logEvent(

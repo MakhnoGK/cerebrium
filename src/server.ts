@@ -10,9 +10,12 @@ import { openDatabase } from "@/db/database";
 import { ensureDaemon } from "./runtime/ensure-daemon";
 import { EmbeddingWorker } from "./embeddings/worker";
 import { createProvider, EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "./embeddings";
+import { ConsolidationProvider, createConsolidator } from "./consolidation";
+import { CONSOLIDATOR_TOKEN } from "./tools/services/consolidation.service";
 
 async function main(): Promise<void> {
   container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase() });
+  container.register<ConsolidationProvider>(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
   container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
 
   const worker = container.resolve(EmbeddingWorker);
