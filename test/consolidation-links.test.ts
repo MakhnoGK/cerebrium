@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, afterAll } from "vitest";
 import { ConsolidationWorker } from "@/consolidation/worker";
-import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
 import type { EmbeddingWorker } from "@/embeddings/worker";
 import { SessionStartTool } from "../src/tools/session-start";
@@ -13,8 +12,12 @@ import Database from "better-sqlite3";
 import { DB_TOKEN } from "../src/db/repositories/base";
 import { openDatabase } from "../src/db/database";
 import { LocalNullProvider } from "../src/embeddings/local-null";
+import { EdgesRepo } from "../src/db/repositories/edges";
+import { ConsolidationRepo } from "../src/db/repositories/consolidation";
 
 const sessionStart = container.resolve(SessionStartTool);
+const edgesRepo = container.resolve(EdgesRepo);
+const consolidationRepo = container.resolve(ConsolidationRepo);
 
 async function newNode(
   writeTool: WriteTool,
@@ -62,8 +65,8 @@ async function seed(tool: WriteTool, worker: EmbeddingWorker) {
   return { s, twinA, twinB, other };
 }
 
-function edgeTypesBetween(ctx: Ctx, a: string, b: string): string[] {
-  return ctx.repo
+function edgeTypesBetween(a: string, b: string): string[] {
+  return edgesRepo
     .edgesOf(a)
     .filter((e) => e.id === b)
     .map((e) => e.edge);
@@ -99,8 +102,8 @@ describe("similar_to link discovery", () => {
     const r = await worker.tick();
     expect(r.links_added).toBe(1);
 
-    expect(edgeTypesBetween(ctx, twinA, twinB)).toContain("similar_to");
-    expect(edgeTypesBetween(ctx, twinA, other)).not.toContain("similar_to");
+    expect(edgeTypesBetween(twinA, twinB)).toContain("similar_to");
+    expect(edgeTypesBetween(twinA, other)).not.toContain("similar_to");
   });
 
   it("is idempotent — a second sweep adds no duplicate edge", async () => {
@@ -115,7 +118,7 @@ describe("similar_to link discovery", () => {
 
     // neighborsOf is what search uses for 1-hop graph expansion: the discovered
     // similar_to edge makes each twin a neighbor of the other.
-    const neighbors = repo.neighborsOf([twinA]);
+    const neighbors = edgesRepo.neighborsOf([twinA]);
     const hit = neighbors.find((n) => n.node.id === twinB);
 
     expect(hit).toBeDefined();
@@ -131,9 +134,9 @@ describe("similar_to link discovery", () => {
 
     expect(r.links_suggested).toBe(1);
     expect(r.links_added).toBe(0);
-    expect(edgeTypesBetween(ctx, twinA, twinB)).not.toContain("similar_to");
+    expect(edgeTypesBetween(twinA, twinB)).not.toContain("similar_to");
 
-    const pending = repo.pendingCandidates({ kind: "link" });
+    const pending = consolidationRepo.pendingCandidates({ kind: "link" });
     expect(pending).toHaveLength(1);
     expect(pending[0]!.member_ids.sort()).toEqual([twinA, twinB].sort());
   });
@@ -149,6 +152,18 @@ describe("similar_to link discovery", () => {
 });
 
 describe("orphan episodic repair — link discovery reconnects unlinked episodics", () => {
+  let writeTool: WriteTool;
+  let worker: ConsolidationWorker;
+
+  beforeEach(() => {
+    container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+    container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
+    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+
+    worker = container.resolve(ConsolidationWorker);
+    writeTool = container.resolve(WriteTool);
+  });
+
   it("links an unlinked episodic to its nearest semantic neighbor", async () => {
     const s = (await sessionStart.invoke({})).session_id;
     const topic = "the http client retries three times with exponential backoff";
@@ -158,20 +173,21 @@ describe("orphan episodic repair — link discovery reconnects unlinked episodic
     await worker.tick();
 
     // A checkpoint/event_note written without touched_node_ids has no edges at all.
-    expect(repo.edgesOf(orphan)).toHaveLength(0);
+    expect(edgesRepo.edgesOf(orphan)).toHaveLength(0);
+    const r = await worker.tick();
 
     expect(r.links_added).toBe(1);
-    expect(edgeTypesBetween(ctx, orphan, fact)).toContain("similar_to");
+    expect(edgeTypesBetween(orphan, fact)).toContain("similar_to");
   });
 
   it("re-seeds nothing once the episodic has an edge (idempotent)", async () => {
     const s = (await sessionStart.invoke({})).session_id;
     const topic = "the http client retries three times with exponential backoff";
-    await newNode(ctx, s, "Retry budget", topic);
-    await newEpisodic(ctx, s, "Touched the retry logic", topic);
+    await newNode(writeTool, s, "Retry budget", topic);
+    await newEpisodic(writeTool, s, "Touched the retry logic", topic);
     await worker.tick();
 
-    expect((await cw.tick()).links_added).toBe(1);
-    expect((await cw.tick()).links_added).toBe(0);
+    expect((await worker.tick()).links_added).toBe(1);
+    expect((await worker.tick()).links_added).toBe(0);
   });
 });
