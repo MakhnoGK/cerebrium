@@ -40,7 +40,11 @@ interface RawResult {
 // if the call came back as an MCP error, so a broken tool fails loudly, not silently.
 function payload<T = Record<string, unknown>>(res: unknown): T {
   const r = res as RawResult;
-  if (r.isError) throw new Error(`tool returned isError: ${r.content[0]?.text ?? "<empty>"}`);
+
+  if (r.isError) {
+    throw new Error(`tool returned isError: ${r.content[0]?.text ?? "<empty>"}`);
+  }
+
   return JSON.parse(r.content[0]!.text) as T;
 }
 
@@ -569,9 +573,11 @@ describe("checkpoint tool", () => {
         },
       }),
     );
+
     const got = payload<{ nodes: { content: string }[] }>(
       await client.callTool({ name: "get", arguments: { session_id: sid, ids: [cp.id] } }),
     );
+
     expect(got.nodes[0]!.content).toContain("## Summary");
     expect(got.nodes[0]!.content).toContain("chose X");
   });
