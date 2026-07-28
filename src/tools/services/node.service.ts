@@ -1,12 +1,16 @@
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 import { _MemoryKind, type EdgeType, NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
 import { NodesRepo } from "@/db/repositories";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 const MAX_CONTENT = 50_000;
 
 @injectable()
 export class NodeService {
-  constructor(private readonly nodesRepo: NodesRepo) {}
+  constructor(
+    private readonly nodesRepo: NodesRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
 
   public async createNode({
     title,
@@ -59,7 +63,7 @@ export class NodeService {
       content,
       project,
       session_id,
-      ts: new Date().toISOString(),
+      ts: this.clock.now(),
       links,
     });
   }

@@ -1,4 +1,3 @@
-import "@/core/context";
 import "@/tools";
 
 import { injectable, injectAll } from "tsyringe";

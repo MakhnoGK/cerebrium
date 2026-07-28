@@ -3,6 +3,7 @@ import { newId } from "@/core/ids";
 import { inject, injectable } from "tsyringe";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { EMBEDDING_PROVIDER_TOKEN } from ".";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 const EMBED_LEASE = "embedding";
 
@@ -32,6 +33,7 @@ export class EmbeddingWorker {
   constructor(
     private readonly embeddingQueue: EmbeddingQueueRepo,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {
     this.batchSize = 16;
     this.intervalMs = 3000;
@@ -161,7 +163,7 @@ export class EmbeddingWorker {
   }
 
   private now(): string {
-    return new Date().toISOString();
+    return this.clock.now();
   }
 
   private eligible(attempts: number, enqueuedAt: string, now: string): boolean {

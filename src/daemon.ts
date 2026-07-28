@@ -1,13 +1,17 @@
 #!/usr/bin/env node
+import "reflect-metadata";
+import { container } from "tsyringe";
+import Database from "better-sqlite3";
 import { isMainModule } from "@/runtime/is-main";
-import type { Repo } from "@/db/repo";
 import { openDatabase, defaultDbPath } from "@/db/database";
-import { Repo as RepoClass } from "@/db/repo";
-import { nowIso } from "@/core/ids";
-import { createProvider } from "@/embeddings/index";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { EmbeddingQueueRepo } from "@/db/repositories";
+import { createProvider, EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings/index";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import { ConsolidationWorker } from "@/consolidation/worker";
-import { createConsolidator } from "@/consolidation/index";
+import { ConsolidationProvider, createConsolidator } from "@/consolidation/index";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { CLOCK_TOKEN, SystemClock } from "@/tools/services/clock.service";
 import { consolidateIntervalMs } from "@/consolidation/config";
 import { isDaemonAlive, writeDaemonPid, clearDaemonPid } from "@/runtime/daemon-pid";
 
@@ -31,7 +35,6 @@ export interface DaemonOptions {
 const ACTIVE_MS = Number(process.env.MEMORY_DAEMON_ACTIVE_MS) || 0;
 const IDLE_MS = 5000;
 const IDLE_EXIT_MS = Number(process.env.MEMORY_DAEMON_IDLE_MS) || 5 * 60_000;
-const BATCH = Number(process.env.MEMORY_EMBED_BATCH) || 64;
 
 export interface IdleState {
   idleSinceMs: number | null;
@@ -57,7 +60,7 @@ export function nextIdleState(
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export async function runDaemon(
-  repo: Repo,
+  queue: EmbeddingQueueRepo,
   worker: EmbeddingWorker,
   opts: DaemonOptions & {
     stopped?: () => boolean;
@@ -81,7 +84,7 @@ export async function runDaemon(
   let lastConsolidateMs = -Infinity;
   while (!stopped()) {
     await worker.tick();
-    const { backlog } = repo.embeddingStats();
+    const { backlog } = queue.embeddingStats();
     // Consolidate only when caught up on embeddings (kNN over half-embedded content is
     // noise) and no more than once per interval. Runs promptly on reaching idle, before
     // the idle-exit countdown can retire the process.
@@ -99,10 +102,15 @@ export async function runDaemon(
 async function main(): Promise<void> {
   const dbPath = defaultDbPath();
   if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
-  const db = openDatabase(dbPath);
-  const repo = new RepoClass(db);
-  const worker = new EmbeddingWorker(repo, createProvider(), nowIso, { batchSize: BATCH });
-  const consolidation = new ConsolidationWorker(repo, createConsolidator(), nowIso);
+
+  container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase(dbPath) });
+  container.registerSingleton(CLOCK_TOKEN, SystemClock);
+  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
+  container.register<ConsolidationProvider>(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+
+  const queue = container.resolve(EmbeddingQueueRepo);
+  const worker = container.resolve(EmbeddingWorker);
+  const consolidation = container.resolve(ConsolidationWorker);
 
   writeDaemonPid(dbPath);
   let stopping = false;
@@ -117,7 +125,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
 
   try {
-    await runDaemon(repo, worker, { stopped: () => stopping, consolidation });
+    await runDaemon(queue, worker, { stopped: () => stopping, consolidation });
   } finally {
     // `stopping` is flipped by the SIGTERM/SIGINT handler above; eslint's flow
     // analysis can't see that closure mutation and reads it as always-false.

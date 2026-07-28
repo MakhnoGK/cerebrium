@@ -12,11 +12,15 @@ import { EmbeddingWorker } from "./embeddings/worker";
 import { createProvider, EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "./embeddings";
 import { ConsolidationProvider, createConsolidator } from "./consolidation";
 import { CONSOLIDATOR_TOKEN } from "./tools/services/consolidation.service";
+import { createReranker, RerankProvider, RERANK_PROVIDER_TOKEN } from "./rerank";
+import { CLOCK_TOKEN, SystemClock } from "./tools/services/clock.service";
 
 async function main(): Promise<void> {
   container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase() });
+  container.registerSingleton(CLOCK_TOKEN, SystemClock);
   container.register<ConsolidationProvider>(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
   container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
+  container.register<RerankProvider>(RERANK_PROVIDER_TOKEN, { useValue: createReranker() });
 
   const worker = container.resolve(EmbeddingWorker);
   const server = container.resolve(Server);

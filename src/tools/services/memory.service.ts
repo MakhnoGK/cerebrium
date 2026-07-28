@@ -1,12 +1,15 @@
 import { injectable } from "tsyringe";
 import { MirrorRepo, SearchRepo, StatsRepo } from "@/db/repositories";
 import { estimateTokensOf } from "@/core/tokens";
-import { Context } from "@/core/context";
 
 const CHECKPOINT_LIMIT = 2;
 const TASK_LIMIT = 10;
 const SEMANTIC_LIMIT = 15;
 const RECENT_LIMIT = 15;
+
+function workingSetBudget(): number {
+  return Number(process.env.MEMORY_WORKING_SET_TOKENS) || 1500;
+}
 
 @injectable()
 export class MemoryService {
@@ -14,7 +17,6 @@ export class MemoryService {
     private readonly searchRepo: SearchRepo,
     private readonly mirrorRepo: MirrorRepo,
     private readonly statsRepo: StatsRepo,
-    private readonly ctx: Context,
   ) {}
 
   public getWorkingSet(project: string | undefined) {
@@ -46,7 +48,7 @@ export class MemoryService {
   }
 
   private selectWithinBudget<T>(items: T[]) {
-    const budget = this.ctx.workingSetBudget;
+    const budget = workingSetBudget();
     let spent = 0;
 
     return items.filter((item) => {

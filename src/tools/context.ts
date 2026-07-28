@@ -1,34 +1,3 @@
 import type { z } from "zod";
-import type { Repo } from "@/db/repo";
-import type { EmbeddingProvider } from "@/embeddings";
-import type { RerankProvider } from "@/rerank";
-import type { ConsolidationProvider } from "@/consolidation";
 
-export interface Ctx {
-  now: () => string;
-  workingSetBudget: number;
-  provider: EmbeddingProvider;
-  reranker: RerankProvider;
-  consolidator: ConsolidationProvider;
-}
-
-// The validated argument type for a tool, derived directly from its exported Zod
-// `schema` shape — so tools don't keep a throwaway `z.object(schema)` value around
-// just to `typeof` it.
 export type ToolArgs<S extends z.ZodRawShape> = z.infer<z.ZodObject<S>>;
-
-// Auto-create unknown sessions rather than erroring — agents lose ids and the
-// system must stay forgiving. Returns a hint when a session was conjured.
-export function touchOrCreate(
-  ctx: Ctx,
-  sessionId: string,
-  project: string | null = null,
-): string[] {
-  // const { created } = ctx.repo.ensureSession(sessionId, project, ctx.now());
-
-  return true
-    ? [
-        `Unknown session_id — created a new session ${sessionId}. Call session_start next time to get one.`,
-      ]
-    : [];
-}

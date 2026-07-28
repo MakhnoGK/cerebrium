@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { FileIndexResult, Repo } from "@/db/repo";
+import type { FileIndexResult } from "@/db/repo";
+import type { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
 import { langForPath } from "@/code/languages";
 import { compileIgnore } from "@/code/ignore";
 import { parse } from "@/code/parser";
@@ -127,7 +128,12 @@ export function walk(root: string): Candidate[] {
   return out;
 }
 
-export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promise<IndexStats> {
+export async function indexRepo(
+  code: CodeRepo,
+  queue: EmbeddingQueueRepo,
+  target: IndexTarget,
+  opts: IndexOptions,
+): Promise<IndexStats> {
   const start = Date.parse(opts.now());
   const stats: IndexStats = {
     repo: target.name,
@@ -168,7 +174,7 @@ export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promis
       continue;
     }
     const fileHash = sha256(buf);
-    if (!opts.force && repo.codeFileHash(target.name, c.rel) === fileHash) {
+    if (!opts.force && code.codeFileHash(target.name, c.rel) === fileHash) {
       stats.files_skipped++;
       continue; // hash-gate: unchanged file, nothing parsed or re-embedded
     }
@@ -177,7 +183,7 @@ export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promis
     const tree = await parse(c.wasm, source);
     const extract = extractFile(target.name, c.rel, c.lang, source, tree.rootNode);
     tree.delete(); // free WASM heap; extractFile has copied out everything it needs
-    const res: FileIndexResult = repo.applyFileIndex({
+    const res: FileIndexResult = code.applyFileIndex({
       repo: target.name,
       path: c.rel,
       lang: c.lang,
@@ -197,19 +203,19 @@ export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promis
   }
 
   // ---- Sweep: files gone from disk -> invalidate their symbols ----
-  for (const path of repo.listCodeFilePaths(target.name)) {
+  for (const path of code.listCodeFilePaths(target.name)) {
     if (!onDisk.has(path))
-      stats.symbols_invalidated += repo.removeFile(target.name, path, opts.now());
+      stats.symbols_invalidated += code.removeFile(target.name, path, opts.now());
   }
 
   // ---- Pass 2: cross-file imports/calls, resolved against the full directory ----
   if (dirty.length) {
-    const resolver = buildResolver(repo, target.name);
+    const resolver = buildResolver(code, target.name);
     let resolved = 0;
     for (const { rel, lang, extract } of dirty) {
       const importPairs = resolveImports(resolver, rel, extract);
       const callPairs = resolveCalls(resolver, rel, lang, extract);
-      stats.edges_written += repo.rebuildResolvedEdges(
+      stats.edges_written += code.rebuildResolvedEdges(
         target.name,
         rel,
         "imports",
@@ -217,7 +223,7 @@ export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promis
         opts.session_id,
         opts.now(),
       );
-      stats.edges_written += repo.rebuildResolvedEdges(
+      stats.edges_written += code.rebuildResolvedEdges(
         target.name,
         rel,
         "calls",
@@ -233,7 +239,7 @@ export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promis
   stats.branch = prov.branch;
   stats.commit = prov.commit;
   stats.dirty = prov.dirty;
-  repo.setRepoProvenance(
+  code.setRepoProvenance(
     target.name,
     target.root,
     prov.branch,
@@ -242,7 +248,7 @@ export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promis
     opts.now(),
   );
 
-  stats.parked_embeddings = repo.embeddingStats().parked;
+  stats.parked_embeddings = queue.embeddingStats().parked;
   stats.duration_ms = Math.max(0, Date.parse(opts.now()) - start);
   return stats;
 }
@@ -260,14 +266,14 @@ function pathNameKey(path: string, name: string): string {
   return `${path}\0${name}`;
 }
 
-export function buildResolver(repo: Repo, name: string): Resolver {
+export function buildResolver(code: CodeRepo, name: string): Resolver {
   const r: Resolver = {
     byQualified: new Map(),
     byPathName: new Map(),
     moduleByPath: new Map(),
     byName: new Map(),
   };
-  for (const e of repo.repoSymbolDirectory(name)) {
+  for (const e of code.repoSymbolDirectory(name)) {
     if (!r.byQualified.has(e.qualified)) r.byQualified.set(e.qualified, e.node_id);
     const key = pathNameKey(e.path, e.name);
     if (!r.byPathName.has(key)) r.byPathName.set(key, e.node_id);
