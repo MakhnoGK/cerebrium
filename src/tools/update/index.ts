@@ -1,7 +1,11 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/update/metadata";
+import { NodesRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 const MAX_CONTENT = 50_000;
 
@@ -9,9 +13,15 @@ const MAX_CONTENT = 50_000;
 export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
+  constructor(
+    private readonly hints: HintsService,
+    private readonly nodes: NodesRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
+
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-    const current = this.ctx.repo.envelope(args.id);
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const current = this.nodes.envelope(args.id);
 
     if (!current) throw new Error(`node ${args.id} does not exist.`);
     if (current.kind === "episodic") {
@@ -35,21 +45,13 @@ export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown>
       );
     }
 
-    const envelope = this.ctx.repo.addRevision(args.id, {
+    const envelope = this.nodes.addRevision(args.id, {
       content: args.content,
       title: args.title,
       session_id: args.session_id,
       reason: args.reason ?? null,
-      ts: this.ctx.now(),
+      ts: this.clock.now(),
     });
-
-    this.ctx.repo.logEvent(
-      "update",
-      args.session_id,
-      args.id,
-      { rev: envelope.rev, reason: args.reason ?? null },
-      this.ctx.now(),
-    );
 
     return hints.length ? { ...envelope, hints } : envelope;
   }

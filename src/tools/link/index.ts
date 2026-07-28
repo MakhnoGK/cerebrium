@@ -1,16 +1,28 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
-import { embeddingNotes } from "@/tools/notes";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { SYSTEM_EDGE_TYPES } from "@/core/vocab";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/link/metadata";
+import { EdgesRepo, NodesRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { EmbeddingService } from "@/tools/services/embedding.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
+  constructor(
+    private readonly hints: HintsService,
+    private readonly embeddings: EmbeddingService,
+    private readonly nodes: NodesRepo,
+    private readonly edges: EdgesRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
+
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
 
     if ((SYSTEM_EDGE_TYPES as readonly string[]).includes(args.type)) {
       throw new Error(
@@ -19,31 +31,14 @@ export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {
     }
 
     if (args.src === args.dst) throw new Error("cannot link a node to itself.");
-    if (!this.ctx.repo.nodeExists(args.src))
-      throw new Error(`src node ${args.src} does not exist.`);
-    if (!this.ctx.repo.nodeExists(args.dst))
-      throw new Error(`dst node ${args.dst} does not exist.`);
+    if (!(await this.nodes.exists(args.src))) throw new Error(`src node ${args.src} does not exist.`);
+    if (!(await this.nodes.exists(args.dst))) throw new Error(`dst node ${args.dst} does not exist.`);
 
     const weight = args.weight ?? 1.0;
 
-    this.ctx.repo.insertEdge(
-      args.src,
-      args.dst,
-      args.type,
-      "agent",
-      args.session_id,
-      this.ctx.now(),
-      weight,
-    );
-    this.ctx.repo.logEvent(
-      "link",
-      args.session_id,
-      args.src,
-      { dst: args.dst, type: args.type, weight },
-      this.ctx.now(),
-    );
+    this.edges.insertEdge(args.src, args.dst, args.type, "agent", args.session_id, this.clock.now(), weight);
 
-    const notes = embeddingNotes(this.ctx.repo);
+    const notes = this.embeddings.getEmbeddingNotes();
     const out: Record<string, unknown> = {
       ok: true,
       src: args.src,

@@ -1,32 +1,33 @@
+import { inject } from "tsyringe";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/stats/metadata";
 import { StatsRepo } from "@/db/repositories";
-import { HintsService } from "../services/hints.service";
-import { DaemonService } from "../services/daemon.service";
+import { HintsService } from "@/tools/services/hints.service";
+import { DaemonService } from "@/tools/services/daemon.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
+import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/rerank";
 
 @tool()
 export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> {
-  constructor(
-    private readonly hintsService: HintsService,
-    private readonly daemonService: DaemonService,
-    private readonly statsRepo: StatsRepo,
-  ) {}
-
   public getMetadata = () => metadata;
 
+  constructor(
+    private readonly hints: HintsService,
+    private readonly daemon: DaemonService,
+    private readonly statsRepo: StatsRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
+    @inject(RERANK_PROVIDER_TOKEN) private readonly reranker: RerankProvider,
+  ) {}
+
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const now = new Date().toISOString();
-
-    const stats = this.statsRepo.techStats(now);
+    const stats = this.statsRepo.techStats(this.clock.now());
     const hints = args.session_id
-      ? await this.hintsService.getUnknownSessionHints(args.session_id, null)
+      ? await this.hints.getUnknownSessionHints(args.session_id, null)
       : [];
-
-    if (args.session_id) {
-      // this.ctx.repo.logEvent("stats", args.session_id, null, null, this.ctx.now());
-    }
 
     const { rerank_usage, ...rest } = stats;
 
@@ -34,13 +35,13 @@ export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> 
       ...rest,
       drain: {
         ...stats.drain,
-        provider: `${this.ctx.provider.name}@${this.ctx.provider.version}`,
-        daemon_alive: this.daemonService.isDaemonAlive(),
-        daemon_pid: this.daemonService.readDaemonPid(),
+        provider: `${this.provider.name}@${this.provider.version}`,
+        daemon_alive: this.daemon.isDaemonAlive(),
+        daemon_pid: this.daemon.readDaemonPid(),
       },
       rerank: {
-        provider: `${this.ctx.reranker.name}@${this.ctx.reranker.version}`,
-        enabled: this.ctx.reranker.enabled,
+        provider: `${this.reranker.name}@${this.reranker.version}`,
+        enabled: this.reranker.enabled,
         ...rerank_usage,
       },
       ...(hints.length ? { hints } : {}),

@@ -1,24 +1,34 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/invalidate/metadata";
+import { NodesRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class InvalidateTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
+  constructor(
+    private readonly hints: HintsService,
+    private readonly nodes: NodesRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
 
-    if (!this.ctx.repo.nodeExists(args.id)) throw new Error(`node ${args.id} does not exist.`);
-    if (args.superseded_by && !this.ctx.repo.nodeExists(args.superseded_by)) {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+
+    if (!(await this.nodes.exists(args.id))) throw new Error(`node ${args.id} does not exist.`);
+    if (args.superseded_by && !(await this.nodes.exists(args.superseded_by))) {
       throw new Error(`superseded_by node ${args.superseded_by} does not exist.`);
     }
 
     // Code mirrors are maintained by the indexer; retiring one by hand would just come
     // back on the next re-index. External mirrors (origin != 'repo') are agent-curated,
     // so the agent legitimately retires a stale record here.
-    const prov = this.ctx.repo.nodeOrigin(args.id);
+    const prov = this.nodes.nodeOrigin(args.id);
 
     if (prov?.memory_kind === "mirror" && prov.origin === "repo") {
       throw new Error(
@@ -26,19 +36,11 @@ export class InvalidateTool implements McpTool<(typeof metadata)["schema"], unkn
       );
     }
 
-    const envelope = this.ctx.repo.invalidateNode(args.id, {
-      ts: this.ctx.now(),
+    const envelope = this.nodes.invalidateNode(args.id, {
+      ts: this.clock.now(),
       superseded_by: args.superseded_by,
       session_id: args.session_id,
     });
-
-    this.ctx.repo.logEvent(
-      "invalidate",
-      args.session_id,
-      args.id,
-      { reason: args.reason, superseded_by: args.superseded_by ?? null },
-      this.ctx.now(),
-    );
 
     return hints.length ? { ...envelope, hints } : envelope;
   }

@@ -1,12 +1,17 @@
-import type { Ctx, ToolArgs } from "@/tools/context";
-import { touchOrCreate } from "@/tools/context";
+import { inject } from "tsyringe";
+import type { ToolArgs } from "@/tools/context";
 import { toFtsMatch } from "@/core/fts";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
 import { deriveSummary, toEnvelope } from "@/db/repo";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/search/metadata";
-import { Context } from "@/core/context";
+import { EdgesRepo, SearchRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { EmbeddingService } from "@/tools/services/embedding.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
+import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/rerank";
 
 // Candidate ceiling before JS re-rank. Episodic decay only lowers scores, so the
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap
@@ -39,6 +44,7 @@ const EDGE_WEIGHTS: Record<string, number> = {
 };
 
 type Row = SearchRow | VectorRow | EnrichedRow;
+type Schema = (typeof metadata)["schema"];
 
 interface Entry {
   row: Row;
@@ -56,38 +62,34 @@ interface ToolResponse {
 }
 
 @tool()
-export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
-  constructor(private readonly ctx: Context) {}
-
+export class SearchTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
+  constructor(
+    private readonly hints: HintsService,
+    private readonly embeddings: EmbeddingService,
+    private readonly searchRepo: SearchRepo,
+    private readonly edges: EdgesRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
+    @inject(RERANK_PROVIDER_TOKEN) private readonly reranker: RerankProvider,
+  ) {}
+
+  async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : symbolWeight();
     const match = toFtsMatch(args.query);
 
     if (!match) {
-      this.ctx.repo.logEvent(
-        "search",
-        args.session_id,
-        null,
-        { query: args.query, empty: true },
-        this.ctx.now(),
-      );
-
       const empty: ToolResponse = { results: [], total_matches: 0 };
-
-      if (hints.length) {
-        empty.hints = hints;
-      }
-
+      if (hints.length) empty.hints = hints;
       return empty;
     }
 
     if (mode === "text") {
-      return this.textSearch(this.ctx, args, match, history, penalty, hints);
+      return this.textSearch(args, match, history, penalty, hints);
     }
 
     // ---- candidate generation (branches independent; either may be empty) ----
@@ -95,7 +97,7 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
     let ftsTotal = 0;
 
     if (mode !== "vector") {
-      const r = this.ctx.repo.search({
+      const r = this.searchRepo.search({
         match,
         project: args.project,
         kinds: args.kinds,
@@ -111,10 +113,10 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
     let vecRows: VectorRow[] = [];
 
     try {
-      const [qvec] = await this.ctx.provider.embed([args.query], "query");
+      const [qvec] = await this.provider.embed([args.query], "query");
 
       if (qvec) {
-        vecRows = this.ctx.repo.vectorSearch(qvec, {
+        vecRows = this.searchRepo.vectorSearch(qvec, {
           project: args.project,
           kinds: args.kinds,
           types: args.types,
@@ -127,7 +129,7 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
     }
 
     // ---- RRF fusion ----------------------------------------------------------
-    const now = Date.parse(this.ctx.now());
+    const now = Date.parse(this.clock.now());
     const fused = new Map<
       string,
       { row: Row; rrf: number; text: boolean; vector: boolean; best_chunk?: string }
@@ -173,14 +175,11 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
     // text/vector hits. Graph neighbors are deliberately excluded (they earn their
     // place structurally, not by query relevance). Decay stays a post-multiplier, so
     // score = rerankRelevance × memoryFactor, keeping the memory model intact.
-    let reranked = false;
-    let rerankCandidates = 0;
-
-    if (this.ctx.reranker.enabled && entries.size >= MIN_RERANK) {
+    if (this.reranker.enabled && entries.size >= MIN_RERANK) {
       const base = [...entries.values()];
 
       try {
-        const scores = await this.ctx.reranker.rerank(args.query, base.map(rerankDoc));
+        const scores = await this.reranker.rerank(args.query, base.map(rerankDoc));
 
         base.forEach((entry, index) => {
           const rel = scores[index];
@@ -192,9 +191,6 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
           entry.score =
             rel * memoryFactor(entry.row, now, history) * symbolFactor(entry.row, penalty);
         });
-
-        reranked = true;
-        rerankCandidates = base.length;
       } catch {
         // Reranker unavailable -> keep the RRF ordering (graceful degradation).
       }
@@ -206,7 +202,7 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
       const parentScore = new Map(top.map((t) => [t.row.id, t.score]));
       const graphAdds = new Map<string, Entry>();
 
-      for (const nb of this.ctx.repo.neighborsOf(top.map((t) => t.row.id))) {
+      for (const nb of this.edges.neighborsOf(top.map((t) => t.row.id))) {
         if (entries.has(nb.node.id)) {
           continue; // already surfaced directly; don't downgrade to graph
         }
@@ -264,33 +260,20 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
       return envelope;
     });
 
-    this.ctx.repo.logEvent(
-      "search",
-      args.session_id,
-      null,
-      { query: args.query, mode, total: ftsTotal, reranked, rerank_candidates: rerankCandidates },
-      this.ctx.now(),
-    );
-
-    const notes = contextNotes(this.ctx, ranked);
+    const notes = this.contextNotes(ranked);
 
     const out: ToolResponse = {
       results,
       total_matches: mode === "vector" ? vecRows.length : ftsTotal,
     };
 
-    if (hints.length) {
-      out.hints = hints;
-    }
-
-    if (notes.length) {
-      out.context_notes = notes;
-    }
+    if (hints.length) out.hints = hints;
+    if (notes.length) out.context_notes = notes;
 
     return out;
   }
 
-  private wantsSymbols(args: ToolArgs<typeof this.schema>): boolean {
+  private wantsSymbols(args: ToolArgs<Schema>): boolean {
     if (args.types?.includes("symbol")) {
       return true;
     }
@@ -301,14 +284,13 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
   // Phase-1 text-only path, byte-compatible: bm25 normalized by the best match × the
   // memory-kind factor. No RRF, no vectors, no graph, no context_notes.
   private textSearch(
-    ctx: Ctx,
-    args: ToolArgs<typeof this.schema>,
+    args: ToolArgs<Schema>,
     match: string,
     history: boolean,
     penalty: number,
     hints: string[],
-  ) {
-    const { rows, total } = ctx.repo.search({
+  ): ToolResponse {
+    const { rows, total } = this.searchRepo.search({
       match,
       project: args.project,
       kinds: args.kinds,
@@ -317,7 +299,7 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
       cap: CANDIDATE_CAP,
     });
 
-    const now = Date.parse(ctx.now());
+    const now = Date.parse(this.clock.now());
     const best = Math.min(...rows.map((r) => r.bm25));
 
     const ranked = rows
@@ -337,33 +319,23 @@ export class SearchTool implements McpTool<(typeof metadata)["schema"], ToolResp
       .slice(0, args.limit)
       .map(({ row }) => toEnvelope(row));
 
-    ctx.repo.logEvent(
-      "search",
-      args.session_id,
-      null,
-      { query: args.query, mode: "text", total },
-      ctx.now(),
-    );
-
     const out: ToolResponse = { results: ranked, total_matches: total };
 
-    if (hints.length) {
-      out.hints = hints;
-    }
+    if (hints.length) out.hints = hints;
 
     return out;
   }
-}
 
-function contextNotes(ctx: Ctx, ranked: Entry[]): string[] {
-  const notes = [...embeddingNotes(ctx.repo)];
-  const superseded = ctx.repo.supersededInfo(ranked.map((e) => e.row.id));
+  private contextNotes(ranked: Entry[]): string[] {
+    const notes = [...this.embeddings.getEmbeddingNotes()];
+    const superseded = this.edges.supersededInfo(ranked.map((e) => e.row.id));
 
-  for (const [id, info] of superseded) {
-    notes.push(`${id} was superseded by ${info.by} on ${info.at.slice(0, 10)}.`);
+    for (const [id, info] of superseded) {
+      notes.push(`${id} was superseded by ${info.by} on ${info.at.slice(0, 10)}.`);
+    }
+
+    return notes;
   }
-
-  return notes;
 }
 
 // The short text a candidate is judged on: title + its best snippet (the vector
