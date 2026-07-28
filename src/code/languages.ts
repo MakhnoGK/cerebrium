@@ -1,4 +1,4 @@
-// Language registry: file extension → logical language name + the tree-sitter
+// Language registry: file extension -> logical language name + the tree-sitter
 // grammar WASM to load. A small data map by design — adding Python/Go later is a
 // new row here plus a matching branch in the extractor, not a rewrite. Files whose
 // extension is absent have no grammar and are skipped (and counted) by the indexer.
@@ -23,8 +23,10 @@ const BY_EXT: Record<string, LangDef> = {
 
 export function langForPath(path: string): LangDef | undefined {
   const dot = path.lastIndexOf(".");
-  if (dot < 0) return undefined;
+
+  if (dot < 0) {
+    return undefined;
+  }
+
   return BY_EXT[path.slice(dot).toLowerCase()];
 }
-
-export const SUPPORTED_LANGS = ["typescript", "tsx", "javascript", "php", "rust"] as const;

@@ -2,6 +2,7 @@ import type { Envelope, EnrichedRow, SearchRow, VectorRow } from "@/core/types";
 import { toEnvelope } from "@/core/types";
 import { BaseRepo } from "@/db/repositories/base";
 import { ENRICHED } from "@/db/repositories/internal";
+import { injectable } from "tsyringe";
 
 // KNN over-fetch: pull this many nearest chunks, then filter + collapse to the
 // best chunk per node. Generous for a personal-scale store; raise if a project
@@ -10,6 +11,7 @@ const VEC_K = 200;
 
 // Read-side retrieval: full-text (bm25), vector KNN, and the session working-set
 // queries. Read-only — no transactions.
+@injectable()
 export class SearchRepo extends BaseRepo {
   vectorSearch(
     embedding: number[],

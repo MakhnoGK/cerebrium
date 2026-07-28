@@ -32,7 +32,7 @@ taxonomy, or ad-hoc queries.
 2. `get_charts` (saved charts you care about), `get_cohorts`, and
    `get_custom_or_labeled_events` for the key definitions.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|
@@ -45,5 +45,5 @@ taxonomy, or ad-hoc queries.
 
 ## Link
 
-- `documents` from a `decision` note → the chart/cohort that motivated it.
+- `documents` from a `decision` note -> the chart/cohort that motivated it.
 - `relates_to` a Tableau `pulse_metric` measuring the same thing.

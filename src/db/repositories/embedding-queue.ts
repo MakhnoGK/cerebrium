@@ -6,11 +6,13 @@ import {
   refreshQueue,
   syncChunks,
 } from "@/db/repositories/internal";
+import { injectable } from "tsyringe";
 
 // The async-embedding drain side of the queue: candidate selection, vector commits,
 // per-node finalization, failure backoff, worker-lease election, and startup
 // reconciliation. The write-side enqueue (refreshQueue) lives with the node write in
 // internal.ts; this repo owns everything the daemon touches while draining.
+@injectable()
 export class EmbeddingQueueRepo extends BaseRepo {
   // Nodes eligible for an embedding attempt: not parked (attempts < max), oldest first.
   queueRows(limit: number): QueueRow[] {
@@ -23,8 +25,12 @@ export class EmbeddingQueueRepo extends BaseRepo {
   }
 
   unembeddedChunks(nodeIds: string[], limit: number): UnembeddedChunk[] {
-    if (!nodeIds.length) return [];
+    if (!nodeIds.length) {
+      return [];
+    }
+
     const ph = nodeIds.map(() => "?").join(",");
+
     return this.db
       .prepare(
         `SELECT c.id, c.node_id, c.text FROM chunks c
@@ -57,13 +63,17 @@ export class EmbeddingQueueRepo extends BaseRepo {
     version: string,
     ts: string,
   ): void {
-    if (!batch.length) return;
+    if (!batch.length) {
+      return;
+    }
+
     const delVec = this.db.prepare("DELETE FROM chunk_vec WHERE chunk_id = ?");
     const insVec = this.db.prepare("INSERT INTO chunk_vec (chunk_id, embedding) VALUES (?, ?)");
     const meta = this.db.prepare(
       `INSERT INTO embedding_meta (chunk_id, model, model_version, ts) VALUES (?, ?, ?, ?)
        ON CONFLICT(chunk_id) DO UPDATE SET model = excluded.model, model_version = excluded.model_version, ts = excluded.ts`,
     );
+
     this.tx(() => {
       for (const { nodeId, items } of batch) {
         for (const it of items) {
@@ -71,12 +81,13 @@ export class EmbeddingQueueRepo extends BaseRepo {
           insVec.run(it.chunkId, JSON.stringify(it.vector));
           meta.run(it.chunkId, model, version, ts);
         }
+
         this.finalizeNode(nodeId, ts);
       }
     });
   }
 
-  // Node fully embedded → clear pending + dequeue. Otherwise a batch made partial
+  // Node fully embedded -> clear pending + dequeue. Otherwise a batch made partial
   // progress, so clear the failure backoff and leave it queued for the next tick.
   finalizeNode(nodeId: string, ts: string): void {
     if (countUnembedded(this.db, nodeId) === 0) {
@@ -95,8 +106,11 @@ export class EmbeddingQueueRepo extends BaseRepo {
     const stmt = this.db.prepare(
       "UPDATE embedding_queue SET attempts = attempts + 1, last_error = ?, enqueued_at = ? WHERE node_id = ?",
     );
+
     this.tx(() => {
-      for (const id of nodeIds) stmt.run(error.slice(0, 500), ts, id);
+      for (const id of nodeIds) {
+        stmt.run(error.slice(0, 500), ts, id);
+      }
     });
   }
 
@@ -104,12 +118,15 @@ export class EmbeddingQueueRepo extends BaseRepo {
   // after this call. A live lease held by someone else is left untouched (no write);
   // an expired one or the caller's own is (re)claimed atomically, so concurrent
   // server processes converge on a single active worker.
-  holdWorkerLease(role: string, owner: string, ttlMs: number, now: string): boolean {
+  async holdWorkerLease(role: string, owner: string, ttlMs: number, now: string): Promise<boolean> {
     const expires = new Date(Date.parse(now) + ttlMs).toISOString();
     const cur = this.db
       .prepare("SELECT owner, expires_at FROM worker_lease WHERE role = ?")
       .get(role) as { owner: string; expires_at: string } | undefined;
-    if (cur && cur.owner !== owner && cur.expires_at > now) return false;
+    if (cur && cur.owner !== owner && cur.expires_at > now) {
+      return false;
+    }
+
     this.tx(() => {
       this.db
         .prepare(
@@ -119,12 +136,14 @@ export class EmbeddingQueueRepo extends BaseRepo {
         )
         .run(role, owner, expires, now);
     });
+
     const after = this.db.prepare("SELECT owner FROM worker_lease WHERE role = ?").get(role) as
       { owner: string } | undefined;
+
     return after?.owner === owner;
   }
 
-  releaseWorkerLease(role: string, owner: string): void {
+  async releaseWorkerLease(role: string, owner: string): Promise<void> {
     this.tx(() => {
       this.db.prepare("DELETE FROM worker_lease WHERE role = ? AND owner = ?").run(role, owner);
     });
@@ -136,15 +155,20 @@ export class EmbeddingQueueRepo extends BaseRepo {
     const pending = this.db.prepare("SELECT id FROM nodes WHERE pending_embedding = 1").all() as {
       id: string;
     }[];
+
     for (const { id } of pending) {
       const hasChunks = this.db.prepare("SELECT 1 FROM chunks WHERE node_id = ? LIMIT 1").get(id);
+      const hasQueue = this.db.prepare("SELECT 1 FROM embedding_queue WHERE node_id = ?").get(id);
+
       if (!hasChunks) {
         const row = enrichedById(this.db, id);
-        if (row)
+
+        if (row) {
           this.tx(() => {
             syncChunks(this.db, id, row.rev, row.content, ts);
           });
-      } else if (!this.db.prepare("SELECT 1 FROM embedding_queue WHERE node_id = ?").get(id)) {
+        }
+      } else if (!hasQueue) {
         refreshQueue(this.db, id, ts);
       }
     }
@@ -160,6 +184,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
       backlog: number | null;
       parked: number | null;
     };
+
     return { backlog: row.backlog ?? 0, parked: row.parked ?? 0 };
   }
 }

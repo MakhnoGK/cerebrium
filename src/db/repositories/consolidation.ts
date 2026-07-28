@@ -3,6 +3,7 @@ import { newId } from "@/core/ids";
 import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
 import { BaseRepo } from "@/db/repositories/base";
+import { injectable } from "tsyringe";
 
 // The consolidation queue aggregate. Detection (in the daemon's
 // ConsolidationWorker) inserts candidates here; the auto path or the
@@ -58,6 +59,7 @@ function toCandidate(r: CandidateRow): ConsolidationCandidate {
   };
 }
 
+@injectable()
 export class ConsolidationRepo extends BaseRepo {
   // Enqueue a detected candidate. Idempotent by (kind, members): a duplicate hash is
   // ignored and returns null (no new row); otherwise returns the new candidate's id.
@@ -97,7 +99,7 @@ export class ConsolidationRepo extends BaseRepo {
 
   // Pending distill/merge candidates that still need a *judged* proposal — either none
   // at all, or one drafted before the provider produced recommendations. The backlog a
-  // newly-enabled provider backfills (e.g. after switching manual → http).
+  // newly-enabled provider backfills (e.g. after switching manual -> http).
   pendingNeedingProposal(limit: number): ConsolidationCandidate[] {
     return (
       this.db

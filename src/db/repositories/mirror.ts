@@ -9,6 +9,7 @@ import type {
 } from "@/core/types";
 import { BaseRepo } from "@/db/repositories/base";
 import { ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
+import { injectable } from "tsyringe";
 
 // The external-mirror aggregate: the per-deployment source registry and
 // the agent-driven, curated upsert of `mirror` nodes whose origin != 'repo'. Mirror
@@ -41,6 +42,7 @@ export function mirrorExternalId(sourceId: string, nativeId: string): string {
   return createHash("sha256").update(`${sourceId}\0${nativeId}`).digest("hex").slice(0, 24);
 }
 
+@injectable()
 export class MirrorRepo extends BaseRepo {
   // ---- source registry -----------------------------------------------------
 

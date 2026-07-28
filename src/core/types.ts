@@ -195,7 +195,7 @@ export interface FileIndexInput {
   lang: string;
   fileHash: string;
   symbols: ExtractedSymbol[];
-  defines: { src: string; dst: string }[]; // container external_id → member external_id (both local)
+  defines: { src: string; dst: string }[]; // container external_id -> member external_id (both local)
   session_id: string;
   ts: string;
 }
@@ -237,7 +237,7 @@ export interface SymbolLookup {
 
 // A registered external mirror source (a row in `mirror_sources`). `kind` becomes
 // each mirror node's `origin`; `id` is the deployment-local instance (e.g.
-// 'grafana-prod'). Empty registry in a fresh clone → no active sources.
+// 'grafana-prod'). Empty registry in a fresh clone -> no active sources.
 export interface MirrorSource {
   id: string;
   kind: string;

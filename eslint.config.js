@@ -1,6 +1,6 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
-import prettier from "eslint-config-prettier";
+import prettierRecommended from "eslint-plugin-prettier/recommended";
 
 export default tseslint.config(
   { ignores: ["dist", "node_modules", ".tmp", "coverage", "test/fixtures"] },
@@ -51,11 +51,20 @@ export default tseslint.config(
       // Tests cast dynamic tool JSON to `any` and poke fields; that ergonomics is fine
       // in fixtures, unlike production code where the no-any rule stays on.
       "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unnecessary-type-parameters": "off",
     },
   },
   {
     files: ["**/*.mjs", "**/*.js"],
     extends: [tseslint.configs.disableTypeChecked],
   },
-  prettier,
+  {
+    files: ["**/*.cjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: { __dirname: "readonly", __filename: "readonly" },
+    },
+  },
+  prettierRecommended,
 );

@@ -1,21 +1,36 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
-import type { TestCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as source_register from "@/tools/source_register";
-import * as mirror_upsert from "@/tools/mirror_upsert";
-import * as mirror_status from "@/tools/mirror_status";
-import * as get from "@/tools/get";
-import * as invalidate from "@/tools/invalidate";
-import * as write from "@/tools/write";
-import * as link from "@/tools/link";
-import * as search from "@/tools/search";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
 import type { MirrorSourceStatus } from "@/core/types";
+import { SessionStartTool } from "../src/tools/session-start";
+import { SourceRegisterTool } from "../src/tools/source-register";
+import { MirrorUpsertTool } from "../src/tools/mirror-upsert";
+import { MirrorStatusTool } from "../src/tools/mirror-status";
+import { GetTool } from "../src/tools/get";
+import { InvalidateTool } from "../src/tools/invalidate";
+import { WriteTool } from "../src/tools/write";
+import { LinkTool } from "../src/tools/link";
+import { SearchTool } from "../src/tools/search";
 
-async function boot(opts?: Parameters<typeof makeCtx>[0]): Promise<TestCtx & { sid: string }> {
-  const t = makeCtx(opts);
-  const s = await session_start.handler(t.ctx, { project: "acme" });
-  return { ...t, sid: s.session_id };
+function tools() {
+  return {
+    sessionStart: container.resolve(SessionStartTool),
+    sourceRegister: container.resolve(SourceRegisterTool),
+    mirrorUpsert: container.resolve(MirrorUpsertTool),
+    mirrorStatus: container.resolve(MirrorStatusTool),
+    get: container.resolve(GetTool),
+    invalidate: container.resolve(InvalidateTool),
+    write: container.resolve(WriteTool),
+    link: container.resolve(LinkTool),
+    search: container.resolve(SearchTool),
+  };
+}
+
+async function boot(opts?: Parameters<typeof setup>[0]) {
+  const env = setup(opts);
+  const t = tools();
+  const s = await t.sessionStart.invoke({ project: "acme" });
+  return { env, t, sid: s.session_id };
 }
 
 const INCIDENT = {
@@ -27,8 +42,8 @@ const INCIDENT = {
   facets: { severity: "sev2" },
 };
 
-async function registerGrafana(ctx: TestCtx["ctx"], sid: string) {
-  return source_register.handler(ctx, {
+function registerGrafana(t: ReturnType<typeof tools>, sid: string) {
+  return t.sourceRegister.invoke({
     id: "grafana-prod",
     kind: "grafana",
     label: "Grafana (prod)",
@@ -38,19 +53,29 @@ async function registerGrafana(ctx: TestCtx["ctx"], sid: string) {
   });
 }
 
-describe("source_register + mirror_status", () => {
-  it("is empty by default: no sources, session_start emits no stale_sources", async () => {
-    const { ctx, sid } = await boot();
-    const st = (await mirror_status.handler(ctx, { session_id: sid })) as { sources: unknown[] };
+describe("SourceRegisterTool + MirrorStatusTool", () => {
+  it("should report no sources and emit no stale_sources when the registry is empty", async () => {
+    // Given
+    const { t, sid } = await boot();
+
+    // When
+    const st = (await t.mirrorStatus.invoke({ session_id: sid })) as { sources: unknown[] };
+
+    // Then
     expect(st.sources).toEqual([]);
-    const s = await session_start.handler(ctx, { project: "acme" });
+    const s = await t.sessionStart.invoke({ project: "acme" });
     expect(s.working_set).not.toHaveProperty("stale_sources");
   });
 
-  it("registers a source and reports it as stale until first sync", async () => {
-    const { ctx, sid } = await boot();
-    await registerGrafana(ctx, sid);
-    const st = (await mirror_status.handler(ctx, { session_id: sid })) as {
+  it("should report a registered source as stale when it has not been synced yet", async () => {
+    // Given
+    const { t, sid } = await boot();
+
+    // When
+    await registerGrafana(t, sid);
+
+    // Then
+    const st = (await t.mirrorStatus.invoke({ session_id: sid })) as {
       sources: MirrorSourceStatus[];
     };
     expect(st.sources).toHaveLength(1);
@@ -58,33 +83,41 @@ describe("source_register + mirror_status", () => {
   });
 });
 
-describe("mirror_upsert", () => {
-  it("errors actionably for an unregistered source", async () => {
-    const { ctx, sid } = await boot();
+describe("MirrorUpsertTool", () => {
+  it("should throw an actionable error when the source is not registered", async () => {
+    // Given
+    const { t, sid } = await boot();
+
+    // When / Then
     await expect(
-      mirror_upsert.handler(ctx, { session_id: sid, source_id: "nope", items: [INCIDENT] }),
+      t.mirrorUpsert.invoke({ session_id: sid, source_id: "nope", items: [INCIDENT] }),
     ).rejects.toThrow(/source_register/);
   });
 
-  it("mirrors a curated record; get returns url + facets; search scopes to it", async () => {
-    const { ctx, sid } = await boot();
-    await registerGrafana(ctx, sid);
-    const r = (await mirror_upsert.handler(ctx, {
+  it("should mirror a curated record so get returns url + facets and search scopes to it when upserted", async () => {
+    // Given
+    const { t, sid } = await boot();
+    await registerGrafana(t, sid);
+
+    // When
+    const r = (await t.mirrorUpsert.invoke({
       session_id: sid,
       source_id: "grafana-prod",
       items: [INCIDENT],
     })) as { added: number; node_ids: string[] };
+
+    // Then
     expect(r.added).toBe(1);
     const id = r.node_ids[0];
 
-    const g = (await get.handler(ctx, { session_id: sid, ids: [id] })) as {
+    const g = (await t.get.invoke({ session_id: sid, ids: [id!] })) as {
       nodes: { url?: string; facets?: unknown; mirror?: { source_id: string } }[];
     };
-    expect(g.nodes[0].url).toBe(INCIDENT.url);
-    expect(g.nodes[0].facets).toEqual(INCIDENT.facets);
-    expect(g.nodes[0].mirror?.source_id).toBe("grafana-prod");
+    expect(g.nodes[0]!.url).toBe(INCIDENT.url);
+    expect(g.nodes[0]!.facets).toEqual(INCIDENT.facets);
+    expect(g.nodes[0]!.mirror?.source_id).toBe("grafana-prod");
 
-    const found = (await search.handler(ctx, {
+    const found = (await t.search.invoke({
       session_id: sid,
       query: "checkout latency",
       kinds: ["mirror"],
@@ -93,66 +126,73 @@ describe("mirror_upsert", () => {
     expect(found.results.some((x) => x.id === id)).toBe(true);
   });
 
-  it("bumps the source out of staleness after a sync", async () => {
-    const { ctx, sid } = await boot();
-    await registerGrafana(ctx, sid);
-    await mirror_upsert.handler(ctx, {
-      session_id: sid,
-      source_id: "grafana-prod",
-      items: [INCIDENT],
-    });
-    const st = (await mirror_status.handler(ctx, { session_id: sid })) as {
+  it("should move the source out of staleness when a record is synced", async () => {
+    // Given
+    const { t, sid } = await boot();
+    await registerGrafana(t, sid);
+
+    // When
+    await t.mirrorUpsert.invoke({ session_id: sid, source_id: "grafana-prod", items: [INCIDENT] });
+
+    // Then
+    const st = (await t.mirrorStatus.invoke({ session_id: sid })) as {
       sources: MirrorSourceStatus[];
     };
     expect(st.sources[0]).toMatchObject({ stale: false, node_count: 1 });
   });
 });
 
-describe("invalidate guard + session_start freshness", () => {
-  it("lets the agent retire an external mirror record", async () => {
-    const { ctx, sid } = await boot();
-    await registerGrafana(ctx, sid);
-    const r = (await mirror_upsert.handler(ctx, {
+describe("Invalidate guard + session_start freshness", () => {
+  it("should let the agent retire an external mirror record when invalidated by hand", async () => {
+    // Given
+    const { t, sid } = await boot();
+    await registerGrafana(t, sid);
+    const r = (await t.mirrorUpsert.invoke({
       session_id: sid,
       source_id: "grafana-prod",
       items: [INCIDENT],
     })) as { node_ids: string[] };
-    const env = (await invalidate.handler(ctx, {
+
+    // When
+    const env = (await t.invalidate.invoke({
       session_id: sid,
-      id: r.node_ids[0],
+      id: r.node_ids[0]!,
       reason: "incident resolved and archived",
     })) as { invalidated: boolean };
+
+    // Then
     expect(env.invalidated).toBe(true);
   });
 
-  it("surfaces stale sources in session_start after the freshness window passes", async () => {
-    const { ctx, sid, clock } = await boot();
-    await registerGrafana(ctx, sid);
-    await mirror_upsert.handler(ctx, {
-      session_id: sid,
-      source_id: "grafana-prod",
-      items: [INCIDENT],
-    });
+  it("should surface stale sources in session_start when the freshness window has passed", async () => {
+    // Given
+    const { env, t, sid } = await boot();
+    await registerGrafana(t, sid);
+    await t.mirrorUpsert.invoke({ session_id: sid, source_id: "grafana-prod", items: [INCIDENT] });
 
-    clock.advanceMs(25 * 3_600_000);
-    const s = await session_start.handler(ctx, { project: "acme" });
+    // When
+    env.clock.advanceMs(25 * 3_600_000);
+    const s = await t.sessionStart.invoke({ project: "acme" });
+
+    // Then
     const ws = s.working_set as { stale_sources?: { id: string }[] };
     expect(ws.stale_sources?.some((x) => x.id === "grafana-prod")).toBe(true);
   });
 });
 
-describe("link payoff: note documents a mirror record", () => {
-  it("a decision → mirror `documents` edge surfaces the mirror via graph expansion", async () => {
-    const { ctx, sid, worker } = await boot();
-    await registerGrafana(ctx, sid);
-    const r = (await mirror_upsert.handler(ctx, {
+describe("Link payoff: a note documents a mirror record", () => {
+  it("should surface the mirror via graph expansion when a decision draws a documents edge to it", async () => {
+    // Given
+    const { env, t, sid } = await boot();
+    await registerGrafana(t, sid);
+    const r = (await t.mirrorUpsert.invoke({
       session_id: sid,
       source_id: "grafana-prod",
       items: [INCIDENT],
     })) as { node_ids: string[] };
     const mirrorId = r.node_ids[0];
 
-    const decision = (await write.handler(ctx, {
+    const decision = (await t.write.invoke({
       session_id: sid,
       memory_kind: "semantic",
       type: "decision",
@@ -161,20 +201,17 @@ describe("link payoff: note documents a mirror record", () => {
       project: "acme",
     })) as { id: string };
 
-    await link.handler(ctx, {
-      session_id: sid,
-      src: decision.id,
-      dst: mirrorId,
-      type: "documents",
-    });
+    // When
+    await t.link.invoke({ session_id: sid, src: decision.id, dst: mirrorId!, type: "documents" });
 
     // Drain embeddings so hybrid/graph expansion is fully exercised.
     for (let i = 0; i < 20; i++) {
-      const res = await worker.tick();
+      const res = await env.worker.tick();
       if (res.embedded === 0 && res.failed === 0) break;
     }
 
-    const found = (await search.handler(ctx, {
+    // Then
+    const found = (await t.search.invoke({
       session_id: sid,
       query: "cache jitter stampede",
     })) as { results: { id: string; via?: { edge: string } }[] };

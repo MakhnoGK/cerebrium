@@ -32,12 +32,12 @@ only look at once. Those belong in Grafana, not in memory.
 
 ## Fetch
 
-1. `list_incidents` filtered to active + recently-resolved → for each, `get_incident` for the
+1. `list_incidents` filtered to active + recently-resolved -> for each, `get_incident` for the
    summary, severity, affected service, and timeline.
-2. `search_dashboards` (or a maintained allow-list of UIDs) → `get_dashboard_summary` for each
+2. `search_dashboards` (or a maintained allow-list of UIDs) -> `get_dashboard_summary` for each
    key dashboard.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 **Incident:**
 
@@ -63,6 +63,6 @@ only look at once. Those belong in Grafana, not in memory.
 
 ## Link
 
-- From a `decision`/`howto` note about a fix → `documents` the `incident` it addressed.
+- From a `decision`/`howto` note about a fix -> `documents` the `incident` it addressed.
 - Between a Grafana `incident` and a Sentry `issue` or GitLab `merge_request` for the same
-  event → `relates_to`.
+  event -> `relates_to`.

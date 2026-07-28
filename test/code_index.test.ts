@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "./helpers";
+import { setup } from "@test/helpers";
 import { indexRepo } from "@/code/indexer";
 import type { EmbeddingWorker } from "@/embeddings/worker";
 
@@ -59,35 +59,47 @@ function opts(now: () => string) {
   return { session_id: "sys-index", now };
 }
 
-describe("indexer — incremental hash-gate", () => {
-  it("indexes a fresh repo, then a no-op re-index adds/updates/re-embeds nothing", async () => {
-    const { repo, clock, worker } = makeCtx();
+describe("Indexer incremental hash-gate", () => {
+  it("should index a fresh repo and then add/update/re-embed nothing on a no-op re-index", async () => {
+    // Given
+    const { code, queue, clock, worker } = setup();
+
+    // When
     const first = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(first.files_indexed).toBe(2);
     expect(first.symbols_added).toBeGreaterThan(4);
     await drain(worker);
-    expect(repo.embeddingStats().backlog).toBe(0);
+    expect(queue.embeddingStats().backlog).toBe(0);
 
+    // When
     clock.advanceDays(1);
     const again = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(again.files_indexed).toBe(0);
     expect(again.files_skipped).toBe(2);
     expect(again).toMatchObject({ symbols_added: 0, symbols_updated: 0, symbols_invalidated: 0 });
-    expect(repo.embeddingStats().backlog).toBe(0); // nothing re-enqueued
+    expect(queue.embeddingStats().backlog).toBe(0); // nothing re-enqueued
   });
 
-  it("editing one symbol re-embeds only it; siblings keep ids + embeddings", async () => {
-    const { repo, clock, worker, db } = makeCtx();
+  it("should re-embed only the edited symbol and keep sibling ids + embeddings when one symbol changes", async () => {
+    // Given
+    const { code, queue, clock, worker, db } = setup();
     await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
@@ -100,7 +112,7 @@ describe("indexer — incremental hash-gate", () => {
     const issueId = idOf("auth/auth.service.ts:AuthService.issue");
     const cryptoFnId = idOf("util/crypto.ts:hashToken");
 
-    // Change validate's doc + body (its summary changes → it re-embeds).
+    // When — change validate's doc + body (its summary changes -> it re-embeds).
     write(
       "auth/auth.service.ts",
       AUTH.replace("/** Validate a login. */", "/** Validate a login attempt securely. */").replace(
@@ -110,10 +122,13 @@ describe("indexer — incremental hash-gate", () => {
     );
     clock.advanceDays(1);
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(res.files_indexed).toBe(1); // only auth.service.ts reparsed; crypto.ts hash-gated
     expect(res.files_skipped).toBe(1);
 
@@ -132,10 +147,12 @@ describe("indexer — incremental hash-gate", () => {
     expect(pending(cryptoFnId)).toBe(0);
   });
 
-  it("deleting a symbol from a file invalidates it (soft); it survives via history", async () => {
-    const { repo, clock, db } = makeCtx();
+  it("should soft-invalidate a symbol so it survives via history when it is deleted from a file", async () => {
+    // Given
+    const { code, queue, nodes, clock, db } = setup();
     await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
@@ -145,51 +162,66 @@ describe("indexer — incremental hash-gate", () => {
         .get("auth/auth.service.ts:TOKEN_TTL") as { node_id: string }
     ).node_id;
 
+    // When
     write("auth/auth.service.ts", AUTH.replace("export const TOKEN_TTL = 900;", ""));
     clock.advanceDays(1);
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
-    expect(res.symbols_invalidated).toBeGreaterThanOrEqual(1);
 
+    // Then
+    expect(res.symbols_invalidated).toBeGreaterThanOrEqual(1);
     const row = db.prepare("SELECT invalidated_at FROM nodes WHERE id = ?").get(ttlId) as {
       invalidated_at: string | null;
     };
     expect(row.invalidated_at).not.toBeNull();
-    expect(repo.fullNode(ttlId)).toBeDefined(); // reachable, not hard-deleted
+    expect(await nodes.fullNode(ttlId)).toBeDefined(); // reachable, not hard-deleted
   });
 
-  it("deleting a whole file invalidates its symbols and drops its code_files row", async () => {
-    const { repo, clock } = makeCtx();
+  it("should invalidate a file's symbols and drop its code_files row when the whole file is deleted", async () => {
+    // Given
+    const { code, queue, clock } = setup();
     await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // When
     rmSync(join(root, "util/crypto.ts"));
     clock.advanceDays(1);
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(res.symbols_invalidated).toBeGreaterThanOrEqual(1);
-    expect(repo.codeFileHash(NAME, "util/crypto.ts")).toBeUndefined();
-    expect(repo.findSymbolsInFile(NAME, "util/crypto.ts", 25)).toHaveLength(0);
+    expect(code.codeFileHash(NAME, "util/crypto.ts")).toBeUndefined();
+    expect(code.findSymbolsInFile(NAME, "util/crypto.ts", 25)).toHaveLength(0);
   });
 });
 
-describe("indexer — edges", () => {
-  it("creates defines, cross-file imports, and best-effort calls; drops unresolved imports", async () => {
-    const { repo, clock, db } = makeCtx();
+describe("Indexer edges", () => {
+  it("should create defines, cross-file imports, and best-effort calls and drop unresolved imports", async () => {
+    // Given
+    const { code, queue, clock, db } = setup();
+
+    // When
     await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
 
+    // Then
     const idOf = (q: string) =>
       (db.prepare("SELECT node_id FROM symbols WHERE qualified = ?").get(q) as { node_id: string })
         .node_id;
@@ -211,7 +243,7 @@ describe("indexer — edges", () => {
     expect(edge(validate, hashToken, "calls")?.provenance).toBe("system"); // imported-symbol call
     expect(edge(issue, validate, "calls")?.provenance).toBe("system"); // same-file this.method() call
 
-    // The bare `@nestjs/common` import produced no edge → exactly one imports edge from the module.
+    // The bare `@nestjs/common` import produced no edge -> exactly one imports edge from the module.
     const importCount = db
       .prepare(
         "SELECT COUNT(*) AS c FROM edges WHERE src = ? AND type = 'imports' AND invalidated_at IS NULL",
@@ -235,16 +267,22 @@ class AuthService {
 }
 `;
 
-describe("indexer — PHP", () => {
-  it("indexes PHP and resolves by-name imports/calls across files", async () => {
-    const { repo, clock, db } = makeCtx();
+describe("Indexer PHP support", () => {
+  it("should index PHP and resolve by-name imports/calls across files", async () => {
+    // Given
+    const { code, queue, clock, db } = setup();
     write("src/Util/Hasher.php", PHP_HASHER);
     write("src/Service/AuthService.php", PHP_AUTH);
+
+    // When
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(res.files_indexed).toBe(4); // 2 TS + 2 PHP
 
     const idOf = (q: string) =>
@@ -261,8 +299,8 @@ describe("indexer — PHP", () => {
           "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
         )
         .get(src, dst, type);
-    expect(edge(authMod, hasher, "imports")).toBeTruthy(); // use App\Util\Hasher → Hasher class, by name
-    expect(edge(validate, hashM, "calls")).toBeTruthy(); // Hasher::hash() → Hasher.hash, by name
+    expect(edge(authMod, hasher, "imports")).toBeTruthy(); // use App\Util\Hasher -> Hasher class, by name
+    expect(edge(validate, hashM, "calls")).toBeTruthy(); // Hasher::hash() -> Hasher.hash, by name
   });
 });
 
@@ -282,16 +320,22 @@ impl AuthService {
 }
 `;
 
-describe("indexer — Rust", () => {
-  it("indexes Rust and resolves by-name imports/calls across files", async () => {
-    const { repo, clock, db } = makeCtx();
+describe("Indexer Rust support", () => {
+  it("should index Rust and resolve by-name imports/calls across files", async () => {
+    // Given
+    const { code, queue, clock, db } = setup();
     write("src/util.rs", RUST_UTIL);
     write("src/auth.rs", RUST_AUTH);
+
+    // When
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(res.files_indexed).toBe(4); // 2 TS + 2 Rust
 
     const idOf = (q: string) =>
@@ -312,35 +356,47 @@ describe("indexer — Rust", () => {
   });
 });
 
-describe("indexer — walk filters", () => {
-  it("skips node_modules, dist, and .gitignore'd paths", async () => {
-    const { repo, clock } = makeCtx();
+describe("Indexer walk filters", () => {
+  it("should skip node_modules, dist, and .gitignore'd paths when walking", async () => {
+    // Given
+    const { code, queue, clock } = setup();
     write("node_modules/dep/index.ts", "export const x = 1;");
     write("dist/bundle.ts", "export const y = 2;");
     write("secret/keys.ts", "export const k = 3;");
     write(".gitignore", "secret/\n");
+
+    // When
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(res.files_scanned).toBe(2); // only util/crypto.ts + auth/auth.service.ts
-    expect(repo.findSymbolsByName("x", NAME, 5)).toHaveLength(0);
-    expect(repo.findSymbolsByName("k", NAME, 5)).toHaveLength(0);
+    expect(code.findSymbolsByName("x", NAME, 5)).toHaveLength(0);
+    expect(code.findSymbolsByName("k", NAME, 5)).toHaveLength(0);
   });
 
-  it("indexes source that contains a NUL byte in a string literal (not treated as binary)", async () => {
-    const { repo, clock } = makeCtx();
+  it("should index source with a NUL byte in a string literal without treating it as binary", async () => {
+    // Given
+    const { code, queue, clock } = setup();
     write(
       "nul/sep.ts",
       "export function join(a: string, b: string): string {\n  return `${a}\0${b}`;\n}\n",
     );
+
+    // When
     const res = await indexRepo(
-      repo,
+      code,
+      queue,
       { name: NAME, root },
       opts(() => clock.t),
     );
+
+    // Then
     expect(res.files_indexed).toBe(3); // crypto + auth + nul/sep
-    expect(repo.findSymbolsByName("join", NAME, 5)).toHaveLength(1);
+    expect(code.findSymbolsByName("join", NAME, 5)).toHaveLength(1);
   });
 });

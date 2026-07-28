@@ -2,10 +2,12 @@ import type { EdgeType } from "@/core/vocab";
 import type { Neighbor, NeighborStub } from "@/core/types";
 import { BaseRepo } from "@/db/repositories/base";
 import { enrichedByIds } from "@/db/repositories/internal";
+import { injectable } from "tsyringe";
 
 // The typed knowledge graph: edge writes and graph reads (1-hop expansion,
 // supersession lookups). Depends only on the shared enriched-row read helper, so it
 // has no dependency on the other aggregate repos.
+@injectable()
 export class EdgesRepo extends BaseRepo {
   insertEdge(
     src: string,

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeCtx } from "./helpers";
+import { setup } from "@test/helpers";
 import { indexRepo } from "@/code/indexer";
 import { stableSymbolId } from "@/code/extract";
 
@@ -25,19 +25,20 @@ function tmpRepo(files: Record<string, string>): string {
   return d;
 }
 
-describe("006 rename third-brain -> cerebrium", () => {
-  it("relabels the mirror and recomputes symbol identity, leaving other repos intact", async () => {
-    const { repo, db, clock } = makeCtx();
+describe("Migration 006: rename third-brain -> cerebrium", () => {
+  it("should relabel the mirror, recompute symbol identity, and leave other repos intact when the rename runs", async () => {
+    // Given
+    const { code, queue, db, clock } = setup();
     const now = () => clock.t;
 
     const oldRoot = tmpRepo({
       "a.ts": "export function alpha() { return beta(); }\nfunction beta() {}\n",
     });
-    await indexRepo(repo, { name: "third-brain", root: oldRoot }, { session_id: "s", now });
-    repo.setRepoProvenance("third-brain", oldRoot, "main", "deadbee", false, clock.t);
+    await indexRepo(code, queue, { name: "third-brain", root: oldRoot }, { session_id: "s", now });
+    code.setRepoProvenance("third-brain", oldRoot, "main", "deadbee", false, clock.t);
 
     const otherRoot = tmpRepo({ "b.ts": "export function gamma() {}\n" });
-    await indexRepo(repo, { name: "other-app", root: otherRoot }, { session_id: "s", now });
+    await indexRepo(code, queue, { name: "other-app", root: otherRoot }, { session_id: "s", now });
 
     // Authored memories carrying legacy project names.
     const insNode = db.prepare(
@@ -54,9 +55,10 @@ describe("006 rename third-brain -> cerebrium", () => {
       )
       .all() as { node_id: string; external_id: string }[];
 
+    // When
     up(db);
 
-    // No lingering old names anywhere.
+    // Then — no lingering old names anywhere.
     expect(db.prepare("SELECT COUNT(*) c FROM symbols WHERE repo = 'third-brain'").get()).toEqual({
       c: 0,
     });
@@ -73,7 +75,7 @@ describe("006 rename third-brain -> cerebrium", () => {
       db.prepare("SELECT COUNT(*) c FROM nodes WHERE project = 'memory-kernel'").get(),
     ).toEqual({ c: 0 });
 
-    // code_repos row moved to the new name and root (resolved from the repo layout).
+    // Then — code_repos row moved to the new name and root (resolved from the repo layout).
     const expectedRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
     expect(
       db.prepare("SELECT repo, root FROM code_repos WHERE repo = 'cerebrium'").get(),
@@ -82,7 +84,7 @@ describe("006 rename third-brain -> cerebrium", () => {
       root: expectedRoot,
     });
 
-    // Every renamed symbol's external_id equals the cerebrium-keyed hash.
+    // Then — every renamed symbol's external_id equals the cerebrium-keyed hash.
     const renamed = db
       .prepare(
         `SELECT s.path, s.qualified, s.symbol_kind AS kind, n.external_id, n.project
@@ -101,7 +103,7 @@ describe("006 rename third-brain -> cerebrium", () => {
       expect(r.project).toBe("cerebrium");
     }
 
-    // Authored memories consolidated onto the new name; unrelated project untouched.
+    // Then — authored memories consolidated onto the new name; unrelated project untouched.
     expect(
       db
         .prepare(
@@ -113,7 +115,7 @@ describe("006 rename third-brain -> cerebrium", () => {
       project: "other-app",
     });
 
-    // The other repo's mirror is byte-for-byte untouched.
+    // Then — the other repo's mirror is byte-for-byte untouched.
     const otherSymsAfter = db
       .prepare(
         "SELECT node_id, n.external_id FROM symbols s JOIN nodes n ON n.id = s.node_id WHERE s.repo = 'other-app'",
@@ -122,32 +124,43 @@ describe("006 rename third-brain -> cerebrium", () => {
     expect(otherSymsAfter).toEqual(otherSymsBefore);
   });
 
-  it("is idempotent and a no-op when no legacy names are present", async () => {
-    const { repo, db, clock } = makeCtx();
+  it("should be idempotent and a no-op when no legacy names are present", async () => {
+    // Given
+    const { code, queue, db, clock } = setup();
     const now = () => clock.t;
     const root = tmpRepo({ "a.ts": "export function alpha() {}\n" });
-    await indexRepo(repo, { name: "third-brain", root }, { session_id: "s", now });
+    await indexRepo(code, queue, { name: "third-brain", root }, { session_id: "s", now });
 
+    // When
     up(db);
     const snapshot = db.prepare("SELECT id, external_id, project FROM nodes ORDER BY id").all();
     up(db); // second run changes nothing
+
+    // Then
     expect(db.prepare("SELECT id, external_id, project FROM nodes ORDER BY id").all()).toEqual(
       snapshot,
     );
   });
 
-  it("re-indexing under the new name after the rename adds nothing (identity matches)", async () => {
-    const { repo, db, clock } = makeCtx();
+  it("should add nothing when re-indexing under the new name after the rename", async () => {
+    // Given
+    const { code, queue, db, clock } = setup();
     const now = () => clock.t;
     const root = tmpRepo({
       "a.ts": "export function alpha() { return beta(); }\nfunction beta() {}\n",
     });
-    await indexRepo(repo, { name: "third-brain", root }, { session_id: "s", now });
-
+    await indexRepo(code, queue, { name: "third-brain", root }, { session_id: "s", now });
     up(db);
 
-    // The renamed mirror must be recognised as current by an index run under the new name.
-    const stats = await indexRepo(repo, { name: "cerebrium", root }, { session_id: "s", now });
+    // When — the renamed mirror must be recognised as current by an index run under the new name.
+    const stats = await indexRepo(
+      code,
+      queue,
+      { name: "cerebrium", root },
+      { session_id: "s", now },
+    );
+
+    // Then
     expect(stats.symbols_added).toBe(0);
     expect(stats.symbols_invalidated).toBe(0);
     const active = db

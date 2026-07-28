@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsup && node scripts/copy-assets.mjs",
     "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc --noEmit -p tsconfig.eslint.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -28,29 +29,36 @@
     "eval:rerank": "tsx scripts/rerank-eval.mts",
     "inspect": "MEMORY_DB_PATH=.tmp/dev.db npx @modelcontextprotocol/inspector tsx src/server.ts",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude '**/e2e/**'",
+    "test:e2e": "vitest run test/e2e",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
+    "reflect-metadata": "^0.2.2",
     "sqlite-vec": "^0.1.9",
     "tree-sitter-wasms": "^0.1.13",
+    "tsyringe": "^4.10.0",
     "ulid": "^2.3.0",
     "web-tree-sitter": "^0.25.10",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@swc/core": "^1.15.46",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^26.1.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
     "prettier": "^3.9.5",
     "tsup": "^8.5.1",
     "tsx": "^4.23.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.64.0",
+    "unplugin-swc": "^1.5.9",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.7"
   }

@@ -5,10 +5,10 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
     "outDir": "dist",
-    "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@test/*": ["test/*"]
     },
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -16,7 +16,9 @@
     "skipLibCheck": true,
     "declaration": false,
     "sourceMap": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "test"]

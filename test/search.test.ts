@@ -1,136 +1,165 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as search from "@/tools/search";
-import type { Ctx } from "@/tools/context";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session-start";
+import { WriteTool } from "../src/tools/write";
+import { SearchTool } from "../src/tools/search";
 
-async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.handler(ctx, {})).session_id;
-}
-function ids(res: Awaited<ReturnType<typeof search.handler>>): string[] {
-  return (res.results as Envelope[]).map((e) => e.id);
+function tools() {
+  return {
+    sessionStart: container.resolve(SessionStartTool),
+    write: container.resolve(WriteTool),
+    search: container.resolve(SearchTool),
+  };
 }
 
-describe("ranking blends text relevance with the memory model", () => {
-  it("ranks a fresh episodic checkpoint above a 60-day-old one, and a semantic fact above both", async () => {
-    const { ctx, clock } = makeCtx();
-    const s = await session(ctx);
+function ids(res: { results: Envelope[] }): string[] {
+  return res.results.map((e) => e.id);
+}
+
+describe("Ranking blends text relevance with the memory model", () => {
+  it("should rank a semantic fact above a fresh episodic above a 60-day-old one", async () => {
+    // Given
+    const env = setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
     const content = "deploy the release pipeline";
 
-    const old = (await write.handler(ctx, {
+    const old = (await t.write.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "Deploy",
       content,
     })) as Envelope;
-    clock.advanceDays(59);
-    const fresh = (await write.handler(ctx, {
+    env.clock.advanceDays(59);
+    const fresh = (await t.write.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "Deploy",
       content,
     })) as Envelope;
-    clock.advanceDays(1);
-    const fact = (await write.handler(ctx, {
+    env.clock.advanceDays(1);
+    const fact = (await t.write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Deploy",
       content,
     })) as Envelope;
 
-    const res = await search.handler(ctx, { session_id: s, query: "deploy pipeline", limit: 10 });
+    // When
+    const res = await t.search.invoke({ session_id: s, query: "deploy pipeline", limit: 10 });
+
+    // Then
     expect(ids(res)).toEqual([fact.id, fresh.id, old.id]);
   });
 
-  it("drops episodic decay under history:true so a stronger-but-older text match wins", async () => {
-    const { ctx, clock } = makeCtx();
-    const s = await session(ctx);
+  it("should let a stronger-but-older text match win under history:true (decay dropped)", async () => {
+    // Given
+    const env = setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
 
-    const old = (await write.handler(ctx, {
+    const old = (await t.write.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "x",
       content: "deploy deploy deploy deploy pipeline",
     })) as Envelope;
-    clock.advanceDays(60);
-    const fresh = (await write.handler(ctx, {
+    env.clock.advanceDays(60);
+    const fresh = (await t.write.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "x",
       content: "deploy",
     })) as Envelope;
 
-    const normal = await search.handler(ctx, { session_id: s, query: "deploy", limit: 10 });
-    expect(ids(normal)[0]).toBe(fresh.id); // decay sinks the old one
+    // When / Then — decay sinks the old one under normal search.
+    const normal = await t.search.invoke({ session_id: s, query: "deploy", limit: 10 });
+    expect(ids(normal)[0]).toBe(fresh.id);
 
-    const hist = await search.handler(ctx, {
+    // When / Then — no decay under history: the stronger text match wins.
+    const hist = await t.search.invoke({
       session_id: s,
       query: "deploy",
       history: true,
       limit: 10,
     });
-    expect(ids(hist)[0]).toBe(old.id); // no decay: the stronger text match wins
+    expect(ids(hist)[0]).toBe(old.id);
   });
 });
 
-describe("search is robust and filterable", () => {
-  it("never throws on a malformed query", async () => {
-    const { ctx } = makeCtx();
-    const s = await session(ctx);
-    await write.handler(ctx, {
+describe("Search is robust and filterable", () => {
+  it("should never throw on a malformed query", async () => {
+    // Given
+    setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
+    await t.write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "T",
       content: "alpha beta",
     });
-    const res = await search.handler(ctx, {
-      session_id: s,
-      query: 'alpha AND ) OR * "',
-      limit: 10,
-    });
+
+    // When
+    const res = await t.search.invoke({ session_id: s, query: 'alpha AND ) OR * "', limit: 10 });
+
+    // Then
     expect(res.total_matches).toBe(1);
   });
 
-  it("returns nothing for an all-punctuation query without error", async () => {
-    const { ctx } = makeCtx();
-    const s = await session(ctx);
-    const res = await search.handler(ctx, { session_id: s, query: "!!! ??? ...", limit: 10 });
+  it("should return nothing without error for an all-punctuation query", async () => {
+    // Given
+    setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
+
+    // When
+    const res = await t.search.invoke({ session_id: s, query: "!!! ??? ...", limit: 10 });
+
+    // Then
     expect(res.total_matches).toBe(0);
     expect(res.results).toEqual([]);
   });
 
-  it("filters by kind and type", async () => {
-    const { ctx } = makeCtx();
-    const s = await session(ctx);
-    await write.handler(ctx, {
+  it("should filter by kind and type when those filters are supplied", async () => {
+    // Given
+    setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
+    await t.write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "A",
       content: "shared term",
     });
-    await write.handler(ctx, {
+    await t.write.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "event_note",
       title: "B",
       content: "shared term",
     });
-    const onlySemantic = await search.handler(ctx, {
+
+    // When
+    const onlySemantic = await t.search.invoke({
       session_id: s,
       query: "shared",
       kinds: ["semantic"],
       limit: 10,
     });
+
+    // Then
     expect(onlySemantic.total_matches).toBe(1);
-    expect((onlySemantic.results as Envelope[])[0]!.kind).toBe("semantic");
+    expect(onlySemantic.results[0]!.kind).toBe("semantic");
   });
 });

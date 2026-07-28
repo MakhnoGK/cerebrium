@@ -34,7 +34,7 @@ retrieval and floods the embedding queue.
 1. `slack_search_public` (or `_and_private`) to find the specific thread/canvas by keyword.
 2. `slack_read_thread` for the decision thread, or `slack_read_canvas` for a canvas.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|
@@ -47,5 +47,5 @@ retrieval and floods the embedding queue.
 
 ## Link
 
-- `documents` from a `decision` note → the thread/canvas it came from (the payoff: a decision
+- `documents` from a `decision` note -> the thread/canvas it came from (the payoff: a decision
   in memory that points at the Slack conversation where it was made).

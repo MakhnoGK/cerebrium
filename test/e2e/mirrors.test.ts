@@ -1,23 +1,38 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "../helpers";
-import * as session_start from "@/tools/session_start";
-import * as source_register from "@/tools/source_register";
-import * as mirror_upsert from "@/tools/mirror_upsert";
-import * as write from "@/tools/write";
-import * as link from "@/tools/link";
-import * as search from "@/tools/search";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "../../src/tools/session-start";
+import { SourceRegisterTool } from "../../src/tools/source-register";
+import { MirrorUpsertTool } from "../../src/tools/mirror-upsert";
+import { WriteTool } from "../../src/tools/write";
+import { LinkTool } from "../../src/tools/link";
+import { SearchTool } from "../../src/tools/search";
 
 const P = "acme";
 
-// Phase 3a §9.4: register two sources → mirror a Grafana incident + a Sentry issue →
-// relate them → document the incident with a decision → search surfaces the incident and
-// expands to its neighbors → the source goes stale after its window and clears on re-sync.
-describe("external mirrors — end-to-end", () => {
-  it("mirrors, links, surfaces via graph expansion, and tracks freshness", async () => {
-    const { ctx, clock, worker } = makeCtx();
-    const sid = (await session_start.handler(ctx, { project: P })).session_id;
+const INCIDENT = {
+  native_id: "INC-42",
+  type: "incident",
+  title: "Checkout latency spike",
+  content: "p99 checkout latency crossed 2s for 12 minutes; rolled back deploy #918.",
+  url: "https://grafana/incident/42",
+  facets: { severity: "sev2", service: "checkout" },
+};
 
-    await source_register.handler(ctx, {
+describe("External mirrors end-to-end", () => {
+  it("should mirror, link, surface via graph expansion, and track freshness", async () => {
+    // Given
+    const env = setup();
+    const sessionStart = container.resolve(SessionStartTool);
+    const sourceRegister = container.resolve(SourceRegisterTool);
+    const mirrorUpsert = container.resolve(MirrorUpsertTool);
+    const write = container.resolve(WriteTool);
+    const link = container.resolve(LinkTool);
+    const search = container.resolve(SearchTool);
+    const sid = (await sessionStart.invoke({ project: P })).session_id;
+
+    await sourceRegister.invoke({
       session_id: sid,
       id: "grafana-prod",
       kind: "grafana",
@@ -25,7 +40,7 @@ describe("external mirrors — end-to-end", () => {
       project: P,
       freshness_hours: 24,
     });
-    await source_register.handler(ctx, {
+    await sourceRegister.invoke({
       session_id: sid,
       id: "sentry",
       kind: "sentry",
@@ -33,23 +48,15 @@ describe("external mirrors — end-to-end", () => {
       freshness_hours: 24,
     });
 
-    const inc = (await mirror_upsert.handler(ctx, {
+    // When — mirror an incident + a related Sentry issue.
+    const inc = (await mirrorUpsert.invoke({
       session_id: sid,
       source_id: "grafana-prod",
-      items: [
-        {
-          native_id: "INC-42",
-          type: "incident",
-          title: "Checkout latency spike",
-          content: "p99 checkout latency crossed 2s for 12 minutes; rolled back deploy #918.",
-          url: "https://grafana/incident/42",
-          facets: { severity: "sev2", service: "checkout" },
-        },
-      ],
+      items: [INCIDENT],
     })) as { node_ids: string[] };
     const incidentId = inc.node_ids[0];
 
-    const iss = (await mirror_upsert.handler(ctx, {
+    const iss = (await mirrorUpsert.invoke({
       session_id: sid,
       source_id: "sentry",
       items: [
@@ -65,70 +72,51 @@ describe("external mirrors — end-to-end", () => {
     const issueId = iss.node_ids[0];
 
     // Relate the two mirror records across sources.
-    await link.handler(ctx, {
-      session_id: sid,
-      src: incidentId,
-      dst: issueId,
-      type: "relates_to",
-    });
+    await link.invoke({ session_id: sid, src: incidentId!, dst: issueId!, type: "relates_to" });
 
     // A decision documents the incident — the payoff link.
-    const decision = (await write.handler(ctx, {
+    const decision = (await write.invoke({
       session_id: sid,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache-TTL jitter to prevent stampede",
       content: "After the checkout latency incident we jitter cache TTLs to avoid a stampede.",
       project: P,
     })) as { id: string };
-    await link.handler(ctx, {
-      session_id: sid,
-      src: decision.id,
-      dst: incidentId,
-      type: "documents",
-    });
+    await link.invoke({ session_id: sid, src: decision.id, dst: incidentId!, type: "documents" });
 
     // Drain embeddings so vector + graph expansion are fully exercised.
     for (let i = 0; i < 20; i++) {
-      const r = await worker.tick();
+      const r = await env.worker.tick();
       if (r.embedded === 0 && r.failed === 0) break;
     }
 
-    // Searching the decision's topic surfaces the incident (via documents) and reaches the
-    // related Sentry issue through the graph.
-    const found = (await search.handler(ctx, {
+    // Then — searching the decision's topic surfaces the incident (via documents).
+    const found = (await search.invoke({
       session_id: sid,
       query: "cache stampede jitter checkout",
       project: P,
+      limit: 10,
     })) as { results: { id: string }[] };
     const ids = found.results.map((r) => r.id);
     expect(ids).toContain(incidentId);
     expect(ids).toContain(decision.id);
 
-    // Freshness: advance past the window → grafana-prod is flagged stale in session_start.
+    // Freshness: advance past the window -> grafana-prod is flagged stale in session_start.
     const staleIds = async (): Promise<string[]> => {
-      const ws = (await session_start.handler(ctx, { project: P })).working_set as {
+      const ws = (await sessionStart.invoke({ project: P })).working_set as {
         stale_sources?: { id: string }[];
       };
       return (ws.stale_sources ?? []).map((s) => s.id);
     };
-    clock.advanceMs(25 * 3_600_000);
+    env.clock.advanceMs(25 * 3_600_000);
     expect(await staleIds()).toContain("grafana-prod");
 
     // Re-sync clears staleness.
-    await mirror_upsert.handler(ctx, {
+    await mirrorUpsert.invoke({
       session_id: sid,
       source_id: "grafana-prod",
-      items: [
-        {
-          native_id: "INC-42",
-          type: "incident",
-          title: "Checkout latency spike",
-          content: "p99 checkout latency crossed 2s for 12 minutes; rolled back deploy #918.",
-          url: "https://grafana/incident/42",
-          facets: { severity: "sev2", service: "checkout" },
-        },
-      ],
+      items: [INCIDENT],
     });
     expect(await staleIds()).not.toContain("grafana-prod");
   });

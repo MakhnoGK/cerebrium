@@ -25,9 +25,14 @@ function git(root: string, args: string[]): string | null {
 // git repo, git absent, detached HEAD — degrades to nulls rather than throwing.
 export function readGitProvenance(root: string): GitProvenance {
   const inside = git(root, ["rev-parse", "--is-inside-work-tree"]);
-  if (inside !== "true") return NONE;
+
+  if (inside !== "true") {
+    return NONE;
+  }
+
   const rawBranch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const branch = rawBranch && rawBranch !== "HEAD" ? rawBranch : null; // 'HEAD' = detached
+
   return {
     branch,
     commit: git(root, ["rev-parse", "--short", "HEAD"]),

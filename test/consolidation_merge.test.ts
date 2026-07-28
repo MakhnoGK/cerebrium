@@ -1,24 +1,24 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as link from "@/tools/link";
-import * as search from "@/tools/search";
-import * as consolidate_apply from "@/tools/consolidate_apply";
+import { container } from "tsyringe";
+import { setup, TestEnv } from "@test/helpers";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { ConsolidationProvider } from "@/consolidation/provider";
-import type { Ctx } from "@/tools/context";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
-import type { EmbeddingWorker } from "@/embeddings/worker";
+import { SessionStartTool } from "../src/tools/session-start";
+import { WriteTool } from "../src/tools/write";
+import { LinkTool } from "../src/tools/link";
+import { SearchTool } from "../src/tools/search";
+import { ConsolidateApplyTool } from "../src/tools/consolidate-apply";
 
 const SHARED =
   "the payment service authorizes the card then captures the amount and emits a receipt event to the downstream ledger";
 
-async function mk(ctx: Ctx, s: string, title: string, content: string): Promise<string> {
+async function mk(s: string, title: string, content: string): Promise<string> {
   return (
-    (await write.handler(ctx, {
+    (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title,
       content,
@@ -27,12 +27,12 @@ async function mk(ctx: Ctx, s: string, title: string, content: string): Promise<
   ).id;
 }
 
-// Two near-identical semantic facts (cosine > 0.92) → a merge candidate.
-async function seedDupes(ctx: Ctx, worker: EmbeddingWorker) {
-  const s = (await session_start.handler(ctx, {})).session_id;
-  const a = await mk(ctx, s, "Payments A", SHARED);
-  const b = await mk(ctx, s, "Payments B", `${SHARED} duplicate`);
-  await worker.tick();
+// Two near-identical semantic facts (cosine > 0.92) -> a merge candidate.
+async function seedDupes(env: TestEnv) {
+  const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+  const a = await mk(s, "Payments A", SHARED);
+  const b = await mk(s, "Payments B", `${SHARED} duplicate`);
+  await env.worker.tick();
   return { s, a, b };
 }
 
@@ -55,80 +55,97 @@ afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_LINKS;
 });
 
-describe("semantic dedup / merge (P5 §8)", () => {
-  it("suggest (default) queues a merge candidate with a chosen survivor", async () => {
-    const { ctx, repo, worker } = makeCtx();
-    const { a, b } = await seedDupes(ctx, worker);
-    const r = await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
-    expect(r.merge_suggested).toBe(1);
+describe("Semantic dedup / merge", () => {
+  it("should queue a merge candidate with a chosen survivor under the default suggest posture", async () => {
+    // Given
+    const env = setup();
+    const { a, b } = await seedDupes(env);
 
-    const [cand] = repo.pendingCandidates({ kind: "merge" });
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merge_suggested).toBe(1);
+    const [cand] = env.consolidation.pendingCandidates({ kind: "merge" });
     expect(cand!.member_ids).toEqual([a, b].sort());
     expect([a, b]).toContain(cand!.canonical_id);
   });
 
-  it("accept supersedes the loser (kept in history) and re-points its authored edges", async () => {
-    const { ctx, repo, worker } = makeCtx();
-    const { s, a, b } = await seedDupes(ctx, worker);
-    await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
-    const [cand] = repo.pendingCandidates({ kind: "merge" });
-    const survivor = cand!.canonical_id;
+  it("should supersede the loser (kept in history) and re-point its authored edges when accepted", async () => {
+    // Given
+    const env = setup();
+    const { s, a, b } = await seedDupes(env);
+    await container.resolve(ConsolidationWorker).tick();
+    const [cand] = env.consolidation.pendingCandidates({ kind: "merge" });
+    const survivor = cand!.canonical_id!;
     const loser = [a, b].find((id) => id !== survivor)!;
 
     // give the loser an authored edge, then merge
-    const third = await mk(ctx, s, "Ledger", "the ledger records settled transactions by day");
-    await link.handler(ctx, { session_id: s, src: loser, dst: third, type: "references" });
+    const third = await mk(s, "Ledger", "the ledger records settled transactions by day");
+    await container
+      .resolve(LinkTool)
+      .invoke({ session_id: s, src: loser, dst: third, type: "references" });
 
-    const applied = (await consolidate_apply.handler(ctx, {
+    // When
+    const applied = (await container.resolve(ConsolidateApplyTool).invoke({
       session_id: s,
       id: cand!.id,
       decision: "accept",
     })) as { status: string; kind: string };
+
+    // Then
     expect(applied).toMatchObject({ status: "applied", kind: "merge" });
 
-    // loser hidden from normal search, present under history; survivor still valid
-    const normal = (await search.handler(ctx, {
+    // loser hidden from normal search; survivor still valid.
+    const normal = (await container.resolve(SearchTool).invoke({
       session_id: s,
       query: "payment card receipt ledger",
       limit: 10,
     })) as { results: Envelope[] };
     expect(normal.results.some((r) => r.id === loser)).toBe(false);
-    expect(repo.envelope(survivor)!.invalidated).toBe(false);
-    expect(repo.envelope(loser)!.invalidated).toBe(true);
+    expect(env.nodes.envelope(survivor)!.invalidated).toBe(false);
+    expect(env.nodes.envelope(loser)!.invalidated).toBe(true);
 
-    // the loser's references edge now hangs off the survivor
-    expect(repo.edgesOf(survivor).some((e) => e.id === third && e.edge === "references")).toBe(
+    // the loser's references edge now hangs off the survivor, plus a supersedes edge.
+    expect(env.edges.edgesOf(survivor).some((e) => e.id === third && e.edge === "references")).toBe(
       true,
     );
-    // supersedes survivor -> loser exists
-    expect(repo.edgesOf(survivor).some((e) => e.id === loser && e.edge === "supersedes")).toBe(
+    expect(env.edges.edgesOf(survivor).some((e) => e.id === loser && e.edge === "supersedes")).toBe(
       true,
     );
   });
 
-  it("auto with a generating provider merges directly and rewrites the survivor", async () => {
+  it("should merge directly and rewrite the survivor when auto with a generating provider", async () => {
+    // Given
     process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
-    const { ctx, repo, worker } = makeCtx({ consolidator: stubProvider });
-    const { a, b } = await seedDupes(ctx, worker);
+    const env = setup({ consolidator: stubProvider });
+    const { a, b } = await seedDupes(env);
 
-    const r = await new ConsolidationWorker(repo, stubProvider, ctx.now).tick();
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.merged).toBe(1);
-    expect(repo.pendingCandidates({ kind: "merge" })).toHaveLength(0);
-
-    const survivor = [a, b].find((id) => !repo.envelope(id)!.invalidated)!;
-    const loser = [a, b].find((id) => repo.envelope(id)!.invalidated)!;
+    expect(env.consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(0);
+    const survivor = [a, b].find((id) => !env.nodes.envelope(id)!.invalidated)!;
+    const loser = [a, b].find((id) => env.nodes.envelope(id)!.invalidated)!;
     expect(loser).toBeDefined();
-    expect(repo.fullNode(survivor)!.content).toBe("merged body");
+    expect((await env.nodes.fullNode(survivor))!.content).toBe("merged body");
   });
 
-  it("does not merge semantic nodes below the merge threshold", async () => {
-    const { ctx, repo, worker } = makeCtx();
-    const s = (await session_start.handler(ctx, {})).session_id;
-    await mk(ctx, s, "Alpha", "the payment service authorizes cards and captures amounts");
-    await mk(ctx, s, "Beta", "kafka ingestion partitions events by tenant identifier daily");
-    await worker.tick();
-    const r = await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
+  it("should not merge semantic nodes below the merge threshold", async () => {
+    // Given
+    const env = setup();
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    await mk(s, "Alpha", "the payment service authorizes cards and captures amounts");
+    await mk(s, "Beta", "kafka ingestion partitions events by tenant identifier daily");
+    await env.worker.tick();
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.merge_suggested).toBe(0);
-    expect(repo.pendingCandidates({ kind: "merge" })).toHaveLength(0);
+    expect(env.consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(0);
   });
 });

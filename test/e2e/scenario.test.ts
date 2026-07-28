@@ -1,48 +1,61 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "../helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as get from "@/tools/get";
-import * as search from "@/tools/search";
-import * as update from "@/tools/update";
-import * as checkpoint from "@/tools/checkpoint";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../../src/tools/session-start";
+import { WriteTool } from "../../src/tools/write";
+import { GetTool } from "../../src/tools/get";
+import { SearchTool } from "../../src/tools/search";
+import { UpdateTool } from "../../src/tools/update";
+import { CheckpointTool } from "../../src/tools/checkpoint";
 
 const P = "auth-service";
 
-// Acceptance §8.2: session A writes → session B orients, searches, gets, updates
-// → revision history shows both sessions.
-describe("multi-session hand-off", () => {
-  it("carries context from one session to the next", async () => {
-    const { ctx } = makeCtx();
+function tools() {
+  return {
+    sessionStart: container.resolve(SessionStartTool),
+    write: container.resolve(WriteTool),
+    get: container.resolve(GetTool),
+    search: container.resolve(SearchTool),
+    update: container.resolve(UpdateTool),
+    checkpoint: container.resolve(CheckpointTool),
+  };
+}
+
+describe("Multi-session hand-off", () => {
+  it("should carry context from one session to the next", async () => {
+    // Given
+    setup();
+    const t = tools();
 
     // ---- Session A: write 3 facts + 1 checkpoint --------------------------
-    const a = (await session_start.handler(ctx, { project: P })).session_id;
-    const f1 = (await write.handler(ctx, {
+    const a = (await t.sessionStart.invoke({ project: P })).session_id;
+    const f1 = (await t.write.invoke({
       session_id: a,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: "access tokens live 15 minutes",
       project: P,
     })) as Envelope;
-    await write.handler(ctx, {
+    await t.write.invoke({
       session_id: a,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "decision",
       title: "Use RS256",
       content: "sign JWTs with RS256, not HS256",
       project: P,
     });
-    await write.handler(ctx, {
+    await t.write.invoke({
       session_id: a,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Refresh flow",
       content: "refresh tokens rotate on use",
       project: P,
     });
-    await checkpoint.handler(ctx, {
+    await t.checkpoint.invoke({
       session_id: a,
       project: P,
       summary: "wired up JWT auth end to end",
@@ -52,8 +65,11 @@ describe("multi-session hand-off", () => {
     });
 
     // ---- Session B: orient via session_start ------------------------------
-    const bStart = await session_start.handler(ctx, { project: P });
+    // When
+    const bStart = await t.sessionStart.invoke({ project: P });
     const b = bStart.session_id;
+
+    // Then
     expect(b).not.toBe(a);
     const ws = bStart.working_set as {
       semantic: Envelope[];
@@ -63,21 +79,20 @@ describe("multi-session hand-off", () => {
     expect(ws.semantic.map((e) => e.title)).toContain("Token TTL");
 
     // ---- Session B: search, get, update a fact ----------------------------
-    const found = await search.handler(ctx, {
+    const found = await t.search.invoke({
       session_id: b,
       query: "access tokens",
       project: P,
       limit: 5,
     });
-    const hit = (found.results as Envelope[]).find((e) => e.id === f1.id);
-    expect(hit).toBeDefined();
+    expect(found.results.find((e) => e.id === f1.id)).toBeDefined();
 
-    const full = ((get) => (get as { nodes: { content: string }[] }).nodes[0])(
-      await get.handler(ctx, { session_id: b, ids: [f1.id] }),
+    const full = ((res) => (res as { nodes: { content: string }[] }).nodes[0])(
+      await t.get.invoke({ session_id: b, ids: [f1.id] }),
     );
     expect(full!.content).toContain("15 minutes");
 
-    await update.handler(ctx, {
+    await t.update.invoke({
       session_id: b,
       id: f1.id,
       content: "access tokens live 10 minutes",
@@ -87,9 +102,8 @@ describe("multi-session hand-off", () => {
     // ---- Revision history shows both sessions -----------------------------
     const withRevs = ((r) =>
       (r as { nodes: { revisions: { rev: number; session_id: string }[] }[] }).nodes[0])(
-      await get.handler(ctx, { session_id: b, ids: [f1.id], include_revisions: true }),
+      await t.get.invoke({ session_id: b, ids: [f1.id], include_revisions: true }),
     );
-    const revSessions = withRevs!.revisions.map((rv) => rv.session_id);
-    expect(revSessions).toEqual([a, b]);
+    expect(withRevs!.revisions.map((rv) => rv.session_id)).toEqual([a, b]);
   });
 });

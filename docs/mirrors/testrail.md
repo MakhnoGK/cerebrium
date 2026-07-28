@@ -27,10 +27,10 @@ regression run, or a suite under investigation. Not the entire case library or e
 ## Fetch
 
 1. Authenticate the TestRail MCP if needed.
-2. List the suite/section for the area in flight → the relevant cases; and the recent runs of
-   interest → their result summaries.
+2. List the suite/section for the area in flight -> the relevant cases; and the recent runs of
+   interest -> their result summaries.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 **Test case:**
 
@@ -48,5 +48,5 @@ failures, facets `{ suite, passed, failed, blocked, milestone }`.
 
 ## Link
 
-- `relates_to` from a `merge_request` mirror or `documents` from a bug `decision` → the case
+- `relates_to` from a `merge_request` mirror or `documents` from a bug `decision` -> the case
   that covers it.

@@ -29,7 +29,7 @@ compact **envelopes**; fetch full content by id. Two memory kinds:
 
 ## Retrieval discipline
 
-`search` → read envelopes + `best_chunk` snippets → `get` only the ids you actually need.
+`search` -> read envelopes + `best_chunk` snippets -> `get` only the ids you actually need.
 
 - The `best_chunk` snippet on a vector/both hit is often enough to judge relevance —
   don't `get` unless you need the full body. Tokens are the budget.
@@ -43,9 +43,9 @@ compact **envelopes**; fetch full content by id. Two memory kinds:
   what you want; `mode: 'vector'` for "find me something like this" with no shared words.
 
 ```
-GOOD: search "retry backoff policy" → envelope shows best_chunk "…exponential backoff,
-      parked after 5 attempts…" → answer directly, no get needed.
-BAD:  search → immediately get all 10 ids → dump 8k tokens to read one sentence.
+GOOD: search "retry backoff policy" -> envelope shows best_chunk "…exponential backoff,
+      parked after 5 attempts…" -> answer directly, no get needed.
+BAD:  search -> immediately get all 10 ids -> dump 8k tokens to read one sentence.
 ```
 
 ## Write discipline
@@ -53,21 +53,21 @@ BAD:  search → immediately get all 10 ids → dump 8k tokens to read one sente
 **Search before every write.** If the write returns `similar_existing` (a near-duplicate
 probe fired), STOP and reconsider:
 
-- Same fact, now more correct? → `update` the existing node (keeps history).
-- Replaced by a genuinely new fact? → `write` the new one, then `invalidate` the old with
+- Same fact, now more correct? -> `update` the existing node (keeps history).
+- Replaced by a genuinely new fact? -> `write` the new one, then `invalidate` the old with
   `superseded_by: <new id>`.
-- Genuinely distinct? → proceed, and `link` them so the graph connects them.
+- Genuinely distinct? -> proceed, and `link` them so the graph connects them.
 
 One fact per node. Link liberally — edges are what make graph expansion work.
 
 Episodic vs semantic, the decision rule:
-- "We deployed X and hit error Y" → **episodic** `event_note`.
-- "X must be deployed before Y" → **semantic** `fact`/`decision`.
-- Ending a work block → **`checkpoint`** (never a plain episodic note).
+- "We deployed X and hit error Y" -> **episodic** `event_note`.
+- "X must be deployed before Y" -> **semantic** `fact`/`decision`.
+- Ending a work block -> **`checkpoint`** (never a plain episodic note).
 
 ```
-GOOD: search "token TTL" → hit exists → update it to "10 minutes", reason "shortened".
-BAD:  write a second "Token TTL" fact → two contradictory nodes, note-sprawl.
+GOOD: search "token TTL" -> hit exists -> update it to "10 minutes", reason "shortened".
+BAD:  write a second "Token TTL" fact -> two contradictory nodes, note-sprawl.
 
 GOOD: write decision "Use RS256"; write fact "JWKS rotates weekly";
       link src=decision dst=fact type=references.
@@ -92,14 +92,14 @@ maintained by re-indexing.
   for the raw `source` slice.
 - **When you learn something ABOUT code** — a decision, a gotcha, why it's shaped this
   way — write it as a normal **semantic** node and `link` it to the relevant symbol
-  with a `documents` edge. That note→code link survives re-indexing, and future
+  with a `documents` edge. That note->code link survives re-indexing, and future
   searches traverse it: a search for the note's topic surfaces the symbol via graph
   expansion (`via:{edge:'documents'}`). This is the payoff — design notes that point
   straight at the code they describe.
 
 ```
-GOOD: code_index → search "token expiry" types:['symbol'] → get the symbol → write a
-      decision "TTL is 15m because …" → link documents → symbol.
+GOOD: code_index -> search "token expiry" types:['symbol'] -> get the symbol -> write a
+      decision "TTL is 15m because …" -> link documents -> symbol.
 BAD:  write a semantic node describing what AuthService.validate does (that's a mirror —
       let the indexer own it; only record insight the code itself doesn't state).
 ```
@@ -129,8 +129,8 @@ Mirror nodes are still **mirrors**: don't `write`/`update` them by hand — re-s
 `mirror_upsert`.
 
 ```
-GOOD: session_start shows grafana-prod stale → fetch active incidents via the Grafana MCP →
-      mirror_upsert incidents → write a decision about the fix → link documents → the incident.
+GOOD: session_start shows grafana-prod stale -> fetch active incidents via the Grafana MCP ->
+      mirror_upsert incidents -> write a decision about the fix -> link documents -> the incident.
 BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieval).
 ```
 
@@ -140,7 +140,7 @@ BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieva
 |------|-----|
 | `session_start` | First call. session_id + working set. |
 | `search` | Find memories. Envelopes only. Search before writing. |
-| `get` | Full content + edges for specific ids (symbol → raw `source` too). |
+| `get` | Full content + edges for specific ids (symbol -> raw `source` too). |
 | `write` | New node (semantic/episodic). Returns `similar_existing` on a near-dup. |
 | `update` | Revise a **semantic** node (episodic write-once; mirror indexer-only). |
 | `invalidate` | Soft-delete; pass `superseded_by` when a new node replaces it. |

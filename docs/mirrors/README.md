@@ -18,7 +18,7 @@ sources — nothing in `src/` changes.
    - Map each record to a `mirror_upsert` item (below).
    - `mirror_upsert { source_id, items: [...] }`.
 3. **Link** what matters: draw `documents` / `references` / `relates_to` edges from your own
-   semantic notes (or between mirror records) with `link`. That note→record link is the payoff
+   semantic notes (or between mirror records) with `link`. That note->record link is the payoff
    and survives re-sync.
 4. **Retire** a record that no longer matters: `invalidate` its node id.
 

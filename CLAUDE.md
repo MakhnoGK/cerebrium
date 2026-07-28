@@ -18,7 +18,7 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 
 ## Schema changes
 
-- **Migrations are the single source of truth.** `openDatabase()` builds a DB purely by running `src/db/migrations/000_baseline.sql → NNN` in order; it never executes `schema.sql`. `000_baseline.sql` is a frozen snapshot and must never be edited — any change is a new idempotent, numbered migration (`src/db/migrations/NNN_name.sql`). A migration needing computation SQLite can't express (e.g. recomputing a content-addressed hash) may be a `.cjs` module exporting `up(db)`, applied synchronously by the runner in filename order.
+- **Migrations are the single source of truth.** `openDatabase()` builds a DB purely by running `src/db/migrations/000_baseline.sql -> NNN` in order; it never executes `schema.sql`. `000_baseline.sql` is a frozen snapshot and must never be edited — any change is a new idempotent, numbered migration (`src/db/migrations/NNN_name.sql`). A migration needing computation SQLite can't express (e.g. recomputing a content-addressed hash) may be a `.cjs` module exporting `up(db)`, applied synchronously by the runner in filename order.
 - `src/db/schema.sql` is a **derived, human-readable snapshot** of the current end state — never executed. Keep it updated in the same commit as a migration; the drift-guard test (`test/migrations.test.ts`) fails if it stops matching what the migrations build.
 - Any schema change requires: migration + updated schema.sql snapshot + tests exercising the new columns/tables + a line in the CHANGELOG section of README.
 - Enum-like vocabularies (`memory_kind`, node `type`, edge `type`) are defined once in `src/core/vocab.ts` and referenced by validation and tests. Extending a vocabulary is a normal change; repurposing an existing value is forbidden.
@@ -27,8 +27,8 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 
 - TypeScript strict mode (`strictTypeChecked` lint); no `any` in exported signatures. `npm run check` (typecheck + eslint + prettier + tests) gates every commit.
 - No ORM. All SQL lives in the per-aggregate repositories under `src/db/repositories/*` (prepared statements, named clearly), behind the `Repo` composition root in `src/db/repo.ts`. The cross-aggregate write/read primitives are in `src/db/repositories/internal.ts`. Tools contain no SQL.
-- Module layout: pure domain in `src/core/` (ids, vocab, tokens, chunk, fts, types — no db/fs/process deps); process/IO in `src/runtime/`; data layer in `src/db/`; MCP handlers in `src/tools/`. Import via the `@/*` alias (→ `src/*`); no `.js` extension on relative imports. Barrels (`index.ts`) are the public entry for a folder — members import each other by direct path to avoid cycles.
-- One file per MCP tool under `src/tools/`. Tool input validation with Zod at the boundary (derive the arg type with `ToolArgs<typeof schema>`); repo layer assumes valid input.
+- Module layout: pure domain in `src/core/` (ids, vocab, tokens, chunk, fts, types — no db/fs/process deps); process/IO in `src/runtime/`; data layer in `src/db/`; MCP handlers in `src/tools/`. Import via the `@/*` alias (-> `src/*`); no `.js` extension on relative imports. Barrels (`index.ts`) are the public entry for a folder — members import each other by direct path to avoid cycles.
+- One file per MCP tool under `src/tools/`, each a `class XxxTool extends AbstractTool` (`src/tools/contracts/`) declaring `name` (a `ToolName` enum member), `description`, `schema` (a `z.ZodRawShape`), and `invoke(ctx, args)`. The base class's `callback` wraps `invoke` into the MCP `{content}`/`{isError}` envelope. Register by adding an instance to the `TOOLS` array in `src/tools/index.ts`; `server.ts` loops over it. Tool input validation with Zod at the boundary (args typed `TypeOf<ZodObject<typeof this.schema>>`); repo layer assumes valid input.
 - IDs are ULIDs; timestamps are UTC ISO-8601 strings. Everywhere.
 - MCP tool descriptions are user-facing documentation for consuming agents: every change to a tool's behavior updates its description string in the same commit.
 - Errors returned to agents are actionable sentences ("episodic memories are write-once; write a new node"), never stack traces or codes alone.
@@ -51,6 +51,10 @@ If a command above doesn't exist yet, creating it is part of the current task �
 - Ranking behavior is tested with fixed clocks (inject `now`) — no `sleep`-based decay tests.
 - End-to-end scenarios (multi-session flows from the briefs' acceptance criteria) live in `test/e2e/` and run as part of `npm test`.
 - Never weaken or delete a failing test to make a task pass. If a test contradicts a brief, stop and ask.
+- **Naming + structure follow a fixed convention** (see `test/code_repo.test.ts` as the reference):
+  - `describe(...)` is a capitalized noun phrase naming the subject under test (the unit/behavior group) — e.g. `Repo.applyFileIndex`, `Write-time reconcile`. Never a `should…`, never a placeholder like `phase 3`.
+  - `it(...)`/`test(...)` reads `should <expected outcome> when <condition>`, lowercase, mirroring exactly what the body asserts — e.g. `should be a no-op when an unchanged file set is re-applied`.
+  - Each test body is marked with `// Given` (arrange), `// When` (act), `// Then` (assert) comments. Collapse to `// Given / When` when setup and action are one line; repeat `// When / Then` per segment when a test drives several independent act-assert steps. These structural markers are the one sanctioned exception to the "keep comments minimal" rule — they carry no rationale, only phase labels.
 
 ## Consolidation
 

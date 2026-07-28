@@ -1,57 +1,61 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as invalidate from "@/tools/invalidate";
-import * as link from "@/tools/link";
-import * as search from "@/tools/search";
-import type { Ctx } from "@/tools/context";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session-start";
+import { WriteTool } from "../src/tools/write";
+import { InvalidateTool } from "../src/tools/invalidate";
+import { LinkTool } from "../src/tools/link";
+import { SearchTool } from "../src/tools/search";
 
-async function session(ctx: Ctx, project?: string): Promise<string> {
-  return (await session_start.handler(ctx, { project })).session_id;
+async function session(project?: string): Promise<string> {
+  return (await container.resolve(SessionStartTool).invoke({ project })).session_id;
 }
+
 function w(
-  ctx: Ctx,
   s: string,
-  kind: "semantic" | "episodic",
+  kind: _MemoryKind,
   type: string,
   title: string,
   content: string,
   project?: string,
-) {
-  return write.handler(ctx, {
-    session_id: s,
-    memory_kind: kind,
-    type,
-    title,
-    content,
-    project,
-  }) as Promise<unknown> as Promise<Envelope>;
+): Promise<Envelope> {
+  return container
+    .resolve(WriteTool)
+    .invoke({ session_id: s, memory_kind: kind, type, title, content, project });
 }
+
 type Result = Envelope & {
   matched: string;
   best_chunk?: string;
   via?: { node: string; edge: string };
 };
+
 function results(res: unknown): Result[] {
   return (res as { results: Result[] }).results;
 }
 
+function search(args: Parameters<SearchTool["invoke"]>[0]) {
+  return container.resolve(SearchTool).invoke(args);
+}
+
 describe("RRF fusion", () => {
-  it("a node matched by both branches outranks a single-branch node", async () => {
-    const { ctx, worker } = makeCtx();
-    const s = await session(ctx);
+  it("should outrank a single-branch node with one matched by both branches", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
     const body = "reciprocal rank fusion ranking algorithm for retrieval";
+    const both = await w(s, _MemoryKind.SEMANTIC, "fact", "Alpha", body);
+    await env.worker.tick(); // embed Alpha -> it lands in the vector branch too
+    const textOnly = await w(s, _MemoryKind.SEMANTIC, "fact", "Beta", body); // not drained -> FTS only
 
-    const both = await w(ctx, s, "semantic", "fact", "Alpha", body);
-    await worker.tick(); // embed Alpha → it lands in the vector branch too
-
-    const textOnly = await w(ctx, s, "semantic", "fact", "Beta", body); // not drained → FTS only
-
+    // When
     const res = results(
-      await search.handler(ctx, { session_id: s, query: "reciprocal rank fusion", limit: 10 }),
+      await search({ session_id: s, query: "reciprocal rank fusion", limit: 10 }),
     );
+
+    // Then
     const alpha = res.find((r) => r.id === both.id)!;
     const beta = res.find((r) => r.id === textOnly.id)!;
     expect(alpha.matched).toBe("both");
@@ -62,45 +66,63 @@ describe("RRF fusion", () => {
   });
 });
 
-describe("memory-model factors hold in hybrid mode", () => {
-  it("semantic outranks fresh episodic outranks old episodic, with vectors present", async () => {
-    const { ctx, clock, worker } = makeCtx();
-    const s = await session(ctx);
+describe("Memory-model factors hold in hybrid mode", () => {
+  it("should rank semantic above fresh episodic above old episodic with vectors present", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
     const content = "deploy the release pipeline";
+    const old = await w(s, _MemoryKind.EPISODIC, "event_note", "Deploy", content);
+    env.clock.advanceDays(59);
+    const fresh = await w(s, _MemoryKind.EPISODIC, "event_note", "Deploy", content);
+    env.clock.advanceDays(1);
+    const fact = await w(s, _MemoryKind.SEMANTIC, "fact", "Deploy", content);
+    await env.worker.tick(); // embed all three -> vector branch active
 
-    const old = await w(ctx, s, "episodic", "event_note", "Deploy", content);
-    clock.advanceDays(59);
-    const fresh = await w(ctx, s, "episodic", "event_note", "Deploy", content);
-    clock.advanceDays(1);
-    const fact = await w(ctx, s, "semantic", "fact", "Deploy", content);
-    await worker.tick(); // embed all three → vector branch active
+    // When
+    const res = results(await search({ session_id: s, query: "deploy pipeline", limit: 10 }));
 
-    const res = results(
-      await search.handler(ctx, { session_id: s, query: "deploy pipeline", limit: 10 }),
-    );
+    // Then
     expect(res.map((r) => r.id)).toEqual([fact.id, fresh.id, old.id]);
   });
 
-  it("excludes superseded nodes from normal search and from graph expansion", async () => {
-    const { ctx, worker } = makeCtx();
-    const s = await session(ctx);
-    const oldNode = await w(ctx, s, "semantic", "fact", "Old TTL", "access tokens live 15 minutes");
-    const newNode = await w(ctx, s, "semantic", "fact", "New TTL", "access tokens live 10 minutes");
-    await worker.tick();
-    await invalidate.handler(ctx, {
+  it("should exclude superseded nodes from normal search and from graph expansion", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const oldNode = await w(
+      s,
+      _MemoryKind.SEMANTIC,
+      "fact",
+      "Old TTL",
+      "access tokens live 15 minutes",
+    );
+    const newNode = await w(
+      s,
+      _MemoryKind.SEMANTIC,
+      "fact",
+      "New TTL",
+      "access tokens live 10 minutes",
+    );
+    await env.worker.tick();
+    await container.resolve(InvalidateTool).invoke({
       session_id: s,
       id: oldNode.id,
       reason: "shortened",
       superseded_by: newNode.id,
     });
 
+    // When
     const normal = results(
-      await search.handler(ctx, { session_id: s, query: "access tokens live minutes", limit: 10 }),
+      await search({ session_id: s, query: "access tokens live minutes", limit: 10 }),
     );
+
+    // Then
     expect(normal.some((r) => r.id === oldNode.id)).toBe(false); // hidden
     expect(normal.some((r) => r.id === newNode.id)).toBe(true);
 
-    const hist = await search.handler(ctx, {
+    // When / Then — visible under history, flagged, never via graph expansion.
+    const hist = await search({
       session_id: s,
       query: "access tokens live minutes",
       history: true,
@@ -108,40 +130,43 @@ describe("memory-model factors hold in hybrid mode", () => {
     });
     const histRows = results(hist);
     const oldHit = histRows.find((r) => r.id === oldNode.id);
-    expect(oldHit?.invalidated).toBe(true); // visible under history, flagged
-    // superseded node never arrives via graph expansion (supersedes weight 0 + invalidated)
+    expect(oldHit?.invalidated).toBe(true);
     expect(histRows.every((r) => !(r.id === oldNode.id && r.matched === "graph"))).toBe(true);
+
     const notes = (hist as { context_notes?: string[] }).context_notes ?? [];
     expect(notes.some((n) => n.includes(oldNode.id) && n.includes(newNode.id))).toBe(true);
   });
 });
 
-describe("graph expansion", () => {
-  it("surfaces a documents-linked neighbor with a correct via edge", async () => {
-    const { ctx } = makeCtx();
-    const s = await session(ctx);
-    // Neither embedded (no tick): FTS finds the how-to, graph pulls in the entity.
+describe("Graph expansion", () => {
+  it("should surface a documents-linked neighbor with a correct via edge", async () => {
+    // Given — neither embedded (no tick): FTS finds the how-to, graph pulls in the entity.
+    setup();
+    const s = await session();
     const howto = await w(
-      ctx,
       s,
-      "semantic",
+      _MemoryKind.SEMANTIC,
       "howto",
       "Deploy billing",
       "how to deploy the billing pipeline runbook steps",
     );
     const entity = await w(
-      ctx,
       s,
-      "semantic",
+      _MemoryKind.SEMANTIC,
       "entity",
       "PaymentService",
       "PaymentService internal component details",
     );
-    await link.handler(ctx, { session_id: s, src: howto.id, dst: entity.id, type: "documents" });
+    await container
+      .resolve(LinkTool)
+      .invoke({ session_id: s, src: howto.id, dst: entity.id, type: "documents" });
 
+    // When
     const res = results(
-      await search.handler(ctx, { session_id: s, query: "billing pipeline deploy", limit: 10 }),
+      await search({ session_id: s, query: "billing pipeline deploy", limit: 10 }),
     );
+
+    // Then
     const surfaced = res.find((r) => r.id === entity.id);
     expect(surfaced).toBeDefined();
     expect(surfaced!.matched).toBe("graph");
@@ -149,37 +174,29 @@ describe("graph expansion", () => {
   });
 });
 
-describe("mode variants", () => {
-  it("mode:'vector' finds a node only after it is embedded, with a best_chunk", async () => {
-    const { ctx, worker } = makeCtx();
-    const s = await session(ctx);
+describe("Search mode variants", () => {
+  it("should find a node under mode:'vector' only after it is embedded, with a best_chunk", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
     const node = await w(
-      ctx,
       s,
-      "semantic",
+      _MemoryKind.SEMANTIC,
       "fact",
       "Kafka",
       "the ingestion service consumes from kafka topics",
     );
 
+    // When / Then — not embedded yet.
     const before = results(
-      await search.handler(ctx, {
-        session_id: s,
-        query: "kafka ingestion",
-        mode: "vector",
-        limit: 10,
-      }),
+      await search({ session_id: s, query: "kafka ingestion", mode: "vector", limit: 10 }),
     );
-    expect(before.some((r) => r.id === node.id)).toBe(false); // not embedded yet
+    expect(before.some((r) => r.id === node.id)).toBe(false);
 
-    await worker.tick();
+    // When / Then — after embedding.
+    await env.worker.tick();
     const after = results(
-      await search.handler(ctx, {
-        session_id: s,
-        query: "kafka ingestion",
-        mode: "vector",
-        limit: 10,
-      }),
+      await search({ session_id: s, query: "kafka ingestion", mode: "vector", limit: 10 }),
     );
     const hit = after.find((r) => r.id === node.id)!;
     expect(hit.matched).toBe("vector");
@@ -187,22 +204,21 @@ describe("mode variants", () => {
     expect(hit.best_chunk!.length).toBeGreaterThan(0);
   });
 
-  it("mode:'text' is byte-compatible: envelopes only, no Phase-2 fields", async () => {
-    const { ctx, worker } = makeCtx();
-    const s = await session(ctx);
-    await w(ctx, s, "semantic", "fact", "Alpha", "alpha beta gamma");
-    await worker.tick();
+  it("should return envelopes only with no hybrid-only fields under mode:'text'", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    await w(s, _MemoryKind.SEMANTIC, "fact", "Alpha", "alpha beta gamma");
+    await env.worker.tick();
 
-    const res = await search.handler(ctx, {
-      session_id: s,
-      query: "alpha",
-      mode: "text",
-      limit: 10,
-    });
+    // When
+    const res = await search({ session_id: s, query: "alpha", mode: "text", limit: 10 });
+
+    // Then
     expect(Object.keys(res).sort()).toEqual(["results", "total_matches"]);
     expect(res.context_notes).toBeUndefined();
-    const env = (res.results as Record<string, unknown>[])[0]!;
-    expect(Object.keys(env).sort()).toEqual([
+    const envRow = (res.results as Record<string, unknown>[])[0]!;
+    expect(Object.keys(envRow).sort()).toEqual([
       "edges",
       "id",
       "invalidated",

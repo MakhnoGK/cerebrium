@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      # eslint is not yet clean over test/; keep it visible (annotations) without
+      # blocking. Drop continue-on-error once the suite is lint-clean.
+      - run: npm run lint
+        continue-on-error: true
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Once the suite is clean, replace this whole step with `npm run typecheck:test`.
+      - name: Typecheck tests (warnings, non-blocking)
+        run: |
+          out=$(npm run --silent typecheck:test 2>&1) || true
+          echo "$out"
+          echo "$out" \
+            | sed -nE 's|^(.+)\(([0-9]+),([0-9]+)\): error TS[0-9]+: (.*)$|::warning file=\1,line=\2,col=\3::\4|p'
+          count=$(printf '%s\n' "$out" | grep -cE '\([0-9]+,[0-9]+\): error TS' || true)
+          echo "### ⚠️ Test typecheck: ${count} unresolved type issue(s) — tracked, not blocking" >> "$GITHUB_STEP_SUMMARY"
+
+  test-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  test-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:e2e

@@ -1,27 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import type { EmbeddingProvider } from "@/embeddings/index";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import type { Ctx } from "@/tools/context";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session-start";
+import { WriteTool } from "../src/tools/write";
 
-async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.handler(ctx, {})).session_id;
+async function session(): Promise<string> {
+  return (await container.resolve(SessionStartTool).invoke({})).session_id;
 }
-
-async function writeFact(ctx: Ctx, s: string, title: string): Promise<Envelope> {
-  return (await write.handler(ctx, {
+async function writeFact(s: string, title: string): Promise<Envelope> {
+  return container.resolve(WriteTool).invoke({
     session_id: s,
-    memory_kind: "semantic",
+    memory_kind: _MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content: `a durable fact about ${title} with a few words of body text`,
-  })) as unknown as Envelope;
+  });
 }
 
-// Always-throwing provider (dim matches so the ctx builds) to drive retry/backoff.
+// Always-throwing provider (dim matches so the DB builds) to drive retry/backoff.
 class BrokenProvider implements EmbeddingProvider {
   readonly name = "broken";
   readonly version = "0";
@@ -31,90 +31,110 @@ class BrokenProvider implements EmbeddingProvider {
   }
 }
 
-describe("embedding queue drains", () => {
-  it("moves a node from pending → embedded on tick", async () => {
-    const { ctx, repo, worker, db } = makeCtx();
-    const s = await session(ctx);
-    const node = await writeFact(ctx, s, "TTL");
-
+describe("Embedding queue drains", () => {
+  it("should move a node from pending to embedded on a tick", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const node = await writeFact(s, "TTL");
     expect(
-      (db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as { p: number })
-        .p,
+      (
+        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as {
+          p: number;
+        }
+      ).p,
     ).toBe(1);
-    expect(repo.embeddingStats().backlog).toBe(1);
+    expect(env.queue.embeddingStats().backlog).toBe(1);
 
-    const res = await worker.tick();
+    // When
+    const res = await env.worker.tick();
+
+    // Then
     expect(res.embedded).toBeGreaterThan(0);
     expect(
-      (db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as { p: number })
-        .p,
+      (
+        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as {
+          p: number;
+        }
+      ).p,
     ).toBe(0);
-    expect(repo.embeddingStats().backlog).toBe(0);
-    expect(db.prepare("SELECT COUNT(*) c FROM embedding_queue").get()).toEqual({ c: 0 });
+    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect(env.db.prepare("SELECT COUNT(*) c FROM embedding_queue").get()).toEqual({ c: 0 });
   });
 });
 
-describe("retry with backoff, then park", () => {
-  it("increments attempts, honors backoff, and parks after 5 failures", async () => {
-    const { ctx, repo, clock } = makeCtx({ provider: new BrokenProvider() });
-    const worker = new EmbeddingWorker(repo, new BrokenProvider(), () => clock.t, {
+describe("Retry with backoff, then park", () => {
+  it("should increment attempts, honor backoff, and park after 5 failures", async () => {
+    // Given
+    const env = setup();
+    const worker = new EmbeddingWorker(env.queue, new BrokenProvider(), env.clock, {
       backoffBaseMs: 1000,
     });
-    const s = await session(ctx);
-    await writeFact(ctx, s, "Flaky");
+    const s = await session();
+    await writeFact(s, "Flaky");
 
-    await worker.tick(); // attempt 1 fails
-    expect(repo.queueRows(10)[0]!.attempts).toBe(1);
-
-    // backoff: not eligible again until the clock advances past base * 2^(n-1)
+    // When / Then — attempt 1 fails.
     await worker.tick();
-    expect(repo.queueRows(10)[0]!.attempts).toBe(1); // skipped, no retry yet
+    expect(env.queue.queueRows(10)[0]!.attempts).toBe(1);
+
+    // When / Then — backoff: not eligible again until the clock advances.
+    await worker.tick();
+    expect(env.queue.queueRows(10)[0]!.attempts).toBe(1); // skipped, no retry yet
 
     for (let n = 2; n <= 5; n++) {
-      clock.advanceMs(60_000); // past any backoff
+      env.clock.advanceMs(60_000); // past any backoff
       await worker.tick();
-      if (n < 5) expect(repo.queueRows(10)[0]!.attempts).toBe(n);
+      if (n < 5) expect(env.queue.queueRows(10)[0]!.attempts).toBe(n);
     }
 
-    // attempts === 5 → parked, excluded from the eligible queue
-    expect(repo.queueRows(10).length).toBe(0);
-    expect(repo.embeddingStats().parked).toBe(1);
-    expect(repo.embeddingStats().backlog).toBe(0);
+    // Then — attempts === 5 -> parked, excluded from the eligible queue.
+    expect(env.queue.queueRows(10).length).toBe(0);
+    expect(env.queue.embeddingStats().parked).toBe(1);
+    expect(env.queue.embeddingStats().backlog).toBe(0);
 
-    clock.advanceMs(10_000_000);
-    expect((await worker.tick()).embedded).toBe(0); // stays parked, no retry
+    // When / Then — stays parked, no retry.
+    env.clock.advanceMs(10_000_000);
+    expect((await worker.tick()).embedded).toBe(0);
   });
 });
 
-describe("restart recovery", () => {
-  it("a fresh worker drains a queue that survived the previous process", async () => {
-    const { ctx, repo, provider, clock } = makeCtx();
-    const s = await session(ctx);
-    const node = await writeFact(ctx, s, "Survivor"); // enqueued, never drained
+describe("Restart recovery", () => {
+  it("should let a fresh worker drain a queue that survived the previous process", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    await writeFact(s, "Survivor"); // enqueued, never drained
 
-    const restarted = new EmbeddingWorker(repo, provider, () => clock.t);
+    // When
+    const restarted = new EmbeddingWorker(env.queue, env.provider, env.clock);
     restarted.reconcile();
+
+    // Then
     expect((await restarted.tick()).embedded).toBeGreaterThan(0);
-    expect(repo.embeddingStats().backlog).toBe(0);
-    void node;
+    expect(env.queue.embeddingStats().backlog).toBe(0);
   });
 
-  it("re-enqueues a pending node whose queue row was lost", async () => {
-    const { ctx, repo, provider, clock, db } = makeCtx();
-    const s = await session(ctx);
-    const node = await writeFact(ctx, s, "Orphan");
+  it("should re-enqueue a pending node whose queue row was lost", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const node = await writeFact(s, "Orphan");
+    env.db.prepare("DELETE FROM embedding_queue").run(); // simulate a lost queue row
+    expect(env.queue.queueRows(10).length).toBe(0);
 
-    db.prepare("DELETE FROM embedding_queue").run(); // simulate a lost queue row
-    expect(repo.queueRows(10).length).toBe(0);
-
-    const restarted = new EmbeddingWorker(repo, provider, () => clock.t);
+    // When
+    const restarted = new EmbeddingWorker(env.queue, env.provider, env.clock);
     restarted.reconcile();
-    expect(repo.queueRows(10).length).toBe(1); // pending node re-queued
 
+    // Then
+    expect(env.queue.queueRows(10).length).toBe(1); // pending node re-queued
     await restarted.tick();
     expect(
-      (db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as { p: number })
-        .p,
+      (
+        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as {
+          p: number;
+        }
+      ).p,
     ).toBe(0);
   });
 });

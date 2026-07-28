@@ -29,9 +29,9 @@ resolved with a decision worth remembering. Never the whole backlog or closed-lo
 1. `searchJiraIssuesUsingJql` with a scoped JQL, e.g.
    `project = <KEY> AND (sprint in openSprints() OR statusCategory != Done OR resolved >= -14d)
    ORDER BY updated DESC`.
-2. `getJiraIssue` for each hit → summary, description, status, assignee, epic link.
+2. `getJiraIssue` for each hit -> summary, description, status, assignee, epic link.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|
@@ -44,5 +44,5 @@ resolved with a decision worth remembering. Never the whole backlog or closed-lo
 
 ## Link
 
-- A `decision`/`howto` note → `documents` the epic/issue it resolves.
+- A `decision`/`howto` note -> `documents` the epic/issue it resolves.
 - `relates_to` between a Jira issue and the GitLab `merge_request` that closes it.

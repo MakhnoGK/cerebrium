@@ -27,7 +27,7 @@ Mirror decision-worthy records only; never bulk-export.>
 
 <Step-by-step: which MCP tool calls fetch the scoped records, with any filters.>
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source field |
 |------------|--------------|

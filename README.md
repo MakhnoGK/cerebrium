@@ -92,7 +92,7 @@ and `sqlite-vec` are native modules that build/download on install.
 ```bash
 git clone <this-repo> cerebrium && cd cerebrium
 npm install
-npm run build        # tsup (esbuild) → dist/, copies migrations
+npm run build        # tsup (esbuild) -> dist/, copies migrations
 ```
 
 **2 — Register it in Claude Code.** Use `-s user` so the memory server is available in
@@ -162,13 +162,13 @@ claude mcp add cerebrium-dev -s user \
 | `MEMORY_DEDUP_THRESHOLD` | `0.82` | Similarity above which a write reports `similar_existing`. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
-| `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin → result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
+| `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `60000` | Generation timeout for `http`/`command`. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
-| `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic→semantic distillation. |
+| `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
 | `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
@@ -275,8 +275,8 @@ does not violate the single-writer invariant (that is about who writes the *DB*)
   revision, and a symbol re-embeds only when its summary actually changes. Symbols and
   files removed from source are **soft-invalidated** (never deleted; reachable with
   `history:true`).
-- **Edges** (all provenance `system`, agent-uncreatable): `defines` (class→method,
-  module→top-level), `imports` (resolved to repo-local files; third-party/aliased
+- **Edges** (all provenance `system`, agent-uncreatable): `defines` (class->method,
+  module->top-level), `imports` (resolved to repo-local files; third-party/aliased
   specifiers are dropped, not stored as dangling edges), and best-effort `calls`.
 - **`calls` is best-effort and intra-repo only** — same-file names and imported symbols
   are resolved by name; dynamic dispatch and cross-module calls that need a type system
@@ -398,7 +398,7 @@ WAL mode (already on) is required for Litestream.
 ## Engineering highlights
 
 - **DB-as-source-of-truth, append-only.** A database is built purely by running numbered
-  migrations (`000_baseline.sql → NNN`); `schema.sql` is a derived snapshot kept honest by
+  migrations (`000_baseline.sql -> NNN`); `schema.sql` is a derived snapshot kept honest by
   a drift-guard test. Nothing is ever hard-deleted — invalidation is soft, and superseded
   data stays queryable with `history:true`.
 - **Hybrid retrieval with a memory model.** FTS5 bm25 and vector KNN are fused with RRF,
@@ -419,7 +419,7 @@ WAL mode (already on) is required for Litestream.
   it already has MCP access to (GitLab, Jira, Sentry, Grafana, Notion, …) into searchable
   `mirror` nodes. The kernel connects to nothing, stores no credentials, and hard-codes no
   source — a different deployment just registers different sources, no code change.
-- **Background consolidation.** Link discovery, episodic→semantic distillation, dedup/merge,
+- **Background consolidation.** Link discovery, episodic->semantic distillation, dedup/merge,
   and dead-mirror pruning run in the daemon, each with an independent `off`/`suggest`/`auto`
   posture. Generation is a pluggable adapter (`manual`/`command`/`http`), and the default
   keeps the entire test suite offline — no API keys, no model download.

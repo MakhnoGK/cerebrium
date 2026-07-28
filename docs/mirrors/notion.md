@@ -28,9 +28,9 @@ hubs, RFCs. Never entire databases or scratch/journal pages.
 
 1. `notion-search` for the pages/hubs you care about, or `notion-query-data-sources` /
    `notion-query-database-view` against a specific database with a filter.
-2. `notion-fetch` for each page → summarize; keep it compact.
+2. `notion-fetch` for each page -> summarize; keep it compact.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|

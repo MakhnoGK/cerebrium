@@ -1,37 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "./helpers";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
 import { withBusyRetry, isBusy } from "@/db/retry";
 import { EmbeddingWorker } from "@/embeddings/worker";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import type { Ctx } from "@/tools/context";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
+import { SessionStartTool } from "../src/tools/session-start";
+import { WriteTool } from "../src/tools/write";
 
-async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.handler(ctx, {})).session_id;
+async function session(): Promise<string> {
+  return (await container.resolve(SessionStartTool).invoke({})).session_id;
 }
-
-async function writeFact(ctx: Ctx, s: string, title: string): Promise<Envelope> {
-  return (await write.handler(ctx, {
+async function writeFact(s: string, title: string): Promise<Envelope> {
+  return container.resolve(WriteTool).invoke({
     session_id: s,
-    memory_kind: "semantic",
+    memory_kind: _MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content: `a durable fact about ${title} with a few words of body text`,
-  })) as unknown as Envelope;
+  });
 }
 
 const busyErr = () => Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
 
-describe("busy-retry wrapper", () => {
-  it("recognizes the busy family and nothing else", () => {
+describe("Busy-retry wrapper", () => {
+  it("should recognize the busy family and nothing else", () => {
+    // Given / When / Then
     expect(isBusy(busyErr())).toBe(true);
     expect(isBusy(Object.assign(new Error("x"), { code: "SQLITE_BUSY_SNAPSHOT" }))).toBe(true);
     expect(isBusy(new Error("plain"))).toBe(false);
   });
 
-  it("retries a busy transaction then succeeds", () => {
+  it("should retry a busy transaction then succeed", () => {
+    // Given
     let n = 0;
+
+    // When
     const r = withBusyRetry(
       () => {
         if (n++ < 2) throw busyErr();
@@ -40,12 +44,17 @@ describe("busy-retry wrapper", () => {
       6,
       1,
     );
+
+    // Then
     expect(r).toBe("ok");
     expect(n).toBe(3);
   });
 
-  it("rethrows a non-busy error immediately without retrying", () => {
+  it("should rethrow a non-busy error immediately without retrying", () => {
+    // Given
     let n = 0;
+
+    // When / Then
     expect(() =>
       withBusyRetry(() => {
         n++;
@@ -55,8 +64,11 @@ describe("busy-retry wrapper", () => {
     expect(n).toBe(1);
   });
 
-  it("gives up after the attempt budget on persistent busy", () => {
+  it("should give up after the attempt budget on persistent busy", () => {
+    // Given
     let n = 0;
+
+    // When / Then
     expect(() =>
       withBusyRetry(
         () => {
@@ -71,48 +83,52 @@ describe("busy-retry wrapper", () => {
   });
 });
 
-describe("embedding worker lease", () => {
-  it("lets only the lease holder drain while a second worker stands down", async () => {
-    const { ctx, repo, provider, clock } = makeCtx();
-    const s = await session(ctx);
-    await writeFact(ctx, s, "one");
-    await writeFact(ctx, s, "two");
-    expect(repo.embeddingStats().backlog).toBe(2);
+describe("Embedding worker lease", () => {
+  it("should let only the lease holder drain while a second worker stands down", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    await writeFact(s, "one");
+    await writeFact(s, "two");
+    expect(env.queue.embeddingStats().backlog).toBe(2);
 
     // One-chunk batches so the first tick leaves work behind for the contention check.
-    const a = new EmbeddingWorker(repo, provider, () => clock.t, {
+    const a = new EmbeddingWorker(env.queue, env.provider, env.clock, {
       batchSize: 1,
       leaseTtlMs: 10_000,
     });
-    const b = new EmbeddingWorker(repo, provider, () => clock.t, {
+    const b = new EmbeddingWorker(env.queue, env.provider, env.clock, {
       batchSize: 16,
       leaseTtlMs: 10_000,
     });
 
-    expect((await a.tick()).embedded).toBeGreaterThan(0); // A takes the lease
-    const afterA = repo.embeddingStats().backlog;
+    // When / Then — A takes the lease and drains one chunk.
+    expect((await a.tick()).embedded).toBeGreaterThan(0);
+    const afterA = env.queue.embeddingStats().backlog;
     expect(afterA).toBeGreaterThan(0); // work remains
 
-    // B cannot drain: A's lease is still live at the same clock instant.
+    // When / Then — B cannot drain: A's lease is still live at the same clock instant.
     expect((await b.tick()).embedded).toBe(0);
-    expect(repo.embeddingStats().backlog).toBe(afterA);
+    expect(env.queue.embeddingStats().backlog).toBe(afterA);
 
-    // Once A's lease lapses, B steals it and finishes the queue.
-    clock.advanceMs(11_000);
+    // When / Then — once A's lease lapses, B steals it and finishes the queue.
+    env.clock.advanceMs(11_000);
     expect((await b.tick()).embedded).toBeGreaterThan(0);
-    expect(repo.embeddingStats().backlog).toBe(0);
+    expect(env.queue.embeddingStats().backlog).toBe(0);
   });
 
-  it("a worker keeps renewing its own lease across ticks", async () => {
-    const { ctx, repo, provider, clock } = makeCtx();
-    const s = await session(ctx);
-    await writeFact(ctx, s, "solo");
+  it("should keep renewing its own lease across ticks", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    await writeFact(s, "solo");
 
-    const w = new EmbeddingWorker(repo, provider, () => clock.t, { leaseTtlMs: 5_000 });
+    // When / Then
+    const w = new EmbeddingWorker(env.queue, env.provider, env.clock, { leaseTtlMs: 5_000 });
     expect((await w.tick()).embedded).toBeGreaterThan(0);
-    await writeFact(ctx, s, "solo-2");
-    clock.advanceMs(4_000); // within its own TTL — still the holder, no hand-off
+    await writeFact(s, "solo-2");
+    env.clock.advanceMs(4_000); // within its own TTL — still the holder, no hand-off
     expect((await w.tick()).embedded).toBeGreaterThan(0);
-    expect(repo.embeddingStats().backlog).toBe(0);
+    expect(env.queue.embeddingStats().backlog).toBe(0);
   });
 });

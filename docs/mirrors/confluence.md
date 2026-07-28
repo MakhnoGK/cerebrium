@@ -28,9 +28,9 @@ charters. Not personal drafts, meeting notes, or every page in a space.
 
 1. `searchConfluenceUsingCql`, e.g. `space = <KEY> AND type = page AND lastmodified >= now("-90d")`,
    or a maintained allow-list of page ids.
-2. `getConfluencePage` for each → title + body; summarize the body (do not store it whole).
+2. `getConfluencePage` for each -> title + body; summarize the body (do not store it whole).
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|

@@ -31,7 +31,7 @@ with a root cause or a Seer analysis worth remembering. Never every event or one
 2. For the ones that matter, `analyze_issue_with_seer` and/or `get_sentry_resource` for the
    root-cause detail; `search_events` for the impact window.
 
-## Map each record → `mirror_upsert` item
+## Map each record -> `mirror_upsert` item
 
 | item field | source |
 |------------|--------|
@@ -46,4 +46,4 @@ with a root cause or a Seer analysis worth remembering. Never every event or one
 
 - `relates_to` between a Sentry `issue` and the Grafana `incident` / GitLab `merge_request` for
   the same event.
-- `documents` from a `decision` note that captures the fix → the issue.
+- `documents` from a `decision` note that captures the fix -> the issue.

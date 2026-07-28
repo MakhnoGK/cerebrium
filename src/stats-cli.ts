@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import "reflect-metadata";
+import { container } from "tsyringe";
+import Database from "better-sqlite3";
 import { isMainModule } from "@/runtime/is-main";
 import { openDatabaseReadonly, defaultDbPath } from "@/db/database";
-import { Repo } from "@/db/repo";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { StatsRepo } from "@/db/repositories";
 import { nowIso } from "@/core/ids";
 import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
 
@@ -23,8 +27,9 @@ function main(): void {
   const dbPath = defaultDbPath();
   const asJson = process.argv.includes("--json");
   const db = openDatabaseReadonly(dbPath);
+  container.register<Database.Database>(DB_TOKEN, { useValue: db });
   try {
-    const s = new Repo(db).techStats(nowIso());
+    const s = container.resolve(StatsRepo).techStats(nowIso());
     const daemonAlive = isDaemonAlive(dbPath);
     const daemonPid = readDaemonPid(dbPath);
 

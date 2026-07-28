@@ -4,6 +4,8 @@ import { LocalReranker } from "@/rerank/local";
 
 export type { RerankProvider } from "@/rerank/provider";
 
+export const RERANK_PROVIDER_TOKEN = Symbol("RerankProvider");
+
 // The disabled default: `search` checks `enabled` and skips the rerank stage, leaving
 // the RRF ordering untouched. `rerank` is never called, but returns zeros for safety.
 class DisabledReranker implements RerankProvider {

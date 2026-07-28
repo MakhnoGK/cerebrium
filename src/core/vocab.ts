@@ -4,6 +4,12 @@
 export const MEMORY_KINDS = ["episodic", "semantic", "mirror"] as const;
 export type MemoryKind = (typeof MEMORY_KINDS)[number];
 
+export enum _MemoryKind {
+  EPISODIC = "episodic",
+  SEMANTIC = "semantic",
+  MIRROR = "mirror",
+}
+
 // Writable kinds through the `write` tool. `mirror` exists in the schema but is
 // non-writable by hand — mirror nodes (code `symbol`s) are maintained by
 // the indexer via the repo layer, never through `write`/`update`.
@@ -37,7 +43,7 @@ export type EdgeType = (typeof EDGE_TYPES)[number];
 
 // System-only edge types: agents may not create these via the `link` tool. The
 // code edges (imports/calls/defines) are drawn only by the indexer; `documents`
-// stays agent-creatable — that is the note→code link the agent draws by hand.
+// stays agent-creatable — that is the note->code link the agent draws by hand.
 export const SYSTEM_EDGE_TYPES = ["similar_to", "imports", "calls", "defines"] as const;
 
 // Consolidation: the kind of a queued consolidation candidate and its
@@ -67,6 +73,7 @@ export const EVENT_ACTIONS = [
   "consolidate_apply",
   "stats",
 ] as const;
+
 export type EventAction = (typeof EVENT_ACTIONS)[number];
 
 export function typeAllowedForKind(kind: WritableKind, type: string): boolean {
