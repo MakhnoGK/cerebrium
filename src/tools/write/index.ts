@@ -26,10 +26,10 @@ interface SimilarExisting {
 }
 
 type ToolResponse = Envelope & {
-  similar_existing?: unknown;
+  similar_existing?: SimilarExisting[];
   reconcile?: unknown;
   hints?: string[];
-  context_notes?: unknown;
+  context_notes?: string[];
 };
 
 @tool()

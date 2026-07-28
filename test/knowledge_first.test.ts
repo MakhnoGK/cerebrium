@@ -5,15 +5,10 @@ import { join } from "node:path";
 import { makeCtx } from "@test/helpers";
 import type { Ctx } from "@/tools/context";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session_start";
-import { CodeIndexTool } from "../src/tools/code_index";
+import { SessionStartTool } from "../src/tools/session-start";
+import { CodeIndexTool } from "../src/tools/code-index";
 import { SearchTool } from "../src/tools/search";
 import { WriteTool } from "../src/tools/write";
-
-const session_start = new SessionStartTool();
-const code_index = new CodeIndexTool();
-const write = new WriteTool();
-const search = new SearchTool();
 
 const DEPLOY = `/**
  * deploy pipeline deploy pipeline
@@ -55,8 +50,21 @@ async function corpus(
       content: "the deploy step only",
     })) as Envelope
   ).id;
+
   return { s, strong, symbol, weak };
 }
+
+let sessionStartTool: SessionStartTool;
+let writeTool: WriteTool;
+let codeIndexTool: CodeIndexTool;
+let searchTool: SearchTool;
+
+beforeAll(() => {
+  writeTool = container.resolve(WriteTool);
+  codeIndexTool = container.resolve(CodeIndexTool);
+  searchTool = container.resolve(SearchTool);
+  sessionStartTool = container.resolve(SessionStartTool);
+});
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "mk-kf-"));
@@ -80,6 +88,7 @@ describe("knowledge-first ranking", () => {
         limit: 10,
       }),
     );
+
     expect(def).toContain(symbol);
     expect(def.indexOf(strong)).toBeLessThan(def.indexOf(symbol)); // authored above code
   });
@@ -89,6 +98,7 @@ describe("knowledge-first ranking", () => {
     const { s, symbol } = await corpus(ctx);
 
     process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // heavy penalty -> symbol sinks to the bottom
+
     const low = ids(
       await search.invoke(ctx, {
         session_id: s,
@@ -100,6 +110,7 @@ describe("knowledge-first ranking", () => {
     expect(low[low.length - 1]).toBe(symbol);
 
     process.env.MEMORY_SYMBOL_WEIGHT = "100"; // heavy boost -> symbol climbs above other matches
+
     const high = ids(
       await search.invoke(ctx, {
         session_id: s,
@@ -108,6 +119,7 @@ describe("knowledge-first ranking", () => {
         limit: 10,
       }),
     );
+
     expect(high[high.length - 1]).not.toBe(symbol); // no longer pinned to the bottom
     expect(high.indexOf(symbol)).toBeLessThan(low.indexOf(symbol));
   });
@@ -117,6 +129,7 @@ describe("knowledge-first ranking", () => {
     const { s, symbol } = await corpus(ctx);
 
     process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // would sink the symbol to the bottom...
+
     const plain = ids(
       await search.invoke(ctx, {
         session_id: s,
@@ -135,6 +148,7 @@ describe("knowledge-first ranking", () => {
         limit: 10,
       }),
     );
+
     expect(escaped.indexOf(symbol)).toBeLessThan(plain.indexOf(symbol));
   });
 });
