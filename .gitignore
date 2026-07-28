@@ -5,5 +5,4 @@ dist/
 *.db-shm
 *.db-wal
 .DS_Store
-
 .idea
