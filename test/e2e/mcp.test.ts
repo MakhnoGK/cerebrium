@@ -791,9 +791,11 @@ describe("code_index tool", () => {
   it("should return a compact summary when indexing an explicit path", async () => {
     const client = await connect();
     const sid = await startSession(client);
+
     const res = payload<{ repo: string; files_indexed: number; symbols_added: number }>(
       await client.callTool({ name: "code_index", arguments: { session_id: sid, path: FIXTURE } }),
     );
+
     expect(res.repo).toBe("demo-repo");
     expect(res.files_indexed).toBe(2);
     expect(res.symbols_added).toBeGreaterThan(4);
@@ -803,9 +805,11 @@ describe("code_index tool", () => {
   it("should error when the repo is unknown and no path is given", async () => {
     const client = await connect();
     const sid = await startSession(client);
+
     const res = asError(
       await client.callTool({ name: "code_index", arguments: { session_id: sid, repo: "nope" } }),
     );
+
     expect(res.isError).toBe(true);
     expect(res.text).toMatch(/not configured/);
   });

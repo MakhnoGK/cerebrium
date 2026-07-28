@@ -1,12 +1,12 @@
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { Repo, FileIndexResult } from "@/db/repo";
+import type { FileIndexResult, Repo } from "@/db/repo";
 import { langForPath } from "@/code/languages";
 import { compileIgnore } from "@/code/ignore";
 import { parse } from "@/code/parser";
-import { extractFile } from "@/code/extract";
 import type { FileExtract } from "@/code/extract";
+import { extractFile } from "@/code/extract";
 import { readGitProvenance } from "@/code/git";
 
 export interface IndexStats {
@@ -55,23 +55,31 @@ const MAX_BYTES = 1_000_000;
 // own embedding worker) get scheduling gaps between per-file transactions.
 const YIELD_EVERY = 8;
 
-function sha256(buf: Buffer): string {
+export function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-function yieldToLoop(): Promise<void> {
+export function yieldToLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-// Real binaries are saturated with NUL bytes; source occasionally carries one inside
+// Real binaries are saturated with NUL bytes; a source occasionally carries one inside
 // a string literal (e.g. a "\0" separator). Flag only a high NUL fraction, not the
-// first NUL, so legal source is never dropped.
-function looksBinary(buf: Buffer): boolean {
+// first NUL, so a legal source is never dropped.
+export function looksBinary(buf: Buffer): boolean {
   const n = Math.min(buf.length, 8000);
-  if (n === 0) return false;
-  let nuls = 0;
-  for (let i = 0; i < n; i++) if (buf[i] === 0) nuls++;
-  return nuls / n > 0.1;
+
+  if (n === 0) {
+    return false;
+  }
+
+  let nulls = 0;
+
+  for (let i = 0; i < n; i++) {
+    if (buf[i] === 0) nulls++;
+  }
+
+  return nulls / n > 0.1;
 }
 
 interface Candidate {
@@ -83,7 +91,7 @@ interface Candidate {
 
 // Walk `root`, yielding indexable files (known grammar, not ignored/binary/oversized).
 // A directory's own .gitignore extends the inherited rules for its subtree.
-function walk(root: string): Candidate[] {
+export function walk(root: string): Candidate[] {
   const out: Candidate[] = [];
   const rootIgnore = existsSync(join(root, ".gitignore"))
     ? compileIgnore(readFileSync(join(root, ".gitignore"), "utf8"))
@@ -119,11 +127,7 @@ function walk(root: string): Candidate[] {
   return out;
 }
 
-export async function indexRepo(
-  repo: Repo,
-  target: IndexTarget,
-  opts: IndexOptions,
-): Promise<IndexStats> {
+export async function indexRepo(target: IndexTarget, opts: IndexOptions): Promise<IndexStats> {
   const start = Date.parse(opts.now());
   const stats: IndexStats = {
     repo: target.name,
@@ -256,7 +260,7 @@ function pathNameKey(path: string, name: string): string {
   return `${path}\0${name}`;
 }
 
-function buildResolver(repo: Repo, name: string): Resolver {
+export function buildResolver(repo: Repo, name: string): Resolver {
   const r: Resolver = {
     byQualified: new Map(),
     byPathName: new Map(),
@@ -273,7 +277,7 @@ function buildResolver(repo: Repo, name: string): Resolver {
   return r;
 }
 
-function resolveImports(
+export function resolveImports(
   r: Resolver,
   path: string,
   ex: FileExtract,
@@ -306,7 +310,7 @@ function resolveImports(
 // same-file/imported resolution).
 const NAMESPACED_IMPORTS = new Set(["php", "rust"]);
 
-function resolveCalls(
+export function resolveCalls(
   r: Resolver,
   path: string,
   lang: string,
