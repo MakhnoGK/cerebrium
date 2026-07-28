@@ -51,6 +51,10 @@ If a command above doesn't exist yet, creating it is part of the current task �
 - Ranking behavior is tested with fixed clocks (inject `now`) — no `sleep`-based decay tests.
 - End-to-end scenarios (multi-session flows from the briefs' acceptance criteria) live in `test/e2e/` and run as part of `npm test`.
 - Never weaken or delete a failing test to make a task pass. If a test contradicts a brief, stop and ask.
+- **Naming + structure follow a fixed convention** (see `test/code_repo.test.ts` as the reference):
+  - `describe(...)` is a capitalized noun phrase naming the subject under test (the unit/behavior group) — e.g. `Repo.applyFileIndex`, `Write-time reconcile`. Never a `should…`, never a placeholder like `phase 3`.
+  - `it(...)`/`test(...)` reads `should <expected outcome> when <condition>`, lowercase, mirroring exactly what the body asserts — e.g. `should be a no-op when an unchanged file set is re-applied`.
+  - Each test body is marked with `// Given` (arrange), `// When` (act), `// Then` (assert) comments. Collapse to `// Given / When` when setup and action are one line; repeat `// When / Then` per segment when a test drives several independent act-assert steps. These structural markers are the one sanctioned exception to the "keep comments minimal" rule — they carry no rationale, only phase labels.
 
 ## Consolidation
 
