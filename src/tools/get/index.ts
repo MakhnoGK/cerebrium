@@ -1,4 +1,5 @@
 import { CodeRepo, MirrorRepo, NodesRepo } from "@/db/repositories";
+import { MemoryKind } from "@/core/vocab";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
@@ -52,7 +53,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {
           node.symbol = facets;
           node.source = source;
         }
-      } else if (full.envelope.kind === "mirror") {
+      } else if (full.envelope.kind === MemoryKind.MIRROR) {
         // For an external mirror, `get` also carries the source back-reference, the
         // deep-link URL, and the opaque facet metadata (search returns envelopes only).
         const rec = this.mirror.mirrorRecord(id);

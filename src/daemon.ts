@@ -3,22 +3,25 @@ import "reflect-metadata";
 import Database from "better-sqlite3";
 import { container } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
+import {
+  CONSOLIDATION_PROVIDER_TOKEN,
+  type ConsolidationProvider,
+} from "@/domain/ports/consolidation-provider";
+import {
+  EMBEDDING_PROVIDER_TOKEN,
+  type EmbeddingProvider,
+} from "@/domain/ports/embedding-provider";
 import { consolidateIntervalMs } from "@/consolidation/config";
-import { createConsolidator, type ConsolidationProvider } from "@/consolidation/index";
+import { createConsolidator } from "@/consolidation/index";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import { defaultDbPath, openDatabase } from "@/db/database";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
-import {
-  createProvider,
-  EMBEDDING_PROVIDER_TOKEN,
-  type EmbeddingProvider,
-} from "@/embeddings/index";
 import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { SystemClock } from "@/runtime/system-clock";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { createProvider } from "@/embeddings";
 
 // Standalone embedding drain. Outlives any Claude Code session: the MCP server
 // spawns it detached (see ensureDaemon in server.ts) and it keeps draining the
@@ -115,7 +118,9 @@ async function main(): Promise<void> {
     useValue: { batchSize: Number(process.env.MEMORY_EMBED_BATCH) || 64 },
   });
   container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
-  container.register<ConsolidationProvider>(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+  container.register<ConsolidationProvider>(CONSOLIDATION_PROVIDER_TOKEN, {
+    useValue: createConsolidator(),
+  });
 
   const queue = container.resolve(EmbeddingQueueRepo);
   const worker = container.resolve(EmbeddingWorker);

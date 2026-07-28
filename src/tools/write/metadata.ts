@@ -1,5 +1,5 @@
 import z from "zod";
-import { _MemoryKind, EDGE_TYPES } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
@@ -18,7 +18,7 @@ export const metadata = {
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
     memory_kind: z
-      .nativeEnum(_MemoryKind)
+      .nativeEnum(MemoryKind)
       .describe("'episodic' (what happened, write-once) or 'semantic' (a durable fact)."),
     type: z
       .string()
@@ -32,7 +32,7 @@ export const metadata = {
       .describe("Markdown body. First non-heading line becomes the summary."),
     project: z.string().optional().describe("Project scope; omit for a global memory."),
     links: z
-      .array(z.object({ dst: z.string(), type: z.enum(EDGE_TYPES) }))
+      .array(z.object({ dst: z.string(), type: z.nativeEnum(EdgeType) }))
       .optional()
       .describe("Edges from this new node to existing nodes."),
   },

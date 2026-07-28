@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { SearchTool } from "@/tools/search";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
@@ -29,7 +29,7 @@ describe("Ranking blends text relevance with the memory model", () => {
 
     const old = (await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "Deploy",
       content,
@@ -37,7 +37,7 @@ describe("Ranking blends text relevance with the memory model", () => {
     env.clock.advanceDays(59);
     const fresh = (await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "Deploy",
       content,
@@ -45,7 +45,7 @@ describe("Ranking blends text relevance with the memory model", () => {
     env.clock.advanceDays(1);
     const fact = (await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Deploy",
       content,
@@ -66,7 +66,7 @@ describe("Ranking blends text relevance with the memory model", () => {
 
     const old = (await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "x",
       content: "deploy deploy deploy deploy pipeline",
@@ -74,7 +74,7 @@ describe("Ranking blends text relevance with the memory model", () => {
     env.clock.advanceDays(60);
     const fresh = (await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "x",
       content: "deploy",
@@ -103,7 +103,7 @@ describe("Search is robust and filterable", () => {
     const s = (await t.sessionStart.invoke({})).session_id;
     await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "T",
       content: "alpha beta",
@@ -137,14 +137,14 @@ describe("Search is robust and filterable", () => {
     const s = (await t.sessionStart.invoke({})).session_id;
     await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "A",
       content: "shared term",
     });
     await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: "B",
       content: "shared term",
@@ -154,7 +154,7 @@ describe("Search is robust and filterable", () => {
     const onlySemantic = await t.search.invoke({
       session_id: s,
       query: "shared",
-      kinds: ["semantic"],
+      kinds: [MemoryKind.SEMANTIC],
       limit: 10,
     });
 

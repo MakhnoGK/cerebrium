@@ -1,6 +1,10 @@
 import { inject, injectable } from "tsyringe";
+import {
+  CONSOLIDATION_PROVIDER_TOKEN,
+  ReconcileAction,
+  type ConsolidationProvider,
+} from "@/domain/ports/consolidation-provider";
 import { NodesRepo } from "@/db/repositories";
-import type { ConsolidationProvider } from "@/consolidation";
 
 const RECONCILE_CANDIDATES = 3;
 
@@ -24,13 +28,11 @@ interface ReconcileVO {
   draft: { title: string; type: string; content: string };
 }
 
-export const CONSOLIDATOR_TOKEN = Symbol("consolidator-token");
-
 @injectable()
 export class ConsolidationService {
   constructor(
     private readonly nodesRepo: NodesRepo,
-    @inject(CONSOLIDATOR_TOKEN) private readonly consolidator: ConsolidationProvider,
+    @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
   ) {}
 
   // Ask the provider to judge the new draft against its nearest existing records: keep,
@@ -51,7 +53,7 @@ export class ConsolidationService {
         candidates,
       });
 
-      const isNoop = consolidationResult.action === "noop";
+      const isNoop = consolidationResult.action === ReconcileAction.NOOP;
       const hasTargetCandidates = candidates.some((c) => c.id === consolidationResult.target_id);
 
       if (!isNoop && !hasTargetCandidates) {

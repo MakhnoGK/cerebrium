@@ -17,6 +17,7 @@ import {
 import { parse } from "@/code/parser";
 import { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
 import type { FileIndexResult } from "@/core/types";
+import { EdgeType } from "@/core/vocab";
 import { metadata } from "@/tools/code-index/metadata";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
@@ -272,7 +273,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
         stats.edges_written += this.code.rebuildResolvedEdges(
           target.name,
           rel,
-          "imports",
+          EdgeType.IMPORTS,
           importPairs,
           opts.session_id,
           opts.now(),
@@ -280,7 +281,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
         stats.edges_written += this.code.rebuildResolvedEdges(
           target.name,
           rel,
-          "calls",
+          EdgeType.CALLS,
           callPairs,
           opts.session_id,
           opts.now(),

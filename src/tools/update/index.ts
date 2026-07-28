@@ -1,6 +1,7 @@
 import { inject } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { NodesRepo } from "@/db/repositories";
+import { MemoryKind } from "@/core/vocab";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
@@ -24,11 +25,11 @@ export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown>
     const current = this.nodes.envelope(args.id);
 
     if (!current) throw new Error(`node ${args.id} does not exist.`);
-    if (current.kind === "episodic") {
+    if (current.kind === MemoryKind.EPISODIC) {
       throw new Error("episodic memories are write-once; write a new node.");
     }
 
-    if (current.kind === "mirror") {
+    if (current.kind === MemoryKind.MIRROR) {
       throw new Error(
         "symbol/mirror nodes are re-indexed, not hand-edited; run `code_index` to refresh them. To record insight ABOUT " +
           "this code, write a semantic node and `link` it with a 'documents' edge.",

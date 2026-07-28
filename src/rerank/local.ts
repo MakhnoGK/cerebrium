@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { RerankProvider } from "@/rerank/provider";
+import { type RerankProvider } from "@/domain/ports/rerank-provider";
 
 // In-process cross-encoder reranker via transformers.js. Default model
 // ms-marco-MiniLM-L-6-v2 (a BERT cross-encoder scoring a query|passage pair with a

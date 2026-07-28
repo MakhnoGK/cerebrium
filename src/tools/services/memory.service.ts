@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { MirrorRepo, SearchRepo, StatsRepo } from "@/db/repositories";
 import { estimateTokensOf } from "@/core/tokens";
 

@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { CodeIndexTool } from "@/tools/code-index";
 import { CodeLookupTool } from "@/tools/code-lookup";
 import { GetTool } from "@/tools/get";
@@ -130,7 +130,7 @@ describe("Mirror discipline", () => {
     await expect(
       container.resolve(WriteTool).invoke({
         session_id,
-        memory_kind: _MemoryKind.MIRROR,
+        memory_kind: MemoryKind.MIRROR,
         type: "symbol",
         title: "x",
         content: "y",

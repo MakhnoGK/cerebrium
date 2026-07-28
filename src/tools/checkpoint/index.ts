@@ -1,5 +1,6 @@
 import { NodesRepo } from "@/db/repositories";
 import { Envelope } from "@/core/types";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
@@ -39,14 +40,14 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
     }
 
     const envelope = await this.nodes.createNode({
-      memory_kind: "episodic",
+      memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: args.summary.split("\n")[0]!.slice(0, 120),
       content: buildBody(args.summary, args.decisions, args.open_threads),
       project: args.project ?? null,
       session_id: args.session_id,
       ts: new Date().toISOString(),
-      links: existing.map((dst) => ({ dst, type: "references" as const })),
+      links: existing.map((dst) => ({ dst, type: EdgeType.REFERENCES })),
     });
 
     // this.ctx.repo.logEvent(

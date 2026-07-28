@@ -5,18 +5,20 @@ import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { container } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { SystemClock } from "@/runtime/system-clock";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { SearchTool } from "@/tools/search";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
 import { createConsolidator } from "@/consolidation";
-import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "@/embeddings";
-import { createReranker, RERANK_PROVIDER_TOKEN } from "@/rerank";
+import { createProvider } from "@/embeddings";
+import { createReranker } from "@/rerank";
 
 // Offline relevance eval: measure whether the `local` cross-encoder reranker
 // improves search precision over RRF-only fusion on a labeled query set. Both runs
@@ -88,7 +90,7 @@ async function main() {
   container.register(DB_TOKEN, { useValue: db });
   container.registerSingleton(CLOCK_TOKEN, SystemClock);
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
-  container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator("manual") });
+  container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator("manual") });
   container.register(WORKER_OPTIONS_TOKEN, { useValue: {} });
 
   // Both runs share the same DB + embeddings and differ only in the injected reranker.
@@ -110,7 +112,7 @@ async function main() {
   for (const d of data.docs) {
     await writeTool.invoke({
       session_id: sid,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: d.title,
       content: `${d.title}. ${d.content}`,

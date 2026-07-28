@@ -1,4 +1,13 @@
 import {
+  type AnnotateResult,
+  type AnnotateTask,
+  type ConsolidationProvider,
+  type ConsolidationResult,
+  type ConsolidationTask,
+  type ReconcileResult,
+  type ReconcileTask,
+} from "@/domain/ports/consolidation-provider";
+import {
   ANNOTATE_SCHEMA,
   ANNOTATE_SYSTEM_PROMPT,
   annotatePrompt,
@@ -11,13 +20,6 @@ import {
   RESULT_SCHEMA,
   SYSTEM_PROMPT,
   taskPrompt,
-  type AnnotateResult,
-  type AnnotateTask,
-  type ConsolidationProvider,
-  type ConsolidationResult,
-  type ConsolidationTask,
-  type ReconcileResult,
-  type ReconcileTask,
 } from "@/consolidation/provider";
 
 export type FetchFn = typeof fetch;

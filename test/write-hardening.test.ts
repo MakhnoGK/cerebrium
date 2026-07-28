@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { isBusy, withBusyRetry } from "@/db/retry";
 import { EmbeddingWorker } from "@/embeddings/worker";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
 import { setup } from "@test/helpers";
@@ -14,7 +14,7 @@ async function session(): Promise<string> {
 async function writeFact(s: string, title: string): Promise<Envelope> {
   return container.resolve(WriteTool).invoke({
     session_id: s,
-    memory_kind: _MemoryKind.SEMANTIC,
+    memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content: `a durable fact about ${title} with a few words of body text`,

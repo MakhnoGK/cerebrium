@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { CodeIndexTool } from "@/tools/code-index";
 import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
 import { SearchTool } from "@/tools/search";
@@ -83,7 +84,7 @@ describe("Tier-1 mirror prune", () => {
     const { s } = await orphanSymbol(env);
     const fact = (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Keep me",
       content: "a durable fact that must survive the prune sweep",
@@ -109,12 +110,12 @@ describe("Tier-1 mirror prune", () => {
     expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
 
     const cand = env.consolidation
-      .pendingCandidates({ kind: "prune" })
+      .pendingCandidates({ kind: ConsolidationKind.PRUNE })
       .find((c) => c.member_ids[0] === symbolId);
     expect(cand).toBeDefined();
     await container
       .resolve(ConsolidateApplyTool)
-      .invoke({ session_id: s, id: cand!.id, decision: "accept" });
+      .invoke({ session_id: s, id: cand!.id, decision: ConsolidationRecommendation.APPLY });
     expect(env.nodes.envelope(symbolId)!.invalidated).toBe(true);
   });
 

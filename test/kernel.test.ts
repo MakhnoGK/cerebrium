@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { GetTool } from "@/tools/get";
 import { InvalidateTool } from "@/tools/invalidate";
 import { SearchTool } from "@/tools/search";
@@ -37,7 +37,7 @@ describe("Revisions are append-only and history is reconstructable", () => {
     const created = env(
       await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Fact",
         content: "content A",
@@ -88,7 +88,7 @@ describe("Episodic memories are write-once", () => {
     const note = env(
       await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.EPISODIC,
+        memory_kind: MemoryKind.EPISODIC,
         type: "event_note",
         title: "E",
         content: "happened",
@@ -111,7 +111,7 @@ describe("Invalidate is a soft delete with a supersedes edge", () => {
     const oldNode = env(
       await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Old",
         content: "old truth",
@@ -120,7 +120,7 @@ describe("Invalidate is a soft delete with a supersedes edge", () => {
     const newNode = env(
       await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "New",
         content: "new truth",
@@ -157,7 +157,7 @@ describe("FTS stays consistent across write -> update -> invalidate", () => {
     const n = env(
       await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Fruit",
         content: "banana",
@@ -204,7 +204,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.MIRROR,
+        memory_kind: MemoryKind.MIRROR,
         type: "fact",
         title: "M",
         content: "x",
@@ -222,7 +222,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "checkpoint",
         title: "X",
         content: "x",
@@ -240,7 +240,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Big",
         content: "x".repeat(50_001),
@@ -258,11 +258,11 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "L",
         content: "x",
-        links: [{ dst: "01NONEXISTENT", type: "references" }],
+        links: [{ dst: "01NONEXISTENT", type: EdgeType.REFERENCES }],
       }),
     ).rejects.toThrow(/does not exist/);
   });
@@ -278,7 +278,7 @@ describe("Unknown sessions are forgiven", () => {
     const res = env(
       await t.write.invoke({
         session_id: "GHOST",
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "T",
         content: "x",

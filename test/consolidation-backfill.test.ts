@@ -1,9 +1,12 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
-import type { ConsolidationProvider } from "@/consolidation/provider";
+import {
+  ConsolidationRecommendation,
+  type ConsolidationProvider,
+} from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
 import { setup } from "@test/helpers";
@@ -14,7 +17,7 @@ const stub: ConsolidationProvider = {
   enabled: true,
   generate: () =>
     Promise.resolve({
-      recommendation: "apply",
+      recommendation: ConsolidationRecommendation.APPLY,
       reason: "same fact",
       title: "Drafted",
       summary: "S",
@@ -30,7 +33,7 @@ const rejectStub: ConsolidationProvider = {
   enabled: true,
   generate: () =>
     Promise.resolve({
-      recommendation: "reject",
+      recommendation: ConsolidationRecommendation.REJECT,
       reason: "different services, not a duplicate",
       title: "",
       summary: "",
@@ -44,7 +47,7 @@ async function mk(s: string, title: string): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title,
       content: `content for ${title}`,
@@ -60,7 +63,7 @@ describe("Proposal backfill (manual -> provider upgrade)", () => {
     const a = await mk(s, "Alpha");
     const b = await mk(s, "Beta");
     const id = env.consolidation.insertCandidate({
-      kind: "merge",
+      kind: ConsolidationKind.MERGE,
       member_ids: [a, b],
       canonical_id: a,
       score: 0.95,
@@ -88,7 +91,7 @@ describe("Proposal backfill (manual -> provider upgrade)", () => {
     const a = await mk(s, "crm-backend deps");
     const b = await mk(s, "chat-socket deps");
     const id = env.consolidation.insertCandidate({
-      kind: "merge",
+      kind: ConsolidationKind.MERGE,
       member_ids: [a, b],
       canonical_id: a,
       score: 0.93,
@@ -105,14 +108,14 @@ describe("Proposal backfill (manual -> provider upgrade)", () => {
     expect(cand.status).toBe("dismissed"); // no longer clutters the Review inbox
     expect(cand.proposal?.recommendation).toBe("reject");
     expect(cand.proposal?.reason).toMatch(/different services/);
-    expect(env.consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(0);
+    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
   });
 
   it("should backfill nothing when the provider is the manual/disabled default", async () => {
     // Given
     const env = setup(); // default consolidator is manual (enabled=false)
     const id = env.consolidation.insertCandidate({
-      kind: "distill",
+      kind: ConsolidationKind.DISTILL,
       member_ids: ["x", "y", "z"],
       score: 0.9,
       detected_at: "2026-01-01T00:00:00.000Z",

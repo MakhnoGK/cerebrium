@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { InvalidateTool } from "@/tools/invalidate";
 import { LinkTool } from "@/tools/link";
 import { SearchTool } from "@/tools/search";
@@ -15,7 +15,7 @@ async function session(project?: string): Promise<string> {
 
 function w(
   s: string,
-  kind: _MemoryKind,
+  kind: MemoryKind,
   type: string,
   title: string,
   content: string,
@@ -46,9 +46,9 @@ describe("RRF fusion", () => {
     const env = setup();
     const s = await session();
     const body = "reciprocal rank fusion ranking algorithm for retrieval";
-    const both = await w(s, _MemoryKind.SEMANTIC, "fact", "Alpha", body);
+    const both = await w(s, MemoryKind.SEMANTIC, "fact", "Alpha", body);
     await env.worker.tick(); // embed Alpha -> it lands in the vector branch too
-    const textOnly = await w(s, _MemoryKind.SEMANTIC, "fact", "Beta", body); // not drained -> FTS only
+    const textOnly = await w(s, MemoryKind.SEMANTIC, "fact", "Beta", body); // not drained -> FTS only
 
     // When
     const res = results(
@@ -72,11 +72,11 @@ describe("Memory-model factors hold in hybrid mode", () => {
     const env = setup();
     const s = await session();
     const content = "deploy the release pipeline";
-    const old = await w(s, _MemoryKind.EPISODIC, "event_note", "Deploy", content);
+    const old = await w(s, MemoryKind.EPISODIC, "event_note", "Deploy", content);
     env.clock.advanceDays(59);
-    const fresh = await w(s, _MemoryKind.EPISODIC, "event_note", "Deploy", content);
+    const fresh = await w(s, MemoryKind.EPISODIC, "event_note", "Deploy", content);
     env.clock.advanceDays(1);
-    const fact = await w(s, _MemoryKind.SEMANTIC, "fact", "Deploy", content);
+    const fact = await w(s, MemoryKind.SEMANTIC, "fact", "Deploy", content);
     await env.worker.tick(); // embed all three -> vector branch active
 
     // When
@@ -92,14 +92,14 @@ describe("Memory-model factors hold in hybrid mode", () => {
     const s = await session();
     const oldNode = await w(
       s,
-      _MemoryKind.SEMANTIC,
+      MemoryKind.SEMANTIC,
       "fact",
       "Old TTL",
       "access tokens live 15 minutes",
     );
     const newNode = await w(
       s,
-      _MemoryKind.SEMANTIC,
+      MemoryKind.SEMANTIC,
       "fact",
       "New TTL",
       "access tokens live 10 minutes",
@@ -145,21 +145,21 @@ describe("Graph expansion", () => {
     const s = await session();
     const howto = await w(
       s,
-      _MemoryKind.SEMANTIC,
+      MemoryKind.SEMANTIC,
       "howto",
       "Deploy billing",
       "how to deploy the billing pipeline runbook steps",
     );
     const entity = await w(
       s,
-      _MemoryKind.SEMANTIC,
+      MemoryKind.SEMANTIC,
       "entity",
       "PaymentService",
       "PaymentService internal component details",
     );
     await container
       .resolve(LinkTool)
-      .invoke({ session_id: s, src: howto.id, dst: entity.id, type: "documents" });
+      .invoke({ session_id: s, src: howto.id, dst: entity.id, type: EdgeType.DOCUMENTS });
 
     // When
     const res = results(
@@ -181,7 +181,7 @@ describe("Search mode variants", () => {
     const s = await session();
     const node = await w(
       s,
-      _MemoryKind.SEMANTIC,
+      MemoryKind.SEMANTIC,
       "fact",
       "Kafka",
       "the ingestion service consumes from kafka topics",
@@ -208,7 +208,7 @@ describe("Search mode variants", () => {
     // Given
     const env = setup();
     const s = await session();
-    await w(s, _MemoryKind.SEMANTIC, "fact", "Alpha", "alpha beta gamma");
+    await w(s, MemoryKind.SEMANTIC, "fact", "Alpha", "alpha beta gamma");
     await env.worker.tick();
 
     // When

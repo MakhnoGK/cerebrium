@@ -1,12 +1,6 @@
+import { VECTOR_DIM, type EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { LocalProvider } from "@/embeddings/local";
 import { LocalNullProvider } from "@/embeddings/local-null";
-import type { EmbeddingProvider } from "@/embeddings/provider";
-import { VECTOR_DIM } from "@/embeddings/provider";
-
-export type { EmbeddingProvider } from "@/embeddings/provider";
-export { VECTOR_DIM } from "@/embeddings/provider";
-
-export const EMBEDDING_PROVIDER_TOKEN = Symbol("EmbeddingProvider");
 
 // Provider chosen by env at startup. Adding a paid/cloud provider is a one-file
 // change here plus a class — the interface is the whole contract.

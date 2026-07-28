@@ -1,3 +1,5 @@
+export const RERANK_PROVIDER_TOKEN = Symbol("RerankProvider");
+
 // A second-stage reranker: given the query and the fused candidates' short docs,
 // return a relevance score in [0,1] per doc, aligned to input order. Providers own
 // their model/scoring. A disabled provider reports `enabled=false` and `search` skips
@@ -7,5 +9,6 @@ export interface RerankProvider {
   readonly name: string;
   readonly version: string;
   readonly enabled: boolean;
+
   rerank(query: string, docs: string[]): Promise<number[]>;
 }

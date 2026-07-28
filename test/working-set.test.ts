@@ -2,7 +2,7 @@ import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { estimateTokensOf } from "@/core/tokens";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { CheckpointTool } from "@/tools/checkpoint";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
@@ -30,7 +30,7 @@ describe("session_start builds a budgeted working set", () => {
     const s = (await t.sessionStart.invoke({ project: P })).session_id;
     await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Fact 1",
       content: "the sky is blue",
@@ -38,7 +38,7 @@ describe("session_start builds a budgeted working set", () => {
     });
     await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "task",
       title: "Task 1",
       content: "ship the thing",
@@ -78,7 +78,7 @@ describe("session_start builds a budgeted working set", () => {
     for (let i = 0; i < 20; i++) {
       await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: `Fact ${i}`,
         content: `this is a reasonably sized fact number ${i} with enough text to cost some tokens`,

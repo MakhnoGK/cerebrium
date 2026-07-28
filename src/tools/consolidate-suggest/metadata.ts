@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CONSOLIDATION_KINDS } from "@/core/vocab";
+import { ConsolidationKind } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
@@ -17,7 +17,7 @@ export const metadata = {
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
     kind: z
-      .enum(CONSOLIDATION_KINDS)
+      .nativeEnum(ConsolidationKind)
       .optional()
       .describe("Filter to one kind: distill | merge | link | prune. Omit for all pending."),
     limit: z

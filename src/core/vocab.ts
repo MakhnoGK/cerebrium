@@ -1,10 +1,7 @@
 // The single source of truth for enum-like vocabularies. Validation and tests
-// reference these; extending a list is a normal change, repurposing a value is not.
+// reference these; extending a vocabulary is a normal change, repurposing a value is not.
 
-export const MEMORY_KINDS = ["episodic", "semantic", "mirror"] as const;
-export type MemoryKind = (typeof MEMORY_KINDS)[number];
-
-export enum _MemoryKind {
+export enum MemoryKind {
   EPISODIC = "episodic",
   SEMANTIC = "semantic",
   MIRROR = "mirror",
@@ -13,68 +10,79 @@ export enum _MemoryKind {
 // Writable kinds through the `write` tool. `mirror` exists in the schema but is
 // non-writable by hand — mirror nodes (code `symbol`s) are maintained by
 // the indexer via the repo layer, never through `write`/`update`.
-export const WRITABLE_KINDS = ["episodic", "semantic"] as const;
-export type WritableKind = (typeof WRITABLE_KINDS)[number];
+export type WritableKind = MemoryKind.EPISODIC | MemoryKind.SEMANTIC;
+
+export const WRITABLE_KINDS = [MemoryKind.EPISODIC, MemoryKind.SEMANTIC] as const;
 
 // Legal node types per memory_kind. `mirror` lists only `symbol` (the code index's
 // system-generated type); it stays out of WRITABLE_KINDS (indexer-only). External
-// mirror types (`incident`, `thread`, `chart`, …) are OPEN VOCAB —
-// agent-supplied via `mirror_upsert` and intentionally not enumerated here, so a new
-// source needs no vocab/migration change (like `symbols.symbol_kind`). `mirror_upsert`
-// validates only that `type` is a non-empty string, never against this list.
+// mirror types (`incident`, `thread`, `chart`, …) are OPEN VOCAB — agent-supplied via
+// `mirror_upsert` and intentionally not enumerated here, so a new source needs no
+// vocab/migration change (like `symbols.symbol_kind`). `mirror_upsert` validates only
+// that `type` is a non-empty string, never against this list. Values stay `string` for
+// that reason: this is a per-kind allow-list, not a closed vocabulary.
 export const NODE_TYPES: Record<MemoryKind, readonly string[]> = {
-  episodic: ["checkpoint", "event_note"],
-  semantic: ["fact", "decision", "entity", "howto", "task"],
-  mirror: ["symbol"],
+  [MemoryKind.EPISODIC]: ["checkpoint", "event_note"],
+  [MemoryKind.SEMANTIC]: ["fact", "decision", "entity", "howto", "task"],
+  [MemoryKind.MIRROR]: ["symbol"],
 };
 
-export const EDGE_TYPES = [
-  "references",
-  "documents",
-  "derived_from",
-  "supersedes",
-  "relates_to",
-  "similar_to",
-  "imports",
-  "calls",
-  "defines",
-] as const;
-export type EdgeType = (typeof EDGE_TYPES)[number];
+export enum EdgeType {
+  REFERENCES = "references",
+  DOCUMENTS = "documents",
+  DERIVED_FROM = "derived_from",
+  SUPERSEDES = "supersedes",
+  RELATES_TO = "relates_to",
+  SIMILAR_TO = "similar_to",
+  IMPORTS = "imports",
+  CALLS = "calls",
+  DEFINES = "defines",
+}
 
 // System-only edge types: agents may not create these via the `link` tool. The
 // code edges (imports/calls/defines) are drawn only by the indexer; `documents`
 // stays agent-creatable — that is the note->code link the agent draws by hand.
-export const SYSTEM_EDGE_TYPES = ["similar_to", "imports", "calls", "defines"] as const;
+export const SYSTEM_EDGE_TYPES = [
+  EdgeType.SIMILAR_TO,
+  EdgeType.IMPORTS,
+  EdgeType.CALLS,
+  EdgeType.DEFINES,
+] as const;
 
 // Consolidation: the kind of a queued consolidation candidate and its
 // lifecycle status. `link`/`prune` are deterministic (no generation); `distill`/`merge`
 // summarize a cluster. A candidate is resolved by moving off `pending`.
-export const CONSOLIDATION_KINDS = ["distill", "merge", "link", "prune"] as const;
-export type ConsolidationKind = (typeof CONSOLIDATION_KINDS)[number];
+export enum ConsolidationKind {
+  DISTILL = "distill",
+  MERGE = "merge",
+  LINK = "link",
+  PRUNE = "prune",
+}
 
-export const CONSOLIDATION_STATUSES = ["pending", "applied", "dismissed"] as const;
-export type ConsolidationStatus = (typeof CONSOLIDATION_STATUSES)[number];
+export enum ConsolidationStatus {
+  PENDING = "pending",
+  APPLIED = "applied",
+  DISMISSED = "dismissed",
+}
 
-export const EVENT_ACTIONS = [
-  "session_start",
-  "search",
-  "get",
-  "write",
-  "update",
-  "invalidate",
-  "checkpoint",
-  "link",
-  "code_index",
-  "code_lookup",
-  "source_register",
-  "mirror_upsert",
-  "mirror_status",
-  "consolidate_suggest",
-  "consolidate_apply",
-  "stats",
-] as const;
-
-export type EventAction = (typeof EVENT_ACTIONS)[number];
+export enum EventAction {
+  SESSION_START = "session_start",
+  SEARCH = "search",
+  GET = "get",
+  WRITE = "write",
+  UPDATE = "update",
+  INVALIDATE = "invalidate",
+  CHECKPOINT = "checkpoint",
+  LINK = "link",
+  CODE_INDEX = "code_index",
+  CODE_LOOKUP = "code_lookup",
+  SOURCE_REGISTER = "source_register",
+  MIRROR_UPSERT = "mirror_upsert",
+  MIRROR_STATUS = "mirror_status",
+  CONSOLIDATE_SUGGEST = "consolidate_suggest",
+  CONSOLIDATE_APPLY = "consolidate_apply",
+  STATS = "stats",
+}
 
 export function typeAllowedForKind(kind: WritableKind, type: string): boolean {
   return NODE_TYPES[kind].includes(type);

@@ -1,5 +1,10 @@
 import { inject } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  EMBEDDING_PROVIDER_TOKEN,
+  type EmbeddingProvider,
+} from "@/domain/ports/embedding-provider";
+import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
 import { StatsRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
@@ -7,8 +12,6 @@ import { tool } from "@/tools/contracts/tool";
 import { DaemonService } from "@/tools/services/daemon.service";
 import { HintsService } from "@/tools/services/hints.service";
 import { metadata } from "@/tools/stats/metadata";
-import { EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "@/embeddings";
-import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/rerank";
 
 @tool()
 export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> {

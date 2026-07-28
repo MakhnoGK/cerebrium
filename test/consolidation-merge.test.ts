@@ -1,9 +1,12 @@
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ConsolidationProvider } from "@/consolidation/provider";
+import {
+  ConsolidationRecommendation,
+  type ConsolidationProvider,
+} from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { ConsolidationKind, EdgeType, MemoryKind } from "@/core/vocab";
 import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
 import { LinkTool } from "@/tools/link";
 import { SearchTool } from "@/tools/search";
@@ -18,7 +21,7 @@ async function mk(s: string, title: string, content: string): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title,
       content,
@@ -42,7 +45,7 @@ const stubProvider: ConsolidationProvider = {
   enabled: true,
   generate: () =>
     Promise.resolve({
-      recommendation: "apply",
+      recommendation: ConsolidationRecommendation.APPLY,
       reason: "same fact",
       title: "Merged payments",
       summary: "S",
@@ -68,7 +71,7 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(r.merge_suggested).toBe(1);
-    const [cand] = env.consolidation.pendingCandidates({ kind: "merge" });
+    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
     expect(cand!.member_ids).toEqual([a, b].sort());
     expect([a, b]).toContain(cand!.canonical_id);
   });
@@ -78,7 +81,7 @@ describe("Semantic dedup / merge", () => {
     const env = setup();
     const { s, a, b } = await seedDupes(env);
     await container.resolve(ConsolidationWorker).tick();
-    const [cand] = env.consolidation.pendingCandidates({ kind: "merge" });
+    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
     const survivor = cand!.canonical_id!;
     const loser = [a, b].find((id) => id !== survivor)!;
 
@@ -86,17 +89,17 @@ describe("Semantic dedup / merge", () => {
     const third = await mk(s, "Ledger", "the ledger records settled transactions by day");
     await container
       .resolve(LinkTool)
-      .invoke({ session_id: s, src: loser, dst: third, type: "references" });
+      .invoke({ session_id: s, src: loser, dst: third, type: EdgeType.REFERENCES });
 
     // When
     const applied = (await container.resolve(ConsolidateApplyTool).invoke({
       session_id: s,
       id: cand!.id,
-      decision: "accept",
+      decision: ConsolidationRecommendation.APPLY,
     })) as { status: string; kind: string };
 
     // Then
-    expect(applied).toMatchObject({ status: "applied", kind: "merge" });
+    expect(applied).toMatchObject({ status: "applied", kind: ConsolidationKind.MERGE });
 
     // loser hidden from normal search; survivor still valid.
     const normal = (await container.resolve(SearchTool).invoke({
@@ -128,7 +131,7 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(r.merged).toBe(1);
-    expect(env.consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(0);
+    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
     const survivor = [a, b].find((id) => !env.nodes.envelope(id)!.invalidated)!;
     const loser = [a, b].find((id) => env.nodes.envelope(id)!.invalidated)!;
     expect(loser).toBeDefined();
@@ -148,6 +151,6 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(r.merge_suggested).toBe(0);
-    expect(env.consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(0);
+    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
   });
 });

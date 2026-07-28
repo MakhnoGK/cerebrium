@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MEMORY_KINDS } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
@@ -27,7 +27,7 @@ export const metadata = {
       ),
     project: z.string().optional().describe("Restrict to one project; omit to search across all."),
     kinds: z
-      .array(z.enum(MEMORY_KINDS))
+      .array(z.nativeEnum(MemoryKind))
       .optional()
       .describe("Filter by memory_kind, e.g. ['semantic']."),
     types: z

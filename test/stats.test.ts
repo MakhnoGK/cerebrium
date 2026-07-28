@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/tools/session-start";
 import { StatsTool } from "@/tools/stats";
 import { WriteTool } from "@/tools/write";
@@ -16,7 +16,7 @@ async function session(): Promise<string> {
 async function writeFact(s: string, title: string): Promise<void> {
   await container.resolve(WriteTool).invoke({
     session_id: s,
-    memory_kind: _MemoryKind.SEMANTIC,
+    memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content: `a durable fact about ${title} with a body of a few words`,

@@ -1,5 +1,5 @@
 import { injectable } from "tsyringe";
-import { Clock } from "@/domain/ports/clock";
+import { type Clock } from "@/domain/ports/clock";
 
 @injectable()
 export class SystemClock implements Clock {

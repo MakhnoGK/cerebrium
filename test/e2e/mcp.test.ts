@@ -1,3 +1,4 @@
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import "reflect-metadata";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,12 +6,16 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
+import {
+  CONSOLIDATION_PROVIDER_TOKEN,
+  ConsolidationRecommendation,
+} from "@/domain/ports/consolidation-provider";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { Server } from "@/core/server";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
 import { createConsolidator } from "@/consolidation";
-import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "@/embeddings";
+import { createProvider } from "@/embeddings";
 
 // Every test gets its own MCP client backed by a fresh in-memory DB, so ordering and
 // cross-test state never leak. A child DI container re-binds DB_TOKEN, and the Server
@@ -18,7 +23,7 @@ import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "@/embeddings";
 async function connect(): Promise<Client> {
   const scope = container.createChildContainer();
   scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
-  scope.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+  scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
   scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
 
   const server = scope.resolve(Server);
@@ -317,7 +322,12 @@ describe("search tool", () => {
     const res = payload<{ total_matches: number; results: { kind: string }[] }>(
       await client.callTool({
         name: "search",
-        arguments: { session_id: sid, query: "shared", kinds: ["semantic"], project: "kf" },
+        arguments: {
+          session_id: sid,
+          query: "shared",
+          kinds: [MemoryKind.SEMANTIC],
+          project: "kf",
+        },
       }),
     );
 
@@ -502,7 +512,7 @@ describe("link tool", () => {
     const res = payload<{ ok: boolean; type: string }>(
       await client.callTool({
         name: "link",
-        arguments: { session_id: sid, src: a.id, dst: b.id, type: "references" },
+        arguments: { session_id: sid, src: a.id, dst: b.id, type: EdgeType.REFERENCES },
       }),
     );
     expect(res.ok).toBe(true);
@@ -516,7 +526,7 @@ describe("link tool", () => {
     const res = asError(
       await client.callTool({
         name: "link",
-        arguments: { session_id: sid, src: a.id, dst: a.id, type: "references" },
+        arguments: { session_id: sid, src: a.id, dst: a.id, type: EdgeType.REFERENCES },
       }),
     );
     expect(res.isError).toBe(true);
@@ -530,7 +540,7 @@ describe("link tool", () => {
     const res = asError(
       await client.callTool({
         name: "link",
-        arguments: { session_id: sid, src: a.id, dst: "NOPE", type: "references" },
+        arguments: { session_id: sid, src: a.id, dst: "NOPE", type: EdgeType.REFERENCES },
       }),
     );
     expect(res.isError).toBe(true);
@@ -895,14 +905,19 @@ describe("consolidate_suggest / consolidate_apply tools", () => {
   });
 
   it("should error when applying an unknown candidate id", async () => {
+    // Given
     const client = await connect();
     const sid = await startSession(client);
+
+    // When
     const res = asError(
       await client.callTool({
         name: "consolidate_apply",
-        arguments: { session_id: sid, id: "nope", decision: "accept" },
+        arguments: { session_id: sid, id: "nope", decision: ConsolidationRecommendation.APPLY },
       }),
     );
+
+    // Then
     expect(res.isError).toBe(true);
     expect(res.text).toMatch(/no consolidation candidate/);
   });

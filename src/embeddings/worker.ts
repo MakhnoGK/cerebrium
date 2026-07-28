@@ -1,9 +1,12 @@
 import { inject, injectable } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  EMBEDDING_PROVIDER_TOKEN,
+  EmbeddingRole,
+  type EmbeddingProvider,
+} from "@/domain/ports/embedding-provider";
 import { EmbeddingQueueRepo } from "@/db/repositories";
-import type { EmbeddingProvider } from "@/embeddings/provider";
 import { newId } from "@/core/ids";
-import { EMBEDDING_PROVIDER_TOKEN } from ".";
 
 const EMBED_LEASE = "embedding";
 
@@ -128,7 +131,7 @@ export class EmbeddingWorker {
     try {
       vectors = await this.provider.embed(
         chunks.map((c) => c.text),
-        "passage",
+        EmbeddingRole.PASSAGE,
       );
     } catch (err) {
       const involved = [...new Set(chunks.map((c) => c.node_id))];

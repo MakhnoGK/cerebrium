@@ -1,17 +1,22 @@
 import { inject } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  EMBEDDING_PROVIDER_TOKEN,
+  EmbeddingRole,
+  type EmbeddingProvider,
+} from "@/domain/ports/embedding-provider";
+import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
 import { deriveSummary, toEnvelope } from "@/db/repo";
 import { EdgesRepo, SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
+import { MemoryKind } from "@/core/vocab";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/search/metadata";
 import { EmbeddingService } from "@/tools/services/embedding.service";
 import { HintsService } from "@/tools/services/hints.service";
-import { EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "@/embeddings";
-import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/rerank";
 
 // Candidate ceiling before JS re-rank. Episodic decay only lowers scores, so the
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap
@@ -113,7 +118,7 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     let vecRows: VectorRow[] = [];
 
     try {
-      const [qvec] = await this.provider.embed([args.query], "query");
+      const [qvec] = await this.provider.embed([args.query], EmbeddingRole.QUERY);
 
       if (qvec) {
         vecRows = this.searchRepo.vectorSearch(qvec, {
@@ -278,7 +283,7 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
       return true;
     }
 
-    return args.kinds?.length === 1 && args.kinds[0] === "mirror";
+    return args.kinds?.length === 1 && args.kinds[0] === MemoryKind.MIRROR;
   }
 
   // Phase-1 text-only path, byte-compatible: bm25 normalized by the best match × the
@@ -348,7 +353,7 @@ function rerankDoc(e: Entry): string {
 }
 
 function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
-  if (history || row.memory_kind !== "episodic") {
+  if (history || row.memory_kind !== MemoryKind.EPISODIC) {
     return 1; // history queries drop episodic decay (superseded nodes included, flagged)
   }
 

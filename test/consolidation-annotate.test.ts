@@ -7,12 +7,12 @@ import type {
   ConsolidationProvider,
   ConsolidationResult,
   ReconcileResult,
-} from "@/consolidation/provider";
+} from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
 import type { SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
 import { setup } from "@test/helpers";
@@ -46,7 +46,7 @@ async function writeFact(s: string): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: TITLE,
       content: BODY,
@@ -61,7 +61,7 @@ function ftsFinds(search: SearchRepo, term: string, id: string): boolean {
   const match = toFtsMatch(term);
   if (!match) return false;
   return search
-    .search({ match, kinds: ["semantic"], history: false, cap: 10 })
+    .search({ match, kinds: [MemoryKind.SEMANTIC], history: false, cap: 10 })
     .rows.some((r) => r.id === id);
 }
 

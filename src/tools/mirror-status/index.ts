@@ -1,5 +1,5 @@
 import { inject } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { MirrorRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";

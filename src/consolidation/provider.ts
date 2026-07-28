@@ -1,75 +1,17 @@
-// A generation task handed to a ConsolidationProvider: a cluster of records to fold
-// into ONE durable semantic fact (distill) or a merged canonical note (merge). The
-// provider only produces text — the daemon (the single writer) performs the DB write.
-export interface ConsolidationTask {
-  kind: "distill" | "merge";
-  project: string | null;
-  inputs: { id: string; title: string; content: string }[];
-}
-
-// The generated result: a JUDGMENT plus the drafted consolidation. `recommendation` is
-// the provider's verdict on whether these records should actually be consolidated —
-// detection only measures similarity, which yields false positives (two different
-// services' "dependencies" docs look alike). `reject` = keep them separate; `reason`
-// explains either way. title/summary/body are the consolidation to write when applied.
-export interface ConsolidationResult {
-  recommendation: "apply" | "reject";
-  reason: string;
-  title: string;
-  summary: string;
-  body: string;
-}
-
-// A write-time duplicate judgment. When a new semantic write resembles existing
-// records, the provider decides whether the draft is genuinely new (`noop`), refines
-// ONE existing record (`update` -> the agent should revise that node), or replaces one
-// (`supersede` -> invalidate + supersedes). The provider only judges; the write tool
-// surfaces the verdict and never auto-applies it.
-export interface ReconcileTask {
-  draft: { title: string; type: string; content: string };
-  project: string | null;
-  candidates: { id: string; title: string; content: string }[];
-}
-
-export interface ReconcileResult {
-  action: "noop" | "update" | "supersede";
-  target_id: string | null; // the existing record the action applies to (null for noop)
-  reason: string;
-}
-
-// Attribute mining for one semantic record. The provider reads the
-// record and proposes retrieval attributes — keywords/synonyms a future query might use,
-// short topical tags, and a one-sentence context — which the daemon folds into the FTS
-// text for wider recall. Faithful: surface what the record is about, invent no facts.
-export interface AnnotateTask {
-  title: string;
-  content: string;
-  project: string | null;
-}
-
-export interface AnnotateResult {
-  keywords: string[];
-  tags: string[];
-  context: string;
-}
-
-// A pluggable generation backend for consolidation (`generate`), the write-time dedup
-// judgment (`reconcile`), and attribute enrichment (`annotate`). `manual`/`off` report
-// `enabled=false` and are never asked to do any of them (the daemon queues clusters for
-// an agent; the write tool falls back to its advisory `similar_existing` hint; nodes
-// stay un-annotated); real providers (`command`/`http`) run autonomously. Mirrors
-// RerankProvider: the interface is the whole contract, so a new backend is a one-file change.
-export interface ConsolidationProvider {
-  readonly name: string;
-  readonly version: string;
-  readonly enabled: boolean;
-  generate(task: ConsolidationTask): Promise<ConsolidationResult>;
-  reconcile(task: ReconcileTask): Promise<ReconcileResult>;
-  annotate(task: AnnotateTask): Promise<AnnotateResult>;
-}
-
 // Faithfulness is the whole game for durable memory: summarize only what the records
 // state, invent nothing. Shared by every generating provider so the contract is one text.
+import {
+  ConsolidationRecommendation,
+  ReconcileAction,
+  type AnnotateResult,
+  type AnnotateTask,
+  type ConsolidationResult,
+  type ConsolidationTask,
+  type ReconcileResult,
+  type ReconcileTask,
+} from "@/domain/ports/consolidation-provider";
+import { ConsolidationKind } from "@/core/vocab";
+
 export const SYSTEM_PROMPT =
   "You judge and consolidate a cluster of an AI agent's memory records. FIRST decide " +
   "whether they truly describe the SAME thing and should be consolidated into one note, " +
@@ -99,9 +41,12 @@ export const RESULT_SCHEMA = {
 // The user message for a task: the cluster's records, labeled and ordered.
 export function taskPrompt(task: ConsolidationTask): string {
   const verb =
-    task.kind === "merge" ? "Merge these near-duplicate records" : "Consolidate these records";
+    task.kind === ConsolidationKind.MERGE
+      ? "Merge these near-duplicate records"
+      : "Consolidate these records";
   const scope = task.project ? ` (project: ${task.project})` : "";
   const records = task.inputs.map((r, i) => `[${i + 1}] ${r.title}\n${r.content}`).join("\n\n");
+
   return `${verb}${scope}:\n\n${records}`;
 }
 
@@ -109,17 +54,25 @@ export function taskPrompt(task: ConsolidationTask): string {
 // actionable error on anything malformed so the caller degrades to suggest/skip.
 export function parseResult(raw: string): ConsolidationResult {
   let obj: unknown;
+
   try {
     obj = JSON.parse(raw);
   } catch {
     throw new Error("consolidation provider returned invalid JSON");
   }
+
   const o = obj as Record<string, unknown>;
+
   if (typeof o.title !== "string" || typeof o.summary !== "string" || typeof o.body !== "string") {
     throw new Error("consolidation provider response missing title/summary/body strings");
   }
-  const recommendation = o.recommendation === "reject" ? "reject" : "apply";
+
+  const recommendation =
+    o.recommendation === ConsolidationRecommendation.REJECT
+      ? ConsolidationRecommendation.REJECT
+      : ConsolidationRecommendation.APPLY;
   const reason = typeof o.reason === "string" ? o.reason : "";
+
   return { recommendation, reason, title: o.title, summary: o.summary, body: o.body };
 }
 
@@ -151,11 +104,12 @@ export const RECONCILE_SCHEMA = {
 // by id so the judge can name a target_id verbatim.
 export function reconcilePrompt(task: ReconcileTask): string {
   const scope = task.project ? ` (project: ${task.project})` : "";
-  const cands = task.candidates.map((c) => `[${c.id}] ${c.title}\n${c.content}`).join("\n\n");
+  const candidates = task.candidates.map((c) => `[${c.id}] ${c.title}\n${c.content}`).join("\n\n");
+
   return (
     `A new ${task.draft.type} record is about to be written${scope}:\n` +
     `${task.draft.title}\n${task.draft.content}\n\n` +
-    `Existing records it resembles:\n\n${cands}`
+    `Existing records it resembles:\n\n${candidates}`
   );
 }
 
@@ -163,15 +117,21 @@ export function reconcilePrompt(task: ReconcileTask): string {
 // non-string target_id to null, so a sloppy model can only ever be conservative.
 export function parseReconcile(raw: string): ReconcileResult {
   let obj: unknown;
+
   try {
     obj = JSON.parse(raw);
   } catch {
     throw new Error("reconcile provider returned invalid JSON");
   }
+
   const o = obj as Record<string, unknown>;
-  const action = o.action === "update" || o.action === "supersede" ? o.action : "noop";
+  const action =
+    o.action === ReconcileAction.UPDATE || o.action === ReconcileAction.SUPERSEDE
+      ? o.action
+      : ReconcileAction.NOOP;
   const target_id = typeof o.target_id === "string" ? o.target_id : null;
   const reason = typeof o.reason === "string" ? o.reason : "";
+
   return { action, target_id, reason };
 }
 
@@ -199,6 +159,7 @@ export const ANNOTATE_SCHEMA = {
 
 export function annotatePrompt(task: AnnotateTask): string {
   const scope = task.project ? ` (project: ${task.project})` : "";
+
   return `Record${scope}:\n${task.title}\n${task.content}`;
 }
 
@@ -207,14 +168,17 @@ export function annotatePrompt(task: AnnotateTask): string {
 // rather than corrupting the FTS text.
 export function parseAnnotate(raw: string): AnnotateResult {
   let obj: unknown;
+
   try {
     obj = JSON.parse(raw);
   } catch {
     throw new Error("annotate provider returned invalid JSON");
   }
+
   const o = obj as Record<string, unknown>;
   const strings = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
   return {
     keywords: strings(o.keywords),
     tags: strings(o.tags),

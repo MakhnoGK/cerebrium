@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
+import type {
+  AnnotateTask,
+  ConsolidationTask,
+  ReconcileTask,
+} from "@/domain/ports/consolidation-provider";
 import { CommandConsolidator } from "@/consolidation/command";
 import { HttpConsolidator, type FetchFn } from "@/consolidation/http";
-import { createConsolidator } from "@/consolidation/index";
 import {
   annotationFtsText,
   parseAnnotate,
@@ -9,13 +13,12 @@ import {
   parseResult,
   reconcilePrompt,
   taskPrompt,
-  type AnnotateTask,
-  type ConsolidationTask,
-  type ReconcileTask,
 } from "@/consolidation/provider";
+import { ConsolidationKind } from "@/core/vocab";
+import { createConsolidator } from "@/consolidation";
 
 const TASK: ConsolidationTask = {
-  kind: "distill",
+  kind: ConsolidationKind.DISTILL,
   project: "cerebrium",
   inputs: [
     { id: "a", title: "First", content: "the pipeline was slow" },

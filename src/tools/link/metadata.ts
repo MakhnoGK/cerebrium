@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EDGE_TYPES } from "@/core/vocab";
+import { EdgeType } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
@@ -16,7 +16,7 @@ export const metadata = {
     src: z.string().describe("Source node id (the edge points from here)."),
     dst: z.string().describe("Destination node id (the edge points to here)."),
     type: z
-      .enum(EDGE_TYPES)
+      .nativeEnum(EdgeType)
       .describe(
         "references | documents | derived_from | supersedes | relates_to (similar_to is system-only).",
       ),

@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { MirrorSourceStatus } from "@/core/types";
-import { _MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { GetTool } from "@/tools/get";
 import { InvalidateTool } from "@/tools/invalidate";
 import { LinkTool } from "@/tools/link";
@@ -122,7 +122,7 @@ describe("MirrorUpsertTool", () => {
       session_id: sid,
       query: "checkout latency",
       limit: 10,
-      kinds: ["mirror"],
+      kinds: [MemoryKind.MIRROR],
       types: ["incident"],
     })) as { results: { id: string }[] };
     expect(found.results.some((x) => x.id === id)).toBe(true);
@@ -196,7 +196,7 @@ describe("Link payoff: a note documents a mirror record", () => {
 
     const decision = (await t.write.invoke({
       session_id: sid,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache jitter to prevent stampede",
       content: "We added jitter to cache TTLs after the checkout latency incident.",
@@ -204,7 +204,12 @@ describe("Link payoff: a note documents a mirror record", () => {
     })) as { id: string };
 
     // When
-    await t.link.invoke({ session_id: sid, src: decision.id, dst: mirrorId!, type: "documents" });
+    await t.link.invoke({
+      session_id: sid,
+      src: decision.id,
+      dst: mirrorId!,
+      type: EdgeType.DOCUMENTS,
+    });
 
     // Drain embeddings so hybrid/graph expansion is fully exercised.
     for (let i = 0; i < 20; i++) {

@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { CheckpointTool } from "@/tools/checkpoint";
 import { GetTool } from "@/tools/get";
 import { SearchTool } from "@/tools/search";
@@ -33,7 +33,7 @@ describe("Multi-session hand-off", () => {
     const a = (await t.sessionStart.invoke({ project: P })).session_id;
     const f1 = (await t.write.invoke({
       session_id: a,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: "access tokens live 15 minutes",
@@ -41,7 +41,7 @@ describe("Multi-session hand-off", () => {
     })) as Envelope;
     await t.write.invoke({
       session_id: a,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Use RS256",
       content: "sign JWTs with RS256, not HS256",
@@ -49,7 +49,7 @@ describe("Multi-session hand-off", () => {
     });
     await t.write.invoke({
       session_id: a,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Refresh flow",
       content: "refresh tokens rotate on use",

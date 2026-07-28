@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
@@ -17,7 +18,7 @@ export const metadata = {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
     id: z.string().describe("The consolidation candidate id (from consolidate_suggest)."),
     decision: z
-      .enum(["accept", "reject"])
+      .nativeEnum(ConsolidationRecommendation)
       .describe("accept: apply the consolidation. reject: dismiss it (never re-proposed)."),
     override: z
       .object({

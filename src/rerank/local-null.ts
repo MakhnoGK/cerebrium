@@ -1,9 +1,9 @@
-import type { RerankProvider } from "@/rerank/provider";
-
 // Deterministic, offline reranker for tests and CI: scores each doc by the fraction
 // of distinct query terms it contains (lexical recall). No model download — enough to
 // exercise the rerank stage (reordering, decay interaction, graceful fallback) with a
 // fixed, inspectable score. Mirrors the local-null embedding provider's role.
+import { type RerankProvider } from "@/domain/ports/rerank-provider";
+
 export class LocalNullReranker implements RerankProvider {
   readonly name = "local-null";
   readonly version = "1";

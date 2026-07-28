@@ -2,7 +2,7 @@ import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { chunkContent } from "@/core/chunk";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/tools/session-start";
 import { UpdateTool } from "@/tools/update";
 import { WriteTool } from "@/tools/write";
@@ -69,7 +69,7 @@ describe("Embedding diff: only genuinely-new chunks re-embed", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const node = (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "howto",
       title: "Retrieval",
       content: NOTE,

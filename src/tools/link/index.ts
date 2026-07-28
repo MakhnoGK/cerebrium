@@ -1,5 +1,5 @@
 import { inject } from "tsyringe";
-import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { EdgesRepo, NodesRepo } from "@/db/repositories";
 import { SYSTEM_EDGE_TYPES } from "@/core/vocab";
 import { ToolArgs } from "@/tools/context";

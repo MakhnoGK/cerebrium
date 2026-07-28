@@ -1,10 +1,15 @@
 import { inject } from "tsyringe";
+import {
+  EMBEDDING_PROVIDER_TOKEN,
+  EmbeddingRole,
+  type EmbeddingProvider,
+} from "@/domain/ports/embedding-provider";
 import { reconcilePosture } from "@/consolidation/config";
 import { deriveSummary, Envelope } from "@/db/repo";
 import { SearchRepo } from "@/db/repositories";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
@@ -13,7 +18,6 @@ import { EmbeddingService } from "@/tools/services/embedding.service";
 import { HintsService } from "@/tools/services/hints.service";
 import { NodeService } from "@/tools/services/node.service";
 import { metadata } from "@/tools/write/metadata";
-import { EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "@/embeddings";
 
 const DEDUP_CANDIDATES = 5;
 
@@ -71,7 +75,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
     // When a duplicate is found and a judging provider is configured, sharpen the advisory
     // hint into a specific action. Never blocks, never applies — the agent decides.
     const similar =
-      args.memory_kind === _MemoryKind.SEMANTIC ? await this.dedupProbe(args, envelope) : [];
+      args.memory_kind === MemoryKind.SEMANTIC ? await this.dedupProbe(args, envelope) : [];
 
     const shouldReconcile = similar.length && "off" !== reconcilePosture();
     const reconcile = shouldReconcile
@@ -118,7 +122,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       };
 
       let scored: SimilarExisting[] = [];
-      const [qvec] = await this.embeddings.embed([probe], "query");
+      const [qvec] = await this.embeddings.embed([probe], EmbeddingRole.QUERY);
 
       if (qvec) {
         scored = this.search.vectorSearch(qvec, opts).map((r) => ({

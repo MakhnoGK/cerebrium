@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { EmbeddingProvider } from "@/embeddings/provider";
+import { type EmbeddingProvider } from "@/domain/ports/embedding-provider";
 
 // In-process embeddings via transformers.js. Default model multilingual-e5-small
 // (dim 384), using the Xenova ONNX build (identical weights, packaged with quantized

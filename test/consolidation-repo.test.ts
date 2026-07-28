@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { candidateHash } from "@/db/repositories/consolidation";
+import { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 import { setup } from "@test/helpers";
 
 describe("ConsolidationRepo candidate queue", () => {
@@ -9,7 +10,7 @@ describe("ConsolidationRepo candidate queue", () => {
 
     // When
     const id = consolidation.insertCandidate({
-      kind: "distill",
+      kind: ConsolidationKind.DISTILL,
       project: "cerebrium",
       member_ids: ["b", "a", "c"],
       score: 0.9,
@@ -33,14 +34,14 @@ describe("ConsolidationRepo candidate queue", () => {
 
     // When
     const first = consolidation.insertCandidate({
-      kind: "merge",
+      kind: ConsolidationKind.MERGE,
       member_ids: ["x", "y"],
       canonical_id: "x",
       score: 0.95,
       detected_at: "2026-01-01T00:00:00.000Z",
     });
     const dup = consolidation.insertCandidate({
-      kind: "merge",
+      kind: ConsolidationKind.MERGE,
       member_ids: ["y", "x"], // reordered — same cluster
       canonical_id: "x",
       score: 0.99,
@@ -50,16 +51,18 @@ describe("ConsolidationRepo candidate queue", () => {
     // Then
     expect(first).not.toBeNull();
     expect(dup).toBeNull();
-    expect(consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(1);
-    expect(consolidation.candidateExists("merge", ["x", "y"])).toBe(true);
-    expect(candidateHash("merge", ["x", "y"])).toBe(candidateHash("merge", ["y", "x"]));
+    expect(consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(1);
+    expect(consolidation.candidateExists(ConsolidationKind.MERGE, ["x", "y"])).toBe(true);
+    expect(candidateHash(ConsolidationKind.MERGE, ["x", "y"])).toBe(
+      candidateHash(ConsolidationKind.MERGE, ["y", "x"]),
+    );
   });
 
   it("should create a distinct candidate when the same members are inserted under a different kind", () => {
     // Given
     const { consolidation } = setup();
     consolidation.insertCandidate({
-      kind: "link",
+      kind: ConsolidationKind.LINK,
       member_ids: ["a", "b"],
       score: 0.9,
       detected_at: "t",
@@ -67,7 +70,7 @@ describe("ConsolidationRepo candidate queue", () => {
 
     // When
     const other = consolidation.insertCandidate({
-      kind: "merge",
+      kind: ConsolidationKind.MERGE,
       member_ids: ["a", "b"],
       score: 0.9,
       detected_at: "t",
@@ -81,13 +84,13 @@ describe("ConsolidationRepo candidate queue", () => {
     // Given
     const { consolidation } = setup();
     const lo = consolidation.insertCandidate({
-      kind: "distill",
+      kind: ConsolidationKind.DISTILL,
       member_ids: ["a"],
       score: 0.5,
       detected_at: "t",
     })!;
     const hi = consolidation.insertCandidate({
-      kind: "distill",
+      kind: ConsolidationKind.DISTILL,
       member_ids: ["b"],
       score: 0.9,
       detected_at: "t",
@@ -101,7 +104,12 @@ describe("ConsolidationRepo candidate queue", () => {
 
     // When / Then
     expect(
-      consolidation.resolveCandidate(lo, "dismissed", "sess-1", "2026-01-03T00:00:00.000Z"),
+      consolidation.resolveCandidate(
+        lo,
+        ConsolidationStatus.DISMISSED,
+        "sess-1",
+        "2026-01-03T00:00:00.000Z",
+      ),
     ).toBe(true);
     const after = consolidation.pendingCandidates();
     expect(after.map((c) => c.id)).toEqual([hi]);
@@ -116,19 +124,23 @@ describe("ConsolidationRepo candidate queue", () => {
     const { consolidation } = setup();
 
     // When / Then
-    expect(consolidation.resolveCandidate("nope", "applied", "s", "t")).toBe(false);
+    expect(consolidation.resolveCandidate("nope", ConsolidationStatus.APPLIED, "s", "t")).toBe(
+      false,
+    );
 
     // Given
     const id = consolidation.insertCandidate({
-      kind: "prune",
+      kind: ConsolidationKind.PRUNE,
       member_ids: ["m"],
       score: 1,
       detected_at: "t",
     })!;
 
     // When / Then
-    expect(consolidation.resolveCandidate(id, "applied", "s", "t")).toBe(true);
-    expect(consolidation.resolveCandidate(id, "dismissed", "s2", "t2")).toBe(false); // already resolved
+    expect(consolidation.resolveCandidate(id, ConsolidationStatus.APPLIED, "s", "t")).toBe(true);
+    expect(consolidation.resolveCandidate(id, ConsolidationStatus.DISMISSED, "s2", "t2")).toBe(
+      false,
+    ); // already resolved
     expect(consolidation.getCandidate(id)!.status).toBe("applied");
   });
 });

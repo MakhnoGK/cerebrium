@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { CodeIndexTool } from "@/tools/code-index";
 import { SearchTool } from "@/tools/search";
 import { SessionStartTool } from "@/tools/session-start";
@@ -38,7 +38,7 @@ async function corpus(
   const strong = (
     (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Deploy pipeline",
       content: "deploy pipeline release runbook steps",
@@ -47,7 +47,7 @@ async function corpus(
   const weak = (
     (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Notebook",
       content: "the deploy step only",

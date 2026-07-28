@@ -1,6 +1,6 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
-import { _MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { LinkTool } from "@/tools/link";
 import { MirrorUpsertTool } from "@/tools/mirror-upsert";
 import { SearchTool } from "@/tools/search";
@@ -72,18 +72,28 @@ describe("External mirrors end-to-end", () => {
     const issueId = iss.node_ids[0];
 
     // Relate the two mirror records across sources.
-    await link.invoke({ session_id: sid, src: incidentId!, dst: issueId!, type: "relates_to" });
+    await link.invoke({
+      session_id: sid,
+      src: incidentId!,
+      dst: issueId!,
+      type: EdgeType.RELATES_TO,
+    });
 
     // A decision documents the incident — the payoff link.
     const decision = (await write.invoke({
       session_id: sid,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache-TTL jitter to prevent stampede",
       content: "After the checkout latency incident we jitter cache TTLs to avoid a stampede.",
       project: P,
     })) as { id: string };
-    await link.invoke({ session_id: sid, src: decision.id, dst: incidentId!, type: "documents" });
+    await link.invoke({
+      session_id: sid,
+      src: decision.id,
+      dst: incidentId!,
+      type: EdgeType.DOCUMENTS,
+    });
 
     // Drain embeddings so vector + graph expansion are fully exercised.
     for (let i = 0; i < 20; i++) {

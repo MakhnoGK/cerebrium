@@ -1,8 +1,9 @@
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
+import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { ConsolidationCandidate, Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
 import { ConsolidateSuggestTool } from "@/tools/consolidate-suggest";
 import { SessionStartTool } from "@/tools/session-start";
@@ -25,7 +26,7 @@ async function twinsWithSuggestedLink(env: TestEnv, t: ReturnType<typeof tools>)
     (
       (await t.write.invoke({
         session_id: s,
-        memory_kind: _MemoryKind.SEMANTIC,
+        memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title,
         content: dup,
@@ -69,11 +70,11 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
     const applied = (await t.consolidateApply.invoke({
       session_id: s,
       id: cand.id,
-      decision: "accept",
+      decision: ConsolidationRecommendation.APPLY,
     })) as { status: string; kind: string };
 
     // Then — the edge now exists and the candidate is no longer pending.
-    expect(applied).toMatchObject({ status: "applied", kind: "link" });
+    expect(applied).toMatchObject({ status: "applied", kind: ConsolidationKind.LINK });
     expect(env.edges.edgesOf(a).some((e) => e.id === b && e.edge === "similar_to")).toBe(true);
     expect(env.consolidation.pendingCandidates()).toHaveLength(0);
     expect(env.consolidation.getCandidate(cand.id)!.status).toBe("applied");
@@ -93,7 +94,7 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
     const rejected = (await t.consolidateApply.invoke({
       session_id: s,
       id: cand.id,
-      decision: "reject",
+      decision: ConsolidationRecommendation.REJECT,
     })) as { status: string };
 
     // Then
@@ -102,7 +103,11 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
 
     // When / Then — a dismissed candidate cannot be re-resolved.
     await expect(
-      t.consolidateApply.invoke({ session_id: s, id: cand.id, decision: "accept" }),
+      t.consolidateApply.invoke({
+        session_id: s,
+        id: cand.id,
+        decision: ConsolidationRecommendation.APPLY,
+      }),
     ).rejects.toThrow(/already dismissed/);
   });
 
@@ -114,7 +119,11 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
 
     // When / Then
     await expect(
-      t.consolidateApply.invoke({ session_id: s, id: "nope", decision: "accept" }),
+      t.consolidateApply.invoke({
+        session_id: s,
+        id: "nope",
+        decision: ConsolidationRecommendation.APPLY,
+      }),
     ).rejects.toThrow(/no consolidation candidate/);
   });
 

@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { _MemoryKind } from "@/core/vocab";
+import { MemoryKind } from "@/core/vocab";
 import { InvalidateTool } from "@/tools/invalidate";
 import { SearchTool } from "@/tools/search";
 import { SessionStartTool } from "@/tools/session-start";
@@ -35,7 +35,7 @@ describe("Retrieval lifecycle end-to-end", () => {
     // 1) write a fact -> immediately findable via FTS while pending_embedding = 1
     const fact = (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: FACT,
@@ -96,7 +96,7 @@ describe("Retrieval lifecycle end-to-end", () => {
     // 3) write a near-duplicate -> similar_existing returned
     const dup = (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: FACT,
