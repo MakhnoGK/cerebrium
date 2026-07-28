@@ -1,10 +1,10 @@
+import { HintsService } from "@/application/services";
 import { CodeRepo, MirrorRepo, NodesRepo } from "@/db/repositories";
 import { MemoryKind } from "@/core/vocab";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/get/metadata";
-import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
 export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {

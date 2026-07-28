@@ -6,6 +6,7 @@ import {
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
+import { EmbeddingService, HintsService } from "@/application/services";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
 import { deriveSummary, toEnvelope } from "@/db/repo";
 import { EdgesRepo, SearchRepo } from "@/db/repositories";
@@ -15,8 +16,6 @@ import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/search/metadata";
-import { EmbeddingService } from "@/tools/services/embedding.service";
-import { HintsService } from "@/tools/services/hints.service";
 
 // Candidate ceiling before JS re-rank. Episodic decay only lowers scores, so the
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap

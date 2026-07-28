@@ -5,12 +5,11 @@ import {
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
+import { DaemonService, HintsService } from "@/application/services";
 import { StatsRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { DaemonService } from "@/tools/services/daemon.service";
-import { HintsService } from "@/tools/services/hints.service";
 import { metadata } from "@/tools/stats/metadata";
 
 @tool()

@@ -4,6 +4,12 @@ import {
   EmbeddingRole,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
+import {
+  ConsolidationService,
+  EmbeddingService,
+  HintsService,
+  NodeService,
+} from "@/application/services";
 import { reconcilePosture } from "@/consolidation/config";
 import { deriveSummary, Envelope } from "@/db/repo";
 import { SearchRepo } from "@/db/repositories";
@@ -13,10 +19,6 @@ import { MemoryKind } from "@/core/vocab";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { ConsolidationService } from "@/tools/services/consolidation.service";
-import { EmbeddingService } from "@/tools/services/embedding.service";
-import { HintsService } from "@/tools/services/hints.service";
-import { NodeService } from "@/tools/services/node.service";
 import { metadata } from "@/tools/write/metadata";
 
 const DEDUP_CANDIDATES = 5;

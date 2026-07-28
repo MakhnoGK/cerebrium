@@ -10,8 +10,8 @@
   "importOrder": [
     "<BUILTIN_MODULES>",
     "<THIRD_PARTY_MODULES>",
-    "^@/domain/(.*)$",
-    "^@/application/(.*)$",
+    "^@/domain(/.*)?$",
+    "^@/application(/.*)?$",
     "^@/(db|code|embeddings|rerank|consolidation|runtime)/(.*)$",
     "^@/(core|presentation|tools)/(.*)$",
     "^@/(.*)$",

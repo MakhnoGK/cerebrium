@@ -1,12 +1,11 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { EmbeddingService, HintsService } from "@/application/services";
 import { MirrorRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/mirror-upsert/metadata";
-import { EmbeddingService } from "@/tools/services/embedding.service";
-import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
 export class MirrorUpsertTool implements McpTool<(typeof metadata)["schema"], unknown> {

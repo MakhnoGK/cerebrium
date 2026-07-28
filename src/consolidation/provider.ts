@@ -1,5 +1,5 @@
 // Faithfulness is the whole game for durable memory: summarize only what the records
-// state, invent nothing. Shared by every generating provider so the contract is one text.
+// state, invent nothing. Shared by every generating provider, so the contract is one text.
 import {
   ConsolidationRecommendation,
   ReconcileAction,
@@ -24,7 +24,7 @@ export const SYSTEM_PROMPT =
   "Return JSON: recommendation ('apply'|'reject'), reason (one sentence), title (short " +
   "noun phrase), summary (one sentence), body (2-4 sentences grounded in the records).";
 
-// The JSON schema a structured-output backend (e.g. Ollama `format`) enforces so the
+// The JSON schema a structured-output backend (e.g., Ollama `format`) enforces so the
 // response parses without fragility.
 export const RESULT_SCHEMA = {
   type: "object",
@@ -51,7 +51,7 @@ export function taskPrompt(task: ConsolidationTask): string {
 }
 
 // Parse + validate a backend's JSON reply into a ConsolidationResult. Throws an
-// actionable error on anything malformed so the caller degrades to suggest/skip.
+// actionable error on anything malformed, so the caller degrades to suggest/skip.
 export function parseResult(raw: string): ConsolidationResult {
   let obj: unknown;
 
@@ -76,8 +76,8 @@ export function parseResult(raw: string): ConsolidationResult {
   return { recommendation, reason, title: o.title, summary: o.summary, body: o.body };
 }
 
-// The reconcile judge's contract. Faithfulness again: the provider decides an ACTION,
-// it never rewrites memory. Erring toward `noop` keeps the write path safe — a false
+// The reconciled judge's contract. Faithfulness again: the provider decides an ACTION,
+// it never rewrites memory. Erring toward `noop` keeps the writing path safe — a false
 // `update`/`supersede` would push an agent to mangle an unrelated record.
 export const RECONCILE_SYSTEM_PROMPT =
   "You are the write-time duplicate judge for an AI agent's durable memory. Given a NEW " +
@@ -113,7 +113,7 @@ export function reconcilePrompt(task: ReconcileTask): string {
   );
 }
 
-// Parse + validate a reconcile reply. Unknown/absent action degrades to 'noop' and a
+// Parse + validate a reconciled reply. Unknown/absent action degrades to 'noop' and a
 // non-string target_id to null, so a sloppy model can only ever be conservative.
 export function parseReconcile(raw: string): ReconcileResult {
   let obj: unknown;
@@ -135,7 +135,7 @@ export function parseReconcile(raw: string): ReconcileResult {
   return { action, target_id, reason };
 }
 
-// The annotate contract. Attributes are for RECALL, not display: keywords/synonyms the
+// The annotated contract. Attributes are for RECALL, not display: keywords/synonyms the
 // author didn't necessarily write, a few topical tags, one sentence of context. Grounded
 // in the record — no invented facts, dates, names, or numbers.
 export const ANNOTATE_SYSTEM_PROMPT =
@@ -163,7 +163,7 @@ export function annotatePrompt(task: AnnotateTask): string {
   return `Record${scope}:\n${task.title}\n${task.content}`;
 }
 
-// Parse + validate an annotate reply. Non-string array members are dropped and a
+// Parse + validate an annotated reply. Non-string array members are dropped and a
 // non-string context becomes empty, so a sloppy model degrades to fewer attributes
 // rather than corrupting the FTS text.
 export function parseAnnotate(raw: string): AnnotateResult {

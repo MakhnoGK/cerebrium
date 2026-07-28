@@ -1,11 +1,11 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { HintsService } from "@/application/services";
 import { NodesRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/invalidate/metadata";
-import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
 export class InvalidateTool implements McpTool<(typeof metadata)["schema"], unknown> {
