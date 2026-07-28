@@ -1,6 +1,6 @@
-import { ToolName } from "@/tools/contracts";
 import { z } from "zod";
 import { CONSOLIDATION_KINDS } from "@/core/vocab";
+import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
   name: ToolName.CONSOLIDATE_SUGGEST,

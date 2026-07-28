@@ -1,12 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
+import { afterEach, describe, expect, it } from "vitest";
+import type { Envelope } from "@/db/repo";
 import { estimateTokensOf } from "@/core/tokens";
 import { _MemoryKind } from "@/core/vocab";
-import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { CheckpointTool } from "../src/tools/checkpoint";
+import { CheckpointTool } from "@/tools/checkpoint";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 const P = "proj";
 

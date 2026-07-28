@@ -1,10 +1,10 @@
+import { NodesRepo } from "@/db/repositories";
+import { Envelope } from "@/core/types";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
-import { Envelope } from "@/core/types";
 import { tool } from "@/tools/contracts/tool";
+import { HintsService } from "@/tools/services/hints.service";
 import { metadata } from "./metadata";
-import { HintsService } from "../services/hints.service";
-import { NodesRepo } from "@/db/repositories";
 
 // TODO: Move to a separate file
 type ToolResponse =

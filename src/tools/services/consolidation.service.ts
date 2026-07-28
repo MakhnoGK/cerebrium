@@ -1,6 +1,6 @@
-import { ConsolidationProvider } from "@/consolidation";
-import { NodesRepo } from "@/db/repositories";
 import { inject, injectable } from "tsyringe";
+import { NodesRepo } from "@/db/repositories";
+import type { ConsolidationProvider } from "@/consolidation";
 
 const RECONCILE_CANDIDATES = 3;
 

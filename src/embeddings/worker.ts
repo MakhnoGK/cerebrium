@@ -1,9 +1,9 @@
-import type { EmbeddingProvider } from "@/embeddings/provider";
-import { newId } from "@/core/ids";
 import { inject, injectable } from "tsyringe";
 import { EmbeddingQueueRepo } from "@/db/repositories";
+import type { EmbeddingProvider } from "@/embeddings/provider";
+import { newId } from "@/core/ids";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { EMBEDDING_PROVIDER_TOKEN } from ".";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 const EMBED_LEASE = "embedding";
 

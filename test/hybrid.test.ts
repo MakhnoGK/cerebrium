@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { _MemoryKind } from "@/core/vocab";
+import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { InvalidateTool } from "../src/tools/invalidate";
-import { LinkTool } from "../src/tools/link";
-import { SearchTool } from "../src/tools/search";
+import { _MemoryKind } from "@/core/vocab";
+import { InvalidateTool } from "@/tools/invalidate";
+import { LinkTool } from "@/tools/link";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 async function session(project?: string): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({ project })).session_id;
@@ -217,7 +217,7 @@ describe("Search mode variants", () => {
     // Then
     expect(Object.keys(res).sort()).toEqual(["results", "total_matches"]);
     expect(res.context_notes).toBeUndefined();
-    const envRow = (res.results as Record<string, unknown>[])[0]!;
+    const envRow = (res.results as unknown as Record<string, unknown>[])[0]!;
     expect(Object.keys(envRow).sort()).toEqual([
       "edges",
       "id",

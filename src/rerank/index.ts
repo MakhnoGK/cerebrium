@@ -1,6 +1,6 @@
-import type { RerankProvider } from "@/rerank/provider";
-import { LocalNullReranker } from "@/rerank/local-null";
 import { LocalReranker } from "@/rerank/local";
+import { LocalNullReranker } from "@/rerank/local-null";
+import type { RerankProvider } from "@/rerank/provider";
 
 export type { RerankProvider } from "@/rerank/provider";
 

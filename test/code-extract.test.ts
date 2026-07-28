@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { parse } from "@/code/parser";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 import { extractFile } from "@/code/extract";
 import { langForPath } from "@/code/languages";
+import { parse } from "@/code/parser";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = "demo";

@@ -1,11 +1,11 @@
 import { inject } from "tsyringe";
+import { ConsolidationRepo, EdgesRepo, NodesRepo } from "@/db/repositories";
+import { metadata } from "@/tools/consolidate-apply/metadata";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { metadata } from "@/tools/consolidate-apply/metadata";
-import { ConsolidationRepo, EdgesRepo, NodesRepo } from "@/db/repositories";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { HintsService } from "@/tools/services/hints.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"], unknown> {

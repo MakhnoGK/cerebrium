@@ -1,4 +1,4 @@
-import type { QueueRow, UnembeddedChunk } from "@/core/types";
+import { injectable } from "tsyringe";
 import { BaseRepo, MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
 import {
   countUnembedded,
@@ -6,7 +6,7 @@ import {
   refreshQueue,
   syncChunks,
 } from "@/db/repositories/internal";
-import { injectable } from "tsyringe";
+import type { QueueRow, UnembeddedChunk } from "@/core/types";
 
 // The async-embedding drain side of the queue: candidate selection, vector commits,
 // per-node finalization, failure backoff, worker-lease election, and startup

@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
 import {
+  ANNOTATE_SYSTEM_PROMPT,
   annotatePrompt,
   parseAnnotate,
   parseReconcile,
   parseResult,
-  reconcilePrompt,
-  ANNOTATE_SYSTEM_PROMPT,
   RECONCILE_SYSTEM_PROMPT,
+  reconcilePrompt,
   SYSTEM_PROMPT,
   taskPrompt,
   type AnnotateResult,

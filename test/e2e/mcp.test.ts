@@ -1,16 +1,16 @@
 import "reflect-metadata";
-import { describe, it, expect } from "vitest";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { container } from "tsyringe";
-import { Server } from "../../src/core/server";
-import { DB_TOKEN } from "../../src/db/repositories/base";
-import { openDatabase } from "../../src/db/database";
-import { CONSOLIDATOR_TOKEN } from "../../src/tools/services/consolidation.service";
-import { createConsolidator } from "../../src/consolidation";
-import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "../../src/embeddings";
+import { describe, expect, it } from "vitest";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { Server } from "@/core/server";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { createConsolidator } from "@/consolidation";
+import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "@/embeddings";
 
 // Every test gets its own MCP client backed by a fresh in-memory DB, so ordering and
 // cross-test state never leak. A child DI container re-binds DB_TOKEN, and the Server

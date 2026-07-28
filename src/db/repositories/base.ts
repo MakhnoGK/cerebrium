@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
-import { withBusyRetry } from "@/db/retry";
 import { inject, injectable } from "tsyringe";
+import { withBusyRetry } from "@/db/retry";
 
 // Common surface for every aggregate repository: the shared connection (single
 // writer) and the write-transaction wrapper. Kept minimal on purpose — each repo

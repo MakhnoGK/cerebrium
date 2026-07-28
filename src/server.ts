@@ -1,20 +1,18 @@
 #!/usr/bin/env node
-
 import "reflect-metadata";
+import Database from "better-sqlite3";
 import { container } from "tsyringe";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
 import { isMainModule } from "@/runtime/is-main";
 import { Server } from "@/core/server";
-import Database from "better-sqlite3";
-import { DB_TOKEN } from "@/db/repositories/base";
-import { openDatabase } from "@/db/database";
+import { createConsolidator, type ConsolidationProvider } from "./consolidation";
+import { createProvider, EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "./embeddings";
+import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "./embeddings/worker";
+import { createReranker, RERANK_PROVIDER_TOKEN, type RerankProvider } from "./rerank";
 import { ensureDaemon } from "./runtime/ensure-daemon";
-import { EmbeddingWorker } from "./embeddings/worker";
-import { createProvider, EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "./embeddings";
-import { ConsolidationProvider, createConsolidator } from "./consolidation";
-import { CONSOLIDATOR_TOKEN } from "./tools/services/consolidation.service";
-import { createReranker, RerankProvider, RERANK_PROVIDER_TOKEN } from "./rerank";
 import { CLOCK_TOKEN, SystemClock } from "./tools/services/clock.service";
-import { WORKER_OPTIONS_TOKEN } from "./embeddings/worker";
+import { CONSOLIDATOR_TOKEN } from "./tools/services/consolidation.service";
 
 async function main(): Promise<void> {
   container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase() });

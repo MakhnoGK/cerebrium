@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
+import { describe, expect, it } from "vitest";
+import type { Envelope } from "@/db/repo";
 import { chunkContent } from "@/core/chunk";
 import { _MemoryKind } from "@/core/vocab";
-import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { UpdateTool } from "../src/tools/update";
+import { SessionStartTool } from "@/tools/session-start";
+import { UpdateTool } from "@/tools/update";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 const NOTE = `# Intro
 This is the introduction paragraph with enough words to stand on its own as a chunk.

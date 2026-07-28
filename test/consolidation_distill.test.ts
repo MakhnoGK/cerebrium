@@ -1,12 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { container } from "tsyringe";
-import { setup, TestEnv } from "@test/helpers";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ConsolidationProvider } from "@/consolidation/provider";
+import { ConsolidationWorker } from "@/consolidation/worker";
 import { _MemoryKind } from "@/core/vocab";
-import { WriteTool } from "../src/tools/write";
-import { SessionStartTool } from "../src/tools/session-start";
-import { ConsolidateApplyTool } from "../src/tools/consolidate-apply";
+import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup, TestEnv } from "@test/helpers";
 
 const BASE = "the deployment rollback procedure drains connections and flips the feature flag";
 
@@ -44,6 +44,8 @@ const stubProvider: ConsolidationProvider = {
       summary: "S",
       body: "B body",
     }),
+  reconcile: () => Promise.reject(new Error("not used")),
+  annotate: () => Promise.reject(new Error("not used")),
 };
 
 afterEach(() => {

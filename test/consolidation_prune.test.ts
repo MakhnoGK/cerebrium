@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
-import { setup, TestEnv } from "@test/helpers";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationWorker } from "@/consolidation/worker";
-import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { CodeIndexTool } from "../src/tools/code-index";
-import { WriteTool } from "../src/tools/write";
-import { SearchTool } from "../src/tools/search";
-import { ConsolidateApplyTool } from "../src/tools/consolidate-apply";
+import { _MemoryKind } from "@/core/vocab";
+import { CodeIndexTool } from "@/tools/code-index";
+import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup, TestEnv } from "@test/helpers";
 
 const SRC = `/** prunable widget helper for the gadget subsystem */
 export function prunableWidget(): number {

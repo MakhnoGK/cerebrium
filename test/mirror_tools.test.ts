@@ -1,16 +1,17 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
+import { describe, expect, it } from "vitest";
 import type { MirrorSourceStatus } from "@/core/types";
-import { SessionStartTool } from "../src/tools/session-start";
-import { SourceRegisterTool } from "../src/tools/source-register";
-import { MirrorUpsertTool } from "../src/tools/mirror-upsert";
-import { MirrorStatusTool } from "../src/tools/mirror-status";
-import { GetTool } from "../src/tools/get";
-import { InvalidateTool } from "../src/tools/invalidate";
-import { WriteTool } from "../src/tools/write";
-import { LinkTool } from "../src/tools/link";
-import { SearchTool } from "../src/tools/search";
+import { _MemoryKind } from "@/core/vocab";
+import { GetTool } from "@/tools/get";
+import { InvalidateTool } from "@/tools/invalidate";
+import { LinkTool } from "@/tools/link";
+import { MirrorStatusTool } from "@/tools/mirror-status";
+import { MirrorUpsertTool } from "@/tools/mirror-upsert";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { SourceRegisterTool } from "@/tools/source-register";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 function tools() {
   return {
@@ -120,6 +121,7 @@ describe("MirrorUpsertTool", () => {
     const found = (await t.search.invoke({
       session_id: sid,
       query: "checkout latency",
+      limit: 10,
       kinds: ["mirror"],
       types: ["incident"],
     })) as { results: { id: string }[] };
@@ -194,7 +196,7 @@ describe("Link payoff: a note documents a mirror record", () => {
 
     const decision = (await t.write.invoke({
       session_id: sid,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache jitter to prevent stampede",
       content: "We added jitter to cache TTLs after the checkout latency incident.",
@@ -214,6 +216,7 @@ describe("Link payoff: a note documents a mirror record", () => {
     const found = (await t.search.invoke({
       session_id: sid,
       query: "cache jitter stampede",
+      limit: 10,
     })) as { results: { id: string; via?: { edge: string } }[] };
     expect(found.results.some((x) => x.id === mirrorId)).toBe(true);
   });

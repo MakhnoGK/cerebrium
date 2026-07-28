@@ -1,8 +1,8 @@
-import type { EdgeType } from "@/core/vocab";
-import type { Neighbor, NeighborStub } from "@/core/types";
+import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
 import { enrichedByIds } from "@/db/repositories/internal";
-import { injectable } from "tsyringe";
+import type { Neighbor, NeighborStub } from "@/core/types";
+import type { EdgeType } from "@/core/vocab";
 
 // The typed knowledge graph: edge writes and graph reads (1-hop expansion,
 // supersession lookups). Depends only on the shared enriched-row read helper, so it

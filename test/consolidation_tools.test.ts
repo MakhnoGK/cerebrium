@@ -1,13 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { container } from "tsyringe";
-import { setup, TestEnv } from "@test/helpers";
+import { afterEach, describe, expect, it } from "vitest";
 import { ConsolidationWorker } from "@/consolidation/worker";
+import type { ConsolidationCandidate, Envelope } from "@/db/repo";
 import { _MemoryKind } from "@/core/vocab";
-import type { Envelope, ConsolidationCandidate } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { ConsolidateSuggestTool } from "../src/tools/consolidate-suggest";
-import { ConsolidateApplyTool } from "../src/tools/consolidate-apply";
+import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
+import { ConsolidateSuggestTool } from "@/tools/consolidate-suggest";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup, TestEnv } from "@test/helpers";
 
 function tools() {
   return {

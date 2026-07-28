@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { candidateHash } from "@/db/repositories/consolidation";
 import { setup } from "@test/helpers";
 

@@ -1,17 +1,17 @@
 import { inject } from "tsyringe";
-import type { ToolArgs } from "@/tools/context";
-import { toFtsMatch } from "@/core/fts";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
 import { deriveSummary, toEnvelope } from "@/db/repo";
+import { EdgesRepo, SearchRepo } from "@/db/repositories";
+import { toFtsMatch } from "@/core/fts";
+import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/search/metadata";
-import { EdgesRepo, SearchRepo } from "@/db/repositories";
-import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { EmbeddingService } from "@/tools/services/embedding.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
-import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
-import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/rerank";
+import { HintsService } from "@/tools/services/hints.service";
+import { EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "@/embeddings";
+import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/rerank";
 
 // Candidate ceiling before JS re-rank. Episodic decay only lowers scores, so the
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap

@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
+import { MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
 import { chunkContent } from "@/core/chunk";
 import type { EnrichedRow } from "@/core/types";
-import { MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
 
 // Cross-aggregate primitives shared by the node-write path (NodesRepo), the code
 // mirror (CodeRepo), and the embedding drain (EmbeddingQueueRepo). They keep the SQL

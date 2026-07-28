@@ -1,6 +1,6 @@
-import { McpTool } from "@/tools/contracts";
-import { ToolArgs } from "@/tools/context";
 import { ZodRawShape } from "zod";
+import { ToolArgs } from "@/tools/context";
+import { McpTool } from "@/tools/contracts";
 
 export class ToolOutputAdapter {
   constructor(private tool: McpTool<ZodRawShape, unknown>) {}

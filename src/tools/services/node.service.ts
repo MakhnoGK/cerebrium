@@ -1,7 +1,7 @@
 import { inject, injectable } from "tsyringe";
-import { _MemoryKind, type EdgeType, NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
 import { NodesRepo } from "@/db/repositories";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { _MemoryKind, NODE_TYPES, typeAllowedForKind, type EdgeType } from "@/core/vocab";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 
 const MAX_CONTENT = 50_000;
 

@@ -1,7 +1,7 @@
 import { inject, injectable } from "tsyringe";
 import { MirrorRepo, SearchRepo, StatsRepo } from "@/db/repositories";
 import { estimateTokensOf } from "@/core/tokens";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 
 const CHECKPOINT_LIMIT = 2;
 const TASK_LIMIT = 10;

@@ -1,19 +1,19 @@
-import type { ToolArgs } from "@/tools/context";
+import { inject } from "tsyringe";
+import { reconcilePosture } from "@/consolidation/config";
 import { deriveSummary, Envelope } from "@/db/repo";
+import { SearchRepo } from "@/db/repositories";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
-import { reconcilePosture } from "@/consolidation/config";
+import { _MemoryKind } from "@/core/vocab";
+import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { metadata } from "@/tools/write/metadata";
-import { HintsService } from "@/tools/services/hints.service";
+import { ConsolidationService } from "@/tools/services/consolidation.service";
 import { EmbeddingService } from "@/tools/services/embedding.service";
+import { HintsService } from "@/tools/services/hints.service";
 import { NodeService } from "@/tools/services/node.service";
-import { ConsolidationService } from "../services/consolidation.service";
-import { SearchRepo } from "@/db/repositories";
-import { _MemoryKind } from "@/core/vocab";
-import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
-import { inject } from "tsyringe";
+import { metadata } from "@/tools/write/metadata";
+import { EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "@/embeddings";
 
 const DEDUP_CANDIDATES = 5;
 

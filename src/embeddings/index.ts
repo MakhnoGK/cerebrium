@@ -1,7 +1,7 @@
+import { LocalProvider } from "@/embeddings/local";
+import { LocalNullProvider } from "@/embeddings/local-null";
 import type { EmbeddingProvider } from "@/embeddings/provider";
 import { VECTOR_DIM } from "@/embeddings/provider";
-import { LocalNullProvider } from "@/embeddings/local-null";
-import { LocalProvider } from "@/embeddings/local";
 
 export type { EmbeddingProvider } from "@/embeddings/provider";
 export { VECTOR_DIM } from "@/embeddings/provider";

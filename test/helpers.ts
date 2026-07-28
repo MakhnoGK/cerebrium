@@ -2,7 +2,6 @@ import "reflect-metadata";
 import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
 import { openDatabase } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
 import {
   CodeRepo,
   ConsolidationRepo,
@@ -14,13 +13,14 @@ import {
   SessionsRepo,
   StatsRepo,
 } from "@/db/repositories";
+import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { EmbeddingWorker } from "@/embeddings/worker";
+import { Clock, CLOCK_TOKEN } from "@/tools/services/clock.service";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { ConsolidationProvider, createConsolidator } from "@/consolidation";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
 import { createReranker, RERANK_PROVIDER_TOKEN, RerankProvider } from "@/rerank";
-import { createConsolidator, ConsolidationProvider } from "@/consolidation";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 export interface TestClock extends Clock {
   t: string;

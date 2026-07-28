@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { _MemoryKind } from "@/core/vocab";
+import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../../src/tools/session-start";
-import { WriteTool } from "../../src/tools/write";
-import { GetTool } from "../../src/tools/get";
-import { SearchTool } from "../../src/tools/search";
-import { UpdateTool } from "../../src/tools/update";
-import { CheckpointTool } from "../../src/tools/checkpoint";
+import { _MemoryKind } from "@/core/vocab";
+import { CheckpointTool } from "@/tools/checkpoint";
+import { GetTool } from "@/tools/get";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { UpdateTool } from "@/tools/update";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 const P = "auth-service";
 

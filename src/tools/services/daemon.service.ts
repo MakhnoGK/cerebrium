@@ -1,7 +1,7 @@
-import { injectable } from "tsyringe";
 import { readFileSync } from "node:fs";
-import { defaultDbPath } from "@/db/database";
 import { dirname, join } from "node:path";
+import { injectable } from "tsyringe";
+import { defaultDbPath } from "@/db/database";
 
 @injectable()
 export class DaemonService {

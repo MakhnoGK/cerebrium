@@ -1,5 +1,5 @@
-import { ToolName } from "@/tools/contracts";
 import { z } from "zod";
+import { ToolName } from "@/tools/contracts";
 
 export const metadata = {
   name: ToolName.STATS,

@@ -1,8 +1,8 @@
-import type { Envelope, EnrichedRow, SearchRow, VectorRow } from "@/core/types";
-import { toEnvelope } from "@/core/types";
+import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
 import { ENRICHED } from "@/db/repositories/internal";
-import { injectable } from "tsyringe";
+import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/core/types";
+import { toEnvelope } from "@/core/types";
 
 // KNN over-fetch: pull this many nearest chunks, then filter + collapse to the
 // best chunk per node. Generous for a personal-scale store; raise if a project

@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { describe, expect, it } from "vitest";
 import type { ConsolidationProvider } from "@/consolidation/provider";
-import { _MemoryKind } from "@/core/vocab";
+import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
+import { _MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 const stub: ConsolidationProvider = {
   name: "stub",
@@ -20,6 +20,8 @@ const stub: ConsolidationProvider = {
       summary: "S",
       body: "drafted body",
     }),
+  reconcile: () => Promise.reject(new Error("not used")),
+  annotate: () => Promise.reject(new Error("not used")),
 };
 
 const rejectStub: ConsolidationProvider = {
@@ -34,6 +36,8 @@ const rejectStub: ConsolidationProvider = {
       summary: "",
       body: "",
     }),
+  reconcile: () => Promise.reject(new Error("not used")),
+  annotate: () => Promise.reject(new Error("not used")),
 };
 
 async function mk(s: string, title: string): Promise<string> {

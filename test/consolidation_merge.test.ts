@@ -1,15 +1,15 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { container } from "tsyringe";
-import { setup, TestEnv } from "@test/helpers";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ConsolidationProvider } from "@/consolidation/provider";
-import { _MemoryKind } from "@/core/vocab";
+import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { LinkTool } from "../src/tools/link";
-import { SearchTool } from "../src/tools/search";
-import { ConsolidateApplyTool } from "../src/tools/consolidate-apply";
+import { _MemoryKind } from "@/core/vocab";
+import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
+import { LinkTool } from "@/tools/link";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup, TestEnv } from "@test/helpers";
 
 const SHARED =
   "the payment service authorizes the card then captures the amount and emits a receipt event to the downstream ledger";
@@ -48,6 +48,8 @@ const stubProvider: ConsolidationProvider = {
       summary: "S",
       body: "merged body",
     }),
+  reconcile: () => Promise.reject(new Error("not used")),
+  annotate: () => Promise.reject(new Error("not used")),
 };
 
 afterEach(() => {

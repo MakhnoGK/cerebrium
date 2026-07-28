@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { newId } from "@/core/ids";
-import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
-import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
-import { BaseRepo } from "@/db/repositories/base";
 import { injectable } from "tsyringe";
+import { BaseRepo } from "@/db/repositories/base";
+import { newId } from "@/core/ids";
+import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
+import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 
 // The consolidation queue aggregate. Detection (in the daemon's
 // ConsolidationWorker) inserts candidates here; the auto path or the

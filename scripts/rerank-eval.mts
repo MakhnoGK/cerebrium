@@ -1,21 +1,21 @@
 import "reflect-metadata";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import { container } from "tsyringe";
+import { createConsolidator } from "@/consolidation/index";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "@/embeddings/index";
-import { createReranker, RERANK_PROVIDER_TOKEN } from "@/rerank/index";
-import { createConsolidator } from "@/consolidation/index";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
-import { CLOCK_TOKEN, SystemClock } from "@/tools/services/clock.service";
 import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
+import { createReranker, RERANK_PROVIDER_TOKEN } from "@/rerank/index";
 import { _MemoryKind } from "@/core/vocab";
+import { SearchTool } from "@/tools/search";
+import { CLOCK_TOKEN, SystemClock } from "@/tools/services/clock.service";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
 import { SessionStartTool } from "@/tools/session-start";
 import { WriteTool } from "@/tools/write";
-import { SearchTool } from "@/tools/search";
 
 // Offline relevance eval: measure whether the `local` cross-encoder reranker
 // improves search precision over RRF-only fusion on a labeled query set. Both runs

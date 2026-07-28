@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
+import { describe, expect, it } from "vitest";
 import { _MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "../../src/tools/session-start";
-import { SourceRegisterTool } from "../../src/tools/source-register";
-import { MirrorUpsertTool } from "../../src/tools/mirror-upsert";
-import { WriteTool } from "../../src/tools/write";
-import { LinkTool } from "../../src/tools/link";
-import { SearchTool } from "../../src/tools/search";
+import { LinkTool } from "@/tools/link";
+import { MirrorUpsertTool } from "@/tools/mirror-upsert";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { SourceRegisterTool } from "@/tools/source-register";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 const P = "acme";
 

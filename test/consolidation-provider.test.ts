@@ -1,4 +1,6 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { CommandConsolidator } from "@/consolidation/command";
+import { HttpConsolidator, type FetchFn } from "@/consolidation/http";
 import { createConsolidator } from "@/consolidation/index";
 import {
   annotationFtsText,
@@ -11,8 +13,6 @@ import {
   type ConsolidationTask,
   type ReconcileTask,
 } from "@/consolidation/provider";
-import { HttpConsolidator, type FetchFn } from "@/consolidation/http";
-import { CommandConsolidator } from "@/consolidation/command";
 
 const TASK: ConsolidationTask = {
   kind: "distill",

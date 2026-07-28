@@ -1,11 +1,11 @@
 import { inject } from "tsyringe";
+import { MirrorRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { metadata } from "@/tools/source-register/metadata";
-import { MirrorRepo } from "@/db/repositories";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { HintsService } from "@/tools/services/hints.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { metadata } from "@/tools/source-register/metadata";
 
 @tool()
 export class SourceRegisterTool implements McpTool<(typeof metadata)["schema"], unknown> {

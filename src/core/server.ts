@@ -1,14 +1,13 @@
 import "@/tools";
-
-import { injectable, injectAll } from "tsyringe";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Transport } from "@modelcontextprotocol/sdk/shared/transport";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { TOOL_TOKEN } from "@/tools/contracts/tool";
-import { McpTool } from "@/tools/contracts";
+import { Transport } from "@modelcontextprotocol/sdk/shared/transport";
+import { injectable, injectAll } from "tsyringe";
+import { ZodRawShape } from "zod";
 import { ToolOutputAdapter } from "@/core/adapters";
 import { ToolArgs } from "@/tools/context";
-import { ZodRawShape } from "zod";
+import { McpTool } from "@/tools/contracts";
+import { TOOL_TOKEN } from "@/tools/contracts/tool";
 
 @injectable()
 export class Server {

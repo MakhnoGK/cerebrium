@@ -1,12 +1,12 @@
+import { CommandConsolidator } from "@/consolidation/command";
+import { HttpConsolidator } from "@/consolidation/http";
+import { ManualConsolidator } from "@/consolidation/manual";
 import type {
   AnnotateResult,
   ConsolidationProvider,
   ConsolidationResult,
   ReconcileResult,
 } from "@/consolidation/provider";
-import { ManualConsolidator } from "@/consolidation/manual";
-import { HttpConsolidator } from "@/consolidation/http";
-import { CommandConsolidator } from "@/consolidation/command";
 
 export type {
   ConsolidationProvider,

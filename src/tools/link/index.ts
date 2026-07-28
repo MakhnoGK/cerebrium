@@ -1,13 +1,13 @@
 import { inject } from "tsyringe";
-import { ToolArgs } from "@/tools/context";
+import { EdgesRepo, NodesRepo } from "@/db/repositories";
 import { SYSTEM_EDGE_TYPES } from "@/core/vocab";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/link/metadata";
-import { EdgesRepo, NodesRepo } from "@/db/repositories";
-import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { EmbeddingService } from "@/tools/services/embedding.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
 export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {

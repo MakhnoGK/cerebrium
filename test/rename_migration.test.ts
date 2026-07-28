@@ -1,12 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { setup } from "@test/helpers";
-import { indexRepo } from "@/code/indexer";
+import { afterEach, describe, expect, it } from "vitest";
 import { stableSymbolId } from "@/code/extract";
+import { indexRepo } from "@/code/indexer";
+import { setup } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
 const { up } = require("../src/db/migrations/006_rename_third_brain_to_cerebrium.cjs") as {

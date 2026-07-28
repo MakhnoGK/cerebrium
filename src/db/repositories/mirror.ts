@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { injectable } from "tsyringe";
+import { BaseRepo } from "@/db/repositories/base";
+import { ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
 import type {
   MirrorItem,
@@ -7,9 +10,6 @@ import type {
   MirrorSourceStatus,
   MirrorUpsertResult,
 } from "@/core/types";
-import { BaseRepo } from "@/db/repositories/base";
-import { ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
-import { injectable } from "tsyringe";
 
 // The external-mirror aggregate: the per-deployment source registry and
 // the agent-driven, curated upsert of `mirror` nodes whose origin != 'repo'. Mirror

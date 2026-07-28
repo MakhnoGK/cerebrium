@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { LocalNullReranker } from "@/rerank/local-null";
-import type { RerankProvider } from "@/rerank/index";
-import { _MemoryKind } from "@/core/vocab";
+import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { LinkTool } from "../src/tools/link";
-import { SearchTool } from "../src/tools/search";
+import type { RerankProvider } from "@/rerank/index";
+import { LocalNullReranker } from "@/rerank/local-null";
+import { _MemoryKind } from "@/core/vocab";
+import { LinkTool } from "@/tools/link";
+import { SearchTool } from "@/tools/search";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { setup } from "@test/helpers";
 
 async function session(project?: string): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({ project })).session_id;

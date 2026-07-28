@@ -1,21 +1,23 @@
-import { describe, it, expect, afterEach, beforeEach, afterAll } from "vitest";
+import Database from "better-sqlite3";
+import { container } from "tsyringe";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
+  AnnotateResult,
   ConsolidationProvider,
   ConsolidationResult,
   ReconcileResult,
   ReconcileTask,
 } from "@/consolidation/provider";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { container } from "tsyringe";
-import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "../src/embeddings";
-import { EmbeddingWorker } from "../src/embeddings/worker";
-import { LocalNullProvider } from "../src/embeddings/local-null";
-import Database from "better-sqlite3";
-import { DB_TOKEN } from "../src/db/repositories/base";
-import { openDatabase } from "../src/db/database";
-import { createConsolidator } from "../src/consolidation";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { LocalNullProvider } from "@/embeddings/local-null";
+import { EmbeddingWorker } from "@/embeddings/worker";
+import { _MemoryKind } from "@/core/vocab";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { createConsolidator } from "@/consolidation";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
 
 const session_start = container.resolve(SessionStartTool);
 
@@ -35,6 +37,10 @@ class FakeJudge implements ConsolidationProvider {
   reconcile(task: ReconcileTask): Promise<ReconcileResult> {
     this.calls++;
     return Promise.resolve(this.verdict(task));
+  }
+
+  annotate(): Promise<AnnotateResult> {
+    return Promise.reject(new Error("not used"));
   }
 }
 
@@ -57,12 +63,12 @@ function writeFact(s: string, title: string, content: string): Promise<WriteOut>
 
   return write.invoke({
     session_id: s,
-    memory_kind: "semantic",
+    memory_kind: _MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content,
     project: P,
-  }) as Promise<WriteOut>;
+  }) as unknown as Promise<WriteOut>;
 }
 
 beforeEach(() => {
@@ -213,6 +219,7 @@ describe("Write-time reconcile", () => {
       enabled: true,
       generate: () => Promise.reject(new Error("no")),
       reconcile: () => Promise.reject(new Error("provider down")),
+      annotate: () => Promise.reject(new Error("not used")),
     };
 
     container.registerInstance(CONSOLIDATOR_TOKEN, boom);

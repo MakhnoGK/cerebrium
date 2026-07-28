@@ -1,9 +1,9 @@
-import { ToolArgs } from "@/tools/context";
 import type { SymbolLookup } from "@/db/repo";
+import { CodeRepo } from "@/db/repositories";
+import { metadata } from "@/tools/code-lookup/metadata";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { metadata } from "@/tools/code-lookup/metadata";
-import { CodeRepo } from "@/db/repositories";
 import { HintsService } from "@/tools/services/hints.service";
 
 @tool()

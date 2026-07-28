@@ -1,6 +1,6 @@
 import js from "@eslint/js";
-import tseslint from "typescript-eslint";
 import prettierRecommended from "eslint-plugin-prettier/recommended";
+import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   { ignores: ["dist", "node_modules", ".tmp", "coverage", "test/fixtures"] },
@@ -10,7 +10,7 @@ export default tseslint.config(
     extends: [...tseslint.configs.strictTypeChecked, ...tseslint.configs.stylisticTypeChecked],
     languageOptions: {
       parserOptions: {
-        project: ["./tsconfig.eslint.json"],
+        project: ["./tsconfig.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -36,6 +36,27 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true },
+      ],
+    },
+  },
+  {
+    // Path aliases are the import contract: `@/…` for src, `@test/…` for test. A
+    // parent-relative import resolves differently per tool (tsc, vitest, each IDE's
+    // language server) and is what makes modules "not found" in some editors. Sibling
+    // `./…` imports stay legal — they never cross a folder, so no alias applies.
+    files: ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["../*", "../**"],
+              message:
+                "Use a path alias instead of a parent-relative import: '@/…' for src, '@test/…' for test.",
+            },
+          ],
+        },
       ],
     },
   },

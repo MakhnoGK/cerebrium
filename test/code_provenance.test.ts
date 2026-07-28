@@ -1,13 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { indexRepo } from "@/code/indexer";
+import { afterEach, describe, expect, it } from "vitest";
 import { readGitProvenance } from "@/code/git";
-import { CodeIndexTool } from "../src/tools/code-index";
+import { indexRepo } from "@/code/indexer";
+import { CodeIndexTool } from "@/tools/code-index";
+import { setup } from "@test/helpers";
 
 const dirs: string[] = [];
 afterEach(() => {

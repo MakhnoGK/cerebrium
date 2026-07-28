@@ -1,14 +1,14 @@
 import { inject } from "tsyringe";
+import { StatsRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { metadata } from "@/tools/stats/metadata";
-import { StatsRepo } from "@/db/repositories";
-import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { DaemonService } from "@/tools/services/daemon.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
-import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
-import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/rerank";
+import { HintsService } from "@/tools/services/hints.service";
+import { metadata } from "@/tools/stats/metadata";
+import { EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "@/embeddings";
+import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/rerank";
 
 @tool()
 export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> {

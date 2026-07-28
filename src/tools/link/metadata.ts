@@ -1,5 +1,5 @@
-import { EDGE_TYPES } from "@/core/vocab";
 import { z } from "zod";
+import { EDGE_TYPES } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 
 export const metadata = {

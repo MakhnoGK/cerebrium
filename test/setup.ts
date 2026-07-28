@@ -1,14 +1,14 @@
 import "reflect-metadata";
 import { container } from "tsyringe";
-import { DB_TOKEN } from "../src/db/repositories/base";
-import { openDatabase } from "../src/db/database";
-import { EMBEDDING_PROVIDER_TOKEN } from "../src/embeddings";
-import { LocalNullProvider } from "../src/embeddings/local-null";
-import { RERANK_PROVIDER_TOKEN, createReranker } from "../src/rerank";
-import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { createConsolidator } from "../src/consolidation";
-import { CLOCK_TOKEN, SystemClock } from "../src/tools/services/clock.service";
-import { WORKER_OPTIONS_TOKEN } from "../src/embeddings/worker";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { LocalNullProvider } from "@/embeddings/local-null";
+import { WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
+import { CLOCK_TOKEN, SystemClock } from "@/tools/services/clock.service";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { createConsolidator } from "@/consolidation";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/embeddings";
+import { createReranker, RERANK_PROVIDER_TOKEN } from "@/rerank";
 
 container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
 container.registerSingleton(CLOCK_TOKEN, SystemClock);

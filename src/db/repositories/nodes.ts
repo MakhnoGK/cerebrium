@@ -1,12 +1,12 @@
 import type Database from "better-sqlite3";
-import { newId } from "@/core/ids";
-import type { EdgeType } from "@/core/vocab";
-import type { Envelope, NeighborStub, NewNode, RevisionMeta } from "@/core/types";
-import { toEnvelope } from "@/core/types";
+import { inject, injectable } from "tsyringe";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
-import { inject, injectable } from "tsyringe";
+import { newId } from "@/core/ids";
+import type { Envelope, NeighborStub, NewNode, RevisionMeta } from "@/core/types";
+import { toEnvelope } from "@/core/types";
+import type { EdgeType } from "@/core/vocab";
 
 // The authored-node write path (nodes + revisions + FTS + chunks/queue, atomically)
 // and node reads. The append-only-revisions and FTS-in-write-transaction invariants

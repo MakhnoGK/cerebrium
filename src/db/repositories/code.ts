@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
+import { inject, injectable } from "tsyringe";
+import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
+import { EdgesRepo } from "@/db/repositories/edges";
+import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
-import type { EdgeType } from "@/core/vocab";
 import type {
   ExtractedSymbol,
   FileIndexInput,
@@ -11,10 +14,7 @@ import type {
   SymbolLookup,
 } from "@/core/types";
 import { toEnvelope } from "@/core/types";
-import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
-import { EdgesRepo } from "@/db/repositories/edges";
-import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
-import { inject, injectable } from "tsyringe";
+import type { EdgeType } from "@/core/vocab";
 
 // The code mirror: symbol nodes + their facet rows, per-file hash gate,
 // incremental index application, cross-file edge resolution, structural lookups, and

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import { container } from "tsyringe";
 import Database from "better-sqlite3";
-import { isMainModule } from "@/runtime/is-main";
-import { openDatabaseReadonly, defaultDbPath } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { container } from "tsyringe";
+import { defaultDbPath, openDatabaseReadonly } from "@/db/database";
 import { StatsRepo } from "@/db/repositories";
-import { nowIso } from "@/core/ids";
+import { DB_TOKEN } from "@/db/repositories/base";
 import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
+import { isMainModule } from "@/runtime/is-main";
+import { nowIso } from "@/core/ids";
 
 // Read-only inspection command: `cerebrium-stats`. Safe to run anytime,
 // including while no MCP server or daemon is up — it never writes.

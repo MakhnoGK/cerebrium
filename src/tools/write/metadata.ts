@@ -1,6 +1,6 @@
+import z from "zod";
 import { _MemoryKind, EDGE_TYPES } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
-import z from "zod";
 
 export const metadata = {
   name: ToolName.WRITE,

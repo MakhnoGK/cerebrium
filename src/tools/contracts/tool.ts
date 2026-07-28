@@ -1,7 +1,7 @@
 import { container, injectable, InjectionToken } from "tsyringe";
 import { ZodRawShape } from "zod";
-import { ToolName } from "@/tools/contracts/tool-name";
 import { ToolArgs } from "@/tools/context";
+import { ToolName } from "@/tools/contracts/tool-name";
 
 export const TOOL_TOKEN: InjectionToken<McpTool<ZodRawShape, unknown>> = Symbol("TOOL_TOKEN");
 

@@ -1,6 +1,7 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
-import type { ToolArgs } from "@/tools/context";
-import { McpTool } from "@/tools/contracts";
+import { extractFile, FileExtract } from "@/code/extract";
+import { readGitProvenance } from "@/code/git";
 import {
   IndexOptions,
   IndexStats,
@@ -13,16 +14,15 @@ import {
   walk,
   yieldToLoop,
 } from "@/code/indexer";
-import { tool } from "@/tools/contracts/tool";
+import { parse } from "@/code/parser";
+import { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
+import type { FileIndexResult } from "@/core/types";
 import { metadata } from "@/tools/code-index/metadata";
+import type { ToolArgs } from "@/tools/context";
+import { McpTool } from "@/tools/contracts";
+import { tool } from "@/tools/contracts/tool";
 import { EmbeddingService } from "@/tools/services/embedding.service";
 import { HintsService } from "@/tools/services/hints.service";
-import { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extractFile, FileExtract } from "@/code/extract";
-import { parse } from "@/code/parser";
-import type { FileIndexResult } from "@/core/types";
-import { readGitProvenance } from "@/code/git";
 
 interface Resolver {
   byQualified: Map<string, string>;

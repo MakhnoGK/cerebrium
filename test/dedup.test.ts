@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
 import { container } from "tsyringe";
-import { _MemoryKind } from "../src/core/vocab";
-import { EmbeddingWorker } from "../src/embeddings/worker";
-import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { createConsolidator } from "../src/consolidation";
-import { EMBEDDING_PROVIDER_TOKEN } from "../src/embeddings";
-import { LocalNullProvider } from "../src/embeddings/local-null";
-import { DB_TOKEN } from "../src/db/repositories/base";
-import { openDatabase } from "../src/db/database";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { LocalNullProvider } from "@/embeddings/local-null";
+import { EmbeddingWorker } from "@/embeddings/worker";
+import { _MemoryKind } from "@/core/vocab";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { createConsolidator } from "@/consolidation";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/embeddings";
 
 async function session(tool: SessionStartTool, project?: string): Promise<string> {
   return (await tool.invoke({ project })).session_id;
