@@ -160,7 +160,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
         // );
 
         // TODO: Decouple
-        return await this.indexRepo(target, {
+        return await this.getRepositoryIndex(target, {
           session_id: args.session_id,
           // FIXME: Remove this sh*t
           now: () => new Date().toISOString(),
@@ -171,7 +171,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
   }
 
   // TODO: Decouple
-  private async indexRepo(target: IndexTarget, opts: IndexOptions): Promise<IndexStats> {
+  private async getRepositoryIndex(target: IndexTarget, opts: IndexOptions): Promise<IndexStats> {
     const start = Date.parse(opts.now());
 
     const stats: IndexStats = {
@@ -262,7 +262,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
 
     // ---- Pass 2: cross-file imports/calls, resolved against the full directory ----
     if (dirty.length) {
-      const resolver = this.buildResolver(target.name);
+      const resolver = this.getResolver(target.name);
       let resolved = 0;
 
       for (const { rel, lang, extract } of dirty) {
@@ -292,17 +292,17 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
       }
     }
 
-    const prov = readGitProvenance(target.root);
-    stats.branch = prov.branch;
-    stats.commit = prov.commit;
-    stats.dirty = prov.dirty;
+    const provenance = readGitProvenance(target.root);
+    stats.branch = provenance.branch;
+    stats.commit = provenance.commit;
+    stats.dirty = provenance.dirty;
 
     this.code.setRepoProvenance(
       target.name,
       target.root,
-      prov.branch,
-      prov.commit,
-      prov.dirty,
+      provenance.branch,
+      provenance.commit,
+      provenance.dirty,
       opts.now(),
     );
 
@@ -312,7 +312,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
     return stats;
   }
 
-  private buildResolver(name: string): Resolver {
+  private getResolver(name: string): Resolver {
     const r: Resolver = {
       byQualified: new Map(),
       byPathName: new Map(),
