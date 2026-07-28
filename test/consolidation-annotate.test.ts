@@ -1,11 +1,13 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type BetterSqlite3 from "better-sqlite3";
-import { makeCtx } from "@test/helpers";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
 
 import { ConsolidationWorker } from "@/consolidation/worker";
 import { toFtsMatch } from "@/core/fts";
-import type { Ctx } from "@/tools/context";
-import type { Repo, Envelope } from "@/db/repo";
+import { _MemoryKind } from "@/core/vocab";
+import type { SearchRepo } from "@/db/repositories";
+import type { Envelope } from "@/db/repo";
 import type {
   AnnotateResult,
   AnnotateTask,
@@ -13,11 +15,8 @@ import type {
   ConsolidationResult,
   ReconcileResult,
 } from "@/consolidation/provider";
-import { SessionStartTool } from "../src/tools/session_start";
+import { SessionStartTool } from "../src/tools/session-start";
 import { WriteTool } from "../src/tools/write";
-
-const session_start = new SessionStartTool();
-const write = new WriteTool();
 
 // An enabled provider that only annotates. `generate`/`reconcile` are unused here.
 class FakeAnnotator implements ConsolidationProvider {
@@ -44,11 +43,11 @@ const TITLE = "Failover behavior";
 const BODY = "the http client switches to the standby node when the primary stops responding";
 const KEYWORD = "resilience";
 
-async function writeFact(ctx: Ctx, s: string): Promise<string> {
+async function writeFact(s: string): Promise<string> {
   return (
-    (await write.invoke(ctx, {
+    (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: TITLE,
       content: BODY,
@@ -59,10 +58,10 @@ async function writeFact(ctx: Ctx, s: string): Promise<string> {
 
 // Direct FTS probe: does a text search for `term` return `id`? Proves the annotation
 // reached node_fts.content without any vector/embedding involvement.
-function ftsFinds(repo: Repo, term: string, id: string): boolean {
+function ftsFinds(search: SearchRepo, term: string, id: string): boolean {
   const match = toFtsMatch(term);
   if (!match) return false;
-  return repo
+  return search
     .search({ match, kinds: ["semantic"], history: false, cap: 10 })
     .rows.some((r) => r.id === id);
 }
@@ -73,93 +72,108 @@ function annotationRows(db: BetterSqlite3.Database, id: string): unknown[] {
     .all(id);
 }
 
+async function session(project?: string): Promise<string> {
+  return (await container.resolve(SessionStartTool).invoke({ project })).session_id;
+}
+
 afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_ANNOTATE;
 });
 
-describe("write-time attribute enrichment (annotate)", () => {
-  it("auto folds generated keywords into FTS without touching the revision body", async () => {
+describe("Write-time attribute enrichment (annotate)", () => {
+  it("should fold generated keywords into FTS without touching the revision body when auto", async () => {
+    // Given
     const provider = new FakeAnnotator(() => ({
       keywords: [KEYWORD, "failover"],
       tags: ["infra"],
       context: "how the client survives a primary outage",
     }));
-    const { ctx, repo, db } = makeCtx({ consolidator: provider });
-    const s = (await session_start.invoke(ctx, { project: "infra" })).session_id;
-    const id = await writeFact(ctx, s);
+    const env = setup({ consolidator: provider });
+    const id = await writeFact(await session("infra"));
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false); // injected keyword finds nothing yet
 
-    // Before enrichment: the injected keyword finds nothing.
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(false);
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
 
-    const r = await new ConsolidationWorker(repo, provider, ctx.now).tick();
+    // Then
     expect(r.annotated).toBe(1);
     expect(provider.calls).toBe(1);
-
-    // After enrichment: findable by the injected keyword and the context phrase…
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(true);
-    expect(ftsFinds(repo, "outage", id)).toBe(true);
+    // findable by the injected keyword and the context phrase…
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(true);
+    expect(ftsFinds(env.search, "outage", id)).toBe(true);
     // …but the authored body is byte-for-byte unchanged, and no new revision was created.
-    const full = repo.fullNode(id)!;
+    const full = (await env.nodes.fullNode(id))!;
     expect(full.content).toBe(BODY);
     expect(full.envelope.rev).toBe(1);
-    expect(annotationRows(db, id)).toHaveLength(1);
+    expect(annotationRows(env.db, id)).toHaveLength(1);
   });
 
-  it("is idempotent — a second sweep re-annotates nothing", async () => {
+  it("should re-annotate nothing on a second sweep (idempotent)", async () => {
+    // Given
     const provider = new FakeAnnotator(() => ({ keywords: [KEYWORD], tags: [], context: "" }));
-    const { ctx, repo } = makeCtx({ consolidator: provider });
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    await writeFact(ctx, s);
+    setup({ consolidator: provider });
+    await writeFact(await session());
 
-    // One worker (one lease holder) across both sweeps, so the second sweep tests
-    // idempotency — not a denied lease.
-    const cw = new ConsolidationWorker(repo, provider, ctx.now);
+    // When / Then — one worker (one lease holder) across both sweeps tests idempotency.
+    const cw = container.resolve(ConsolidationWorker);
     expect((await cw.tick()).annotated).toBe(1);
     expect((await cw.tick()).annotated).toBe(0);
   });
 
-  it("re-annotates the new revision after an update (annotation is per-rev)", async () => {
+  it("should re-annotate the new revision after an update since annotation is per-rev", async () => {
+    // Given
     const provider = new FakeAnnotator(() => ({ keywords: [KEYWORD], tags: [], context: "" }));
-    const { ctx, repo } = makeCtx({ consolidator: provider });
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const id = await writeFact(ctx, s);
-    const cw = new ConsolidationWorker(repo, provider, ctx.now);
+    const env = setup({ consolidator: provider });
+    const s = await session();
+    const id = await writeFact(s);
+    const cw = container.resolve(ConsolidationWorker);
     await cw.tick();
 
-    // A new revision drops the rev-1 annotation from FTS; the node is un-annotated again.
-    repo.addRevision(id, {
+    // When — a new revision drops the rev-1 annotation from FTS; the node is un-annotated again.
+    env.nodes.addRevision(id, {
       content: `${BODY} and logs the switch`,
       session_id: s,
       reason: null,
-      ts: ctx.now(),
+      ts: env.clock.now(),
     });
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(false);
+
+    // Then
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
     expect((await cw.tick()).annotated).toBe(1);
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(true);
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(true);
   });
 
-  it("does nothing under the default offline (manual) provider", async () => {
-    const { ctx, repo } = makeCtx(); // manual, enabled=false
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const id = await writeFact(ctx, s);
-    const r = await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
+  it("should do nothing under the default offline manual provider", async () => {
+    // Given
+    const env = setup(); // manual, enabled=false
+    const id = await writeFact(await session());
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.annotated).toBe(0);
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(false);
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
   });
 
-  it("off posture skips enrichment even with an enabled provider", async () => {
+  it("should skip enrichment when the posture is off even with an enabled provider", async () => {
+    // Given
     process.env.MEMORY_CONSOLIDATE_ANNOTATE = "off";
     const provider = new FakeAnnotator(() => ({ keywords: [KEYWORD], tags: [], context: "" }));
-    const { ctx, repo } = makeCtx({ consolidator: provider });
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const id = await writeFact(ctx, s);
-    const r = await new ConsolidationWorker(repo, provider, ctx.now).tick();
+    const env = setup({ consolidator: provider });
+    const id = await writeFact(await session());
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.annotated).toBe(0);
     expect(provider.calls).toBe(0);
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(false);
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
   });
 
-  it("a generation failure skips the node — no annotation, no FTS change", async () => {
+  it("should skip the node on a generation failure with no annotation or FTS change", async () => {
+    // Given
     const boom: ConsolidationProvider = {
       name: "boom",
       version: "1",
@@ -168,13 +182,16 @@ describe("write-time attribute enrichment (annotate)", () => {
       reconcile: () => Promise.reject(new Error("no")),
       annotate: () => Promise.reject(new Error("model down")),
     };
-    const { ctx, repo } = makeCtx({ consolidator: boom });
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const id = await writeFact(ctx, s);
-    const r = await new ConsolidationWorker(repo, boom, ctx.now).tick();
+    const env = setup({ consolidator: boom });
+    const id = await writeFact(await session());
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.annotated).toBe(0);
-    expect(ftsFinds(repo, KEYWORD, id)).toBe(false);
+    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
     // The node is still authored-body findable — enrichment is purely additive.
-    expect(ftsFinds(repo, "standby", id)).toBe(true);
+    expect(ftsFinds(env.search, "standby", id)).toBe(true);
   });
 });

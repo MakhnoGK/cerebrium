@@ -1,32 +1,37 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/consolidate-apply/metadata";
+import { ConsolidationRepo, EdgesRepo, NodesRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
+  constructor(
+    private readonly hints: HintsService,
+    private readonly consolidation: ConsolidationRepo,
+    private readonly edges: EdgesRepo,
+    private readonly nodes: NodesRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
+
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-    const candidate = this.ctx.repo.getCandidate(args.id);
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const candidate = this.consolidation.getCandidate(args.id);
 
     if (!candidate) throw new Error(`no consolidation candidate ${args.id}.`);
     if (candidate.status !== "pending") {
       throw new Error(`candidate ${args.id} is already ${candidate.status}.`);
     }
 
-    const now = this.ctx.now();
+    const now = this.clock.now();
 
     if (args.decision === "reject") {
-      this.ctx.repo.resolveCandidate(args.id, "dismissed", args.session_id, now);
-      this.ctx.repo.logEvent(
-        "consolidate_apply",
-        args.session_id,
-        null,
-        { id: args.id, decision: "reject" },
-        now,
-      );
+      this.consolidation.resolveCandidate(args.id, "dismissed", args.session_id, now);
 
       const rejected: Record<string, unknown> = { ok: true, id: args.id, status: "dismissed" };
       if (hints.length) rejected.hints = hints;
@@ -38,7 +43,7 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
       const [src, dst] = candidate.member_ids;
 
       if (!src || !dst) throw new Error(`link candidate ${args.id} is malformed.`);
-      this.ctx.repo.insertEdge(
+      this.edges.insertEdge(
         src,
         dst,
         "similar_to",
@@ -47,7 +52,7 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
         now,
         candidate.score,
       );
-      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.consolidation.resolveCandidate(args.id, "applied", args.session_id, now);
     } else if (candidate.kind === "distill") {
       const result = args.override ?? candidate.proposal;
 
@@ -57,7 +62,7 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
         );
       }
 
-      this.ctx.repo.applyDistillation({
+      this.nodes.applyDistillation({
         title: result.title,
         content: result.body,
         project: candidate.project,
@@ -65,7 +70,7 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
         session_id: args.session_id,
         ts: now,
       });
-      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.consolidation.resolveCandidate(args.id, "applied", args.session_id, now);
     } else if (candidate.kind === "merge") {
       const survivor = candidate.canonical_id;
       const loser = candidate.member_ids.find((mid) => mid !== survivor);
@@ -73,30 +78,22 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
       if (!survivor || !loser) throw new Error(`merge candidate ${args.id} is malformed.`);
       const merged = args.override ?? candidate.proposal;
 
-      this.ctx.repo.applyMerge({
+      this.nodes.applyMerge({
         survivorId: survivor,
         loserId: loser,
         session_id: args.session_id,
         ts: now,
         merged: merged ? { title: merged.title, body: merged.body } : undefined,
       });
-      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.consolidation.resolveCandidate(args.id, "applied", args.session_id, now);
     } else {
       // prune: soft-invalidate the dead mirror node
       const [target] = candidate.member_ids;
       if (!target) throw new Error(`prune candidate ${args.id} is malformed.`);
 
-      this.ctx.repo.invalidateNode(target, { ts: now, session_id: args.session_id });
-      this.ctx.repo.resolveCandidate(args.id, "applied", args.session_id, now);
+      this.nodes.invalidateNode(target, { ts: now, session_id: args.session_id });
+      this.consolidation.resolveCandidate(args.id, "applied", args.session_id, now);
     }
-
-    this.ctx.repo.logEvent(
-      "consolidate_apply",
-      args.session_id,
-      null,
-      { id: args.id, decision: "accept", kind: candidate.kind },
-      now,
-    );
 
     const out: Record<string, unknown> = {
       ok: true,
@@ -106,6 +103,7 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
     };
 
     if (hints.length) out.hints = hints;
+
     return out;
   }
 }

@@ -1,25 +1,23 @@
-import type { ToolArgs } from "@/tools/context";
-import { touchOrCreate } from "@/tools/context";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/consolidate-suggest/metadata";
+import { ConsolidationRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
 export class ConsolidateSuggestTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-    const candidates = this.ctx.repo.pendingCandidates({ kind: args.kind, limit: args.limit });
-    const out: Record<string, unknown> = { candidates };
+  constructor(
+    private readonly hints: HintsService,
+    private readonly consolidation: ConsolidationRepo,
+  ) {}
 
-    this.ctx.repo.logEvent(
-      "consolidate_suggest",
-      args.session_id,
-      null,
-      { kind: args.kind ?? null, count: candidates.length },
-      this.ctx.now(),
-    );
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const candidates = this.consolidation.pendingCandidates({ kind: args.kind, limit: args.limit });
+    const out: Record<string, unknown> = { candidates };
 
     if (hints.length) out.hints = hints;
 

@@ -1,14 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "@test/helpers";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { ConsolidationProvider } from "@/consolidation/provider";
-import type { Ctx } from "@/tools/context";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session_start";
+import { SessionStartTool } from "../src/tools/session-start";
 import { WriteTool } from "../src/tools/write";
-
-const session_start = new SessionStartTool();
-const write = new WriteTool();
 
 const stub: ConsolidationProvider = {
   name: "stub",
@@ -38,11 +36,11 @@ const rejectStub: ConsolidationProvider = {
     }),
 };
 
-async function mk(ctx: Ctx, s: string, title: string): Promise<string> {
+async function mk(s: string, title: string): Promise<string> {
   return (
-    (await write.invoke(ctx, {
+    (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title,
       content: `content for ${title}`,
@@ -50,25 +48,28 @@ async function mk(ctx: Ctx, s: string, title: string): Promise<string> {
   ).id;
 }
 
-describe("proposal backfill (manual->provider upgrade)", () => {
-  it("fills proposals for pending distill/merge candidates lacking them", async () => {
-    const { ctx, repo } = makeCtx();
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const a = await mk(ctx, s, "Alpha");
-    const b = await mk(ctx, s, "Beta");
-    // a proposal-less merge candidate, as queued under the manual provider
-    const id = repo.insertCandidate({
+describe("Proposal backfill (manual -> provider upgrade)", () => {
+  it("should backfill a proposal for a proposal-less candidate when a generating provider is configured", async () => {
+    // Given
+    const env = setup({ consolidator: stub });
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const a = await mk(s, "Alpha");
+    const b = await mk(s, "Beta");
+    const id = env.consolidation.insertCandidate({
       kind: "merge",
       member_ids: [a, b],
       canonical_id: a,
       score: 0.95,
       detected_at: "2026-01-01T00:00:00.000Z",
     })!;
-    expect(repo.getCandidate(id)!.proposal).toBeNull();
+    expect(env.consolidation.getCandidate(id)!.proposal).toBeNull();
 
-    const r = await new ConsolidationWorker(repo, stub, ctx.now).tick();
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.proposals_backfilled).toBe(1);
-    expect(repo.getCandidate(id)!.proposal).toMatchObject({
+    expect(env.consolidation.getCandidate(id)!.proposal).toMatchObject({
       recommendation: "apply",
       title: "Drafted",
       summary: "S",
@@ -76,12 +77,13 @@ describe("proposal backfill (manual->provider upgrade)", () => {
     });
   });
 
-  it("auto-dismisses a candidate the provider judges not a real duplicate, keeping the reason", async () => {
-    const { ctx, repo } = makeCtx();
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const a = await mk(ctx, s, "crm-backend deps");
-    const b = await mk(ctx, s, "chat-socket deps");
-    const id = repo.insertCandidate({
+  it("should auto-dismiss a candidate and keep the reason when the provider judges it not a real duplicate", async () => {
+    // Given
+    const env = setup({ consolidator: rejectStub });
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const a = await mk(s, "crm-backend deps");
+    const b = await mk(s, "chat-socket deps");
+    const id = env.consolidation.insertCandidate({
       kind: "merge",
       member_ids: [a, b],
       canonical_id: a,
@@ -89,26 +91,34 @@ describe("proposal backfill (manual->provider upgrade)", () => {
       detected_at: "2026-01-01T00:00:00.000Z",
     })!;
 
-    const r = await new ConsolidationWorker(repo, rejectStub, ctx.now).tick();
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.rejected).toBe(1);
     expect(r.proposals_backfilled).toBe(0);
-    const cand = repo.getCandidate(id)!;
+    const cand = env.consolidation.getCandidate(id)!;
     expect(cand.status).toBe("dismissed"); // no longer clutters the Review inbox
     expect(cand.proposal?.recommendation).toBe("reject");
     expect(cand.proposal?.reason).toMatch(/different services/);
-    expect(repo.pendingCandidates({ kind: "merge" })).toHaveLength(0);
+    expect(env.consolidation.pendingCandidates({ kind: "merge" })).toHaveLength(0);
   });
 
-  it("the manual/disabled provider backfills nothing (stays offline)", async () => {
-    const { ctx, repo } = makeCtx(); // default consolidator is manual (enabled=false)
-    const id = repo.insertCandidate({
+  it("should backfill nothing when the provider is the manual/disabled default", async () => {
+    // Given
+    const env = setup(); // default consolidator is manual (enabled=false)
+    const id = env.consolidation.insertCandidate({
       kind: "distill",
       member_ids: ["x", "y", "z"],
       score: 0.9,
       detected_at: "2026-01-01T00:00:00.000Z",
     })!;
-    const r = await new ConsolidationWorker(repo, ctx.consolidator, ctx.now).tick();
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
     expect(r.proposals_backfilled).toBe(0);
-    expect(repo.getCandidate(id)!.proposal).toBeNull();
+    expect(env.consolidation.getCandidate(id)!.proposal).toBeNull();
   });
 });
