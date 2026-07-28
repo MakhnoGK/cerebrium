@@ -1,14 +1,13 @@
-import { describe, it, expect, afterEach, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
-import type { EmbeddingWorker } from "@/embeddings/worker";
+import { EmbeddingWorker } from "@/embeddings/worker";
 import { SessionStartTool } from "../src/tools/session-start";
 import { WriteTool } from "../src/tools/write";
 import { container } from "tsyringe";
 import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
 import { createConsolidator } from "../src/consolidation";
 import { EMBEDDING_PROVIDER_TOKEN } from "../src/embeddings";
-import Database from "better-sqlite3";
 import { DB_TOKEN } from "../src/db/repositories/base";
 import { openDatabase } from "../src/db/database";
 import { LocalNullProvider } from "../src/embeddings/local-null";
@@ -16,8 +15,8 @@ import { EdgesRepo } from "../src/db/repositories/edges";
 import { ConsolidationRepo } from "../src/db/repositories/consolidation";
 
 const sessionStart = container.resolve(SessionStartTool);
-const edgesRepo = container.resolve(EdgesRepo);
-const consolidationRepo = container.resolve(ConsolidationRepo);
+let edgesRepo: EdgesRepo;
+let consolidationRepo: ConsolidationRepo;
 
 async function newNode(
   writeTool: WriteTool,
@@ -62,6 +61,7 @@ async function seed(tool: WriteTool, worker: EmbeddingWorker) {
   const twinB = await newNode(tool, s, "Client retries", dup);
   const other = await newNode(tool, s, "Kafka", "ingestion consumes kafka topics by tenant");
   await worker.tick(); // embed all three so the kNN detector has vectors
+
   return { s, twinA, twinB, other };
 }
 
@@ -78,43 +78,42 @@ afterEach(() => {
 });
 
 describe("similar_to link discovery", () => {
-  let db: Database.Database;
   let writeTool: WriteTool;
-  let worker: ConsolidationWorker;
+  let embedWorker: EmbeddingWorker;
+  let consolidation: ConsolidationWorker;
 
   beforeEach(() => {
+    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
     container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
 
-    worker = container.resolve(ConsolidationWorker);
+    embedWorker = container.resolve(EmbeddingWorker);
+    consolidation = container.resolve(ConsolidationWorker);
     writeTool = container.resolve(WriteTool);
-    db = container.resolve(DB_TOKEN);
-  });
-
-  afterAll(() => {
-    db.close();
+    edgesRepo = container.resolve(EdgesRepo);
+    consolidationRepo = container.resolve(ConsolidationRepo);
   });
 
   it("auto (default) writes a system similar_to edge between near-identical nodes only", async () => {
-    const { twinA, twinB, other } = await seed(writeTool, worker);
+    const { twinA, twinB, other } = await seed(writeTool, embedWorker);
 
-    const r = await worker.tick();
-    expect(r.links_added).toBe(1);
+    const consolidationResult = await consolidation.tick();
+    expect(consolidationResult.links_added).toBe(1);
 
     expect(edgeTypesBetween(twinA, twinB)).toContain("similar_to");
     expect(edgeTypesBetween(twinA, other)).not.toContain("similar_to");
   });
 
   it("is idempotent — a second sweep adds no duplicate edge", async () => {
-    await seed(writeTool, worker);
+    await seed(writeTool, embedWorker);
 
-    expect((await worker.tick()).links_added).toBe(1);
-    expect((await worker.tick()).links_added).toBe(0);
+    expect((await consolidation.tick()).links_added).toBe(1);
+    expect((await consolidation.tick()).links_added).toBe(0);
   });
 
   it("writes a system-provenance edge that graph expansion can traverse", async () => {
-    const { twinA, twinB } = await seed(writeTool, worker);
+    const { twinA, twinB } = await seed(writeTool, embedWorker);
+    await consolidation.tick();
 
     // neighborsOf is what search uses for 1-hop graph expansion: the discovered
     // similar_to edge makes each twin a neighbor of the other.
@@ -128,12 +127,12 @@ describe("similar_to link discovery", () => {
   it("suggest posture queues a link candidate instead of writing an edge", async () => {
     process.env.MEMORY_CONSOLIDATE_LINKS = "suggest";
 
-    const { twinA, twinB } = await seed(writeTool, worker);
+    const { twinA, twinB } = await seed(writeTool, embedWorker);
 
-    const r = await worker.tick();
+    const consolidationResult = await consolidation.tick();
 
-    expect(r.links_suggested).toBe(1);
-    expect(r.links_added).toBe(0);
+    expect(consolidationResult.links_suggested).toBe(1);
+    expect(consolidationResult.links_added).toBe(0);
     expect(edgeTypesBetween(twinA, twinB)).not.toContain("similar_to");
 
     const pending = consolidationRepo.pendingCandidates({ kind: "link" });
@@ -144,24 +143,28 @@ describe("similar_to link discovery", () => {
   it("off posture does nothing", async () => {
     process.env.MEMORY_CONSOLIDATE_LINKS = "off";
 
-    await seed(writeTool, worker);
-    const r = await worker.tick();
+    await seed(writeTool, embedWorker);
+    const consolidationResult = await consolidation.tick();
 
-    expect(r).toMatchObject({ links_added: 0, links_suggested: 0 });
+    expect(consolidationResult).toMatchObject({ links_added: 0, links_suggested: 0 });
   });
 });
 
 describe("orphan episodic repair — link discovery reconnects unlinked episodics", () => {
   let writeTool: WriteTool;
-  let worker: ConsolidationWorker;
+  let embedWorker: EmbeddingWorker;
+  let consolidation: ConsolidationWorker;
 
   beforeEach(() => {
+    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
     container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
 
-    worker = container.resolve(ConsolidationWorker);
+    embedWorker = container.resolve(EmbeddingWorker);
+    consolidation = container.resolve(ConsolidationWorker);
     writeTool = container.resolve(WriteTool);
+    edgesRepo = container.resolve(EdgesRepo);
+    consolidationRepo = container.resolve(ConsolidationRepo);
   });
 
   it("links an unlinked episodic to its nearest semantic neighbor", async () => {
@@ -170,13 +173,13 @@ describe("orphan episodic repair — link discovery reconnects unlinked episodic
     const fact = await newNode(writeTool, s, "Retry budget", topic);
     const orphan = await newEpisodic(writeTool, s, "Touched the retry logic", topic);
 
-    await worker.tick();
+    await embedWorker.tick();
 
     // A checkpoint/event_note written without touched_node_ids has no edges at all.
     expect(edgesRepo.edgesOf(orphan)).toHaveLength(0);
-    const r = await worker.tick();
+    const consolidationResult = await consolidation.tick();
 
-    expect(r.links_added).toBe(1);
+    expect(consolidationResult.links_added).toBe(1);
     expect(edgeTypesBetween(orphan, fact)).toContain("similar_to");
   });
 
@@ -185,9 +188,9 @@ describe("orphan episodic repair — link discovery reconnects unlinked episodic
     const topic = "the http client retries three times with exponential backoff";
     await newNode(writeTool, s, "Retry budget", topic);
     await newEpisodic(writeTool, s, "Touched the retry logic", topic);
-    await worker.tick();
+    await embedWorker.tick();
 
-    expect((await worker.tick()).links_added).toBe(1);
-    expect((await worker.tick()).links_added).toBe(0);
+    expect((await consolidation.tick()).links_added).toBe(1);
+    expect((await consolidation.tick()).links_added).toBe(0);
   });
 });

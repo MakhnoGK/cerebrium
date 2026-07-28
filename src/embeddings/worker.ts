@@ -65,13 +65,13 @@ export class EmbeddingWorker {
     this.timer.unref();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
 
-    this.embeddingQueue.releaseWorkerLease(EMBED_LEASE, this.ownerId);
+    await this.embeddingQueue.releaseWorkerLease(EMBED_LEASE, this.ownerId);
   }
 
   reconcile(): void {
@@ -84,7 +84,15 @@ export class EmbeddingWorker {
     const now = this.now();
     // Only the lease holder drains — keeps N per-session server processes from all
     // writing embeddings to the shared DB at once.
-    if (!this.embeddingQueue.holdWorkerLease(EMBED_LEASE, this.ownerId, this.leaseTtlMs, now)) {
+
+    const isWorkerLeased = await this.embeddingQueue.holdWorkerLease(
+      EMBED_LEASE,
+      this.ownerId,
+      this.leaseTtlMs,
+      now,
+    );
+
+    if (!isWorkerLeased) {
       return { embedded: 0, failed: 0 };
     }
 
