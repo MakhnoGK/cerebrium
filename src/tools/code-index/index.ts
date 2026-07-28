@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
+import { EmbeddingService, HintsService } from "@/application/services";
 import { extractFile, FileExtract } from "@/code/extract";
 import { readGitProvenance } from "@/code/git";
 import {
@@ -22,8 +23,6 @@ import { metadata } from "@/tools/code-index/metadata";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { EmbeddingService } from "@/tools/services/embedding.service";
-import { HintsService } from "@/tools/services/hints.service";
 
 interface Resolver {
   byQualified: Map<string, string>;

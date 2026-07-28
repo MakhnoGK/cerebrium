@@ -7,6 +7,7 @@ import {
   type ConsolidationResult,
   type ConsolidationTask,
 } from "@/domain/ports/consolidation-provider";
+import { SessionService } from "@/application/services";
 import {
   annotateBatch,
   annotatePosture,
@@ -28,7 +29,6 @@ import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
 import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType } from "@/core/vocab";
-import { SessionService } from "@/tools/services/session.service";
 
 const CONSOLIDATION_LEASE = "consolidation";
 

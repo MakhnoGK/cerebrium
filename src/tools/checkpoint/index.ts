@@ -1,10 +1,10 @@
+import { HintsService } from "@/application/services";
 import { NodesRepo } from "@/db/repositories";
 import { Envelope } from "@/core/types";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import type { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { HintsService } from "@/tools/services/hints.service";
 import { metadata } from "./metadata";
 
 // TODO: Move to a separate file

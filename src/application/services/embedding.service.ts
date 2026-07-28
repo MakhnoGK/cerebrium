@@ -1,6 +1,6 @@
 import { injectable } from "tsyringe";
+import { DaemonService } from "@/application/services/daemon.service";
 import { EmbeddingQueueRepo } from "@/db/repositories";
-import { DaemonService } from "@/tools/services/daemon.service";
 
 // A single writer only ever adds one node to the queue, so only flag a genuine
 // backlog — not the routine one-behind state right after a writer.

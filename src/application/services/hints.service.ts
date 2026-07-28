@@ -1,5 +1,5 @@
 import { injectable } from "tsyringe";
-import { SessionService } from "@/tools/services/session.service";
+import { SessionService } from "@/application/services/session.service";
 
 @injectable()
 export class HintsService {

@@ -1,11 +1,11 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { HintsService } from "@/application/services";
 import { NodesRepo } from "@/db/repositories";
 import { MemoryKind } from "@/core/vocab";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { HintsService } from "@/tools/services/hints.service";
 import { metadata } from "@/tools/update/metadata";
 
 const MAX_CONTENT = 50_000;

@@ -1,9 +1,9 @@
+import { HintsService } from "@/application/services";
 import { ConsolidationRepo } from "@/db/repositories";
 import { metadata } from "@/tools/consolidate-suggest/metadata";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
-import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
 export class ConsolidateSuggestTool implements McpTool<(typeof metadata)["schema"], unknown> {
