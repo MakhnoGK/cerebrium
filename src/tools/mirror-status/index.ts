@@ -1,24 +1,26 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/mirror-status/metadata";
+import { MirrorRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class MirrorStatusTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-    const sources = this.ctx.repo.sourceStatus(this.ctx.now(), args.source_id);
-    const out: Record<string, unknown> = { sources };
+  constructor(
+    private readonly hints: HintsService,
+    private readonly mirror: MirrorRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
 
-    this.ctx.repo.logEvent(
-      "mirror_status",
-      args.session_id,
-      null,
-      { source_id: args.source_id ?? null, count: sources.length },
-      this.ctx.now(),
-    );
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const sources = this.mirror.sourceStatus(this.clock.now(), args.source_id);
+    const out: Record<string, unknown> = { sources };
 
     if (hints.length) out.hints = hints;
 

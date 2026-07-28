@@ -1,16 +1,27 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
-import { embeddingNotes } from "@/tools/notes";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/mirror-upsert/metadata";
+import { MirrorRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { EmbeddingService } from "@/tools/services/embedding.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class MirrorUpsertTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
+  constructor(
+    private readonly hints: HintsService,
+    private readonly embeddings: EmbeddingService,
+    private readonly mirror: MirrorRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
+
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
-    const source = this.ctx.repo.getSource(args.source_id);
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const source = this.mirror.getSource(args.source_id);
 
     if (!source) {
       throw new Error(
@@ -24,22 +35,8 @@ export class MirrorUpsertTool implements McpTool<(typeof metadata)["schema"], un
       );
     }
 
-    const result = this.ctx.repo.upsertMirrors(source, args.items, args.session_id, this.ctx.now());
-
-    this.ctx.repo.logEvent(
-      "mirror_upsert",
-      args.session_id,
-      null,
-      {
-        source_id: source.id,
-        added: result.added,
-        updated: result.updated,
-        unchanged: result.unchanged,
-      },
-      this.ctx.now(),
-    );
-
-    const notes = embeddingNotes(this.ctx.repo);
+    const result = this.mirror.upsertMirrors(source, args.items, args.session_id, this.clock.now());
+    const notes = this.embeddings.getEmbeddingNotes();
     const out: Record<string, unknown> = { ...result };
 
     if (hints.length) out.hints = hints;

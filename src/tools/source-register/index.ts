@@ -1,16 +1,26 @@
-import { ToolArgs, touchOrCreate } from "@/tools/context";
+import { inject } from "tsyringe";
+import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/source-register/metadata";
+import { MirrorRepo } from "@/db/repositories";
+import { HintsService } from "@/tools/services/hints.service";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 @tool()
 export class SourceRegisterTool implements McpTool<(typeof metadata)["schema"], unknown> {
   public getMetadata = () => metadata;
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = touchOrCreate(this.ctx, args.session_id);
+  constructor(
+    private readonly hints: HintsService,
+    private readonly mirror: MirrorRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+  ) {}
 
-    const source = this.ctx.repo.registerSource({
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
+    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+
+    const source = this.mirror.registerSource({
       id: args.id,
       kind: args.kind,
       label: args.label ?? null,
@@ -18,16 +28,8 @@ export class SourceRegisterTool implements McpTool<(typeof metadata)["schema"], 
       freshness_hours: args.freshness_hours ?? null,
       recipe: args.recipe ?? null,
       enabled: args.enabled,
-      ts: this.ctx.now(),
+      ts: this.clock.now(),
     });
-
-    this.ctx.repo.logEvent(
-      "source_register",
-      args.session_id,
-      null,
-      { id: args.id, kind: args.kind },
-      this.ctx.now(),
-    );
 
     return hints.length ? { source, hints } : { source };
   }
