@@ -13,6 +13,7 @@ import { openDatabase } from "../src/db/database";
 import { LocalNullProvider } from "../src/embeddings/local-null";
 import { EdgesRepo } from "../src/db/repositories/edges";
 import { ConsolidationRepo } from "../src/db/repositories/consolidation";
+import { _MemoryKind } from "../src/core/vocab";
 
 const sessionStart = container.resolve(SessionStartTool);
 let edgesRepo: EdgesRepo;
@@ -27,7 +28,7 @@ async function newNode(
   return (
     (await writeTool.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title,
       content,
@@ -44,7 +45,7 @@ async function newEpisodic(
   return (
     (await tool.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "event_note",
       title,
       content,
@@ -77,7 +78,7 @@ afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_SIM;
 });
 
-describe("similar_to link discovery", () => {
+describe("Similar node link discovery", () => {
   let writeTool: WriteTool;
   let embedWorker: EmbeddingWorker;
   let consolidation: ConsolidationWorker;
@@ -94,43 +95,54 @@ describe("similar_to link discovery", () => {
     consolidationRepo = container.resolve(ConsolidationRepo);
   });
 
-  it("auto (default) writes a system similar_to edge between near-identical nodes only", async () => {
+  it("should write a system similar_to edge between near-identical nodes only when posture is auto", async () => {
+    // Given
     const { twinA, twinB, other } = await seed(writeTool, embedWorker);
 
+    // When
     const consolidationResult = await consolidation.tick();
-    expect(consolidationResult.links_added).toBe(1);
 
+    // Then
+    expect(consolidationResult.links_added).toBe(1);
     expect(edgeTypesBetween(twinA, twinB)).toContain("similar_to");
     expect(edgeTypesBetween(twinA, other)).not.toContain("similar_to");
   });
 
-  it("is idempotent — a second sweep adds no duplicate edge", async () => {
+  it("should add no duplicate edge when a second sweep runs", async () => {
+    // Given
     await seed(writeTool, embedWorker);
 
+    // When / Then
     expect((await consolidation.tick()).links_added).toBe(1);
+    // When / Then
     expect((await consolidation.tick()).links_added).toBe(0);
   });
 
-  it("writes a system-provenance edge that graph expansion can traverse", async () => {
+  it("should write a system-provenance edge that graph expansion can traverse when near-identical nodes exist", async () => {
+    // Given
     const { twinA, twinB } = await seed(writeTool, embedWorker);
     await consolidation.tick();
 
+    // When
     // neighborsOf is what search uses for 1-hop graph expansion: the discovered
     // similar_to edge makes each twin a neighbor of the other.
     const neighbors = edgesRepo.neighborsOf([twinA]);
     const hit = neighbors.find((n) => n.node.id === twinB);
 
+    // Then
     expect(hit).toBeDefined();
     expect(hit!.edge).toBe("similar_to");
   });
 
-  it("suggest posture queues a link candidate instead of writing an edge", async () => {
+  it("should queue a link candidate instead of writing an edge when posture is suggest", async () => {
+    // Given
     process.env.MEMORY_CONSOLIDATE_LINKS = "suggest";
-
     const { twinA, twinB } = await seed(writeTool, embedWorker);
 
+    // When
     const consolidationResult = await consolidation.tick();
 
+    // Then
     expect(consolidationResult.links_suggested).toBe(1);
     expect(consolidationResult.links_added).toBe(0);
     expect(edgeTypesBetween(twinA, twinB)).not.toContain("similar_to");
@@ -140,17 +152,20 @@ describe("similar_to link discovery", () => {
     expect(pending[0]!.member_ids.sort()).toEqual([twinA, twinB].sort());
   });
 
-  it("off posture does nothing", async () => {
+  it("should do nothing when posture is off", async () => {
+    // Given
     process.env.MEMORY_CONSOLIDATE_LINKS = "off";
-
     await seed(writeTool, embedWorker);
+
+    // When
     const consolidationResult = await consolidation.tick();
 
+    // Then
     expect(consolidationResult).toMatchObject({ links_added: 0, links_suggested: 0 });
   });
 });
 
-describe("orphan episodic repair — link discovery reconnects unlinked episodics", () => {
+describe("Orphan episodic link repair", () => {
   let writeTool: WriteTool;
   let embedWorker: EmbeddingWorker;
   let consolidation: ConsolidationWorker;
@@ -167,7 +182,8 @@ describe("orphan episodic repair — link discovery reconnects unlinked episodic
     consolidationRepo = container.resolve(ConsolidationRepo);
   });
 
-  it("links an unlinked episodic to its nearest semantic neighbor", async () => {
+  it("should link an unlinked episodic to its nearest semantic neighbor when swept", async () => {
+    // Given
     const s = (await sessionStart.invoke({})).session_id;
     const topic = "the http client retries three times with exponential backoff";
     const fact = await newNode(writeTool, s, "Retry budget", topic);
@@ -177,20 +193,26 @@ describe("orphan episodic repair — link discovery reconnects unlinked episodic
 
     // A checkpoint/event_note written without touched_node_ids has no edges at all.
     expect(edgesRepo.edgesOf(orphan)).toHaveLength(0);
+
+    // When
     const consolidationResult = await consolidation.tick();
 
+    // Then
     expect(consolidationResult.links_added).toBe(1);
     expect(edgeTypesBetween(orphan, fact)).toContain("similar_to");
   });
 
-  it("re-seeds nothing once the episodic has an edge (idempotent)", async () => {
+  it("should re-seed nothing when the episodic already has an edge", async () => {
+    // Given
     const s = (await sessionStart.invoke({})).session_id;
     const topic = "the http client retries three times with exponential backoff";
     await newNode(writeTool, s, "Retry budget", topic);
     await newEpisodic(writeTool, s, "Touched the retry logic", topic);
     await embedWorker.tick();
 
+    // When / Then
     expect((await consolidation.tick()).links_added).toBe(1);
+    // When / Then
     expect((await consolidation.tick()).links_added).toBe(0);
   });
 });

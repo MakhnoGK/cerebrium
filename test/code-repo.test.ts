@@ -40,9 +40,12 @@ function fileInput(over: Partial<FileIndexInput> & { symbols: ExtractedSymbol[] 
   };
 }
 
-describe("phase 3b — migration + schema", () => {
-  it("creates code_files and symbols tables", () => {
+describe("Code mirror schema", () => {
+  it("should create the code_files and symbols tables when the database is opened", () => {
+    // Given / When
     const { db } = makeCtx();
+
+    // Then
     const tables = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('code_files','symbols')",
@@ -53,8 +56,9 @@ describe("phase 3b — migration + schema", () => {
   });
 });
 
-describe("phase 3b — applyFileIndex diff", () => {
-  it("creates mirror symbol nodes on first index and enqueues embeddings", () => {
+describe("Repo.applyFileIndex", () => {
+  it("should create mirror symbol nodes and enqueue embeddings when a file is indexed for the first time", () => {
+    // Given
     const { repo, db } = makeCtx();
     const mod = sym({
       name: "auth.service.ts",
@@ -63,8 +67,11 @@ describe("phase 3b — applyFileIndex diff", () => {
       source: "whole file",
     });
     const cls = sym({ name: "AuthService", symbol_kind: "class", source: "class AuthService {}" });
+
+    // When
     const res = repo.applyFileIndex(fileInput({ symbols: [mod, cls] }));
 
+    // Then
     expect(res).toMatchObject({ added: 2, updated: 0, invalidated: 0 });
 
     const nodes = db
@@ -94,26 +101,35 @@ describe("phase 3b — applyFileIndex diff", () => {
     expect(repo.codeFileHash(REPO, PATH)).toBeTruthy();
   });
 
-  it("hash-gate: re-applying an unchanged file set is a no-op", () => {
+  it("should be a no-op when an unchanged file set is re-applied", () => {
+    // Given
     const { repo } = makeCtx();
     const cls = sym({ name: "AuthService", symbol_kind: "class", source: "class AuthService {}" });
     repo.applyFileIndex(fileInput({ symbols: [cls] }));
+
+    // When
     const again = repo.applyFileIndex(
       fileInput({ symbols: [cls], ts: "2026-01-02T00:00:00.000Z" }),
     );
+
+    // Then
     expect(again).toMatchObject({ added: 0, updated: 0, invalidated: 0 });
   });
 
-  it("changed symbol bumps exactly that node's revision; siblings untouched", () => {
+  it("should bump only the changed symbol's revision and leave siblings untouched when re-applied", () => {
+    // Given
     const { repo, db } = makeCtx();
     const a = sym({ name: "alpha", source: "function alpha() { return 1; }" });
     const b = sym({ name: "beta", source: "function beta() { return 2; }" });
     repo.applyFileIndex(fileInput({ symbols: [a, b] }));
 
+    // When
     const a2 = sym({ name: "alpha", source: "function alpha() { return 99; }" });
     const res = repo.applyFileIndex(
       fileInput({ symbols: [a2, b], ts: "2026-01-03T00:00:00.000Z" }),
     );
+
+    // Then
     expect(res).toMatchObject({ added: 0, updated: 1, invalidated: 0 });
 
     const rev = db.prepare(
@@ -123,13 +139,17 @@ describe("phase 3b — applyFileIndex diff", () => {
     expect((rev.get(b.external_id) as { m: number }).m).toBe(1);
   });
 
-  it("removed symbol is invalidated (soft), still reachable via history", () => {
+  it("should soft-invalidate a symbol but keep it reachable via history when it is removed", () => {
+    // Given
     const { repo, db } = makeCtx();
     const a = sym({ name: "alpha", source: "function alpha() {}" });
     const b = sym({ name: "beta", source: "function beta() {}" });
     repo.applyFileIndex(fileInput({ symbols: [a, b] }));
 
+    // When
     const res = repo.applyFileIndex(fileInput({ symbols: [a], ts: "2026-01-04T00:00:00.000Z" }));
+
+    // Then
     expect(res).toMatchObject({ invalidated: 1 });
 
     const bRow = db
@@ -144,12 +164,17 @@ describe("phase 3b — applyFileIndex diff", () => {
     expect(repo.fullNode(bRow.id)).toBeDefined();
   });
 
-  it("a reappearing symbol is revived rather than duplicated", () => {
+  it("should revive rather than duplicate a symbol when it reappears after removal", () => {
+    // Given
     const { repo, db } = makeCtx();
     const b = sym({ name: "beta", source: "function beta() {}" });
     repo.applyFileIndex(fileInput({ symbols: [b] }));
     repo.applyFileIndex(fileInput({ symbols: [], ts: "2026-01-02T00:00:00.000Z" })); // b removed
+
+    // When
     const res = repo.applyFileIndex(fileInput({ symbols: [b], ts: "2026-01-03T00:00:00.000Z" })); // back
+
+    // Then
     expect(res).toMatchObject({ added: 0, updated: 1 });
     const count = db
       .prepare("SELECT COUNT(*) AS c FROM nodes WHERE external_id = ?")
@@ -166,8 +191,9 @@ describe("phase 3b — applyFileIndex diff", () => {
   });
 });
 
-describe("phase 3b — code edges", () => {
-  it("defines edges are written with provenance 'system'", () => {
+describe("Repo code edges", () => {
+  it("should write a 'defines' edge with 'system' provenance when a class defining a method is indexed", () => {
+    // Given
     const { repo, db } = makeCtx();
     const cls = sym({ name: "AuthService", symbol_kind: "class", source: "class AuthService {}" });
     const m = sym({
@@ -176,9 +202,13 @@ describe("phase 3b — code edges", () => {
       qualified: `${PATH}:AuthService.validate`,
       source: "validate() {}",
     });
+
+    // When
     const res = repo.applyFileIndex(
       fileInput({ symbols: [cls, m], defines: [{ src: cls.external_id, dst: m.external_id }] }),
     );
+
+    // Then
     expect(res.edges).toBe(1);
     const edge = db.prepare("SELECT type, provenance FROM edges WHERE type = 'defines'").get() as {
       type: string;
@@ -187,7 +217,8 @@ describe("phase 3b — code edges", () => {
     expect(edge).toMatchObject({ type: "defines", provenance: "system" });
   });
 
-  it("resolves cross-file imports via the repo directory; drops the unresolved", () => {
+  it("should create edges for resolved imports and drop unresolved ones when edges are rebuilt", () => {
+    // Given
     const { repo } = makeCtx();
     // Imported file (bar.ts) indexed first.
     const barMod = sym({
@@ -217,6 +248,7 @@ describe("phase 3b — code edges", () => {
     const modId = dir.find((d) => d.qualified === PATH)!.node_id;
     const barId = dir.find((d) => d.qualified === "bar.ts:Bar")!.node_id;
 
+    // When
     const n = repo.rebuildResolvedEdges(
       REPO,
       PATH,
@@ -228,14 +260,17 @@ describe("phase 3b — code edges", () => {
       "sess-1",
       "2026-01-05T00:00:00.000Z",
     );
+
+    // Then
     expect(n).toBe(1);
     const neigh = repo.findSymbolsByName("auth.service.ts", REPO, 5)[0]!.neighbors;
     expect(neigh.some((e) => e.edge === "imports" && e.id === barId)).toBe(true);
   });
 });
 
-describe("phase 3b — lookups", () => {
-  it("findSymbolsByName / findSymbolsInFile / symbolDetail", () => {
+describe("Repo symbol lookups", () => {
+  it("should return the matching envelopes, facets, and source when symbols are queried by name, by file, and by detail", () => {
+    // Given
     const { repo } = makeCtx();
     const mod = sym({
       name: "auth.service.ts",
@@ -252,7 +287,10 @@ describe("phase 3b — lookups", () => {
     });
     repo.applyFileIndex(fileInput({ symbols: [mod, cls] }));
 
+    // When
     const byName = repo.findSymbolsByName("AuthService", REPO, 5);
+
+    // Then
     expect(byName).toHaveLength(1);
     expect(byName[0]!.facets).toMatchObject({
       symbol_kind: "class",
@@ -261,9 +299,11 @@ describe("phase 3b — lookups", () => {
     });
     expect(byName[0]!.envelope.kind).toBe("mirror");
 
+    // When / Then
     const inFile = repo.findSymbolsInFile(REPO, PATH, 25);
     expect(inFile.map((s) => s.facets.name).sort()).toEqual(["AuthService", "auth.service.ts"]);
 
+    // When / Then
     const detail = repo.symbolDetail(byName[0]!.envelope.id)!;
     expect(detail.source).toContain("class AuthService");
   });

@@ -62,9 +62,12 @@ function tableNames(db: Database.Database): Set<string> {
   );
 }
 
-describe("migrations as single source of truth", () => {
-  it("builds a fresh DB entirely from migrations (schema.sql never executed)", () => {
+describe("Migrations as single source of truth", () => {
+  it("should build a fresh DB entirely from migrations when the database is opened", () => {
+    // Given / When
     const db = openDatabase(":memory:");
+
+    // Then
     const tables = tableNames(db);
     for (const t of [
       "nodes",
@@ -96,32 +99,39 @@ describe("migrations as single source of truth", () => {
     db.close();
   });
 
-  it("schema.sql stays byte-equivalent to what migrations build (drift guard)", () => {
+  it("should stay byte-equivalent to what migrations build when schema.sql is compared (drift guard)", () => {
+    // Given / When
     const fromMigrations = openDatabase(":memory:");
     const fromSchema = new Database(":memory:");
     sqliteVec.load(fromSchema);
     fromSchema.exec(schemaSql);
 
+    // Then
     expect(normalizedSchema(fromMigrations)).toEqual(normalizedSchema(fromSchema));
 
     fromMigrations.close();
     fromSchema.close();
   });
 
-  it("is idempotent across reopen — migrations are not re-applied", () => {
+  it("should not re-apply migrations when an existing DB is reopened", () => {
+    // Given
     const path = tmpDbPath();
     const a = openDatabase(path);
     const first = a.prepare("SELECT id, applied_at FROM schema_migrations ORDER BY id").all();
     a.close();
 
+    // When
     const b = openDatabase(path);
     const second = b.prepare("SELECT id, applied_at FROM schema_migrations ORDER BY id").all();
+
+    // Then
     // Same rows with the same applied_at => nothing re-ran on the second open.
     expect(second).toEqual(first);
     b.close();
   });
 
-  it("upgrades a legacy DB (tables present, 000 not recorded) without error or data loss", () => {
+  it("should upgrade a legacy DB without error or data loss when tables are present but 000 is not recorded", () => {
+    // Given
     const path = tmpDbPath();
 
     // Simulate the OLD startup: exec schema.sql directly and record only 001..006 —
@@ -141,10 +151,13 @@ describe("migrations as single source of truth", () => {
       .run();
     legacy.close();
 
+    // When
     const upgraded = openDatabase(path);
     const applied = (
       upgraded.prepare("SELECT id FROM schema_migrations").all() as { id: string }[]
     ).map((r) => r.id);
+
+    // Then
     // 000 gets recorded (ran as an idempotent no-op); nothing else re-ran; data intact.
     expect(applied).toContain("000_baseline.sql");
     expect(applied.sort()).toEqual([...MIGRATION_IDS].sort());

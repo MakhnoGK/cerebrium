@@ -17,11 +17,13 @@ async function extract(relPath: string, base = "fixtures/demo-repo") {
   return extractFile(REPO, relPath, lang.lang, source, tree.rootNode);
 }
 
-describe("TS extraction", () => {
-  it("extracts module, class, methods, interface, const with kinds & qualified names", async () => {
+describe("TypeScript extraction", () => {
+  it("should extract module, class, method, interface, and const symbols with correct kinds and qualified names when parsing a TS service", async () => {
+    // Given / When
     const ex = await extract("auth/auth.service.ts");
-    const byQual = new Map(ex.symbols.map((s) => [s.qualified, s]));
 
+    // Then
+    const byQual = new Map(ex.symbols.map((s) => [s.qualified, s]));
     expect(byQual.get("auth/auth.service.ts")?.symbol_kind).toBe("module");
     expect(byQual.get("auth/auth.service.ts:AuthService")?.symbol_kind).toBe("class");
     expect(byQual.get("auth/auth.service.ts:AuthService.validate")?.symbol_kind).toBe("method");
@@ -30,8 +32,11 @@ describe("TS extraction", () => {
     expect(byQual.get("auth/auth.service.ts:TOKEN_TTL")?.symbol_kind).toBe("const");
   });
 
-  it("captures signature and leading doc-comment in the summary (deterministic)", async () => {
+  it("should capture the signature and leading doc-comment in the summary when extracting a TS class and method", async () => {
+    // Given / When
     const ex = await extract("auth/auth.service.ts");
+
+    // Then
     const cls = ex.symbols.find((s) => s.qualified === "auth/auth.service.ts:AuthService")!;
     expect(cls.signature).toContain("class AuthService");
     expect(cls.signature).not.toContain("{");
@@ -40,8 +45,11 @@ describe("TS extraction", () => {
     expect(validate.summary).toContain("Validate a set of login credentials");
   });
 
-  it("emits defines edges: module->members and class->methods", async () => {
+  it("should emit defines edges from module to members and class to methods when extracting a TS service", async () => {
+    // Given / When
     const ex = await extract("auth/auth.service.ts");
+
+    // Then
     const id = (q: string) => ex.symbols.find((s) => s.qualified === q)!.external_id;
     const has = (src: string, dst: string) =>
       ex.defines.some((d) => d.src === src && d.dst === dst);
@@ -53,8 +61,11 @@ describe("TS extraction", () => {
     ).toBe(true);
   });
 
-  it("resolves relative import candidates and drops bare specifiers", async () => {
+  it("should resolve relative import candidates and drop bare specifiers when extracting TS imports", async () => {
+    // Given / When
     const ex = await extract("auth/auth.service.ts");
+
+    // Then
     // '@nestjs/common' is bare -> no import ref at all.
     expect(ex.imports.some((i) => i.name === "Injectable")).toBe(false);
     // '../util/crypto' -> repo-relative candidates including util/crypto.ts.
@@ -63,8 +74,11 @@ describe("TS extraction", () => {
     expect(hashImport!.candidatePaths).toContain("util/crypto.ts");
   });
 
-  it("captures best-effort calls (identifier and this.method)", async () => {
+  it("should capture best-effort calls for identifier and this.method references when extracting a TS service", async () => {
+    // Given / When
     const ex = await extract("auth/auth.service.ts");
+
+    // Then
     const calls = ex.calls;
     expect(calls).toContainEqual({
       srcQualified: "auth/auth.service.ts:AuthService.validate",
@@ -76,8 +90,11 @@ describe("TS extraction", () => {
     });
   });
 
-  it("extracts enum and type from a plain module", async () => {
+  it("should extract function, enum, and type kinds when extracting a plain TS module", async () => {
+    // Given / When
     const ex = await extract("util/crypto.ts");
+
+    // Then
     const kinds = new Map(ex.symbols.map((s) => [s.name, s.symbol_kind]));
     expect(kinds.get("hashToken")).toBe("function");
     expect(kinds.get("Algo")).toBe("enum");
@@ -86,8 +103,11 @@ describe("TS extraction", () => {
 });
 
 describe("PHP extraction", () => {
-  it("extracts class/method/function/interface/trait/enum/const with kinds", async () => {
+  it("should extract class, method, function, interface, trait, enum, and const symbols with correct kinds when parsing a PHP file", async () => {
+    // Given / When
     const ex = await extract("AuthService.php", "fixtures/php-repo");
+
+    // Then
     const kinds = new Map(ex.symbols.map((s) => [s.name, s.symbol_kind]));
     expect(kinds.get("AuthService.php")).toBe("module");
     expect(kinds.get("AuthService")).toBe("class");
@@ -99,8 +119,11 @@ describe("PHP extraction", () => {
     expect(kinds.get("TOKEN_TTL")).toBe("const");
   });
 
-  it("captures signature + docblock, defines edges, use-imports, and calls", async () => {
+  it("should capture signatures, docblocks, defines edges, use-imports, and calls when parsing a PHP file", async () => {
+    // Given / When
     const ex = await extract("AuthService.php", "fixtures/php-repo");
+
+    // Then
     const cls = ex.symbols.find((s) => s.name === "AuthService")!;
     expect(cls.signature).toContain("class AuthService");
     expect(cls.signature).not.toContain("{");
@@ -132,8 +155,11 @@ describe("PHP extraction", () => {
 });
 
 describe("Rust extraction", () => {
-  it("extracts module/struct/enum/trait/impl/method/function/const/type with kinds & qualified names", async () => {
+  it("should extract module, struct, enum, trait, impl, method, function, const, and type symbols with correct kinds and qualified names when parsing a Rust file", async () => {
+    // Given / When
     const ex = await extract("auth.rs", "fixtures/rust-repo");
+
+    // Then
     const byQual = new Map(ex.symbols.map((s) => [s.qualified, s]));
 
     expect(byQual.get("auth.rs")?.symbol_kind).toBe("module");
@@ -152,8 +178,11 @@ describe("Rust extraction", () => {
     expect(byQual.get("auth.rs:impl Validator for AuthService")?.symbol_kind).toBe("impl");
   });
 
-  it("captures signature and leading doc-comment past attributes (deterministic)", async () => {
+  it("should capture the signature and leading doc-comment past attributes when extracting a Rust struct and method", async () => {
+    // Given / When
     const ex = await extract("auth.rs", "fixtures/rust-repo");
+
+    // Then
     const s = ex.symbols.find((x) => x.qualified === "auth.rs:AuthService")!;
     expect(s.signature).toContain("struct AuthService");
     expect(s.signature).not.toContain("{");
@@ -165,8 +194,11 @@ describe("Rust extraction", () => {
     expect(validate.signature).toContain("fn validate");
   });
 
-  it("emits defines edges: module->items, impl->methods, trait->methods", async () => {
+  it("should emit defines edges from module to items, impl to methods, and trait to methods when extracting a Rust file", async () => {
+    // Given / When
     const ex = await extract("auth.rs", "fixtures/rust-repo");
+
+    // Then
     const id = (q: string) => ex.symbols.find((s) => s.qualified === q)!.external_id;
     const has = (src: string, dst: string) =>
       ex.defines.some((d) => d.src === src && d.dst === dst);
@@ -177,16 +209,22 @@ describe("Rust extraction", () => {
     expect(has(id("auth.rs:Validator"), id("auth.rs:Validator.validate"))).toBe(true);
   });
 
-  it("resolves `use` bindings by name (path + list + no candidate paths)", async () => {
+  it("should resolve use bindings by name with no candidate paths when extracting Rust imports", async () => {
+    // Given / When
     const ex = await extract("auth.rs", "fixtures/rust-repo");
+
+    // Then
     const hashImport = ex.imports.find((i) => i.name === "hash_token");
     expect(hashImport).toMatchObject({ byName: true, candidatePaths: [] });
     expect(ex.imports.some((i) => i.name === "Algo")).toBe(true); // from the `{…}` use-list
     expect(ex.imports.some((i) => i.name === "HashMap")).toBe(true);
   });
 
-  it("captures best-effort calls (identifier, self.method, scoped)", async () => {
+  it("should capture best-effort calls for identifier, self.method, and scoped references when extracting a Rust file", async () => {
+    // Given / When
     const ex = await extract("auth.rs", "fixtures/rust-repo");
+
+    // Then
     expect(ex.calls).toContainEqual({
       srcQualified: "auth.rs:AuthService.issue",
       callee: "validate",

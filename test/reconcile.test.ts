@@ -76,7 +76,7 @@ afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_RECONCILE;
 });
 
-describe("write-time reconcile", () => {
+describe("Write-time reconcile", () => {
   beforeEach(() => {
     container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator("manual") });
   });
@@ -89,7 +89,8 @@ describe("write-time reconcile", () => {
     container.resolve<Database.Database>(DB_TOKEN).close();
   });
 
-  it("sharpens a near-duplicate into a judged action naming the target", async () => {
+  it("should return a judged action naming the target when a near-duplicate is written", async () => {
+    // Given
     const judge = new FakeJudge((t) => ({
       action: "update",
       target_id: t.candidates[0]!.id,
@@ -102,8 +103,11 @@ describe("write-time reconcile", () => {
     const s = await session(P);
     const original = await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick(); // embed the original so the vector dedup probe finds it
+
+    // When
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
 
+    // Then
     expect(dup.similar_existing?.[0]?.id).toBe(original.id);
     expect(dup.reconcile).toEqual({
       action: "update",
@@ -114,7 +118,8 @@ describe("write-time reconcile", () => {
     expect(judge.calls).toBe(1);
   });
 
-  it("stays silent when there is no near-duplicate (no judge call)", async () => {
+  it("should not call the judge or return reconcile when there is no near-duplicate", async () => {
+    // Given
     const judge = new FakeJudge(() => ({ action: "update", target_id: "x", reason: "" }));
 
     container.registerInstance(CONSOLIDATOR_TOKEN, judge);
@@ -123,14 +128,18 @@ describe("write-time reconcile", () => {
     const s = await session(P);
     await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
+
+    // When
     const unrelated = await writeFact(s, "Deploy cadence", "we ship the app every thursday");
 
+    // Then
     expect(unrelated.similar_existing).toBeUndefined();
     expect(unrelated.reconcile).toBeUndefined();
     expect(judge.calls).toBe(0);
   });
 
-  it("decays a non-noop verdict that names an unknown target to noop", async () => {
+  it("should decay the verdict to noop when it names an unknown target", async () => {
+    // Given
     const judge = new FakeJudge(() => ({
       action: "supersede",
       target_id: "01NOTACANDIDATE",
@@ -143,8 +152,11 @@ describe("write-time reconcile", () => {
     const s = await session(P);
     await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
+
+    // When
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
 
+    // Then
     expect(dup.reconcile).toEqual({
       action: "noop",
       target_id: null,
@@ -152,7 +164,8 @@ describe("write-time reconcile", () => {
     });
   });
 
-  it("is disabled by MEMORY_CONSOLIDATE_RECONCILE=off (advisory hint still fires)", async () => {
+  it("should skip reconcile but still return the advisory hint when MEMORY_CONSOLIDATE_RECONCILE is off", async () => {
+    // Given
     process.env.MEMORY_CONSOLIDATE_RECONCILE = "off";
 
     const judge = new FakeJudge((t) => ({
@@ -167,26 +180,34 @@ describe("write-time reconcile", () => {
     const s = await session(P);
     const original = await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
+
+    // When
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
 
+    // Then
     expect(dup.similar_existing?.[0]?.id).toBe(original.id); // probe unaffected
     expect(dup.reconcile).toBeUndefined();
     expect(judge.calls).toBe(0);
   });
 
-  it("never fires under the default offline (manual) provider", async () => {
+  it("should not return reconcile when the default manual provider is active", async () => {
+    // Given
     const worker = container.resolve(EmbeddingWorker);
 
     const s = await session(P);
     await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
+
+    // When
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
 
+    // Then
     expect(dup.similar_existing).toBeDefined();
     expect(dup.reconcile).toBeUndefined();
   });
 
-  it("survives a provider failure — the write still succeeds without reconcile", async () => {
+  it("should still succeed without reconcile when the provider fails", async () => {
+    // Given
     const boom: ConsolidationProvider = {
       name: "boom",
       version: "1",
@@ -202,8 +223,10 @@ describe("write-time reconcile", () => {
     const original = await writeFact(s, "Token TTL", ORIGINAL);
     await worker.tick();
 
+    // When
     const dup = await writeFact(s, "Token TTL", ORIGINAL);
 
+    // Then
     expect(dup.id).toBeDefined();
     expect(dup.similar_existing?.[0]?.id).toBe(original.id);
     expect(dup.reconcile).toBeUndefined();
