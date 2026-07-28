@@ -1,11 +1,11 @@
 import { inject } from "tsyringe";
+import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
 import { EdgesRepo, NodesRepo } from "@/db/repositories";
 import { SYSTEM_EDGE_TYPES } from "@/core/vocab";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/link/metadata";
-import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { EmbeddingService } from "@/tools/services/embedding.service";
 import { HintsService } from "@/tools/services/hints.service";
 

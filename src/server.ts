@@ -2,16 +2,17 @@
 import "reflect-metadata";
 import Database from "better-sqlite3";
 import { container } from "tsyringe";
+import { CLOCK_TOKEN } from "@/domain/ports/clock";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { isMainModule } from "@/runtime/is-main";
+import { SystemClock } from "@/runtime/system-clock";
 import { Server } from "@/core/server";
 import { createConsolidator, type ConsolidationProvider } from "./consolidation";
 import { createProvider, EMBEDDING_PROVIDER_TOKEN, type EmbeddingProvider } from "./embeddings";
 import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "./embeddings/worker";
 import { createReranker, RERANK_PROVIDER_TOKEN, type RerankProvider } from "./rerank";
 import { ensureDaemon } from "./runtime/ensure-daemon";
-import { CLOCK_TOKEN, SystemClock } from "./tools/services/clock.service";
 import { CONSOLIDATOR_TOKEN } from "./tools/services/consolidation.service";
 
 async function main(): Promise<void> {

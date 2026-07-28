@@ -1,10 +1,5 @@
 import { injectable } from "tsyringe";
-
-export const CLOCK_TOKEN = Symbol("Clock");
-
-export interface Clock {
-  now(): string;
-}
+import { Clock } from "@/domain/ports/clock";
 
 @injectable()
 export class SystemClock implements Clock {

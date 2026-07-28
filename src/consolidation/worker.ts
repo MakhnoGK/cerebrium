@@ -1,4 +1,5 @@
 import { inject, injectable } from "tsyringe";
+import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
 import {
   annotateBatch,
   annotatePosture,
@@ -24,7 +25,6 @@ import {
 } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
 import { newId } from "@/core/ids";
-import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
 import { SessionService } from "@/tools/services/session.service";
 

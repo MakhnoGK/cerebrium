@@ -1,8 +1,8 @@
 import { inject, injectable } from "tsyringe";
+import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import type { EmbeddingProvider } from "@/embeddings/provider";
 import { newId } from "@/core/ids";
-import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { EMBEDDING_PROVIDER_TOKEN } from ".";
 
 const EMBED_LEASE = "embedding";

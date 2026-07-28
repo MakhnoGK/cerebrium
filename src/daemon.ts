@@ -2,6 +2,7 @@
 import "reflect-metadata";
 import Database from "better-sqlite3";
 import { container } from "tsyringe";
+import { CLOCK_TOKEN } from "@/domain/ports/clock";
 import { consolidateIntervalMs } from "@/consolidation/config";
 import { createConsolidator, type ConsolidationProvider } from "@/consolidation/index";
 import { ConsolidationWorker } from "@/consolidation/worker";
@@ -16,7 +17,7 @@ import {
 import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
-import { CLOCK_TOKEN, SystemClock } from "@/tools/services/clock.service";
+import { SystemClock } from "@/runtime/system-clock";
 import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
 
 // Standalone embedding drain. Outlives any Claude Code session: the MCP server

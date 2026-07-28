@@ -1,10 +1,10 @@
 import { inject } from "tsyringe";
+import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
 import { NodesRepo } from "@/db/repositories";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { tool } from "@/tools/contracts/tool";
 import { metadata } from "@/tools/invalidate/metadata";
-import { CLOCK_TOKEN, type Clock } from "@/tools/services/clock.service";
 import { HintsService } from "@/tools/services/hints.service";
 
 @tool()
