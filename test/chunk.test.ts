@@ -1,15 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "@test/helpers";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
 import { chunkContent } from "@/core/chunk";
-import type { Ctx } from "@/tools/context";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session_start";
+import { SessionStartTool } from "../src/tools/session-start";
 import { WriteTool } from "../src/tools/write";
 import { UpdateTool } from "../src/tools/update";
-
-const session_start = new SessionStartTool();
-const write = new WriteTool();
-const update = new UpdateTool();
 
 const NOTE = `# Intro
 This is the introduction paragraph with enough words to stand on its own as a chunk.
@@ -20,13 +17,12 @@ Ranking blends full text search with vector similarity via reciprocal rank fusio
 ## Decay
 Episodic memories decay with age while semantic facts stay steady over time.`;
 
-async function session(ctx: Ctx): Promise<string> {
-  return (await session_start.invoke(ctx, {})).session_id;
-}
-
-describe("content-addressed chunking", () => {
-  it("splits a 3-section note into 3 heading-scoped chunks", () => {
+describe("Content-addressed chunking", () => {
+  it("should split a 3-section note into 3 heading-scoped chunks", () => {
+    // Given / When
     const chunks = chunkContent("n1", NOTE);
+
+    // Then
     expect(chunks.length).toBe(3);
     expect(chunks.map((c) => c.heading_path)).toEqual([
       "H1: Intro",
@@ -36,57 +32,68 @@ describe("content-addressed chunking", () => {
     expect(chunks.map((c) => c.seq)).toEqual([0, 1, 2]);
   });
 
-  it("editing one section leaves the other chunk ids untouched", () => {
+  it("should leave the other chunk ids untouched when one section is edited", () => {
+    // Given
     const before = chunkContent("n1", NOTE);
+
+    // When
     const edited = NOTE.replace(
       "via reciprocal rank fusion",
       "via reciprocal rank fusion, tuned carefully",
     );
     const after = chunkContent("n1", edited);
 
+    // Then
     const beforeIds = new Set(before.map((c) => c.id));
     const afterIds = new Set(after.map((c) => c.id));
     expect([...afterIds].filter((id) => beforeIds.has(id)).length).toBe(2); // Intro + Decay unchanged
     expect([...afterIds].filter((id) => !beforeIds.has(id)).length).toBe(1); // Ranking is new
   });
 
-  it("ids are stable across nodes only via node_id (no cross-node collision)", () => {
+  it("should not collide chunk ids across nodes since they key on node_id", () => {
+    // Given / When
     const a = chunkContent("nodeA", NOTE)[0]!;
     const b = chunkContent("nodeB", NOTE)[0]!;
+
+    // Then
     expect(a.id).not.toBe(b.id);
   });
 });
 
-describe("embedding diff: only genuinely-new chunks re-embed", () => {
-  it("re-embeds exactly the changed section on update", async () => {
-    const { ctx, repo, worker, db } = makeCtx();
-    const s = await session(ctx);
-    const node = (await write.invoke(ctx, {
+describe("Embedding diff: only genuinely-new chunks re-embed", () => {
+  it("should re-embed exactly the changed section when a note is updated", async () => {
+    // Given
+    const env = setup();
+    const write = container.resolve(WriteTool);
+    const update = container.resolve(UpdateTool);
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const node = (await write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "howto",
       title: "Retrieval",
       content: NOTE,
     })) as unknown as Envelope;
 
-    const first = await worker.tick();
-    expect(first.embedded).toBe(3); // all three chunks embedded on first drain
-    expect((db.prepare("SELECT COUNT(*) c FROM embedding_meta").get() as { c: number }).c).toBe(3);
+    // When
+    const first = await env.worker.tick();
 
+    // Then
+    expect(first.embedded).toBe(3); // all three chunks embedded on first drain
+    expect((env.db.prepare("SELECT COUNT(*) c FROM embedding_meta").get() as { c: number }).c).toBe(
+      3,
+    );
+
+    // When — edit one section only.
     const edited = NOTE.replace(
       "via reciprocal rank fusion",
       "via reciprocal rank fusion, tuned carefully",
     );
-    await update.invoke(ctx, {
-      session_id: s,
-      id: node.id,
-      content: edited,
-      reason: "tune ranking",
-    });
+    await update.invoke({ session_id: s, id: node.id, content: edited, reason: "tune ranking" });
 
-    // Diff should queue exactly one new chunk; the other two keep their vectors.
-    expect(repo.unembeddedChunks([node.id], 16).length).toBe(1);
-    const second = await worker.tick();
+    // Then — the diff queues exactly one new chunk; the other two keep their vectors.
+    expect(env.queue.unembeddedChunks([node.id], 16).length).toBe(1);
+    const second = await env.worker.tick();
     expect(second.embedded).toBe(1);
   });
 });

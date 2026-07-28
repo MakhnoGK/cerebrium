@@ -31,12 +31,22 @@ export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {
     }
 
     if (args.src === args.dst) throw new Error("cannot link a node to itself.");
-    if (!(await this.nodes.exists(args.src))) throw new Error(`src node ${args.src} does not exist.`);
-    if (!(await this.nodes.exists(args.dst))) throw new Error(`dst node ${args.dst} does not exist.`);
+    if (!(await this.nodes.exists(args.src)))
+      throw new Error(`src node ${args.src} does not exist.`);
+    if (!(await this.nodes.exists(args.dst)))
+      throw new Error(`dst node ${args.dst} does not exist.`);
 
     const weight = args.weight ?? 1.0;
 
-    this.edges.insertEdge(args.src, args.dst, args.type, "agent", args.session_id, this.clock.now(), weight);
+    this.edges.insertEdge(
+      args.src,
+      args.dst,
+      args.type,
+      "agent",
+      args.session_id,
+      this.clock.now(),
+      weight,
+    );
 
     const notes = this.embeddings.getEmbeddingNotes();
     const out: Record<string, unknown> = {

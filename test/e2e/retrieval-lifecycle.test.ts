@@ -1,12 +1,13 @@
 import "reflect-metadata";
 import { describe, it, expect } from "vitest";
-import { makeCtx } from "@test/helpers";
+import { container } from "tsyringe";
+import { setup } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../../src/tools/session_start";
+import { SessionStartTool } from "../../src/tools/session-start";
 import { WriteTool } from "../../src/tools/write";
 import { SearchTool } from "../../src/tools/search";
 import { InvalidateTool } from "../../src/tools/invalidate";
-import { container } from "tsyringe";
 
 const P = "auth-service";
 const FACT =
@@ -21,32 +22,31 @@ function results(res: unknown): Result[] {
   return (res as { results: Result[] }).results;
 }
 
-// write -> FTS-findable while pending -> worker drains -> vector-findable
-// -> near-duplicate flagged -> invalidate w/ superseded_by -> old node only via history,
-// never via graph expansion.
-describe("phase 2 end-to-end retrieval lifecycle", () => {
-  const session_start = container.resolve(SessionStartTool);
-  const write = container.resolve(WriteTool);
-  const search = container.resolve(SearchTool);
-  const invalidate = container.resolve(InvalidateTool);
-
-  it("carries a fact through the full retrieval lifecycle", async () => {
-    const { repo, worker, db } = makeCtx();
-    const s = (await session_start.invoke({ project: P })).session_id;
+describe("Retrieval lifecycle end-to-end", () => {
+  it("should carry a fact through the full retrieval lifecycle", async () => {
+    // Given
+    const env = setup();
+    const sessionStart = container.resolve(SessionStartTool);
+    const write = container.resolve(WriteTool);
+    const search = container.resolve(SearchTool);
+    const invalidate = container.resolve(InvalidateTool);
+    const s = (await sessionStart.invoke({ project: P })).session_id;
 
     // 1) write a fact -> immediately findable via FTS while pending_embedding = 1
     const fact = (await write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: FACT,
       project: P,
     })) as unknown as Envelope;
-
     expect(
-      (db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as { p: number })
-        .p,
+      (
+        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as {
+          p: number;
+        }
+      ).p,
     ).toBe(1);
     const textHit = results(
       await search.invoke({
@@ -72,10 +72,13 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     expect(vecEmpty.some((r) => r.id === fact.id)).toBe(false);
 
     // 2) worker drains -> vector search now finds it, with a best_chunk snippet
-    await worker.tick();
+    await env.worker.tick();
     expect(
-      (db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as { p: number })
-        .p,
+      (
+        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as {
+          p: number;
+        }
+      ).p,
     ).toBe(0);
     const vecHit = results(
       await search.invoke({
@@ -93,7 +96,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     // 3) write a near-duplicate -> similar_existing returned
     const dup = (await write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: FACT,
@@ -110,12 +113,7 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     });
 
     const normal = results(
-      await search.invoke({
-        session_id: s,
-        query: "access tokens expire",
-        project: P,
-        limit: 10,
-      }),
+      await search.invoke({ session_id: s, query: "access tokens expire", project: P, limit: 10 }),
     );
     expect(normal.some((r) => r.id === fact.id)).toBe(false);
 
@@ -131,7 +129,5 @@ describe("phase 2 end-to-end retrieval lifecycle", () => {
     const old = hist.find((r) => r.id === fact.id);
     expect(old?.invalidated).toBe(true);
     expect(hist.every((r) => !(r.id === fact.id && r.matched === "graph"))).toBe(true);
-
-    void repo;
   });
 });

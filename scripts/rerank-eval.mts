@@ -1,17 +1,21 @@
+import "reflect-metadata";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type Database from "better-sqlite3";
+import { container } from "tsyringe";
 import { openDatabase } from "@/db/database";
-import { Repo } from "@/db/repo";
-import { nowIso } from "@/core/ids";
-import { createProvider } from "@/embeddings/index";
-import { createReranker } from "@/rerank/index";
-import { EmbeddingWorker } from "@/embeddings/worker";
-import type { Ctx } from "@/tools/context";
-import * as session_start from "@/tools/session_start";
-import * as write from "@/tools/write";
-import * as search from "@/tools/search";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { createProvider, EMBEDDING_PROVIDER_TOKEN } from "@/embeddings/index";
+import { createReranker, RERANK_PROVIDER_TOKEN } from "@/rerank/index";
+import { createConsolidator } from "@/consolidation/index";
+import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { CLOCK_TOKEN, SystemClock } from "@/tools/services/clock.service";
+import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
+import { _MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/tools/session-start";
+import { WriteTool } from "@/tools/write";
+import { SearchTool } from "@/tools/search";
 
 // Offline relevance eval: measure whether the `local` cross-encoder reranker
 // improves search precision over RRF-only fusion on a labeled query set. Both runs
@@ -69,10 +73,8 @@ function titlesToIds(db: Database.Database): Map<string, string> {
   return new Map(rows.map((r) => [r.title, r.id]));
 }
 
-async function rankedIds(ctx: Ctx, sid: string, query: string): Promise<string[]> {
-  const res = (await search.handler(ctx, { session_id: sid, query, limit: K })) as {
-    results: { id: string }[];
-  };
+async function rankedIds(searchTool: SearchTool, sid: string, query: string): Promise<string[]> {
+  const res = await searchTool.invoke({ session_id: sid, query, limit: K });
   return res.results.map((r) => r.id);
 }
 
@@ -82,27 +84,38 @@ async function main() {
 
   const provider = createProvider(process.env.MEMORY_EMBED_PROVIDER || "local");
   const db = openDatabase(":memory:");
-  const repo = new Repo(db);
-  const shared: Omit<Ctx, "reranker"> = { repo, now: nowIso, workingSetBudget: 1500, provider };
-  const ctxOff: Ctx = { ...shared, reranker: createReranker("off") };
-  const ctxOn: Ctx = { ...shared, reranker: createReranker(process.env.MEMORY_RERANK || "local") };
+  container.register(DB_TOKEN, { useValue: db });
+  container.registerSingleton(CLOCK_TOKEN, SystemClock);
+  container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
+  container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator("manual") });
+  container.register(WORKER_OPTIONS_TOKEN, { useValue: {} });
+
+  // Both runs share the same DB + embeddings and differ only in the injected reranker.
+  const offScope = container.createChildContainer();
+  offScope.register(RERANK_PROVIDER_TOKEN, { useValue: createReranker("off") });
+  const onScope = container.createChildContainer();
+  const onReranker = createReranker(process.env.MEMORY_RERANK || "local");
+  onScope.register(RERANK_PROVIDER_TOKEN, { useValue: onReranker });
+  const searchOff = offScope.resolve(SearchTool);
+  const searchOn = onScope.resolve(SearchTool);
 
   console.log(
-    `embeddings: ${provider.name}   reranker: ${ctxOn.reranker.name} (enabled=${ctxOn.reranker.enabled})`,
+    `embeddings: ${provider.name}   reranker: ${onReranker.name} (enabled=${onReranker.enabled})`,
   );
   console.log(`corpus: ${data.docs.length} docs   queries: ${data.queries.length}\n`);
 
-  const sid = (await session_start.handler(ctxOff, {})).session_id;
+  const sid = (await container.resolve(SessionStartTool).invoke({})).session_id;
+  const writeTool = container.resolve(WriteTool);
   for (const d of data.docs) {
-    await write.handler(ctxOff, {
+    await writeTool.invoke({
       session_id: sid,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: d.title,
       content: `${d.title}. ${d.content}`,
     });
   }
-  const worker = new EmbeddingWorker(repo, provider, nowIso);
+  const worker = container.resolve(EmbeddingWorker);
   let guard = 0;
   while ((await worker.tick()).embedded > 0 && guard++ < 1000) {
     /* drain the embedding queue */
@@ -131,8 +144,8 @@ async function main() {
   console.log("per-query nDCG@10 (baseline -> reranked):");
   for (const q of data.queries) {
     const gold = goldOf(q);
-    const offIds = await rankedIds(ctxOff, sid, q.query);
-    const onIds = await rankedIds(ctxOn, sid, q.query);
+    const offIds = await rankedIds(searchOff, sid, q.query);
+    const onIds = await rankedIds(searchOn, sid, q.query);
     const offND = ndcgAtK(offIds, gold, K),
       onND = ndcgAtK(onIds, gold, K);
     a.offRR.push(reciprocalRank(offIds, gold));

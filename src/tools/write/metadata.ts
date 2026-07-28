@@ -1,4 +1,4 @@
-import { _MemoryKind, EDGE_TYPES, MEMORY_KINDS } from "@/core/vocab";
+import { _MemoryKind, EDGE_TYPES } from "@/core/vocab";
 import { ToolName } from "@/tools/contracts";
 import z from "zod";
 

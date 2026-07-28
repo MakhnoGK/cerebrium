@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "@test/helpers";
-import type { Ctx } from "@/tools/context";
+import { container } from "tsyringe";
+import { setup, TestEnv } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
 import type { Envelope } from "@/db/repo";
 import { SessionStartTool } from "../src/tools/session-start";
 import { CodeIndexTool } from "../src/tools/code-index";
@@ -18,33 +19,35 @@ export function deployPipeline(): void {}
 
 let root: string;
 
-function ids(res: Awaited<ReturnType<typeof search.invoke>>): string[] {
+function idsOf(res: { results: Envelope[] }): string[] {
   return res.results.map((e) => e.id);
 }
 
 // A three-node corpus for "deploy pipeline": a strong fact (title match on both terms),
-// a code symbol (body match only — its qualified name is one camelCase token), and a weak
-// fact (one term). Raw order is [strong, symbol, weak]. The symbol weight moves the symbol
-// within that fixed frame, so its rank shift isolates the knowledge-first behavior.
+// a code symbol (body match only), and a weak fact (one term). The symbol weight moves
+// the symbol within that fixed frame, isolating the knowledge-first behavior.
 async function corpus(
-  ctx: Ctx,
+  env: TestEnv,
 ): Promise<{ s: string; strong: string; symbol: string; weak: string }> {
-  const s = (await session_start.invoke(ctx, {})).session_id;
-  const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as { repo: string };
-  const symbol = ctx.repo.findSymbolsByName("deployPipeline", stats.repo, 1)[0]!.envelope.id;
+  const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+  const stats = (await container.resolve(CodeIndexTool).invoke({ session_id: s, path: root })) as {
+    repo: string;
+  };
+  const symbol = env.code.findSymbolsByName("deployPipeline", stats.repo, 1)[0]!.envelope.id;
+  const write = container.resolve(WriteTool);
   const strong = (
-    (await write.invoke(ctx, {
+    (await write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Deploy pipeline",
       content: "deploy pipeline release runbook steps",
     })) as Envelope
   ).id;
   const weak = (
-    (await write.invoke(ctx, {
+    (await write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "Notebook",
       content: "the deploy step only",
@@ -54,17 +57,12 @@ async function corpus(
   return { s, strong, symbol, weak };
 }
 
-let sessionStartTool: SessionStartTool;
-let writeTool: WriteTool;
-let codeIndexTool: CodeIndexTool;
-let searchTool: SearchTool;
-
-beforeAll(() => {
-  writeTool = container.resolve(WriteTool);
-  codeIndexTool = container.resolve(CodeIndexTool);
-  searchTool = container.resolve(SearchTool);
-  sessionStartTool = container.resolve(SessionStartTool);
-});
+function textSearch(s: string, types?: string[]) {
+  return container
+    .resolve(SearchTool)
+    .invoke({ session_id: s, query: "deploy pipeline", mode: "text", limit: 10, types })
+    .then(idsOf);
+}
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "mk-kf-"));
@@ -76,79 +74,50 @@ afterEach(() => {
   delete process.env.MEMORY_SYMBOL_WEIGHT;
 });
 
-describe("knowledge-first ranking", () => {
-  it("down-weights code symbols by default so authored knowledge ranks first", async () => {
-    const { ctx } = makeCtx();
-    const { s, strong, symbol } = await corpus(ctx);
-    const def = ids(
-      await search.invoke(ctx, {
-        session_id: s,
-        query: "deploy pipeline",
-        mode: "text",
-        limit: 10,
-      }),
-    );
+describe("Knowledge-first ranking", () => {
+  it("should rank authored knowledge above a code symbol by default", async () => {
+    // Given
+    const env = setup();
+    const { s, strong, symbol } = await corpus(env);
 
+    // When
+    const def = await textSearch(s);
+
+    // Then
     expect(def).toContain(symbol);
     expect(def.indexOf(strong)).toBeLessThan(def.indexOf(symbol)); // authored above code
   });
 
-  it("the symbol weight is configurable and monotonic", async () => {
-    const { ctx } = makeCtx();
-    const { s, symbol } = await corpus(ctx);
+  it("should move the symbol monotonically as the configurable symbol weight changes", async () => {
+    // Given
+    const env = setup();
+    const { s, symbol } = await corpus(env);
 
-    process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // heavy penalty -> symbol sinks to the bottom
-
-    const low = ids(
-      await search.invoke(ctx, {
-        session_id: s,
-        query: "deploy pipeline",
-        mode: "text",
-        limit: 10,
-      }),
-    );
+    // When — a heavy penalty sinks the symbol to the bottom.
+    process.env.MEMORY_SYMBOL_WEIGHT = "0.01";
+    const low = await textSearch(s);
     expect(low[low.length - 1]).toBe(symbol);
 
-    process.env.MEMORY_SYMBOL_WEIGHT = "100"; // heavy boost -> symbol climbs above other matches
+    // When — a heavy boost lifts it above other matches.
+    process.env.MEMORY_SYMBOL_WEIGHT = "100";
+    const high = await textSearch(s);
 
-    const high = ids(
-      await search.invoke(ctx, {
-        session_id: s,
-        query: "deploy pipeline",
-        mode: "text",
-        limit: 10,
-      }),
-    );
-
-    expect(high[high.length - 1]).not.toBe(symbol); // no longer pinned to the bottom
+    // Then
+    expect(high[high.length - 1]).not.toBe(symbol);
     expect(high.indexOf(symbol)).toBeLessThan(low.indexOf(symbol));
   });
 
-  it("asking for symbols explicitly bypasses the penalty (escape hatch)", async () => {
-    const { ctx } = makeCtx();
-    const { s, symbol } = await corpus(ctx);
+  it("should bypass the penalty when symbols are asked for explicitly", async () => {
+    // Given
+    const env = setup();
+    const { s, symbol } = await corpus(env);
+    process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // would sink the symbol...
 
-    process.env.MEMORY_SYMBOL_WEIGHT = "0.01"; // would sink the symbol to the bottom...
+    // When
+    const plain = await textSearch(s);
+    const escaped = await textSearch(s, ["symbol", "fact"]);
 
-    const plain = ids(
-      await search.invoke(ctx, {
-        session_id: s,
-        query: "deploy pipeline",
-        mode: "text",
-        limit: 10,
-      }),
-    );
-    // ...but an explicit symbol request ignores the weight, restoring the raw position.
-    const escaped = ids(
-      await search.invoke(ctx, {
-        session_id: s,
-        query: "deploy pipeline",
-        types: ["symbol", "fact"],
-        mode: "text",
-        limit: 10,
-      }),
-    );
-
+    // Then — an explicit symbol request ignores the weight, restoring the raw position.
     expect(escaped.indexOf(symbol)).toBeLessThan(plain.indexOf(symbol));
   });
 });

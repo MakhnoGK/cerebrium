@@ -1,6 +1,7 @@
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 import { MirrorRepo, SearchRepo, StatsRepo } from "@/db/repositories";
 import { estimateTokensOf } from "@/core/tokens";
+import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 const CHECKPOINT_LIMIT = 2;
 const TASK_LIMIT = 10;
@@ -17,6 +18,7 @@ export class MemoryService {
     private readonly searchRepo: SearchRepo,
     private readonly mirrorRepo: MirrorRepo,
     private readonly statsRepo: StatsRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   public getWorkingSet(project: string | undefined) {
@@ -24,7 +26,7 @@ export class MemoryService {
     // their freshness window. Only registered, enabled, stale sources; omitted entirely
     // when there are none (a deployment with no sources sees no change).
     const stale = this.mirrorRepo
-      .sourceStatus(new Date().toISOString())
+      .sourceStatus(this.clock.now())
       .filter((s) => s.stale)
       .map((s) => ({ id: s.id, label: s.label, hours_stale: s.hours_stale }));
 

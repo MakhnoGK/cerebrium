@@ -2,21 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "@test/helpers";
+import { container } from "tsyringe";
+import { setup, TestEnv } from "@test/helpers";
 import type { EmbeddingWorker } from "@/embeddings/worker";
-import { SessionStartTool } from "../../src/tools/session_start";
-import { CodeIndexTool } from "../../src/tools/code_index";
+import { _MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "../../src/tools/session-start";
+import { CodeIndexTool } from "../../src/tools/code-index";
 import { SearchTool } from "../../src/tools/search";
 import { GetTool } from "../../src/tools/get";
 import { WriteTool } from "../../src/tools/write";
 import { LinkTool } from "../../src/tools/link";
-
-const session_start = new SessionStartTool();
-const code_index = new CodeIndexTool();
-const search = new SearchTool();
-const get = new GetTool();
-const write = new WriteTool();
-const link = new LinkTool();
 
 const CRYPTO = `export function hashToken(input: string): string {
   return input.split("").reverse().join("");
@@ -60,29 +55,38 @@ interface Res {
   results: { id: string; kind: string; type: string; via?: { edge: string; node: string } }[];
 }
 
-// Acceptance §9.3 — index -> search -> get -> link a note -> note-topic search surfaces
-// the symbol via graph expansion -> edit + re-index keeps the documents edge.
-describe("code indexing end-to-end", () => {
-  it("carries a note->code documents link across a re-index", async () => {
-    const { ctx, repo, clock, worker, db } = makeCtx();
-    const s = (await session_start.invoke(ctx, {})).session_id;
+function tools() {
+  return {
+    sessionStart: container.resolve(SessionStartTool),
+    codeIndex: container.resolve(CodeIndexTool),
+    search: container.resolve(SearchTool),
+    get: container.resolve(GetTool),
+    write: container.resolve(WriteTool),
+    link: container.resolve(LinkTool),
+  };
+}
+
+describe("Code indexing end-to-end", () => {
+  it("should carry a note->code documents link across a re-index", async () => {
+    // Given
+    const env: TestEnv = setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
 
     // 1. index the repo
-    const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as {
-      repo: string;
-    };
+    const stats = (await t.codeIndex.invoke({ session_id: s, path: root })) as { repo: string };
     const repoName = stats.repo;
-    const validateId = repo.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id;
+    const validateId = env.code.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id;
 
     // 2. FTS-findable immediately, before any embedding runs
     expect(
       (
-        db.prepare("SELECT pending_embedding AS p FROM nodes WHERE id = ?").get(validateId) as {
+        env.db.prepare("SELECT pending_embedding AS p FROM nodes WHERE id = ?").get(validateId) as {
           p: number;
         }
       ).p,
     ).toBe(1);
-    const byText = (await search.invoke(ctx, {
+    const byText = (await t.search.invoke({
       session_id: s,
       query: "validate login",
       mode: "text",
@@ -91,24 +95,24 @@ describe("code indexing end-to-end", () => {
     expect(byText.results.some((r) => r.id === validateId)).toBe(true);
 
     // 3. get shows the raw source
-    const got = (await get.invoke(ctx, { session_id: s, ids: [validateId] })) as {
+    const got = (await t.get.invoke({ session_id: s, ids: [validateId] })) as {
       nodes: { source: string }[];
     };
     expect(got.nodes[0]!.source).toContain("hashToken(pw)");
 
     // 4. write a decision ABOUT the code + link it with a documents edge
-    const note = (await write.invoke(ctx, {
+    const note = (await t.write.invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "decision",
       title: "Signing choice",
       content: "We validate credentials by signing with RS256 rather than HS256.",
       project: repoName,
     })) as { id: string };
-    await link.invoke(ctx, { session_id: s, src: note.id, dst: validateId, type: "documents" });
+    await t.link.invoke({ session_id: s, src: note.id, dst: validateId, type: "documents" });
 
     // 5. searching the NOTE's topic surfaces the symbol via graph expansion
-    const viaGraph = (await search.invoke(ctx, {
+    const viaGraph = (await t.search.invoke({
       session_id: s,
       query: "RS256 signing",
       limit: 10,
@@ -118,8 +122,8 @@ describe("code indexing end-to-end", () => {
     expect(surfaced!.via?.edge).toBe("documents");
 
     // 6. after embeddings drain, vector search finds the symbol by meaning
-    await drain(worker);
-    const byVec = (await search.invoke(ctx, {
+    await drain(env.worker);
+    const byVec = (await t.search.invoke({
       session_id: s,
       query: "validate login boolean",
       mode: "vector",
@@ -135,17 +139,17 @@ describe("code indexing end-to-end", () => {
         "Validate a login attempt strictly.",
       ),
     );
-    clock.advanceDays(1);
-    await code_index.invoke(ctx, { session_id: s, path: root });
+    env.clock.advanceDays(1);
+    await t.codeIndex.invoke({ session_id: s, path: root });
 
-    expect(repo.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id).toBe(validateId); // stable id
-    const edge = db
+    expect(env.code.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id).toBe(validateId); // stable id
+    const edge = env.db
       .prepare(
         "SELECT dst FROM edges WHERE src = ? AND type = 'documents' AND invalidated_at IS NULL",
       )
       .get(note.id) as { dst: string } | undefined;
     expect(edge?.dst).toBe(validateId);
-    const stillGraph = (await search.invoke(ctx, {
+    const stillGraph = (await t.search.invoke({
       session_id: s,
       query: "RS256 signing",
       limit: 10,
@@ -153,45 +157,41 @@ describe("code indexing end-to-end", () => {
     expect(stillGraph.results.find((r) => r.id === validateId)?.via?.edge).toBe("documents");
   });
 
-  it("mirror symbols are code-scoped and do not decay", async () => {
-    const { ctx, clock } = makeCtx();
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    const stats = (await code_index.invoke(ctx, { session_id: s, path: root })) as {
-      repo: string;
-    };
+  it("should keep mirror symbols code-scoped and decay-free", async () => {
+    // Given
+    const env = setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
+    const stats = (await t.codeIndex.invoke({ session_id: s, path: root })) as { repo: string };
 
     // an equally-matching episodic note that WILL decay
-    await write.invoke(ctx, {
+    await t.write.invoke({
       session_id: s,
-      memory_kind: "episodic",
+      memory_kind: _MemoryKind.EPISODIC,
       type: "event_note",
       title: "validate incident",
       content: "validate failed intermittently in prod",
       project: stats.repo,
     });
 
-    // types filter scopes strictly to code
-    const scoped = (await search.invoke(ctx, {
+    // When / Then — types filter scopes strictly to code.
+    const scoped = (await t.search.invoke({
       session_id: s,
       query: "validate",
       types: ["symbol"],
       limit: 10,
-    })) as {
-      results: { kind: string; type: string }[];
-    };
+    })) as { results: { kind: string; type: string }[] };
     expect(scoped.results.length).toBeGreaterThan(0);
     expect(scoped.results.every((r) => r.type === "symbol" && r.kind === "mirror")).toBe(true);
 
-    // age 60 days: the symbol (no decay) outranks the decayed episodic note
-    clock.advanceDays(60);
-    const aged = (await search.invoke(ctx, {
+    // When / Then — age 60 days: the symbol (no decay) outranks the decayed episodic note.
+    env.clock.advanceDays(60);
+    const aged = (await t.search.invoke({
       session_id: s,
       query: "validate",
       mode: "text",
       limit: 10,
-    })) as {
-      results: { type: string }[];
-    };
+    })) as { results: { type: string }[] };
     const symIdx = aged.results.findIndex((r) => r.type === "symbol");
     const epIdx = aged.results.findIndex((r) => r.type === "event_note");
     expect(symIdx).toBeGreaterThanOrEqual(0);

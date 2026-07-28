@@ -7,7 +7,7 @@ import { openDatabase, defaultDbPath } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { createProvider, EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings/index";
-import { EmbeddingWorker } from "@/embeddings/worker";
+import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import { ConsolidationProvider, createConsolidator } from "@/consolidation/index";
 import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
@@ -105,6 +105,10 @@ async function main(): Promise<void> {
 
   container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase(dbPath) });
   container.registerSingleton(CLOCK_TOKEN, SystemClock);
+  // The daemon feeds the model in large batches (vs. the gentle in-process fallback).
+  container.register(WORKER_OPTIONS_TOKEN, {
+    useValue: { batchSize: Number(process.env.MEMORY_EMBED_BATCH) || 64 },
+  });
   container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
   container.register<ConsolidationProvider>(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
 
@@ -114,15 +118,14 @@ async function main(): Promise<void> {
 
   writeDaemonPid(dbPath);
   let stopping = false;
-  const shutdown = () => {
+  const shutdown = async () => {
     stopping = true;
-    worker.stop();
-    consolidation.stop();
+    await Promise.all([worker.stop(), consolidation.stop()]);
     clearDaemonPid(dbPath);
     process.exit(0);
   };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () => void shutdown());
 
   try {
     await runDaemon(queue, worker, { stopped: () => stopping, consolidation });
@@ -131,8 +134,7 @@ async function main(): Promise<void> {
     // analysis can't see that closure mutation and reads it as always-false.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!stopping) {
-      worker.stop();
-      consolidation.stop();
+      await Promise.all([worker.stop(), consolidation.stop()]);
       clearDaemonPid(dbPath);
     }
   }

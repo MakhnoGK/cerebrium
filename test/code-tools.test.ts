@@ -1,66 +1,73 @@
 import { describe, it, expect } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { SessionStartTool } from "../src/tools/session_start";
-import { CodeIndexTool } from "../src/tools/code_index";
-import { CodeLookupTool } from "../src/tools/code_lookup";
+import { container } from "tsyringe";
+import { setup, TestEnv } from "@test/helpers";
+import { _MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "../src/tools/session-start";
+import { CodeIndexTool } from "../src/tools/code-index";
+import { CodeLookupTool } from "../src/tools/code-lookup";
 import { GetTool } from "../src/tools/get";
 import { WriteTool } from "../src/tools/write";
 import { UpdateTool } from "../src/tools/update";
-import { makeCtx } from "@test/helpers";
-
-const session_start = new SessionStartTool();
-const code_index = new CodeIndexTool();
-const code_lookup = new CodeLookupTool();
-const get = new GetTool();
-const write = new WriteTool();
-const update = new UpdateTool();
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
 
-async function indexed() {
-  const t = makeCtx();
-  const s = await session_start.invoke(t.ctx, {});
-  const stats = (await code_index.invoke(t.ctx, { session_id: s.session_id, path: FIXTURE })) as {
+async function indexed(): Promise<{
+  env: TestEnv;
+  session_id: string;
+  stats: { files_indexed: number; symbols_added: number; repo: string };
+}> {
+  const env = setup();
+  const session_id = (await container.resolve(SessionStartTool).invoke({})).session_id;
+  const stats = (await container.resolve(CodeIndexTool).invoke({ session_id, path: FIXTURE })) as {
     files_indexed: number;
     symbols_added: number;
     repo: string;
   };
-  return { ...t, session_id: s.session_id, stats };
+  return { env, session_id, stats };
 }
 
-describe("code_index tool", () => {
-  it("indexes an explicit path and returns a compact summary envelope", async () => {
+describe("CodeIndexTool", () => {
+  it("should index an explicit path and return a compact summary envelope", async () => {
+    // Given / When
     const { stats } = await indexed();
+
+    // Then
     expect(stats.repo).toBe("demo-repo");
     expect(stats.files_indexed).toBe(2);
     expect(stats.symbols_added).toBeGreaterThan(4);
-    // Envelope, not per-symbol dumps.
-    expect(Object.keys(stats)).not.toContain("symbols");
+    expect(Object.keys(stats)).not.toContain("symbols"); // envelope, not per-symbol dumps
   });
 
-  it("errors actionably when repo is unknown and no path given", async () => {
-    const { ctx, session_id } = await indexed();
-    await expect(code_index.invoke(ctx, { session_id, repo: "nope" })).rejects.toThrow(
-      /not configured/,
-    );
+  it("should throw actionably when the repo is unknown and no path is given", async () => {
+    // Given
+    const { session_id } = await indexed();
+
+    // When / Then
+    await expect(
+      container.resolve(CodeIndexTool).invoke({ session_id, repo: "nope" }),
+    ).rejects.toThrow(/not configured/);
   });
 });
 
-describe("code_lookup tool", () => {
-  it("resolves by name with neighbor stubs", async () => {
-    const { ctx, session_id } = await indexed();
-    const res = (await code_lookup.invoke(ctx, {
-      session_id,
-      name: "AuthService",
-      limit: 10,
-    })) as {
+describe("CodeLookupTool", () => {
+  it("should resolve a symbol by name with neighbor stubs", async () => {
+    // Given
+    const { session_id } = await indexed();
+
+    // When
+    const res = (await container
+      .resolve(CodeLookupTool)
+      .invoke({ session_id, name: "AuthService", limit: 10 })) as {
       symbols: {
         title: string;
         symbol_kind: string;
         neighbors: { edge: string; title: string }[];
       }[];
     };
+
+    // Then
     expect(res.symbols).toHaveLength(1);
     expect(res.symbols[0]!.symbol_kind).toBe("class");
     expect(
@@ -68,47 +75,62 @@ describe("code_lookup tool", () => {
     ).toBe(true);
   });
 
-  it("lists a file's symbols", async () => {
-    const { ctx, session_id } = await indexed();
-    const res = (await code_lookup.invoke(ctx, {
-      session_id,
-      file: "util/crypto.ts",
-      limit: 10,
-    })) as {
+  it("should list a file's symbols when given a file path", async () => {
+    // Given
+    const { session_id } = await indexed();
+
+    // When
+    const res = (await container
+      .resolve(CodeLookupTool)
+      .invoke({ session_id, file: "util/crypto.ts", limit: 10 })) as {
       symbols: { symbol_kind: string; title: string }[];
     };
+
+    // Then
     const kinds = res.symbols.map((s) => s.symbol_kind).sort();
     expect(kinds).toContain("function");
     expect(kinds).toContain("enum");
   });
 
-  it("requires name or file", async () => {
-    const { ctx, session_id } = await indexed();
-    await expect(code_lookup.invoke(ctx, { session_id, limit: 10 })).rejects.toThrow(/provide/);
+  it("should require name or file", async () => {
+    // Given
+    const { session_id } = await indexed();
+
+    // When / Then
+    await expect(
+      container.resolve(CodeLookupTool).invoke({ session_id, limit: 10 }),
+    ).rejects.toThrow(/provide/);
   });
 });
 
-describe("get on a symbol", () => {
-  it("returns the raw source slice + structured facets", async () => {
-    const { ctx, session_id } = await indexed();
-    const found = ctx.repo.findSymbolsByName("AuthService", undefined, 1);
-    const id = found[0]!.envelope.id;
-    const res = (await get.invoke(ctx, { session_id, ids: [id] })) as {
+describe("GetTool on a symbol", () => {
+  it("should return the raw source slice and structured facets", async () => {
+    // Given
+    const { env, session_id } = await indexed();
+    const id = env.code.findSymbolsByName("AuthService", undefined, 1)[0]!.envelope.id;
+
+    // When
+    const res = (await container.resolve(GetTool).invoke({ session_id, ids: [id] })) as {
       nodes: { source: string; symbol: { signature: string; symbol_kind: string; path: string } }[];
     };
+
+    // Then
     expect(res.nodes[0]!.source).toContain("class AuthService");
     expect(res.nodes[0]!.symbol.symbol_kind).toBe("class");
     expect(res.nodes[0]!.symbol.signature).toContain("class AuthService");
   });
 });
 
-describe("mirror discipline", () => {
-  it("write with memory_kind:'mirror' is rejected", async () => {
-    const { ctx, session_id } = await indexed();
+describe("Mirror discipline", () => {
+  it("should reject a write with memory_kind:'mirror'", async () => {
+    // Given
+    const { session_id } = await indexed();
+
+    // When / Then
     await expect(
-      write.invoke(ctx, {
+      container.resolve(WriteTool).invoke({
         session_id,
-        memory_kind: "mirror",
+        memory_kind: _MemoryKind.MIRROR,
         type: "symbol",
         title: "x",
         content: "y",
@@ -116,11 +138,14 @@ describe("mirror discipline", () => {
     ).rejects.toThrow(/indexer|code_index/);
   });
 
-  it("update on a symbol node is rejected with an actionable message", async () => {
-    const { ctx, session_id } = await indexed();
-    const id = ctx.repo.findSymbolsByName("AuthService", undefined, 1)[0]!.envelope.id;
-    await expect(update.invoke(ctx, { session_id, id, content: "hand edit" })).rejects.toThrow(
-      /re-indexed|code_index/,
-    );
+  it("should reject an update on a symbol node with an actionable message", async () => {
+    // Given
+    const { env, session_id } = await indexed();
+    const id = env.code.findSymbolsByName("AuthService", undefined, 1)[0]!.envelope.id;
+
+    // When / Then
+    await expect(
+      container.resolve(UpdateTool).invoke({ session_id, id, content: "hand edit" }),
+    ).rejects.toThrow(/re-indexed|code_index/);
   });
 });

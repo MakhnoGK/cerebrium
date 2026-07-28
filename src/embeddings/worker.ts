@@ -7,6 +7,11 @@ import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
 
 const EMBED_LEASE = "embedding";
 
+// Injected so `container.resolve(EmbeddingWorker)` gets the defaults ({}), while tests
+// that need to tune batching/backoff/lease construct a worker manually with an overrides
+// object. Register a default `{}` wherever the worker is resolved (server/daemon/tests).
+export const WORKER_OPTIONS_TOKEN = Symbol("WorkerOptions");
+
 export interface WorkerOptions {
   batchSize?: number;
   intervalMs?: number;
@@ -34,15 +39,16 @@ export class EmbeddingWorker {
     private readonly embeddingQueue: EmbeddingQueueRepo,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(WORKER_OPTIONS_TOKEN) opts: WorkerOptions = {},
   ) {
-    this.batchSize = 16;
-    this.intervalMs = 3000;
-    this.backoffBaseMs = 1000;
-    this.backoffCapMs = 60_000;
+    this.batchSize = opts.batchSize ?? 16;
+    this.intervalMs = opts.intervalMs ?? 3000;
+    this.backoffBaseMs = opts.backoffBaseMs ?? 1000;
+    this.backoffCapMs = opts.backoffCapMs ?? 60_000;
 
     // Comfortably longer than the tick interval so the holder keeps the lease
     // across normal ticks; if the process dies, another takes over after it lapses.
-    this.leaseTtlMs = Math.max(this.intervalMs * 20, 60_000);
+    this.leaseTtlMs = opts.leaseTtlMs ?? Math.max(this.intervalMs * 20, 60_000);
   }
 
   start(): void {

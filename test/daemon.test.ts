@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { container } from "tsyringe";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCtx } from "@test/helpers";
+import { setup } from "@test/helpers";
 import { nextIdleState, runDaemon } from "@/daemon";
 import {
   daemonPidPath,
@@ -13,11 +14,9 @@ import {
   isProcessAlive,
 } from "@/runtime/daemon-pid";
 import { ensureDaemon } from "@/runtime/ensure-daemon";
-import { SessionStartTool } from "../src/tools/session_start";
+import { _MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "../src/tools/session-start";
 import { WriteTool } from "../src/tools/write";
-
-const session_start = new SessionStartTool();
-const write = new WriteTool();
 
 const DB = join(tmpdir(), `mk-daemon-${process.pid}.db`);
 afterEach(() => {
@@ -26,24 +25,32 @@ afterEach(() => {
 });
 
 describe("nextIdleState", () => {
-  it("resets the idle timer whenever there is a backlog", () => {
+  it("should reset the idle timer whenever there is a backlog", () => {
+    // Given / When
     const r = nextIdleState({ idleSinceMs: 100 }, 3, 500, 1000);
+
+    // Then
     expect(r.state.idleSinceMs).toBeNull();
     expect(r.shouldExit).toBe(false);
   });
 
-  it("starts the idle timer on first empty tick and exits after the threshold", () => {
+  it("should start the idle timer on the first empty tick and exit after the threshold", () => {
+    // Given / When
     const first = nextIdleState({ idleSinceMs: null }, 0, 1000, 1000);
+
+    // Then
     expect(first.state.idleSinceMs).toBe(1000);
     expect(first.shouldExit).toBe(false);
 
+    // When / Then
     const later = nextIdleState(first.state, 0, 2000, 1000);
     expect(later.shouldExit).toBe(true);
   });
 });
 
-describe("daemon pidfile", () => {
-  it("round-trips the pid and treats a dead pid as not alive", () => {
+describe("Daemon pidfile", () => {
+  it("should round-trip the pid and treat a dead pid as not alive", () => {
+    // Given / When / Then
     expect(readDaemonPid(DB)).toBeNull();
     writeDaemonPid(DB);
     expect(readDaemonPid(DB)).toBe(process.pid);
@@ -53,39 +60,46 @@ describe("daemon pidfile", () => {
     expect(readDaemonPid(DB)).toBeNull();
   });
 
-  it("isProcessAlive: true for self, false for a dead pid", () => {
+  it("should treat self as alive and a dead pid as not alive", () => {
+    // Given / When / Then
     expect(isProcessAlive(process.pid)).toBe(true);
     expect(isProcessAlive(2_147_483_646)).toBe(false);
   });
 });
 
 describe("runDaemon loop", () => {
-  it("drains the backlog to empty then exits on idle", async () => {
-    const { ctx, repo, worker } = makeCtx();
-    const s = (await session_start.invoke(ctx, {})).session_id;
-    await write.invoke(ctx, {
+  it("should drain the backlog to empty then exit on idle", async () => {
+    // Given
+    const env = setup();
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: "semantic",
+      memory_kind: _MemoryKind.SEMANTIC,
       type: "fact",
       title: "drain me",
       content: "a fact with enough words to make a chunk worth embedding",
     });
-    expect(repo.embeddingStats().backlog).toBe(1);
+    expect(env.queue.embeddingStats().backlog).toBe(1);
 
+    // When
     let clock = 0;
-    await runDaemon(repo, worker, {
+    await runDaemon(env.queue, env.worker, {
       idleExitMs: 50,
       nowMs: () => (clock += 100), // each check jumps past the idle threshold
       sleepMs: () => Promise.resolve(),
     });
 
-    expect(repo.embeddingStats().backlog).toBe(0);
+    // Then
+    expect(env.queue.embeddingStats().backlog).toBe(0);
   });
 
-  it("honors an external stop signal", async () => {
-    const { repo, worker } = makeCtx();
+  it("should honor an external stop signal", async () => {
+    // Given
+    const env = setup();
     let stop = false;
-    const p = runDaemon(repo, worker, {
+
+    // When
+    const p = runDaemon(env.queue, env.worker, {
       stopped: () => stop,
       idleExitMs: 1_000_000,
       nowMs: () => 0,
@@ -93,6 +107,8 @@ describe("runDaemon loop", () => {
         stop = true; // stop after the first idle sleep
       },
     });
+
+    // Then
     await expect(p).resolves.toBeUndefined();
   });
 });
@@ -104,8 +120,11 @@ describe("ensureDaemon", () => {
     else process.env.MEMORY_EMBED_PROVIDER = saved;
   });
 
-  it("skips spawning under the local-null provider", () => {
+  it("should skip spawning under the local-null provider", () => {
+    // Given
     process.env.MEMORY_EMBED_PROVIDER = "local-null";
+
+    // When / Then
     expect(ensureDaemon(DB)).toBe("skipped");
   });
 });
