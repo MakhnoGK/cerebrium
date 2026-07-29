@@ -16,7 +16,7 @@ import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { isMainModule } from "@/runtime/is-main";
 import { SystemClock } from "@/runtime/system-clock";
-import { Server } from "@/core/server";
+import { Server } from "@/presentation/mcp/server";
 import { createProvider } from "@/embeddings";
 import { createReranker } from "@/rerank";
 import { createConsolidator } from "./consolidation";
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
 if (isMainModule(import.meta.url)) {
   main().catch((err: unknown) => {
-    console.error("cerebrium failed to start:", err);
+    console.error("Cerebrium failed to start:", err);
     process.exit(1);
   });
 }

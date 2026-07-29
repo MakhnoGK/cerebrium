@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport";
 import { injectable, injectAll } from "tsyringe";
 import { ZodRawShape } from "zod";
-import { ToolOutputAdapter } from "@/core/adapters";
+import { ToolOutputAdapter } from "@/presentation/mcp/adapters";
 import { ToolArgs } from "@/tools/context";
 import { McpTool } from "@/tools/contracts";
 import { TOOL_TOKEN } from "@/tools/contracts/tool";

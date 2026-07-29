@@ -13,7 +13,7 @@ import {
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
-import { Server } from "@/core/server";
+import { Server } from "@/presentation/mcp/server";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
 
@@ -234,7 +234,7 @@ describe("write tool", () => {
       client,
       sid,
       "Deploy cadence",
-      "we ship the mobile app every second thursday",
+      "we ship the mobile app every second Thursday",
       "billing",
     );
     expect(other.similar_existing).toBeUndefined();
