@@ -1,14 +1,5 @@
 import { spawn } from "node:child_process";
 import {
-  annotatePrompt,
-  parseAnnotate,
-  parseReconcile,
-  parseResult,
-  reconcilePrompt,
-  ANNOTATE_SYSTEM_PROMPT,
-  RECONCILE_SYSTEM_PROMPT,
-  SYSTEM_PROMPT,
-  taskPrompt,
   type AnnotateResult,
   type AnnotateTask,
   type ConsolidationProvider,
@@ -16,6 +7,17 @@ import {
   type ConsolidationTask,
   type ReconcileResult,
   type ReconcileTask,
+} from "@/domain/ports/consolidation-provider";
+import {
+  ANNOTATE_SYSTEM_PROMPT,
+  annotatePrompt,
+  parseAnnotate,
+  parseReconcile,
+  parseResult,
+  RECONCILE_SYSTEM_PROMPT,
+  reconcilePrompt,
+  SYSTEM_PROMPT,
+  taskPrompt,
 } from "@/consolidation/provider";
 
 // Runs a user command, feeding `input` on stdin and resolving with its stdout. Rejects

@@ -1,6 +1,6 @@
 import js from "@eslint/js";
-import tseslint from "typescript-eslint";
 import prettierRecommended from "eslint-plugin-prettier/recommended";
+import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   { ignores: ["dist", "node_modules", ".tmp", "coverage", "test/fixtures"] },
@@ -10,7 +10,7 @@ export default tseslint.config(
     extends: [...tseslint.configs.strictTypeChecked, ...tseslint.configs.stylisticTypeChecked],
     languageOptions: {
       parserOptions: {
-        project: ["./tsconfig.eslint.json"],
+        project: ["./tsconfig.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -40,6 +40,27 @@ export default tseslint.config(
     },
   },
   {
+    // Path aliases are the import contract: `@/…` for src, `@test/…` for test. A
+    // parent-relative import resolves differently per tool (tsc, vitest, each IDE's
+    // language server) and is what makes modules "not found" in some editors. Sibling
+    // `./…` imports stay legal — they never cross a folder, so no alias applies.
+    files: ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["../*", "../**"],
+              message:
+                "Use a path alias instead of a parent-relative import: '@/…' for src, '@test/…' for test.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Tests exercise error paths and cast raw rows freely; keep the strong async and
     // any rules, relax the ones that only add ceremony to fixtures.
     files: ["test/**/*.ts"],
@@ -64,6 +85,57 @@ export default tseslint.config(
     languageOptions: {
       sourceType: "commonjs",
       globals: { __dirname: "readonly", __filename: "readonly" },
+    },
+  },
+  {
+    files: ["src/core/**/*.ts", "src/domain/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@/application/*",
+                "@/presentation/*",
+                "@/tools/*",
+                "@/db/*",
+                "@/code/*",
+                "@/embeddings/*",
+                "@/rerank/*",
+                "@/consolidation/*",
+                "@/runtime/*",
+              ],
+              message: "core/domain are the innermost layers — they may not import outward.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "src/application/**/*.ts",
+      "src/db/**/*.ts",
+      "src/code/**/*.ts",
+      "src/embeddings/**/*.ts",
+      "src/rerank/**/*.ts",
+      "src/consolidation/**/*.ts",
+      "src/runtime/**/*.ts",
+    ],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/presentation/*", "@/tools/*"],
+              message:
+                "delivery is the outermost layer — depend on @/application or @/domain/ports instead.",
+            },
+          ],
+        },
+      ],
     },
   },
   prettierRecommended,

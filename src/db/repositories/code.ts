@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
+import { inject, injectable } from "tsyringe";
+import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
+import { EdgesRepo } from "@/db/repositories/edges";
+import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
-import type { EdgeType } from "@/core/vocab";
 import type {
   ExtractedSymbol,
   FileIndexInput,
@@ -11,10 +14,7 @@ import type {
   SymbolLookup,
 } from "@/core/types";
 import { toEnvelope } from "@/core/types";
-import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
-import { EdgesRepo } from "@/db/repositories/edges";
-import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
-import { inject, injectable } from "tsyringe";
+import { EdgeType } from "@/core/vocab";
 
 // The code mirror: symbol nodes + their facet rows, per-file hash gate,
 // incremental index application, cross-file edge resolution, structural lookups, and
@@ -169,12 +169,12 @@ export class CodeRepo extends BaseRepo {
       }
 
       // Rebuild this file's `defines` edges (all endpoints local, resolvable now).
-      this.invalidateFileEdges(input.repo, input.path, "defines", input.ts);
+      this.invalidateFileEdges(input.repo, input.path, EdgeType.DEFINES, input.ts);
       for (const d of input.defines) {
         const src = nodeByExt.get(d.src);
         const dst = nodeByExt.get(d.dst);
         if (src && dst) {
-          this.edges.insertEdge(src, dst, "defines", "system", input.session_id, input.ts);
+          this.edges.insertEdge(src, dst, EdgeType.DEFINES, "system", input.session_id, input.ts);
           result.edges++;
         }
       }
@@ -279,7 +279,7 @@ export class CodeRepo extends BaseRepo {
     const detail = this.symbolDetail(nodeId);
     if (!row || !detail) return undefined;
     const { source: _source, ...facets } = detail;
-    const structural = new Set(["defines", "calls", "imports"]);
+    const structural = new Set([EdgeType.DEFINES, "calls", "imports"]);
     const neighbors = this.edges.edgesOf(nodeId).filter((e) => structural.has(e.edge));
     return { envelope: toEnvelope(row), facets, neighbors };
   }

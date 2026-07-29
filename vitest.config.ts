@@ -1,11 +1,9 @@
-import { defineConfig } from "vitest/config";
-import tsconfigPaths from "vite-tsconfig-paths";
 import swc from "unplugin-swc";
+import tsconfigPaths from "vite-tsconfig-paths";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  // tsconfig.json excludes test/, so point the resolver at the lint tsconfig, which
-  // covers src + test + scripts and inherits the same `@/*` paths.
-  plugins: [tsconfigPaths({ projects: ["tsconfig.eslint.json"] }), swc.vite()],
+  plugins: [tsconfigPaths({ projects: ["tsconfig.json"] }), swc.vite()],
   test: {
     globals: true,
     include: ["test/**/*.test.ts"],

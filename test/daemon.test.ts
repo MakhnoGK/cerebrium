@@ -1,22 +1,22 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { container } from "tsyringe";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setup } from "@test/helpers";
-import { nextIdleState, runDaemon } from "@/daemon";
+import { container } from "tsyringe";
+import { afterEach, describe, expect, it } from "vitest";
 import {
-  daemonPidPath,
-  readDaemonPid,
-  writeDaemonPid,
   clearDaemonPid,
+  daemonPidPath,
   isDaemonAlive,
   isProcessAlive,
+  readDaemonPid,
+  writeDaemonPid,
 } from "@/runtime/daemon-pid";
 import { ensureDaemon } from "@/runtime/ensure-daemon";
-import { _MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
+import { MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { nextIdleState, runDaemon } from "@/daemon";
+import { setup } from "@test/helpers";
 
 const DB = join(tmpdir(), `mk-daemon-${process.pid}.db`);
 afterEach(() => {
@@ -74,7 +74,7 @@ describe("runDaemon loop", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "drain me",
       content: "a fact with enough words to make a chunk worth embedding",

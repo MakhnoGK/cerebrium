@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
 import { container } from "tsyringe";
-import { _MemoryKind } from "../src/core/vocab";
-import { EmbeddingWorker } from "../src/embeddings/worker";
-import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { createConsolidator } from "../src/consolidation";
-import { EMBEDDING_PROVIDER_TOKEN } from "../src/embeddings";
-import { LocalNullProvider } from "../src/embeddings/local-null";
-import { DB_TOKEN } from "../src/db/repositories/base";
-import { openDatabase } from "../src/db/database";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { LocalNullProvider } from "@/embeddings/local-null";
+import { EmbeddingWorker } from "@/embeddings/worker";
+import { MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { createConsolidator } from "@/consolidation";
 
 async function session(tool: SessionStartTool, project?: string): Promise<string> {
   return (await tool.invoke({ project })).session_id;
@@ -24,7 +24,7 @@ function writeFact(
 ) {
   return writeTool.invoke({
     session_id: s,
-    memory_kind: _MemoryKind.SEMANTIC,
+    memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content,
@@ -43,7 +43,7 @@ describe("Duplicate detection at write time", () => {
 
   beforeAll(() => {
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
-    container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+    container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
   });
 
   beforeEach(() => {
@@ -92,7 +92,7 @@ describe("Duplicate detection at write time", () => {
     // When
     const note = await writeTool.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: "Token TTL",
       content: ORIGINAL,

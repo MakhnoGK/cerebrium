@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defaultDbPath } from "@/db/database";
 

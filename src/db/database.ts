@@ -1,10 +1,10 @@
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { nowIso } from "@/core/ids";
 
 const here = dirname(fileURLToPath(import.meta.url));

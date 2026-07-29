@@ -1,15 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { container } from "tsyringe";
+import { describe, expect, it } from "vitest";
+import { MemoryKind } from "@/core/vocab";
+import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { CodeLookupTool } from "@/presentation/mcp/tools/code-lookup";
+import { GetTool } from "@/presentation/mcp/tools/get";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { UpdateTool } from "@/presentation/mcp/tools/update";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
-import { _MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "../src/tools/session-start";
-import { CodeIndexTool } from "../src/tools/code-index";
-import { CodeLookupTool } from "../src/tools/code-lookup";
-import { GetTool } from "../src/tools/get";
-import { WriteTool } from "../src/tools/write";
-import { UpdateTool } from "../src/tools/update";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
 
@@ -130,7 +130,7 @@ describe("Mirror discipline", () => {
     await expect(
       container.resolve(WriteTool).invoke({
         session_id,
-        memory_kind: _MemoryKind.MIRROR,
+        memory_kind: MemoryKind.MIRROR,
         type: "symbol",
         title: "x",
         content: "y",

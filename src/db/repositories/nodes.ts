@@ -1,12 +1,12 @@
 import type Database from "better-sqlite3";
-import { newId } from "@/core/ids";
-import type { EdgeType } from "@/core/vocab";
-import type { Envelope, NeighborStub, NewNode, RevisionMeta } from "@/core/types";
-import { toEnvelope } from "@/core/types";
+import { inject, injectable } from "tsyringe";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
-import { inject, injectable } from "tsyringe";
+import { newId } from "@/core/ids";
+import type { Envelope, NeighborStub, NewNode, RevisionMeta } from "@/core/types";
+import { toEnvelope } from "@/core/types";
+import { EdgeType } from "@/core/vocab";
 
 // The authored-node write path (nodes + revisions + FTS + chunks/queue, atomically)
 // and node reads. The append-only-revisions and FTS-in-write-transaction invariants
@@ -123,7 +123,7 @@ export class NodesRepo extends BaseRepo {
          WHERE id = @src AND memory_kind = 'episodic' AND consolidated_at IS NULL`,
       );
       for (const src of input.sourceIds) {
-        this.edges.insertEdge(id, src, "derived_from", "system", input.session_id, input.ts);
+        this.edges.insertEdge(id, src, EdgeType.DERIVED_FROM, "system", input.session_id, input.ts);
         mark.run({ ts: input.ts, src });
       }
     });
@@ -273,7 +273,7 @@ export class NodesRepo extends BaseRepo {
         this.edges.insertEdge(
           fields.superseded_by,
           id,
-          "supersedes",
+          EdgeType.SUPERSEDES,
           "agent",
           fields.session_id,
           fields.ts,

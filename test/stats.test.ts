@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { container } from "tsyringe";
-import { setup } from "@test/helpers";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { container } from "tsyringe";
+import { describe, expect, it } from "vitest";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
-import { _MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { StatsTool } from "../src/tools/stats";
+import { MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { StatsTool } from "@/presentation/mcp/tools/stats";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { setup } from "@test/helpers";
 
 async function session(): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({})).session_id;
@@ -16,7 +16,7 @@ async function session(): Promise<string> {
 async function writeFact(s: string, title: string): Promise<void> {
   await container.resolve(WriteTool).invoke({
     session_id: s,
-    memory_kind: _MemoryKind.SEMANTIC,
+    memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content: `a durable fact about ${title} with a body of a few words`,

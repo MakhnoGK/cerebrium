@@ -1,8 +1,14 @@
 import "reflect-metadata";
 import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
+import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
+import {
+  CONSOLIDATION_PROVIDER_TOKEN,
+  type ConsolidationProvider,
+} from "@/domain/ports/consolidation-provider";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
+import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/domain/ports/rerank-provider";
 import { openDatabase } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
 import {
   CodeRepo,
   ConsolidationRepo,
@@ -14,13 +20,11 @@ import {
   SessionsRepo,
   StatsRepo,
 } from "@/db/repositories";
+import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { EmbeddingWorker } from "@/embeddings/worker";
-import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/embeddings";
-import { createReranker, RERANK_PROVIDER_TOKEN, RerankProvider } from "@/rerank";
-import { createConsolidator, ConsolidationProvider } from "@/consolidation";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { createConsolidator } from "@/consolidation";
+import { createReranker } from "@/rerank";
 
 export interface TestClock extends Clock {
   t: string;
@@ -78,7 +82,7 @@ export function setup(opts?: {
   container.register(CLOCK_TOKEN, { useValue: clock });
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
   container.register(RERANK_PROVIDER_TOKEN, { useValue: reranker });
-  container.register(CONSOLIDATOR_TOKEN, { useValue: consolidator });
+  container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: consolidator });
 
   return {
     db,

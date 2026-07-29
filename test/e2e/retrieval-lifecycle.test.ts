@@ -1,13 +1,13 @@
 import "reflect-metadata";
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { _MemoryKind } from "@/core/vocab";
+import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../../src/tools/session-start";
-import { WriteTool } from "../../src/tools/write";
-import { SearchTool } from "../../src/tools/search";
-import { InvalidateTool } from "../../src/tools/invalidate";
+import { MemoryKind } from "@/core/vocab";
+import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { setup } from "@test/helpers";
 
 const P = "auth-service";
 const FACT =
@@ -35,7 +35,7 @@ describe("Retrieval lifecycle end-to-end", () => {
     // 1) write a fact -> immediately findable via FTS while pending_embedding = 1
     const fact = (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: FACT,
@@ -96,7 +96,7 @@ describe("Retrieval lifecycle end-to-end", () => {
     // 3) write a near-duplicate -> similar_existing returned
     const dup = (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: FACT,

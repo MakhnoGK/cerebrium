@@ -1,16 +1,4 @@
 import {
-  annotatePrompt,
-  parseAnnotate,
-  parseReconcile,
-  parseResult,
-  reconcilePrompt,
-  ANNOTATE_SCHEMA,
-  ANNOTATE_SYSTEM_PROMPT,
-  RECONCILE_SCHEMA,
-  RECONCILE_SYSTEM_PROMPT,
-  RESULT_SCHEMA,
-  SYSTEM_PROMPT,
-  taskPrompt,
   type AnnotateResult,
   type AnnotateTask,
   type ConsolidationProvider,
@@ -18,6 +6,20 @@ import {
   type ConsolidationTask,
   type ReconcileResult,
   type ReconcileTask,
+} from "@/domain/ports/consolidation-provider";
+import {
+  ANNOTATE_SCHEMA,
+  ANNOTATE_SYSTEM_PROMPT,
+  annotatePrompt,
+  parseAnnotate,
+  parseReconcile,
+  parseResult,
+  RECONCILE_SCHEMA,
+  RECONCILE_SYSTEM_PROMPT,
+  reconcilePrompt,
+  RESULT_SCHEMA,
+  SYSTEM_PROMPT,
+  taskPrompt,
 } from "@/consolidation/provider";
 
 export type FetchFn = typeof fetch;

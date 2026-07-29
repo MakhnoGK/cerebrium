@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { _MemoryKind } from "@/core/vocab";
+import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../../src/tools/session-start";
-import { WriteTool } from "../../src/tools/write";
-import { GetTool } from "../../src/tools/get";
-import { SearchTool } from "../../src/tools/search";
-import { UpdateTool } from "../../src/tools/update";
-import { CheckpointTool } from "../../src/tools/checkpoint";
+import { MemoryKind } from "@/core/vocab";
+import { CheckpointTool } from "@/presentation/mcp/tools/checkpoint";
+import { GetTool } from "@/presentation/mcp/tools/get";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { UpdateTool } from "@/presentation/mcp/tools/update";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { setup } from "@test/helpers";
 
 const P = "auth-service";
 
@@ -33,7 +33,7 @@ describe("Multi-session hand-off", () => {
     const a = (await t.sessionStart.invoke({ project: P })).session_id;
     const f1 = (await t.write.invoke({
       session_id: a,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
       content: "access tokens live 15 minutes",
@@ -41,7 +41,7 @@ describe("Multi-session hand-off", () => {
     })) as Envelope;
     await t.write.invoke({
       session_id: a,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Use RS256",
       content: "sign JWTs with RS256, not HS256",
@@ -49,7 +49,7 @@ describe("Multi-session hand-off", () => {
     });
     await t.write.invoke({
       session_id: a,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Refresh flow",
       content: "refresh tokens rotate on use",

@@ -1,19 +1,19 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { ConsolidationWorker } from "@/consolidation/worker";
-import type { Envelope } from "@/db/repo";
-import { EmbeddingWorker } from "@/embeddings/worker";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
 import { container } from "tsyringe";
-import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { createConsolidator } from "../src/consolidation";
-import { EMBEDDING_PROVIDER_TOKEN } from "../src/embeddings";
-import { DB_TOKEN } from "../src/db/repositories/base";
-import { openDatabase } from "../src/db/database";
-import { LocalNullProvider } from "../src/embeddings/local-null";
-import { EdgesRepo } from "../src/db/repositories/edges";
-import { ConsolidationRepo } from "../src/db/repositories/consolidation";
-import { _MemoryKind } from "../src/core/vocab";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { ConsolidationWorker } from "@/consolidation/worker";
+import { openDatabase } from "@/db/database";
+import type { Envelope } from "@/db/repo";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { ConsolidationRepo } from "@/db/repositories/consolidation";
+import { EdgesRepo } from "@/db/repositories/edges";
+import { LocalNullProvider } from "@/embeddings/local-null";
+import { EmbeddingWorker } from "@/embeddings/worker";
+import { ConsolidationKind, MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { createConsolidator } from "@/consolidation";
 
 const sessionStart = container.resolve(SessionStartTool);
 let edgesRepo: EdgesRepo;
@@ -28,7 +28,7 @@ async function newNode(
   return (
     (await writeTool.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title,
       content,
@@ -45,7 +45,7 @@ async function newEpisodic(
   return (
     (await tool.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title,
       content,
@@ -85,7 +85,7 @@ describe("Similar node link discovery", () => {
 
   beforeEach(() => {
     container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
-    container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+    container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
 
     embedWorker = container.resolve(EmbeddingWorker);
@@ -147,7 +147,7 @@ describe("Similar node link discovery", () => {
     expect(consolidationResult.links_added).toBe(0);
     expect(edgeTypesBetween(twinA, twinB)).not.toContain("similar_to");
 
-    const pending = consolidationRepo.pendingCandidates({ kind: "link" });
+    const pending = consolidationRepo.pendingCandidates({ kind: ConsolidationKind.LINK });
     expect(pending).toHaveLength(1);
     expect(pending[0]!.member_ids.sort()).toEqual([twinA, twinB].sort());
   });
@@ -172,7 +172,7 @@ describe("Orphan episodic link repair", () => {
 
   beforeEach(() => {
     container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
-    container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator() });
+    container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
 
     embedWorker = container.resolve(EmbeddingWorker);

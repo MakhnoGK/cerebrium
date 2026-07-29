@@ -1,22 +1,21 @@
-import { describe, it, expect, afterEach } from "vitest";
 import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-
-import { ConsolidationWorker } from "@/consolidation/worker";
-import { toFtsMatch } from "@/core/fts";
-import { _MemoryKind } from "@/core/vocab";
-import type { SearchRepo } from "@/db/repositories";
-import type { Envelope } from "@/db/repo";
+import { afterEach, describe, expect, it } from "vitest";
 import type {
   AnnotateResult,
   AnnotateTask,
   ConsolidationProvider,
   ConsolidationResult,
   ReconcileResult,
-} from "@/consolidation/provider";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
+} from "@/domain/ports/consolidation-provider";
+import { ConsolidationWorker } from "@/consolidation/worker";
+import type { Envelope } from "@/db/repo";
+import type { SearchRepo } from "@/db/repositories";
+import { toFtsMatch } from "@/core/fts";
+import { MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { setup } from "@test/helpers";
 
 // An enabled provider that only annotates. `generate`/`reconcile` are unused here.
 class FakeAnnotator implements ConsolidationProvider {
@@ -47,7 +46,7 @@ async function writeFact(s: string): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: TITLE,
       content: BODY,
@@ -62,7 +61,7 @@ function ftsFinds(search: SearchRepo, term: string, id: string): boolean {
   const match = toFtsMatch(term);
   if (!match) return false;
   return search
-    .search({ match, kinds: ["semantic"], history: false, cap: 10 })
+    .search({ match, kinds: [MemoryKind.SEMANTIC], history: false, cap: 10 })
     .rows.some((r) => r.id === id);
 }
 

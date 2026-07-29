@@ -17,7 +17,6 @@
   "scripts": {
     "build": "tsup && node scripts/copy-assets.mjs",
     "typecheck": "tsc --noEmit",
-    "typecheck:test": "tsc --noEmit -p tsconfig.eslint.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -47,6 +46,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
     "@swc/core": "^1.15.46",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^26.1.1",

@@ -1,21 +1,24 @@
-import { describe, it, expect, afterEach, beforeEach, afterAll } from "vitest";
-import type {
-  ConsolidationProvider,
-  ConsolidationResult,
-  ReconcileResult,
-  ReconcileTask,
-} from "@/consolidation/provider";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { container } from "tsyringe";
-import { CONSOLIDATOR_TOKEN } from "../src/tools/services/consolidation.service";
-import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "../src/embeddings";
-import { EmbeddingWorker } from "../src/embeddings/worker";
-import { LocalNullProvider } from "../src/embeddings/local-null";
 import Database from "better-sqlite3";
-import { DB_TOKEN } from "../src/db/repositories/base";
-import { openDatabase } from "../src/db/database";
-import { createConsolidator } from "../src/consolidation";
+import { container } from "tsyringe";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  CONSOLIDATION_PROVIDER_TOKEN,
+  ReconcileAction,
+  type AnnotateResult,
+  type ConsolidationProvider,
+  type ConsolidationResult,
+  type ReconcileResult,
+  type ReconcileTask,
+} from "@/domain/ports/consolidation-provider";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
+import { openDatabase } from "@/db/database";
+import { DB_TOKEN } from "@/db/repositories/base";
+import { LocalNullProvider } from "@/embeddings/local-null";
+import { EmbeddingWorker } from "@/embeddings/worker";
+import { MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { createConsolidator } from "@/consolidation";
 
 const session_start = container.resolve(SessionStartTool);
 
@@ -35,6 +38,10 @@ class FakeJudge implements ConsolidationProvider {
   reconcile(task: ReconcileTask): Promise<ReconcileResult> {
     this.calls++;
     return Promise.resolve(this.verdict(task));
+  }
+
+  annotate(): Promise<AnnotateResult> {
+    return Promise.reject(new Error("not used"));
   }
 }
 
@@ -57,12 +64,12 @@ function writeFact(s: string, title: string, content: string): Promise<WriteOut>
 
   return write.invoke({
     session_id: s,
-    memory_kind: "semantic",
+    memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content,
     project: P,
-  }) as Promise<WriteOut>;
+  }) as unknown as Promise<WriteOut>;
 }
 
 beforeEach(() => {
@@ -77,7 +84,7 @@ afterEach(() => {
 
 describe("Write-time reconcile", () => {
   beforeEach(() => {
-    container.register(CONSOLIDATOR_TOKEN, { useValue: createConsolidator("manual") });
+    container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator("manual") });
   });
 
   afterEach(() => {
@@ -91,12 +98,12 @@ describe("Write-time reconcile", () => {
   it("should return a judged action naming the target when a near-duplicate is written", async () => {
     // Given
     const judge = new FakeJudge((t) => ({
-      action: "update",
+      action: ReconcileAction.UPDATE,
       target_id: t.candidates[0]!.id,
       reason: "refines the existing token TTL fact",
     }));
 
-    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
+    container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, judge);
     const worker = container.resolve(EmbeddingWorker);
 
     const s = await session(P);
@@ -119,9 +126,13 @@ describe("Write-time reconcile", () => {
 
   it("should not call the judge or return reconcile when there is no near-duplicate", async () => {
     // Given
-    const judge = new FakeJudge(() => ({ action: "update", target_id: "x", reason: "" }));
+    const judge = new FakeJudge(() => ({
+      action: ReconcileAction.UPDATE,
+      target_id: "x",
+      reason: "",
+    }));
 
-    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
+    container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, judge);
     const worker = container.resolve(EmbeddingWorker);
 
     const s = await session(P);
@@ -140,12 +151,12 @@ describe("Write-time reconcile", () => {
   it("should decay the verdict to noop when it names an unknown target", async () => {
     // Given
     const judge = new FakeJudge(() => ({
-      action: "supersede",
+      action: ReconcileAction.SUPERSEDE,
       target_id: "01NOTACANDIDATE",
       reason: "hallucinated target",
     }));
 
-    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
+    container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, judge);
     const worker = container.resolve(EmbeddingWorker);
 
     const s = await session(P);
@@ -157,7 +168,7 @@ describe("Write-time reconcile", () => {
 
     // Then
     expect(dup.reconcile).toEqual({
-      action: "noop",
+      action: ReconcileAction.NOOP,
       target_id: null,
       reason: "hallucinated target",
     });
@@ -168,12 +179,12 @@ describe("Write-time reconcile", () => {
     process.env.MEMORY_CONSOLIDATE_RECONCILE = "off";
 
     const judge = new FakeJudge((t) => ({
-      action: "update",
+      action: ReconcileAction.UPDATE,
       target_id: t.candidates[0]!.id,
       reason: "x",
     }));
 
-    container.registerInstance(CONSOLIDATOR_TOKEN, judge);
+    container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, judge);
     const worker = container.resolve(EmbeddingWorker);
 
     const s = await session(P);
@@ -213,9 +224,10 @@ describe("Write-time reconcile", () => {
       enabled: true,
       generate: () => Promise.reject(new Error("no")),
       reconcile: () => Promise.reject(new Error("provider down")),
+      annotate: () => Promise.reject(new Error("not used")),
     };
 
-    container.registerInstance(CONSOLIDATOR_TOKEN, boom);
+    container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, boom);
     const worker = container.resolve(EmbeddingWorker);
 
     const s = await session(P);

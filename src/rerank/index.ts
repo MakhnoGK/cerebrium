@@ -1,10 +1,6 @@
-import type { RerankProvider } from "@/rerank/provider";
-import { LocalNullReranker } from "@/rerank/local-null";
+import { type RerankProvider } from "@/domain/ports/rerank-provider";
 import { LocalReranker } from "@/rerank/local";
-
-export type { RerankProvider } from "@/rerank/provider";
-
-export const RERANK_PROVIDER_TOKEN = Symbol("RerankProvider");
+import { LocalNullReranker } from "@/rerank/local-null";
 
 // The disabled default: `search` checks `enabled` and skips the rerank stage, leaving
 // the RRF ordering untouched. `rerank` is never called, but returns zeros for safety.
@@ -20,7 +16,12 @@ class DisabledReranker implements RerankProvider {
 // Reranker chosen by env at startup (default off). Adding a paid/cloud reranker is a
 // one-file change here plus a class — the interface is the whole contract.
 export function createReranker(name = process.env.MEMORY_RERANK || "off"): RerankProvider {
-  if (name === "local") return new LocalReranker();
-  if (name === "local-null") return new LocalNullReranker();
-  return new DisabledReranker();
+  switch (name) {
+    case "local":
+      return new LocalReranker();
+    case "local-null":
+      return new LocalNullReranker();
+    default:
+      return new DisabledReranker();
+  }
 }

@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
-import { setup } from "@test/helpers";
-import { chunkContent } from "@/core/chunk";
-import { _MemoryKind } from "@/core/vocab";
+import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
-import { SessionStartTool } from "../src/tools/session-start";
-import { WriteTool } from "../src/tools/write";
-import { UpdateTool } from "../src/tools/update";
+import { chunkContent } from "@/core/chunk";
+import { MemoryKind } from "@/core/vocab";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { UpdateTool } from "@/presentation/mcp/tools/update";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { setup } from "@test/helpers";
 
 const NOTE = `# Intro
 This is the introduction paragraph with enough words to stand on its own as a chunk.
@@ -69,7 +69,7 @@ describe("Embedding diff: only genuinely-new chunks re-embed", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const node = (await write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "howto",
       title: "Retrieval",
       content: NOTE,

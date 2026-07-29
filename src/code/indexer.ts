@@ -1,14 +1,15 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
-import type { FileIndexResult } from "@/db/repo";
-import type { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
-import { langForPath } from "@/code/languages";
-import { compileIgnore } from "@/code/ignore";
-import { parse } from "@/code/parser";
 import type { FileExtract } from "@/code/extract";
 import { extractFile } from "@/code/extract";
 import { readGitProvenance } from "@/code/git";
+import { compileIgnore } from "@/code/ignore";
+import { langForPath } from "@/code/languages";
+import { parse } from "@/code/parser";
+import type { FileIndexResult } from "@/db/repo";
+import type { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
+import { EdgeType } from "@/core/vocab";
 
 export interface IndexStats {
   repo: string;
@@ -218,7 +219,7 @@ export async function indexRepo(
       stats.edges_written += code.rebuildResolvedEdges(
         target.name,
         rel,
-        "imports",
+        EdgeType.IMPORTS,
         importPairs,
         opts.session_id,
         opts.now(),
@@ -226,7 +227,7 @@ export async function indexRepo(
       stats.edges_written += code.rebuildResolvedEdges(
         target.name,
         rel,
-        "calls",
+        EdgeType.CALLS,
         callPairs,
         opts.session_id,
         opts.now(),

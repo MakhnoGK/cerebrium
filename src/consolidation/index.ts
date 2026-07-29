@@ -1,22 +1,12 @@
-import type {
-  AnnotateResult,
-  ConsolidationProvider,
-  ConsolidationResult,
-  ReconcileResult,
-} from "@/consolidation/provider";
-import { ManualConsolidator } from "@/consolidation/manual";
-import { HttpConsolidator } from "@/consolidation/http";
+import {
+  type AnnotateResult,
+  type ConsolidationProvider,
+  type ConsolidationResult,
+  type ReconcileResult,
+} from "@/domain/ports/consolidation-provider";
 import { CommandConsolidator } from "@/consolidation/command";
-
-export type {
-  ConsolidationProvider,
-  ConsolidationResult,
-  ConsolidationTask,
-  ReconcileTask,
-  ReconcileResult,
-  AnnotateTask,
-  AnnotateResult,
-} from "@/consolidation/provider";
+import { HttpConsolidator } from "@/consolidation/http";
+import { ManualConsolidator } from "@/consolidation/manual";
 
 // `off` disables consolidation entirely — the daemon's ConsolidationWorker checks the
 // provider (and per-behavior posture) and skips detection. Distinct from `manual`, which

@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { setup } from "@test/helpers";
+import { describe, expect, it } from "vitest";
 import type { ExtractedSymbol, FileIndexInput } from "@/db/repo";
+import { EdgeType } from "@/core/vocab";
+import { setup } from "@test/helpers";
 
 const REPO = "demo";
 const PATH = "auth/auth.service.ts";
@@ -252,7 +253,7 @@ describe("CodeRepo code edges", () => {
     const n = code.rebuildResolvedEdges(
       REPO,
       PATH,
-      "imports",
+      EdgeType.IMPORTS,
       [
         { src: modId, dst: barId },
         // an unresolved import contributes no edge (indexer would never emit a dst)

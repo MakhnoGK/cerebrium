@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
 import { container } from "tsyringe";
+import { describe, expect, it } from "vitest";
+import { EdgeType, MemoryKind } from "@/core/vocab";
+import { LinkTool } from "@/presentation/mcp/tools/link";
+import { MirrorUpsertTool } from "@/presentation/mcp/tools/mirror-upsert";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { SourceRegisterTool } from "@/presentation/mcp/tools/source-register";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
-import { _MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "../../src/tools/session-start";
-import { SourceRegisterTool } from "../../src/tools/source-register";
-import { MirrorUpsertTool } from "../../src/tools/mirror-upsert";
-import { WriteTool } from "../../src/tools/write";
-import { LinkTool } from "../../src/tools/link";
-import { SearchTool } from "../../src/tools/search";
 
 const P = "acme";
 
@@ -72,18 +72,28 @@ describe("External mirrors end-to-end", () => {
     const issueId = iss.node_ids[0];
 
     // Relate the two mirror records across sources.
-    await link.invoke({ session_id: sid, src: incidentId!, dst: issueId!, type: "relates_to" });
+    await link.invoke({
+      session_id: sid,
+      src: incidentId!,
+      dst: issueId!,
+      type: EdgeType.RELATES_TO,
+    });
 
     // A decision documents the incident — the payoff link.
     const decision = (await write.invoke({
       session_id: sid,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache-TTL jitter to prevent stampede",
       content: "After the checkout latency incident we jitter cache TTLs to avoid a stampede.",
       project: P,
     })) as { id: string };
-    await link.invoke({ session_id: sid, src: decision.id, dst: incidentId!, type: "documents" });
+    await link.invoke({
+      session_id: sid,
+      src: decision.id,
+      dst: incidentId!,
+      type: EdgeType.DOCUMENTS,
+    });
 
     // Drain embeddings so vector + graph expansion are fully exercised.
     for (let i = 0; i < 20; i++) {

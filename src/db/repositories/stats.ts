@@ -1,10 +1,10 @@
-import type Database from "better-sqlite3";
 import { statSync } from "node:fs";
-import type { TechStats } from "@/core/types";
+import type Database from "better-sqlite3";
+import { inject, injectable } from "tsyringe";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { CodeRepo } from "@/db/repositories/code";
 import { EmbeddingQueueRepo } from "@/db/repositories/embedding-queue";
-import { inject, injectable } from "tsyringe";
+import type { TechStats } from "@/core/types";
 
 function walBytes(dbPath: string): number {
   if (dbPath === ":memory:" || !dbPath) return 0;

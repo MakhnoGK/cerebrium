@@ -1,10 +1,10 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { openDatabase } from "@/db/database";
 
 const here = dirname(fileURLToPath(import.meta.url));

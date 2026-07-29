@@ -1,7 +1,7 @@
+import { injectable } from "tsyringe";
+import { BaseRepo } from "@/db/repositories/base";
 import { newId } from "@/core/ids";
 import type { EventAction } from "@/core/vocab";
-import { BaseRepo } from "@/db/repositories/base";
-import { injectable } from "tsyringe";
 
 // Sessions and the events audit log — provenance for every tool call.
 @injectable()

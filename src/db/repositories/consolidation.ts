@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { newId } from "@/core/ids";
-import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
-import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
-import { BaseRepo } from "@/db/repositories/base";
 import { injectable } from "tsyringe";
+import { BaseRepo } from "@/db/repositories/base";
+import { newId } from "@/core/ids";
+import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
+import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 
 // The consolidation queue aggregate. Detection (in the daemon's
 // ConsolidationWorker) inserts candidates here; the auto path or the
@@ -17,7 +17,7 @@ const CANDIDATE_COLS =
 
 interface CandidateRow {
   id: string;
-  kind: string;
+  kind: ConsolidationKind;
   status: string;
   project: string | null;
   member_ids: string;
@@ -46,7 +46,7 @@ function pairKey(a: string, b: string): string {
 function toCandidate(r: CandidateRow): ConsolidationCandidate {
   return {
     id: r.id,
-    kind: r.kind as ConsolidationKind,
+    kind: r.kind,
     status: r.status as ConsolidationStatus,
     project: r.project,
     member_ids: JSON.parse(r.member_ids) as string[],
@@ -69,7 +69,8 @@ export class ConsolidationRepo extends BaseRepo {
     const info = this.tx(() =>
       this.db
         .prepare(
-          `INSERT OR IGNORE INTO consolidation_candidates
+          `INSERT
+          OR IGNORE INTO consolidation_candidates
              (id, kind, status, project, member_ids, member_hash, canonical_id, score, proposal, detected_at)
            VALUES (@id, @kind, 'pending', @project, @member_ids, @member_hash, @canonical_id, @score, @proposal, @detected_at)`,
         )
@@ -94,6 +95,7 @@ export class ConsolidationRepo extends BaseRepo {
     const row = this.db
       .prepare("SELECT 1 FROM consolidation_candidates WHERE member_hash = ?")
       .get(candidateHash(kind, memberIds));
+
     return row !== undefined;
   }
 

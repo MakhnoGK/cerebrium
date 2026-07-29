@@ -1,6 +1,6 @@
-import { Parser, Language } from "web-tree-sitter";
-import type { Tree } from "web-tree-sitter";
 import { createRequire } from "node:module";
+import { Language, Parser } from "web-tree-sitter";
+import type { Tree } from "web-tree-sitter";
 
 // tree-sitter runs in-process via WASM (no native build, no daemon), matching the
 // embedding worker's "in the one-server process" model. Parser.init() loads the

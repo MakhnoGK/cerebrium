@@ -1,13 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
 import { isMainModule } from "@/runtime/is-main";
 
 const savedArgv1 = process.argv[1];
 afterEach(() => {
-  process.argv[1] = savedArgv1;
+  process.argv[1] = savedArgv1!;
 });
 
 describe("Main module detection", () => {

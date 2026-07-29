@@ -1,10 +1,13 @@
-import { newId } from "@/core/ids";
+import { inject, injectable } from "tsyringe";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
-  annotationFtsText,
+  CONSOLIDATION_PROVIDER_TOKEN,
+  ConsolidationRecommendation,
   type ConsolidationProvider,
   type ConsolidationResult,
   type ConsolidationTask,
-} from "@/consolidation/provider";
+} from "@/domain/ports/consolidation-provider";
+import { SessionService } from "@/application/services";
 import {
   annotateBatch,
   annotatePosture,
@@ -22,11 +25,10 @@ import {
   prunePosture,
   simThreshold,
 } from "@/consolidation/config";
-import { inject, injectable } from "tsyringe";
-import { CONSOLIDATOR_TOKEN } from "@/tools/services/consolidation.service";
+import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
-import { SessionService } from "@/tools/services/session.service";
-import { CLOCK_TOKEN, Clock } from "@/tools/services/clock.service";
+import { newId } from "@/core/ids";
+import { ConsolidationKind, ConsolidationStatus, EdgeType } from "@/core/vocab";
 
 const CONSOLIDATION_LEASE = "consolidation";
 
@@ -55,7 +57,7 @@ export class ConsolidationWorker {
   private readonly leaseTtlMs: number;
 
   constructor(
-    @inject(CONSOLIDATOR_TOKEN)
+    @inject(CONSOLIDATION_PROVIDER_TOKEN)
     private readonly consolidator: ConsolidationProvider,
 
     private readonly queueRepo: EmbeddingQueueRepo,
@@ -150,11 +152,19 @@ export class ConsolidationWorker {
 
     for (const p of pairs) {
       if (posture === "auto") {
-        this.edgesRepo.insertEdge(p.src, p.dst, "similar_to", "system", this.ownerId, now, p.score);
+        this.edgesRepo.insertEdge(
+          p.src,
+          p.dst,
+          EdgeType.SIMILAR_TO,
+          "system",
+          this.ownerId,
+          now,
+          p.score,
+        );
         result.links_added++;
       } else {
         const id = this.consolidationRepo.insertCandidate({
-          kind: "link",
+          kind: ConsolidationKind.LINK,
           member_ids: [p.src, p.dst],
           canonical_id: p.dst,
           score: p.score,
@@ -188,21 +198,21 @@ export class ConsolidationWorker {
     });
 
     for (const cluster of clusters) {
-      if (this.consolidationRepo.candidateExists("distill", cluster.member_ids)) {
+      if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
         continue;
       }
 
       const gen = await this.tryGenerate({
-        kind: "distill",
+        kind: ConsolidationKind.DISTILL,
         project: cluster.project,
         inputs: this.consolidationRepo.candidateInputs(cluster.member_ids),
       });
 
       // Provider judged these not worth consolidating -> record a dismissed candidate
       // (with the reason) so it is auditable and never re-proposed.
-      if (gen?.recommendation === "reject") {
+      if (gen?.recommendation === ConsolidationRecommendation.REJECT) {
         const id = this.consolidationRepo.insertCandidate({
-          kind: "distill",
+          kind: ConsolidationKind.DISTILL,
           project: cluster.project,
           member_ids: cluster.member_ids,
           score: cluster.score,
@@ -211,7 +221,12 @@ export class ConsolidationWorker {
         });
 
         if (id) {
-          this.consolidationRepo.resolveCandidate(id, "dismissed", this.ownerId, now);
+          this.consolidationRepo.resolveCandidate(
+            id,
+            ConsolidationStatus.DISMISSED,
+            this.ownerId,
+            now,
+          );
           result.rejected++;
         }
 
@@ -234,7 +249,7 @@ export class ConsolidationWorker {
       }
 
       const id = this.consolidationRepo.insertCandidate({
-        kind: "distill",
+        kind: ConsolidationKind.DISTILL,
         project: cluster.project,
         member_ids: cluster.member_ids,
         score: cluster.score,
@@ -264,7 +279,7 @@ export class ConsolidationWorker {
     });
 
     for (const pair of pairs) {
-      if (this.consolidationRepo.candidateExists("merge", pair.member_ids)) {
+      if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
         continue;
       }
 
@@ -275,15 +290,15 @@ export class ConsolidationWorker {
       }
 
       const gen = await this.tryGenerate({
-        kind: "merge",
+        kind: ConsolidationKind.MERGE,
         project: pair.project,
         inputs: this.consolidationRepo.candidateInputs(pair.member_ids),
       });
 
       // Provider judged these distinct (not a true duplicate) -> dismiss with the reason.
-      if (gen?.recommendation === "reject") {
+      if (gen?.recommendation === ConsolidationRecommendation.REJECT) {
         const id = this.consolidationRepo.insertCandidate({
-          kind: "merge",
+          kind: ConsolidationKind.MERGE,
           project: pair.project,
           member_ids: pair.member_ids,
           canonical_id: pair.canonical_id,
@@ -293,7 +308,12 @@ export class ConsolidationWorker {
         });
 
         if (id) {
-          this.consolidationRepo.resolveCandidate(id, "dismissed", this.ownerId, now);
+          this.consolidationRepo.resolveCandidate(
+            id,
+            ConsolidationStatus.DISMISSED,
+            this.ownerId,
+            now,
+          );
           result.rejected++;
         }
 
@@ -315,7 +335,7 @@ export class ConsolidationWorker {
       }
 
       const id = this.consolidationRepo.insertCandidate({
-        kind: "merge",
+        kind: ConsolidationKind.MERGE,
         project: pair.project,
         member_ids: pair.member_ids,
         canonical_id: pair.canonical_id,
@@ -340,7 +360,7 @@ export class ConsolidationWorker {
     }
 
     for (const cand of this.consolidationRepo.pendingNeedingProposal(backfillBatch())) {
-      if (cand.kind !== "distill" && cand.kind !== "merge") {
+      if (cand.kind !== ConsolidationKind.DISTILL && cand.kind !== ConsolidationKind.MERGE) {
         continue;
       }
 
@@ -360,8 +380,13 @@ export class ConsolidationWorker {
 
       // Store the verdict either way; auto-dismiss the ones judged not worth consolidating
       // so the Review inbox surfaces only genuine duplicates.
-      if (gen.recommendation === "reject") {
-        this.consolidationRepo.resolveCandidate(cand.id, "dismissed", this.ownerId, now);
+      if (gen.recommendation === ConsolidationRecommendation.REJECT) {
+        this.consolidationRepo.resolveCandidate(
+          cand.id,
+          ConsolidationStatus.DISMISSED,
+          this.ownerId,
+          now,
+        );
         result.rejected++;
       } else {
         result.proposals_backfilled++;
@@ -385,7 +410,7 @@ export class ConsolidationWorker {
         result.pruned++;
       } else {
         const cid = this.consolidationRepo.insertCandidate({
-          kind: "prune",
+          kind: ConsolidationKind.PRUNE,
           member_ids: [id],
           score: 1,
           detected_at: now,

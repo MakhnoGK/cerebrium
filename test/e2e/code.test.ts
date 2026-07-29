@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
-import { setup, TestEnv } from "@test/helpers";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EmbeddingWorker } from "@/embeddings/worker";
-import { _MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "../../src/tools/session-start";
-import { CodeIndexTool } from "../../src/tools/code-index";
-import { SearchTool } from "../../src/tools/search";
-import { GetTool } from "../../src/tools/get";
-import { WriteTool } from "../../src/tools/write";
-import { LinkTool } from "../../src/tools/link";
+import { EdgeType, MemoryKind } from "@/core/vocab";
+import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { GetTool } from "@/presentation/mcp/tools/get";
+import { LinkTool } from "@/presentation/mcp/tools/link";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
+import { setup, TestEnv } from "@test/helpers";
 
 const CRYPTO = `export function hashToken(input: string): string {
   return input.split("").reverse().join("");
@@ -103,13 +103,13 @@ describe("Code indexing end-to-end", () => {
     // 4. write a decision ABOUT the code + link it with a documents edge
     const note = (await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.SEMANTIC,
+      memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Signing choice",
       content: "We validate credentials by signing with RS256 rather than HS256.",
       project: repoName,
     })) as { id: string };
-    await t.link.invoke({ session_id: s, src: note.id, dst: validateId, type: "documents" });
+    await t.link.invoke({ session_id: s, src: note.id, dst: validateId, type: EdgeType.DOCUMENTS });
 
     // 5. searching the NOTE's topic surfaces the symbol via graph expansion
     const viaGraph = (await t.search.invoke({
@@ -167,7 +167,7 @@ describe("Code indexing end-to-end", () => {
     // an equally-matching episodic note that WILL decay
     await t.write.invoke({
       session_id: s,
-      memory_kind: _MemoryKind.EPISODIC,
+      memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: "validate incident",
       content: "validate failed intermittently in prod",
