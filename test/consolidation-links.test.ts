@@ -11,8 +11,8 @@ import { EdgesRepo } from "@/db/repositories/edges";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
 
 const sessionStart = container.resolve(SessionStartTool);

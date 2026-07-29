@@ -4,10 +4,10 @@ import { RerankProvider } from "@/domain/ports/rerank-provider";
 import type { Envelope } from "@/db/repo";
 import { LocalNullReranker } from "@/rerank/local-null";
 import { EdgeType, MemoryKind } from "@/core/vocab";
-import { LinkTool } from "@/tools/link";
-import { SearchTool } from "@/tools/search";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { LinkTool } from "@/presentation/mcp/tools/link";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 async function session(project?: string): Promise<string> {

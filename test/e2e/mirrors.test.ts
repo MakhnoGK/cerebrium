@@ -1,12 +1,12 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@/core/vocab";
-import { LinkTool } from "@/tools/link";
-import { MirrorUpsertTool } from "@/tools/mirror-upsert";
-import { SearchTool } from "@/tools/search";
-import { SessionStartTool } from "@/tools/session-start";
-import { SourceRegisterTool } from "@/tools/source-register";
-import { WriteTool } from "@/tools/write";
+import { LinkTool } from "@/presentation/mcp/tools/link";
+import { MirrorUpsertTool } from "@/presentation/mcp/tools/mirror-upsert";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { SourceRegisterTool } from "@/presentation/mcp/tools/source-register";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 const P = "acme";

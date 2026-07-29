@@ -5,12 +5,12 @@ import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { EmbeddingWorker } from "@/embeddings/worker";
 import { EdgeType, MemoryKind } from "@/core/vocab";
-import { CodeIndexTool } from "@/tools/code-index";
-import { GetTool } from "@/tools/get";
-import { LinkTool } from "@/tools/link";
-import { SearchTool } from "@/tools/search";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { GetTool } from "@/presentation/mcp/tools/get";
+import { LinkTool } from "@/presentation/mcp/tools/link";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 const CRYPTO = `export function hashToken(input: string): string {

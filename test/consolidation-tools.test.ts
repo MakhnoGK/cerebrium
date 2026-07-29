@@ -4,10 +4,10 @@ import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provid
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { ConsolidationCandidate, Envelope } from "@/db/repo";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
-import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
-import { ConsolidateSuggestTool } from "@/tools/consolidate-suggest";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";
+import { ConsolidateSuggestTool } from "@/presentation/mcp/tools/consolidate-suggest";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 function tools() {

@@ -7,8 +7,8 @@ import {
 import { ConsolidationWorker } from "@/consolidation/worker";
 import type { Envelope } from "@/db/repo";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 const stub: ConsolidationProvider = {

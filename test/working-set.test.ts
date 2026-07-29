@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { estimateTokensOf } from "@/core/tokens";
 import { MemoryKind } from "@/core/vocab";
-import { CheckpointTool } from "@/tools/checkpoint";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { CheckpointTool } from "@/presentation/mcp/tools/checkpoint";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 const P = "proj";

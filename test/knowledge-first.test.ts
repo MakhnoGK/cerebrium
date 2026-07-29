@@ -5,10 +5,10 @@ import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { MemoryKind } from "@/core/vocab";
-import { CodeIndexTool } from "@/tools/code-index";
-import { SearchTool } from "@/tools/search";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 const DEPLOY = `/**

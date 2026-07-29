@@ -13,8 +13,8 @@ import {
 } from "@/runtime/daemon-pid";
 import { ensureDaemon } from "@/runtime/ensure-daemon";
 import { MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { nextIdleState, runDaemon } from "@/daemon";
 import { setup } from "@test/helpers";
 

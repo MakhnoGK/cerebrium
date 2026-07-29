@@ -6,7 +6,7 @@ import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { readGitProvenance } from "@/code/git";
 import { indexRepo } from "@/code/indexer";
-import { CodeIndexTool } from "@/tools/code-index";
+import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
 import { setup } from "@test/helpers";
 
 const dirs: string[] = [];

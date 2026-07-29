@@ -2,12 +2,12 @@ import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { EdgeType, MemoryKind } from "@/core/vocab";
-import { GetTool } from "@/tools/get";
-import { InvalidateTool } from "@/tools/invalidate";
-import { SearchTool } from "@/tools/search";
-import { SessionStartTool } from "@/tools/session-start";
-import { UpdateTool } from "@/tools/update";
-import { WriteTool } from "@/tools/write";
+import { GetTool } from "@/presentation/mcp/tools/get";
+import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { UpdateTool } from "@/presentation/mcp/tools/update";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 function tools() {

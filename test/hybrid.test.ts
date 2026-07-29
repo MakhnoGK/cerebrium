@@ -2,11 +2,11 @@ import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { EdgeType, MemoryKind } from "@/core/vocab";
-import { InvalidateTool } from "@/tools/invalidate";
-import { LinkTool } from "@/tools/link";
-import { SearchTool } from "@/tools/search";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
+import { LinkTool } from "@/presentation/mcp/tools/link";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 async function session(project?: string): Promise<string> {

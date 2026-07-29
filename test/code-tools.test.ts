@@ -3,12 +3,12 @@ import { fileURLToPath } from "node:url";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@/core/vocab";
-import { CodeIndexTool } from "@/tools/code-index";
-import { CodeLookupTool } from "@/tools/code-lookup";
-import { GetTool } from "@/tools/get";
-import { SessionStartTool } from "@/tools/session-start";
-import { UpdateTool } from "@/tools/update";
-import { WriteTool } from "@/tools/write";
+import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { CodeLookupTool } from "@/presentation/mcp/tools/code-lookup";
+import { GetTool } from "@/presentation/mcp/tools/get";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { UpdateTool } from "@/presentation/mcp/tools/update";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");

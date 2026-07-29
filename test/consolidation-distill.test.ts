@@ -6,9 +6,9 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/consolidation/worker";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
-import { ConsolidateApplyTool } from "@/tools/consolidate-apply";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 const BASE = "the deployment rollback procedure drains connections and flips the feature flag";

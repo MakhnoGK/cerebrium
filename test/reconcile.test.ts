@@ -16,8 +16,8 @@ import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { EmbeddingWorker } from "@/embeddings/worker";
 import { MemoryKind } from "@/core/vocab";
-import { SessionStartTool } from "@/tools/session-start";
-import { WriteTool } from "@/tools/write";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
+import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
 
 const session_start = container.resolve(SessionStartTool);

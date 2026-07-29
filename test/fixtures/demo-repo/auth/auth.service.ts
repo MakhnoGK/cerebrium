@@ -1,4 +1,5 @@
 /** Validates credentials and issues access tokens. */
+// @ts-ignore
 import { Injectable } from "@nestjs/common";
 import { hashToken } from "../util/crypto";
 
