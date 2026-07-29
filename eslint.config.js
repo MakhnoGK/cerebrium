@@ -87,5 +87,56 @@ export default tseslint.config(
       globals: { __dirname: "readonly", __filename: "readonly" },
     },
   },
+  {
+    files: ["src/core/**/*.ts", "src/domain/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@/application/*",
+                "@/presentation/*",
+                "@/tools/*",
+                "@/db/*",
+                "@/code/*",
+                "@/embeddings/*",
+                "@/rerank/*",
+                "@/consolidation/*",
+                "@/runtime/*",
+              ],
+              message: "core/domain are the innermost layers — they may not import outward.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "src/application/**/*.ts",
+      "src/db/**/*.ts",
+      "src/code/**/*.ts",
+      "src/embeddings/**/*.ts",
+      "src/rerank/**/*.ts",
+      "src/consolidation/**/*.ts",
+      "src/runtime/**/*.ts",
+    ],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/presentation/*", "@/tools/*"],
+              message:
+                "delivery is the outermost layer — depend on @/application or @/domain/ports instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettierRecommended,
 );
