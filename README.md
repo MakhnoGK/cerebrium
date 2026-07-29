@@ -21,25 +21,32 @@ A personal R&D project exploring long-term memory for agents, used daily with Cl
 
 ## Architecture
 
-Layered, no ORM, one file per MCP tool:
+Clean-architecture layers, no ORM, one directory per MCP tool:
 
 ```
 src/
-  core/           pure domain — ids, vocab, tokens, chunking, FTS, types (no I/O)
-  db/             SQLite: migrations, per-aggregate repositories, schema snapshot
-  embeddings/     pluggable embedding providers + async worker
-  rerank/         pluggable cross-encoder reranker (second-stage precision)
-  code/           tree-sitter code indexer (walk, parse, extract, resolve edges)
-  consolidation/  background sweep + pluggable generation adapter
-  tools/          one MCP handler per tool (Zod-validated at the boundary), no SQL
-  runtime/        process/IO glue (daemon spawn, pid file, main detection)
-  server.ts       stdio MCP server    daemon.ts  embedding drain    stats-cli.ts
+  core/            pure primitives — ids, vocab, tokens, chunking, FTS, types (no I/O)
+  domain/ports/    interfaces the inner layers own — Clock, Embedding/Rerank/Consolidation providers
+  application/     use-case services (node, memory, session, hints, embedding, consolidation)
+  db/              SQLite: migrations, per-aggregate repositories, schema snapshot
+  embeddings/      pluggable embedding providers + async worker
+  rerank/          pluggable cross-encoder reranker (second-stage precision)
+  code/            tree-sitter code indexer (walk, parse, extract, resolve edges)
+  consolidation/   background sweep + pluggable generation adapter
+  runtime/         process/IO glue (daemon spawn, pid file, system clock, main detection)
+  presentation/    the MCP delivery layer — stdio server, output adapter, one dir per tool
+  server.ts        stdio MCP server    daemon.ts  embedding drain    stats-cli.ts
 ```
 
-All SQL lives in `src/db/repositories/*` behind a `Repo` composition root; tools contain
-none. Enum-like vocabularies are defined once in `core/vocab.ts`. IDs are ULIDs;
-timestamps are UTC ISO-8601. The full design contract and invariants are in
-[`CLAUDE.md`](CLAUDE.md).
+Dependencies point inward only: `core` imports nothing, `domain/ports` sees only `core`,
+adapters implement the ports, and nothing may import `presentation`. **That direction is
+enforced by `no-restricted-imports` — a violation fails `npm run check`,** so the layering
+is a build constraint rather than a convention.
+
+All SQL lives in `src/db/repositories/*`; consumers inject the specific repositories they
+need and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
+once in `core/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
+contract and invariants are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Concepts
 
@@ -131,10 +138,16 @@ is searchable via FTS instantly and vector search catches up once the model is w
 ### Development & checks
 
 ```bash
-npm run check        # typecheck + lint + prettier + full Vitest suite
+npm run check        # typecheck + lint + prettier + full Vitest suite — the gate
+npm run build        # tsup bundle; NOT part of `check`, run it after moving files
 npm test             # full Vitest suite (offline, no keys — uses the local-null provider)
 npm run inspect      # MCP inspector against a throwaway dev DB (verify tool schemas)
 ```
+
+One root `tsconfig.json` covers `src` + `test` + `scripts`, so `tsc`, Vitest and every
+editor resolve the `@/*` alias identically. `npm run build` is deliberately separate:
+esbuild catches a class of import error `tsc` cannot, so run it after any change that
+moves files or rewrites imports.
 
 To run against the TypeScript source without a build step (throwaway dev DB), register a
 second server pointed at `tsx`:
@@ -423,6 +436,11 @@ WAL mode (already on) is required for Litestream.
   and dead-mirror pruning run in the daemon, each with an independent `off`/`suggest`/`auto`
   posture. Generation is a pluggable adapter (`manual`/`command`/`http`), and the default
   keeps the entire test suite offline — no API keys, no model download.
+- **Layering enforced by the build, not by discipline.** Dependencies point inward
+  (`core` → `domain/ports` → `application` → adapters → `presentation`), and the direction
+  is checked by lint rather than trusted to review — a wrong-way import fails `npm run check`.
+  Providers are ports with swappable adapters, so changing how embeddings, reranking or
+  consolidation are produced is a one-file change plus a class.
 - **Performance-driven choices.** Batched commits took measured single-writer embedding
   throughput from ~30 to ~176 chunks/s; a benchmark showed CPU int8 inference beating
   CoreML/WebGPU for the 384-dim model, so there is no GPU dependency.
