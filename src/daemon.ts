@@ -1,34 +1,11 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import Database from "better-sqlite3";
-import { container } from "tsyringe";
-import { CLOCK_TOKEN } from "@/domain/ports/clock";
-import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
-import {
-  CONSOLIDATION_PROVIDER_TOKEN,
-  type ConsolidationProvider,
-} from "@/domain/ports/consolidation-provider";
-import {
-  EMBEDDING_PROVIDER_TOKEN,
-  type EmbeddingProvider,
-} from "@/domain/ports/embedding-provider";
-import { ConsolidationWorker, EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
-import {
-  ConsolidationConfig,
-  DaemonConfig,
-  DatabaseConfig,
-  EmbeddingConfig,
-  EnvConfigSource,
-} from "@/infrastructure/config";
-import "@/infrastructure/config/sections";
-import { openDatabase } from "@/db/database";
+import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
-import { DB_TOKEN } from "@/db/repositories/base";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
-import { SystemClock } from "@/runtime/system-clock";
-import { createConsolidator } from "@/consolidation";
-import { createProvider } from "@/embeddings";
+import { buildContainer } from "@/container";
+import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
 
 // Standalone embedding drain. Outlives any Claude Code session: the MCP server
 // spawns it detached (see ensureDaemon in server.ts) and it keeps draining the
@@ -115,29 +92,11 @@ export async function runDaemon(
 }
 
 async function main(): Promise<void> {
-  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
+  const container = buildContainer({ role: "daemon" });
   const dbPath = container.resolve(DatabaseConfig).path;
-  if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
 
-  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
-  const consolidationConfig = container.resolve(ConsolidationConfig);
-  const embeddingConfig = container.resolve(EmbeddingConfig);
-  container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase(dbPath) });
-  container.registerSingleton(CLOCK_TOKEN, SystemClock);
-  // The daemon feeds the model in large batches (vs. the gentle in-process fallback).
-  container.register(WORKER_OPTIONS_TOKEN, {
-    useValue: { batchSize: container.resolve(EmbeddingConfig).batchSize },
-  });
-  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, {
-    useValue: createProvider(
-      embeddingConfig.provider,
-      embeddingConfig.model,
-      embeddingConfig.cacheDir,
-    ),
-  });
-  container.register<ConsolidationProvider>(CONSOLIDATION_PROVIDER_TOKEN, {
-    useValue: createConsolidator(consolidationConfig.provider, consolidationConfig),
-  });
+  // Registrations are lazy, so this bails out before the DB is ever opened.
+  if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
 
   const daemonConfig = container.resolve(DaemonConfig);
   const queue = container.resolve(EmbeddingQueueRepo);

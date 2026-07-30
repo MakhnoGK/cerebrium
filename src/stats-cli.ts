@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import Database from "better-sqlite3";
-import { container } from "tsyringe";
-import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
-import { openDatabaseReadonly } from "@/db/database";
-import { DatabaseConfig, EnvConfigSource, RerankConfig } from "@/infrastructure/config";
-import "@/infrastructure/config/sections";
+import type Database from "better-sqlite3";
 import { StatsRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { nowIso } from "@/core/ids";
+import { buildContainer } from "@/container";
+import { DatabaseConfig, RerankConfig } from "@/infrastructure/config";
 
 // Read-only inspection command: `cerebrium-stats`. Safe to run anytime,
 // including while no MCP server or daemon is up — it never writes.
@@ -27,12 +24,11 @@ function fmtBytes(n: number): string {
 }
 
 function main(): void {
-  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
+  const container = buildContainer({ role: "cli" });
 
   const dbPath = container.resolve(DatabaseConfig).path;
   const asJson = process.argv.includes("--json");
-  const db = openDatabaseReadonly(dbPath);
-  container.register<Database.Database>(DB_TOKEN, { useValue: db });
+  const db = container.resolve<Database.Database>(DB_TOKEN); // read-only for this role
   try {
     const s = container.resolve(StatsRepo).techStats(nowIso());
     const daemonAlive = isDaemonAlive(dbPath);
