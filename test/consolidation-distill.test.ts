@@ -4,7 +4,7 @@ import {
   ConsolidationRecommendation,
   type ConsolidationProvider,
 } from "@/domain/ports/consolidation-provider";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { ConsolidationWorker } from "@/application/workers";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";

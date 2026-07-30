@@ -8,7 +8,7 @@ import type {
   ConsolidationResult,
   ReconcileResult,
 } from "@/domain/ports/consolidation-provider";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
 import type { SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";

@@ -82,7 +82,7 @@ export class ConsolidationWorker {
   }
 
   // One consolidation pass. Side-effecting; tests call it directly with a fixed clock.
-  // Only the lease holder does work — a non-holder returns zeros.
+  // Only the leaseholder does work — a non-holder returns zeros.
   async tick(): Promise<ConsolidationTickResult> {
     const now = this.now();
     const result: ConsolidationTickResult = {
@@ -351,7 +351,7 @@ export class ConsolidationWorker {
   }
 
   // Backfill proposals for pending distill/merge candidates that were queued before a
-  // generation provider was available (e.g. detected under `manual`, then switched to
+  // generation provider was available (e.g., detected under `manual`, then switched to
   // `http`). Provider-gated; leaves a candidate untouched on generation failure (retried
   // next sweep). Bounded by `backfillBatch` so a tick stays reasonable.
   private async backfillProposals(now: string, result: ConsolidationTickResult): Promise<void> {
@@ -378,7 +378,7 @@ export class ConsolidationWorker {
 
       this.consolidationRepo.setCandidateProposal(cand.id, gen);
 
-      // Store the verdict either way; auto-dismiss the ones judged not worth consolidating
+      // Store the verdict either way; auto-dismiss the ones judged not worth consolidating,
       // so the Review inbox surfaces only genuine duplicates.
       if (gen.recommendation === ConsolidationRecommendation.REJECT) {
         this.consolidationRepo.resolveCandidate(
@@ -396,7 +396,7 @@ export class ConsolidationWorker {
 
   // Tier-1 mirror prune. Deterministic, no generation. auto soft-invalidates
   // dead mirror nodes (they then never surface in default search or graph expansion);
-  // suggest queues a prune candidate; off skips. Never touches authored memory.
+  // suggest queues for a prune candidate; off skips. Never touches authored memory.
   private pruneMirrors(now: string, result: ConsolidationTickResult): void {
     const posture = prunePosture();
 
@@ -423,7 +423,7 @@ export class ConsolidationWorker {
     }
   }
 
-  // Write-time attribute enrichment. Provider-gated: for each un-annotated
+  // Write-time attribute enrichment. Provider-gated: for each unannotated
   // semantic node, generate keywords/tags/context and fold them into its FTS text for
   // wider recall. Non-destructive — the revision body is untouched, only the FTS index
   // gains terms. A generation failure skips that node (retried next sweep) and never

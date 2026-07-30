@@ -12,6 +12,7 @@ import {
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
+import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { isMainModule } from "@/runtime/is-main";
@@ -20,7 +21,6 @@ import { Server } from "@/presentation/mcp/server";
 import { createProvider } from "@/embeddings";
 import { createReranker } from "@/rerank";
 import { createConsolidator } from "./consolidation";
-import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "./embeddings/worker";
 import { ensureDaemon } from "./runtime/ensure-daemon";
 
 async function main(): Promise<void> {

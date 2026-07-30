@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { EmbeddingWorker } from "@/application/workers";
 import { indexRepo } from "@/code/indexer";
-import type { EmbeddingWorker } from "@/embeddings/worker";
 import { setup } from "@test/helpers";
 
 const CRYPTO = `/** Hash a token deterministically. */

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
