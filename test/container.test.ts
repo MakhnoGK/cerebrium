@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type Database from "better-sqlite3";
+import { container as globalContainer } from "tsyringe";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import type { RerankProvider } from "@/domain/ports/rerank-provider";
 import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
-import { WORKER_OPTIONS_TOKEN, type WorkerOptions } from "@/application/workers";
+import {
+  ConsolidationWorker,
+  EmbeddingWorker,
+  WORKER_OPTIONS_TOKEN,
+  type WorkerOptions,
+} from "@/application/workers";
+import { openDatabase } from "@/db/database";
+import { StatsRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { nowIso } from "@/core/ids";
+import { Server } from "@/presentation/mcp/server";
 import { buildContainer, KERNEL_TOKENS, type HostRole } from "@/container";
 import { StaticConfigSource } from "@/infrastructure/config";
 
@@ -21,18 +35,19 @@ function build(role: HostRole, env: Record<string, string | undefined> = OFFLINE
   return buildContainer({ role, source: new StaticConfigSource(env) });
 }
 
+// The `cli` role opens the DB read-only with fileMustExist, so parity across roles has to
+// be proven against a real migrated file rather than ":memory:".
+const DB_FILE = join(tmpdir(), `cerebrium-container-${String(process.pid)}.db`);
+const ON_FILE = { ...OFFLINE, MEMORY_DB_PATH: DB_FILE };
+
+beforeAll(() => {
+  openDatabase(DB_FILE).close(); // run the migrations, then release the writer
+});
+afterAll(() => {
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${DB_FILE}${suffix}`, { force: true });
+});
+
 describe("buildContainer", () => {
-  it("should register every kernel token for every role", () => {
-    // Given / When / Then
-    for (const role of ROLES) {
-      const c = build(role);
-
-      for (const token of KERNEL_TOKENS) {
-        expect(c.isRegistered(token), `${role} is missing a kernel token`).toBe(true);
-      }
-    }
-  });
-
   it("should resolve the configured providers", () => {
     // Given / When
     const c = build("server");
@@ -70,5 +85,42 @@ describe("buildContainer", () => {
 
     // Then — building was lazy; only the resolve fails.
     expect(() => c.resolve(DB_TOKEN)).toThrow();
+  });
+});
+
+describe("Host role parity", () => {
+  it("should register every kernel token itself, for every role", () => {
+    // Given / When / Then — `isRegistered(token, false)` ignores what the parent container
+    // already holds, so a token this role failed to register cannot hide behind an
+    // inherited one. That inheritance is exactly why a resolve-based check proves nothing.
+    for (const role of ROLES) {
+      const scope = globalContainer.createChildContainer();
+      buildContainer({ role, source: new StaticConfigSource(ON_FILE), into: scope });
+
+      for (const [name, token] of Object.entries(KERNEL_TOKENS)) {
+        expect(scope.isRegistered(token, false), `${role} did not register ${name}`).toBe(true);
+      }
+    }
+  });
+
+  it("should resolve what each role actually hosts", () => {
+    // Given / When / Then
+    expect(build("server", ON_FILE).resolve(Server)).toBeDefined();
+
+    const daemon = build("daemon", ON_FILE);
+    expect(daemon.resolve(EmbeddingWorker)).toBeDefined();
+    expect(daemon.resolve(ConsolidationWorker)).toBeDefined();
+
+    expect(build("cli", ON_FILE).resolve(StatsRepo).techStats(nowIso()).content.nodes_total).toBe(
+      0,
+    );
+  });
+
+  it("should refuse a write through the database the cli role resolves", () => {
+    // Given
+    const db = build("cli", ON_FILE).resolve<Database.Database>(DB_TOKEN);
+
+    // When / Then
+    expect(() => db.exec("CREATE TABLE nope (x)")).toThrow(/readonly/i);
   });
 });

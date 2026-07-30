@@ -30,26 +30,32 @@ export interface ContainerOptions {
   role: HostRole;
   // Pin configuration instead of reading the environment (tests, and later a config file).
   source?: ConfigSource;
+  // Where to register. Defaults to the global container the `@tool()` and `@configSection()`
+  // decorators populate at import time. A child container isolates one build from another,
+  // which is how the parity test inspects a role's own registrations.
+  into?: DependencyContainer;
 }
 
-// Every token the kernel registers, in one list, so a parity test can assert that no
-// role is missing one.
-export const KERNEL_TOKENS = [
-  CONFIG_SOURCE_TOKEN,
-  DB_TOKEN,
-  CLOCK_TOKEN,
-  WORKER_OPTIONS_TOKEN,
-  EMBEDDING_PROVIDER_TOKEN,
-  RERANK_PROVIDER_TOKEN,
-  CONSOLIDATION_PROVIDER_TOKEN,
-] as const;
+// Every token the kernel registers, named, so a parity test can assert that no role is
+// missing one and say which.
+export const KERNEL_TOKENS = {
+  configSource: CONFIG_SOURCE_TOKEN,
+  database: DB_TOKEN,
+  clock: CLOCK_TOKEN,
+  workerOptions: WORKER_OPTIONS_TOKEN,
+  embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
+  rerankProvider: RERANK_PROVIDER_TOKEN,
+  consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
+} as const;
 
-export function buildContainer({ role, source }: ContainerOptions): DependencyContainer {
-  container.register(CONFIG_SOURCE_TOKEN, { useValue: source ?? new EnvConfigSource() });
+export function buildContainer({ role, source, into }: ContainerOptions): DependencyContainer {
+  const target = into ?? container;
 
-  registerLocalKernel(role);
+  target.register(CONFIG_SOURCE_TOKEN, { useValue: source ?? new EnvConfigSource() });
 
-  return container;
+  registerLocalKernel(role, target);
+
+  return target;
 }
 
 // The local kernel: everything resolves in-process against one SQLite file. A remote
@@ -59,8 +65,8 @@ export function buildContainer({ role, source }: ContainerOptions): DependencyCo
 // Registrations are lazy (`instanceCachingFactory`): a role that never resolves the
 // embedding provider never constructs it, which is what makes registering the full set
 // for every role free.
-function registerLocalKernel(role: HostRole): void {
-  container.register(DB_TOKEN, {
+function registerLocalKernel(role: HostRole, target: DependencyContainer): void {
+  target.register(DB_TOKEN, {
     useFactory: instanceCachingFactory((c) => {
       const { path } = c.resolve(DatabaseConfig);
 
@@ -68,9 +74,9 @@ function registerLocalKernel(role: HostRole): void {
     }),
   });
 
-  container.registerSingleton(CLOCK_TOKEN, SystemClock);
+  target.registerSingleton(CLOCK_TOKEN, SystemClock);
 
-  container.register(WORKER_OPTIONS_TOKEN, {
+  target.register(WORKER_OPTIONS_TOKEN, {
     // The daemon feeds the model in large batches; the server's in-process fallback
     // worker stays gentle on the shared DB.
     useFactory: instanceCachingFactory((c) =>
@@ -78,7 +84,7 @@ function registerLocalKernel(role: HostRole): void {
     ),
   });
 
-  container.register(EMBEDDING_PROVIDER_TOKEN, {
+  target.register(EMBEDDING_PROVIDER_TOKEN, {
     useFactory: instanceCachingFactory((c) => {
       const config = c.resolve(EmbeddingConfig);
 
@@ -86,7 +92,7 @@ function registerLocalKernel(role: HostRole): void {
     }),
   });
 
-  container.register(RERANK_PROVIDER_TOKEN, {
+  target.register(RERANK_PROVIDER_TOKEN, {
     useFactory: instanceCachingFactory((c) => {
       const config = c.resolve(RerankConfig);
 
@@ -94,7 +100,7 @@ function registerLocalKernel(role: HostRole): void {
     }),
   });
 
-  container.register(CONSOLIDATION_PROVIDER_TOKEN, {
+  target.register(CONSOLIDATION_PROVIDER_TOKEN, {
     useFactory: instanceCachingFactory((c) => {
       const config = c.resolve(ConsolidationConfig);
 
