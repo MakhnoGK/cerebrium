@@ -14,7 +14,7 @@ import {
   str,
 } from "@/domain/ports/config";
 import { Posture } from "@/core/vocab";
-import { ConfigRegistry, StaticConfigSource } from "@/infrastructure/config";
+import { ConfigRegistry, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 
 const SPEC = {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
@@ -147,6 +147,36 @@ describe("Section instances", () => {
     // Then
     expect(provenance.find((p) => p.path === "retrieval.symbolWeight")?.source).toBe("env");
     expect(provenance.find((p) => p.path === "retrieval.model")?.source).toBe("default");
+  });
+});
+
+describe("LayeredConfigSource", () => {
+  it("should take the first source that has a value and fall through when it does not", () => {
+    // Given
+    const layered = new LayeredConfigSource(
+      new StaticConfigSource({ MEMORY_A: "pinned" }),
+      new StaticConfigSource({ MEMORY_A: "shadowed", MEMORY_B: "fallback" }),
+    );
+
+    // When / Then
+    expect(layered.read("a", "MEMORY_A")).toBe("pinned");
+    expect(layered.read("b", "MEMORY_B")).toBe("fallback");
+    expect(layered.read("c", "MEMORY_C")).toBeUndefined();
+  });
+
+  it("should read a later source live rather than snapshotting it", () => {
+    // Given
+    const mutable: Record<string, string | undefined> = {};
+    const layered = new LayeredConfigSource(
+      new StaticConfigSource({}),
+      new StaticConfigSource(mutable),
+    );
+
+    // When
+    mutable.MEMORY_LATE = "set-after-construction";
+
+    // Then
+    expect(layered.read("late", "MEMORY_LATE")).toBe("set-after-construction");
   });
 });
 

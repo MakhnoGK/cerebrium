@@ -31,3 +31,26 @@ export class StaticConfigSource implements ConfigSource {
     return this.values[envName];
   }
 }
+
+// Consults its sources in order; the first one with a value wins. Ordering is the
+// caller's precedence statement — the test suite puts its pins ahead of the environment
+// so an ambient variable cannot drag the suite online.
+export class LayeredConfigSource implements ConfigSource {
+  private readonly sources: ConfigSource[];
+
+  constructor(...sources: ConfigSource[]) {
+    this.sources = sources;
+  }
+
+  read(path: string, envName: string): string | undefined {
+    for (const source of this.sources) {
+      const value = source.read(path, envName);
+
+      if (value !== undefined) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+}
