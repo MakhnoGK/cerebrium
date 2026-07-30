@@ -1,26 +1,26 @@
+import { Posture } from "@/core/vocab";
+
 // Consolidation configuration — read at point of use from env (no central config
 // module in this codebase; mirrors dedupThreshold() and the MEMORY_DAEMON_* idioms).
 // Per-behavior posture is independently tunable; the Balanced defaults ship auto for the
 // cheap/reversible behaviors (links, Tier-1 prune) and suggest for the destructive ones
 // (distillation, merge).
 
-export type Posture = "off" | "suggest" | "auto";
-
 function posture(value: string | undefined, fallback: Posture): Posture {
-  return value === "off" || value === "suggest" || value === "auto" ? value : fallback;
+  return (Object.values(Posture) as string[]).includes(value ?? "") ? (value as Posture) : fallback;
 }
 
 export function linksPosture(): Posture {
-  return posture(process.env.MEMORY_CONSOLIDATE_LINKS, "auto");
+  return posture(process.env.MEMORY_CONSOLIDATE_LINKS, Posture.AUTO);
 }
 export function distillPosture(): Posture {
-  return posture(process.env.MEMORY_CONSOLIDATE_DISTILL, "suggest");
+  return posture(process.env.MEMORY_CONSOLIDATE_DISTILL, Posture.SUGGEST);
 }
 export function mergePosture(): Posture {
-  return posture(process.env.MEMORY_CONSOLIDATE_MERGE, "suggest");
+  return posture(process.env.MEMORY_CONSOLIDATE_MERGE, Posture.SUGGEST);
 }
 export function prunePosture(): Posture {
-  return posture(process.env.MEMORY_CONSOLIDATE_PRUNE, "auto");
+  return posture(process.env.MEMORY_CONSOLIDATE_PRUNE, Posture.AUTO);
 }
 
 // Write-time dedup reconcile. `suggest` (default) surfaces a judged action in the write
@@ -28,14 +28,14 @@ export function prunePosture(): Posture {
 // `similar_existing` hint still fires). `auto` is intentionally treated as `suggest`
 // here — the write tool never mutates the graph on the agent's behalf.
 export function reconcilePosture(): Posture {
-  return posture(process.env.MEMORY_CONSOLIDATE_RECONCILE, "suggest");
+  return posture(process.env.MEMORY_CONSOLIDATE_RECONCILE, Posture.SUGGEST);
 }
 
 // Attribute enrichment. `auto` (default) generates + folds attributes into
 // FTS during the sweep; `off` skips it. `suggest` has no meaning here (an annotation is a
 // non-destructive index enrichment with nothing to review) and is treated as `auto`.
 export function annotatePosture(): Posture {
-  return posture(process.env.MEMORY_CONSOLIDATE_ANNOTATE, "auto");
+  return posture(process.env.MEMORY_CONSOLIDATE_ANNOTATE, Posture.AUTO);
 }
 
 // Max un-annotated semantic nodes enriched per sweep (bounds generation calls per tick;

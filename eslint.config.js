@@ -105,6 +105,7 @@ export default tseslint.config(
                 "@/rerank/*",
                 "@/consolidation/*",
                 "@/runtime/*",
+                "@/infrastructure/*",
               ],
               message: "core/domain are the innermost layers — they may not import outward.",
             },
@@ -122,6 +123,7 @@ export default tseslint.config(
       "src/rerank/**/*.ts",
       "src/consolidation/**/*.ts",
       "src/runtime/**/*.ts",
+      "src/infrastructure/**/*.ts",
     ],
     rules: {
       "@typescript-eslint/no-restricted-imports": [

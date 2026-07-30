@@ -15,7 +15,7 @@ import { deriveSummary, Envelope } from "@/db/repo";
 import { SearchRepo } from "@/db/repositories";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
-import { MemoryKind } from "@/core/vocab";
+import { MemoryKind, Posture } from "@/core/vocab";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { metadata } from "@/presentation/mcp/tools/write/metadata";
@@ -78,7 +78,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
     const similar =
       args.memory_kind === MemoryKind.SEMANTIC ? await this.dedupProbe(args, envelope) : [];
 
-    const shouldReconcile = similar.length && "off" !== reconcilePosture();
+    const shouldReconcile = similar.length && reconcilePosture() !== Posture.OFF;
     const reconcile = shouldReconcile
       ? await this.consolidationService.reconcile({
           similar,

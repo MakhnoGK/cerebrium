@@ -20,7 +20,6 @@ import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
 import { createReranker } from "@/rerank";
 
-
 // Offline relevance eval: measure whether the `local` cross-encoder reranker
 // improves search precision over RRF-only fusion on a labeled query set. Both runs
 // share the same seeded corpus and embeddings and differ only in the rerank stage,

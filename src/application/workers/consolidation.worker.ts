@@ -28,7 +28,7 @@ import {
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
 import { newId } from "@/core/ids";
-import { ConsolidationKind, ConsolidationStatus, EdgeType } from "@/core/vocab";
+import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
 
 const CONSOLIDATION_LEASE = "consolidation";
 
@@ -141,7 +141,7 @@ export class ConsolidationWorker {
   private discoverLinks(now: string, result: ConsolidationTickResult): void {
     const posture = linksPosture();
 
-    if (posture === "off") {
+    if (posture === Posture.OFF) {
       return;
     }
 
@@ -151,7 +151,7 @@ export class ConsolidationWorker {
     });
 
     for (const p of pairs) {
-      if (posture === "auto") {
+      if (posture === Posture.AUTO) {
         this.edgesRepo.insertEdge(
           p.src,
           p.dst,
@@ -185,7 +185,7 @@ export class ConsolidationWorker {
   private async distill(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = distillPosture();
 
-    if (posture === "off") {
+    if (posture === Posture.OFF) {
       return;
     }
 
@@ -233,7 +233,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      if (posture === "auto" && gen) {
+      if (posture === Posture.AUTO && gen) {
         this.nodesRepo.applyDistillation({
           title: gen.title,
           content: gen.body,
@@ -269,7 +269,7 @@ export class ConsolidationWorker {
   private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = mergePosture();
 
-    if (posture === "off") {
+    if (posture === Posture.OFF) {
       return;
     }
 
@@ -320,7 +320,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      if (posture === "auto" && gen) {
+      if (posture === Posture.AUTO && gen) {
         this.nodesRepo.applyMerge({
           survivorId: pair.canonical_id,
           loserId: loser,
@@ -400,12 +400,12 @@ export class ConsolidationWorker {
   private pruneMirrors(now: string, result: ConsolidationTickResult): void {
     const posture = prunePosture();
 
-    if (posture === "off") {
+    if (posture === Posture.OFF) {
       return;
     }
 
     for (const id of this.consolidationRepo.deadMirrorNodes(pruneBatch())) {
-      if (posture === "auto") {
+      if (posture === Posture.AUTO) {
         this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;
       } else {
@@ -429,7 +429,7 @@ export class ConsolidationWorker {
   // gains terms. A generation failure skips that node (retried next sweep) and never
   // blocks the rest. `suggest` has nothing to review, so it behaves as `auto`; `off` skips.
   private async annotate(now: string, result: ConsolidationTickResult): Promise<void> {
-    if (!this.consolidator.enabled || annotatePosture() === "off") {
+    if (!this.consolidator.enabled || annotatePosture() === Posture.OFF) {
       return;
     }
 
