@@ -37,7 +37,8 @@ src/
   code/            tree-sitter code indexer (walk, parse, extract, resolve edges)
   consolidation/   pluggable generation adapter (manual / command / http)
   runtime/         process/IO glue (daemon spawn, pid file, system clock, main detection)
-  presentation/    the MCP delivery layer — stdio server, output adapter, one dir per tool
+  presentation/    the MCP delivery layer — stdio server, audit + output adapters,
+                   one dir per tool
   server.ts        stdio MCP server    daemon.ts  embedding drain    stats-cli.ts
 ```
 
@@ -282,9 +283,13 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. |
 | `consolidate_apply` | Resolve a candidate: `accept` applies it (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
-| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), and drain health (provider, daemon alive, lease holder). `session_id` optional. |
+| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), and reranker usage (eligible vs actually reranked searches, candidates scored). `session_id` optional. |
 
-Every tool call updates the session's `last_seen` and appends an `events` row.
+Every tool call updates the session's `last_seen` and appends an `events` row — written at
+the boundary by `AuditedTool`, on failures as well as successes, so provenance cannot be
+forgotten by a new tool. A tool contributes the row's `node_id`/`detail` declaratively via
+the optional `describeEvent(args, result)`; `stats`' reranker counters are derived from
+those rows.
 
 ## Commands
 
