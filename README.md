@@ -28,13 +28,15 @@ src/
   core/            pure primitives — ids, vocab, tokens, chunking, FTS, types (no I/O)
   domain/ports/    interfaces the inner layers own — Clock, Embedding/Rerank/Consolidation
                    providers, and the declarative config mechanism
-  application/     services/ (node, memory, session, hints, embedding, consolidation)
+  application/     services/ (node, memory, session, hints, embedding, consolidation,
+                             code index, event log)
                    workers/  (embedding drain, consolidation sweep)
+                   errors/   (typed errors a use case throws)
   db/              SQLite: migrations, per-aggregate repositories, schema snapshot
   infrastructure/  config sections + the environment source and registry
   embeddings/      pluggable embedding providers
   rerank/          pluggable cross-encoder reranker (second-stage precision)
-  code/            tree-sitter code indexer (walk, parse, extract, resolve edges)
+  code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
   consolidation/   pluggable generation adapter (manual / command / http)
   runtime/         process/IO glue (daemon spawn, pid file, system clock, main detection)
   presentation/    the MCP delivery layer — stdio server, audit + output adapters,
