@@ -3,9 +3,10 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
+import { CodeIndexService } from "@/application/services";
 import { stableSymbolId } from "@/code/extract";
-import { indexRepo } from "@/code/indexer";
 import { setup } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
@@ -18,6 +19,9 @@ afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs.length = 0;
 });
+function index(name: string, root: string) {
+  return container.resolve(CodeIndexService).indexTarget({ name, root }, { session_id: "s" });
+}
 function tmpRepo(files: Record<string, string>): string {
   const d = mkdtempSync(join(tmpdir(), "rename-"));
   dirs.push(d);
@@ -28,17 +32,16 @@ function tmpRepo(files: Record<string, string>): string {
 describe("Migration 006: rename third-brain -> cerebrium", () => {
   it("should relabel the mirror, recompute symbol identity, and leave other repos intact when the rename runs", async () => {
     // Given
-    const { code, queue, db, clock } = setup();
-    const now = () => clock.t;
+    const { code, db, clock } = setup();
 
     const oldRoot = tmpRepo({
       "a.ts": "export function alpha() { return beta(); }\nfunction beta() {}\n",
     });
-    await indexRepo(code, queue, { name: "third-brain", root: oldRoot }, { session_id: "s", now });
+    await index("third-brain", oldRoot);
     code.setRepoProvenance("third-brain", oldRoot, "main", "deadbee", false, clock.t);
 
     const otherRoot = tmpRepo({ "b.ts": "export function gamma() {}\n" });
-    await indexRepo(code, queue, { name: "other-app", root: otherRoot }, { session_id: "s", now });
+    await index("other-app", otherRoot);
 
     // Authored memories carrying legacy project names.
     const insNode = db.prepare(
@@ -126,10 +129,9 @@ describe("Migration 006: rename third-brain -> cerebrium", () => {
 
   it("should be idempotent and a no-op when no legacy names are present", async () => {
     // Given
-    const { code, queue, db, clock } = setup();
-    const now = () => clock.t;
+    const { db } = setup();
     const root = tmpRepo({ "a.ts": "export function alpha() {}\n" });
-    await indexRepo(code, queue, { name: "third-brain", root }, { session_id: "s", now });
+    await index("third-brain", root);
 
     // When
     up(db);
@@ -144,21 +146,15 @@ describe("Migration 006: rename third-brain -> cerebrium", () => {
 
   it("should add nothing when re-indexing under the new name after the rename", async () => {
     // Given
-    const { code, queue, db, clock } = setup();
-    const now = () => clock.t;
+    const { db } = setup();
     const root = tmpRepo({
       "a.ts": "export function alpha() { return beta(); }\nfunction beta() {}\n",
     });
-    await indexRepo(code, queue, { name: "third-brain", root }, { session_id: "s", now });
+    await index("third-brain", root);
     up(db);
 
     // When — the renamed mirror must be recognised as current by an index run under the new name.
-    const stats = await indexRepo(
-      code,
-      queue,
-      { name: "cerebrium", root },
-      { session_id: "s", now },
-    );
+    const stats = await index("cerebrium", root);
 
     // Then
     expect(stats.symbols_added).toBe(0);

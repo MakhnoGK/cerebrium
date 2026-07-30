@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
+import { CodeIndexService } from "@/application/services";
 import { readGitProvenance } from "@/code/git";
-import { indexRepo } from "@/code/indexer";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
 import { setup } from "@test/helpers";
 
@@ -99,17 +99,14 @@ describe("Repo provenance store", () => {
 describe("Indexer records provenance", () => {
   it("should store nulls for a non-git root and surface it in stats", async () => {
     // Given
-    const { code, queue, stats, clock } = setup();
+    const { code, stats, clock } = setup();
     const root = tmp("mk-index-prov-");
     writeFileSync(join(root, "x.ts"), "export function hello() { return 1; }\n");
 
     // When
-    const s = await indexRepo(
-      code,
-      queue,
-      { name: "proj", root },
-      { session_id: "s", now: () => clock.t },
-    );
+    const s = await container
+      .resolve(CodeIndexService)
+      .indexTarget({ name: "proj", root }, { session_id: "s" });
 
     // Then
     expect(s).toMatchObject({ branch: null, commit: null, dirty: false });

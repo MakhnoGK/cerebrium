@@ -1,9 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CodeIndexService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
-import { indexRepo } from "@/code/indexer";
+import type { IndexStats } from "@/core/types";
 import { setup } from "@test/helpers";
 
 const CRYPTO = `/** Hash a token deterministically. */
@@ -55,22 +57,20 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function opts(now: () => string) {
-  return { session_id: "sys-index", now };
+// The same use case the `code_index` tool runs; the clock comes from the container.
+function index(): Promise<IndexStats> {
+  return container
+    .resolve(CodeIndexService)
+    .indexTarget({ name: NAME, root }, { session_id: "sys-index" });
 }
 
 describe("Indexer incremental hash-gate", () => {
   it("should index a fresh repo and then add/update/re-embed nothing on a no-op re-index", async () => {
     // Given
-    const { code, queue, clock, worker } = setup();
+    const { queue, clock, worker } = setup();
 
     // When
-    const first = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const first = await index();
 
     // Then
     expect(first.files_indexed).toBe(2);
@@ -80,12 +80,7 @@ describe("Indexer incremental hash-gate", () => {
 
     // When
     clock.advanceDays(1);
-    const again = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const again = await index();
 
     // Then
     expect(again.files_indexed).toBe(0);
@@ -96,13 +91,8 @@ describe("Indexer incremental hash-gate", () => {
 
   it("should re-embed only the edited symbol and keep sibling ids + embeddings when one symbol changes", async () => {
     // Given
-    const { code, queue, clock, worker, db } = setup();
-    await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const { clock, worker, db } = setup();
+    await index();
     await drain(worker);
 
     const idOf = (q: string) =>
@@ -121,12 +111,7 @@ describe("Indexer incremental hash-gate", () => {
       ),
     );
     clock.advanceDays(1);
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.files_indexed).toBe(1); // only auth.service.ts reparsed; crypto.ts hash-gated
@@ -149,13 +134,8 @@ describe("Indexer incremental hash-gate", () => {
 
   it("should soft-invalidate a symbol so it survives via history when it is deleted from a file", async () => {
     // Given
-    const { code, queue, nodes, clock, db } = setup();
-    await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const { nodes, clock, db } = setup();
+    await index();
     const ttlId = (
       db
         .prepare("SELECT node_id FROM symbols WHERE qualified = ?")
@@ -165,12 +145,7 @@ describe("Indexer incremental hash-gate", () => {
     // When
     write("auth/auth.service.ts", AUTH.replace("export const TOKEN_TTL = 900;", ""));
     clock.advanceDays(1);
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.symbols_invalidated).toBeGreaterThanOrEqual(1);
@@ -183,23 +158,13 @@ describe("Indexer incremental hash-gate", () => {
 
   it("should invalidate a file's symbols and drop its code_files row when the whole file is deleted", async () => {
     // Given
-    const { code, queue, clock } = setup();
-    await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const { code, clock } = setup();
+    await index();
 
     // When
     rmSync(join(root, "util/crypto.ts"));
     clock.advanceDays(1);
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.symbols_invalidated).toBeGreaterThanOrEqual(1);
@@ -211,15 +176,10 @@ describe("Indexer incremental hash-gate", () => {
 describe("Indexer edges", () => {
   it("should create defines, cross-file imports, and best-effort calls and drop unresolved imports", async () => {
     // Given
-    const { code, queue, clock, db } = setup();
+    const { db } = setup();
 
     // When
-    await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    await index();
 
     // Then
     const idOf = (q: string) =>
@@ -270,17 +230,12 @@ class AuthService {
 describe("Indexer PHP support", () => {
   it("should index PHP and resolve by-name imports/calls across files", async () => {
     // Given
-    const { code, queue, clock, db } = setup();
+    const { db } = setup();
     write("src/Util/Hasher.php", PHP_HASHER);
     write("src/Service/AuthService.php", PHP_AUTH);
 
     // When
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.files_indexed).toBe(4); // 2 TS + 2 PHP
@@ -323,17 +278,12 @@ impl AuthService {
 describe("Indexer Rust support", () => {
   it("should index Rust and resolve by-name imports/calls across files", async () => {
     // Given
-    const { code, queue, clock, db } = setup();
+    const { db } = setup();
     write("src/util.rs", RUST_UTIL);
     write("src/auth.rs", RUST_AUTH);
 
     // When
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.files_indexed).toBe(4); // 2 TS + 2 Rust
@@ -359,19 +309,14 @@ describe("Indexer Rust support", () => {
 describe("Indexer walk filters", () => {
   it("should skip node_modules, dist, and .gitignore'd paths when walking", async () => {
     // Given
-    const { code, queue, clock } = setup();
+    const { code } = setup();
     write("node_modules/dep/index.ts", "export const x = 1;");
     write("dist/bundle.ts", "export const y = 2;");
     write("secret/keys.ts", "export const k = 3;");
     write(".gitignore", "secret/\n");
 
     // When
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.files_scanned).toBe(2); // only util/crypto.ts + auth/auth.service.ts
@@ -381,19 +326,14 @@ describe("Indexer walk filters", () => {
 
   it("should index source with a NUL byte in a string literal without treating it as binary", async () => {
     // Given
-    const { code, queue, clock } = setup();
+    const { code } = setup();
     write(
       "nul/sep.ts",
       "export function join(a: string, b: string): string {\n  return `${a}\0${b}`;\n}\n",
     );
 
     // When
-    const res = await indexRepo(
-      code,
-      queue,
-      { name: NAME, root },
-      opts(() => clock.t),
-    );
+    const res = await index();
 
     // Then
     expect(res.files_indexed).toBe(3); // crypto + auth + nul/sep
