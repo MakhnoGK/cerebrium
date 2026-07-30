@@ -1,6 +1,7 @@
 export { ConsolidationService } from "@/application/services/consolidation.service";
 export { DaemonService } from "@/application/services/daemon.service";
 export { EmbeddingService } from "@/application/services/embedding.service";
+export { EventLogService } from "@/application/services/event-log.service";
 export { HintsService } from "@/application/services/hints.service";
 export { MemoryService } from "@/application/services/memory.service";
 export { NodeService } from "@/application/services/node.service";
