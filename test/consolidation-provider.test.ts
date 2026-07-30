@@ -16,6 +16,7 @@ import {
 } from "@/consolidation/provider";
 import { ConsolidationKind } from "@/core/vocab";
 import { createConsolidator } from "@/consolidation";
+import { ConsolidationConfig, StaticConfigSource } from "@/infrastructure/config";
 
 const TASK: ConsolidationTask = {
   kind: ConsolidationKind.DISTILL,
@@ -59,12 +60,14 @@ describe("Consolidator environment selection", () => {
     expect(createConsolidator("command")).toMatchObject({ name: "command", enabled: true });
   });
 
-  it("should read the provider name from MEMORY_CONSOLIDATE when no name is passed", () => {
-    // Given
-    process.env.MEMORY_CONSOLIDATE = "http";
+  it("should take the provider name from configuration, not from the ambient environment", () => {
+    // Given — the factory no longer reads env; the composition root passes the resolved
+    // provider, so a section is what selects the backend.
+    const config = new ConsolidationConfig(new StaticConfigSource({ MEMORY_CONSOLIDATE: "http" }));
 
     // When / Then
-    expect(createConsolidator().name).toBe("http");
+    expect(config.provider).toBe("http");
+    expect(createConsolidator(config.provider, config).name).toBe("http");
   });
 });
 

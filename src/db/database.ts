@@ -11,8 +11,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const requireCjs = createRequire(import.meta.url);
 
 export function defaultDbPath(): string {
-  const env = process.env.MEMORY_DB_PATH;
-  if (env?.length) return env;
   return join(homedir(), ".cerebrium", "memory.db");
 }
 

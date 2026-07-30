@@ -9,12 +9,17 @@ import { type EmbeddingProvider } from "@/domain/ports/embedding-provider";
 // files (~120MB) auto-download to MEMORY_MODEL_CACHE on first use; no API key, no daemon.
 export class LocalProvider implements EmbeddingProvider {
   readonly name: string;
+  private readonly cacheDir: string;
   readonly version = "1";
   readonly dim = 384;
   private pipe: Promise<FeatureExtractor> | null = null;
 
-  constructor(model = process.env.MEMORY_EMBED_MODEL || "Xenova/multilingual-e5-small") {
+  constructor(
+    model = "Xenova/multilingual-e5-small",
+    cacheDir = join(homedir(), ".cerebrium", "models"),
+  ) {
     this.name = model;
+    this.cacheDir = cacheDir;
   }
 
   async embed(texts: string[], role: "query" | "passage"): Promise<number[][]> {
@@ -33,7 +38,7 @@ export class LocalProvider implements EmbeddingProvider {
       // Dynamic import keeps the heavy dep (and its model download) out of any
       // path that uses the local-null provider — the entire test suite.
       const { pipeline, env } = await import("@huggingface/transformers");
-      env.cacheDir = process.env.MEMORY_MODEL_CACHE || join(homedir(), ".cerebrium", "models");
+      env.cacheDir = this.cacheDir;
       return await pipeline("feature-extraction", this.name, {
         dtype: "q8",
       });

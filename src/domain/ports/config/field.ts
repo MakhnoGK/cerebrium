@@ -62,6 +62,11 @@ class NumberField extends Field<number> {
     return this;
   }
 
+  min(lo: number): this {
+    this.lo = lo;
+    return this;
+  }
+
   int(): this {
     this.integer = true;
     return this;

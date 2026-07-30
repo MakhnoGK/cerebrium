@@ -13,12 +13,12 @@ class DisabledReranker implements RerankProvider {
   }
 }
 
-// Reranker chosen by env at startup (default off). Adding a paid/cloud reranker is a
-// one-file change here plus a class — the interface is the whole contract.
-export function createReranker(name = process.env.MEMORY_RERANK || "off"): RerankProvider {
+// Reranker chosen by the resolved configuration (default off). Adding a paid/cloud
+// reranker is a one-file change here plus a class — the interface is the whole contract.
+export function createReranker(name = "off", model?: string, cacheDir?: string): RerankProvider {
   switch (name) {
     case "local":
-      return new LocalReranker();
+      return new LocalReranker(model, cacheDir);
     case "local-null":
       return new LocalNullReranker();
     default:

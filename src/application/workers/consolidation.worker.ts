@@ -8,27 +8,15 @@ import {
   type ConsolidationTask,
 } from "@/domain/ports/consolidation-provider";
 import { SessionService } from "@/application/services";
-import {
-  annotateBatch,
-  annotatePosture,
-  backfillBatch,
-  distillBatch,
-  distillPosture,
-  linkBatch,
-  linksPosture,
-  mergeBatch,
-  mergePosture,
-  mergeSimThreshold,
-  minAgeDays,
-  minCluster,
-  pruneBatch,
-  prunePosture,
-  simThreshold,
-} from "@/consolidation/config";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
 import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
+import {
+  ConsolidationBatchConfig,
+  ConsolidationPostureConfig,
+  ConsolidationThresholdsConfig,
+} from "@/infrastructure/config";
 
 const CONSOLIDATION_LEASE = "consolidation";
 
@@ -68,6 +56,10 @@ export class ConsolidationWorker {
     private readonly sessionService: SessionService,
 
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+
+    private readonly posture: ConsolidationPostureConfig,
+    private readonly thresholds: ConsolidationThresholdsConfig,
+    private readonly batch: ConsolidationBatchConfig,
   ) {
     // TODO: Config service
     this.leaseTtlMs = 60_000;
@@ -139,15 +131,15 @@ export class ConsolidationWorker {
   // similar_to link discovery. Deterministic kNN over stored vectors; no
   // generation. auto -> write system similar_to edges; suggest -> queue; off -> skip.
   private discoverLinks(now: string, result: ConsolidationTickResult): void {
-    const posture = linksPosture();
+    const posture = this.posture.links;
 
     if (posture === Posture.OFF) {
       return;
     }
 
     const pairs = this.consolidationRepo.similarLinkCandidates({
-      minScore: simThreshold(),
-      limit: linkBatch(),
+      minScore: this.thresholds.sim,
+      limit: this.batch.link,
     });
 
     for (const p of pairs) {
@@ -183,18 +175,20 @@ export class ConsolidationWorker {
   // pre-generating a proposal when a provider is available. A generation failure degrades
   // to a proposal-less suggestion — a weak model can never corrupt memory.
   private async distill(now: string, result: ConsolidationTickResult): Promise<void> {
-    const posture = distillPosture();
+    const posture = this.posture.distill;
 
     if (posture === Posture.OFF) {
       return;
     }
 
-    const cutoff = new Date(Date.parse(now) - minAgeDays() * 86_400_000).toISOString();
+    const cutoff = new Date(
+      Date.parse(now) - this.thresholds.minAgeDays * 86_400_000,
+    ).toISOString();
     const clusters = this.consolidationRepo.staleEpisodicClusters({
-      minScore: simThreshold(),
-      minCluster: minCluster(),
+      minScore: this.thresholds.sim,
+      minCluster: this.thresholds.minCluster,
       cutoff,
-      limit: distillBatch(),
+      limit: this.batch.distill,
     });
 
     for (const cluster of clusters) {
@@ -267,15 +261,15 @@ export class ConsolidationWorker {
   // the merged body safely); under manual, or on generation failure, it degrades to a
   // suggestion. Never auto-merges authored knowledge without a mind or a model.
   private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
-    const posture = mergePosture();
+    const posture = this.posture.merge;
 
     if (posture === Posture.OFF) {
       return;
     }
 
     const pairs = this.consolidationRepo.duplicateSemanticPairs({
-      minScore: mergeSimThreshold(),
-      limit: mergeBatch(),
+      minScore: this.thresholds.mergeSim,
+      limit: this.batch.merge,
     });
 
     for (const pair of pairs) {
@@ -359,7 +353,7 @@ export class ConsolidationWorker {
       return;
     }
 
-    for (const cand of this.consolidationRepo.pendingNeedingProposal(backfillBatch())) {
+    for (const cand of this.consolidationRepo.pendingNeedingProposal(this.batch.backfill)) {
       if (cand.kind !== ConsolidationKind.DISTILL && cand.kind !== ConsolidationKind.MERGE) {
         continue;
       }
@@ -398,13 +392,13 @@ export class ConsolidationWorker {
   // dead mirror nodes (they then never surface in default search or graph expansion);
   // suggest queues for a prune candidate; off skips. Never touches authored memory.
   private pruneMirrors(now: string, result: ConsolidationTickResult): void {
-    const posture = prunePosture();
+    const posture = this.posture.prune;
 
     if (posture === Posture.OFF) {
       return;
     }
 
-    for (const id of this.consolidationRepo.deadMirrorNodes(pruneBatch())) {
+    for (const id of this.consolidationRepo.deadMirrorNodes(this.batch.prune)) {
       if (posture === Posture.AUTO) {
         this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;
@@ -429,11 +423,11 @@ export class ConsolidationWorker {
   // gains terms. A generation failure skips that node (retried next sweep) and never
   // blocks the rest. `suggest` has nothing to review, so it behaves as `auto`; `off` skips.
   private async annotate(now: string, result: ConsolidationTickResult): Promise<void> {
-    if (!this.consolidator.enabled || annotatePosture() === Posture.OFF) {
+    if (!this.consolidator.enabled || this.posture.annotate === Posture.OFF) {
       return;
     }
 
-    for (const node of this.consolidationRepo.unannotatedSemantic(annotateBatch())) {
+    for (const node of this.consolidationRepo.unannotatedSemantic(this.batch.annotate)) {
       let a;
 
       try {

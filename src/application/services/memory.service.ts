@@ -2,15 +2,12 @@ import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { MirrorRepo, SearchRepo, StatsRepo } from "@/db/repositories";
 import { estimateTokensOf } from "@/core/tokens";
+import { RetrievalConfig } from "@/infrastructure/config";
 
 const CHECKPOINT_LIMIT = 2;
 const TASK_LIMIT = 10;
 const SEMANTIC_LIMIT = 15;
 const RECENT_LIMIT = 15;
-
-function workingSetBudget(): number {
-  return Number(process.env.MEMORY_WORKING_SET_TOKENS) || 1500;
-}
 
 @injectable()
 export class MemoryService {
@@ -19,6 +16,8 @@ export class MemoryService {
     private readonly mirrorRepo: MirrorRepo,
     private readonly statsRepo: StatsRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+
+    private readonly retrieval: RetrievalConfig,
   ) {}
 
   public getWorkingSet(project: string | undefined) {
@@ -50,7 +49,7 @@ export class MemoryService {
   }
 
   private selectWithinBudget<T>(items: T[]) {
-    const budget = workingSetBudget();
+    const budget = this.retrieval.workingSetTokens;
     let spent = 0;
 
     return items.filter((item) => {

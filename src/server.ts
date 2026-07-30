@@ -3,6 +3,7 @@ import "reflect-metadata";
 import Database from "better-sqlite3";
 import { container } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
 import {
   CONSOLIDATION_PROVIDER_TOKEN,
   type ConsolidationProvider,
@@ -15,6 +16,14 @@ import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/reran
 import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
+import {
+  ConsolidationConfig,
+  DatabaseConfig,
+  EmbeddingConfig,
+  EnvConfigSource,
+  RerankConfig,
+} from "@/infrastructure/config";
+import "@/infrastructure/config/sections";
 import { isMainModule } from "@/runtime/is-main";
 import { SystemClock } from "@/runtime/system-clock";
 import { Server } from "@/presentation/mcp/server";
@@ -24,14 +33,26 @@ import { createConsolidator } from "./consolidation";
 import { ensureDaemon } from "./runtime/ensure-daemon";
 
 async function main(): Promise<void> {
-  container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase() });
+  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
+
+  const consolidation = container.resolve(ConsolidationConfig);
+  const embedding = container.resolve(EmbeddingConfig);
+  const rerank = container.resolve(RerankConfig);
+
+  container.register<Database.Database>(DB_TOKEN, {
+    useValue: openDatabase(container.resolve(DatabaseConfig).path),
+  });
   container.registerSingleton(CLOCK_TOKEN, SystemClock);
   container.register(WORKER_OPTIONS_TOKEN, { useValue: {} });
   container.register<ConsolidationProvider>(CONSOLIDATION_PROVIDER_TOKEN, {
-    useValue: createConsolidator(),
+    useValue: createConsolidator(consolidation.provider, consolidation),
   });
-  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
-  container.register<RerankProvider>(RERANK_PROVIDER_TOKEN, { useValue: createReranker() });
+  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, {
+    useValue: createProvider(embedding.provider, embedding.model, embedding.cacheDir),
+  });
+  container.register<RerankProvider>(RERANK_PROVIDER_TOKEN, {
+    useValue: createReranker(rerank.provider, rerank.model, rerank.cacheDir),
+  });
 
   const worker = container.resolve(EmbeddingWorker);
   const server = container.resolve(Server);

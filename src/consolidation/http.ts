@@ -33,6 +33,14 @@ interface ChatResponse {
 // failure, non-2xx, timeout, or malformed body throws — the caller (daemon) then degrades
 // to `suggest`, exactly like the reranker's graceful fallback. `fetchFn` is injectable so
 // the contract is testable offline without a live model.
+// Fallbacks for a directly-constructed adapter (tests). Production values come from
+// ConsolidationConfig via createConsolidator.
+const DEFAULTS = {
+  url: "http://127.0.0.1:11434/api/chat",
+  model: "gemma4:12b-it-qat",
+  timeoutMs: 60_000,
+};
+
 export class HttpConsolidator implements ConsolidationProvider {
   readonly name = "http";
   readonly version = "1";
@@ -43,10 +51,9 @@ export class HttpConsolidator implements ConsolidationProvider {
   private readonly fetchFn: FetchFn;
 
   constructor(opts?: { url?: string; model?: string; timeoutMs?: number; fetchFn?: FetchFn }) {
-    this.url = opts?.url ?? process.env.MEMORY_CONSOLIDATE_URL ?? "http://127.0.0.1:11434/api/chat";
-    this.model = opts?.model ?? process.env.MEMORY_CONSOLIDATE_MODEL ?? "gemma4:12b-it-qat";
-    this.timeoutMs =
-      opts?.timeoutMs ?? (Number(process.env.MEMORY_CONSOLIDATE_TIMEOUT_MS) || 60_000);
+    this.url = opts?.url ?? DEFAULTS.url;
+    this.model = opts?.model ?? DEFAULTS.model;
+    this.timeoutMs = opts?.timeoutMs ?? DEFAULTS.timeoutMs;
     this.fetchFn = opts?.fetchFn ?? fetch;
   }
 

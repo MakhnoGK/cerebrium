@@ -24,7 +24,7 @@ async function connect(): Promise<Client> {
   const scope = container.createChildContainer();
   scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
   scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
-  scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
+  scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
 
   const server = scope.resolve(Server);
   const client = new Client({ name: "test", version: "0.0.0" });

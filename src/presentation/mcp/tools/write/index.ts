@@ -10,7 +10,6 @@ import {
   HintsService,
   NodeService,
 } from "@/application/services";
-import { reconcilePosture } from "@/consolidation/config";
 import { deriveSummary, Envelope } from "@/db/repo";
 import { SearchRepo } from "@/db/repositories";
 import { chunkContent } from "@/core/chunk";
@@ -19,6 +18,7 @@ import { MemoryKind, Posture } from "@/core/vocab";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { metadata } from "@/presentation/mcp/tools/write/metadata";
+import { ConsolidationPostureConfig, RetrievalConfig } from "@/infrastructure/config";
 
 const DEDUP_CANDIDATES = 5;
 
@@ -47,6 +47,9 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
     private readonly search: SearchRepo,
     // TODO: Move to service ?
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly embeddings: EmbeddingProvider,
+
+    private readonly posture: ConsolidationPostureConfig,
+    private readonly retrieval: RetrievalConfig,
   ) {}
 
   public getMetadata = () => metadata;
@@ -78,7 +81,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
     const similar =
       args.memory_kind === MemoryKind.SEMANTIC ? await this.dedupProbe(args, envelope) : [];
 
-    const shouldReconcile = similar.length && reconcilePosture() !== Posture.OFF;
+    const shouldReconcile = similar.length && this.posture.reconcile !== Posture.OFF;
     const reconcile = shouldReconcile
       ? await this.consolidationService.reconcile({
           similar,
@@ -159,7 +162,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
         }
       }
 
-      const threshold = dedupThreshold();
+      const threshold = this.retrieval.dedupThreshold;
 
       return scored
         .filter((c) => c.score >= threshold && c.id !== envelope.id)
@@ -170,11 +173,6 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       return []; // dedup is advisory; a probe failure must never block the writing
     }
   }
-}
-
-// Read at call time, so it is tunable per-run (and per-test) via env.
-function dedupThreshold(): number {
-  return Number(process.env.MEMORY_DEDUP_THRESHOLD) || 0.82;
 }
 
 function tokenSet(text: string): Set<string> {
