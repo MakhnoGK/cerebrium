@@ -31,8 +31,8 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 - **Layers, innermost first. The direction is enforced by `no-restricted-imports` in `eslint.config.js` — a violation fails `npm run check`.**
   - `src/core/` — pure primitives (ids, vocab, tokens, chunk, fts, types). No db/fs/process deps, no outward imports at all.
   - `src/domain/ports/` — the interfaces + DI tokens the inner layers own (`Clock`, `EmbeddingProvider`, `RerankProvider`, `ConsolidationProvider`). May import `@/core` only.
-  - `src/application/services/` — use-case services (`NodeService`, `MemoryService`, `SessionService`, `HintsService`, `EmbeddingService`, `ConsolidationService`, `DaemonService`).
-  - Adapters/infra — `src/db/`, `src/code/`, `src/embeddings/`, `src/rerank/`, `src/consolidation/`, `src/runtime/`. Implement the ports; never import delivery.
+  - `src/application/services/` — use-case services (`NodeService`, `MemoryService`, `SessionService`, `HintsService`, `EmbeddingService`, `ConsolidationService`, `CodeIndexService`, `EventLogService`, `DaemonService`); `src/application/errors/` — the typed errors a use case throws, mapped to a message at the tool boundary.
+  - Adapters/infra — `src/db/`, `src/code/`, `src/embeddings/`, `src/rerank/`, `src/consolidation/`, `src/runtime/`. Implement the ports; never import delivery. They provide *capabilities*, not orchestration: `src/code/` walks/parses/extracts/resolves, while the indexing use case that sequences them and writes lives in `CodeIndexService`.
   - `src/presentation/mcp/` — the MCP transport (`server.ts`, `adapters/`) and every tool under `tools/`. The outermost layer; nothing may import it.
   - Composition roots — `src/server.ts`, `src/daemon.ts`, `src/stats-cli.ts` wire the container and may import anything.
 - Import via the `@/*` alias (-> `src/*`), `@test/*` in tests. **Parent-relative imports (`../…`) are lint-banned** — they resolve differently per tool/IDE. Sibling `./…` is fine. Barrels (`index.ts`) are the public entry for a folder — members import each other by direct path to avoid cycles.
@@ -89,6 +89,7 @@ Don't scaffold speculatively — the *(future)* columns already in the schema ar
 Layering work that is deliberately **not** done yet, so don't treat its absence as an oversight:
 - `src/application/` still imports `src/db/` repositories directly. Depending on repository *ports* instead is a real future step (and the seam a remote/service-core split would need) — the lint rules intentionally permit it today.
 - The adapters still live at `src/{embeddings,rerank,consolidation,code,runtime}/` rather than under `src/infrastructure/`. They are already in the correct dependency position, so this is a rename, not a re-layering — and the two workers are application services that already sit in `src/application/workers/`; do not move them into infrastructure.
+- `src/application/errors/` holds only the two code-index errors. The general typed-error vocabulary (`InvariantViolation`/`NotFound`/`WriteOnceViolation`) and the boundary mapping are still to come; the ~35 bare `throw new Error` calls across `src/` are the backlog, not the pattern.
 
 ## Working style
 

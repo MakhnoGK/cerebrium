@@ -7,7 +7,7 @@ import {
   type ConsolidationResult,
   type ConsolidationTask,
 } from "@/domain/ports/consolidation-provider";
-import { SessionService } from "@/application/services";
+import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
 import { newId } from "@/core/ids";

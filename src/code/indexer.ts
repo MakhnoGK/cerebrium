@@ -1,42 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FileExtract } from "@/code/extract";
-import { extractFile } from "@/code/extract";
-import { readGitProvenance } from "@/code/git";
 import { compileIgnore } from "@/code/ignore";
 import { langForPath } from "@/code/languages";
-import { parse } from "@/code/parser";
-import type { FileIndexResult } from "@/db/repo";
-import type { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
-import { EdgeType } from "@/core/vocab";
-
-export interface IndexStats {
-  repo: string;
-  files_scanned: number;
-  files_indexed: number;
-  files_skipped: number;
-  symbols_added: number;
-  symbols_updated: number;
-  symbols_invalidated: number;
-  edges_written: number;
-  duration_ms: number;
-  parked_embeddings: number;
-  branch: string | null;
-  commit: string | null;
-  dirty: boolean;
-}
-
-export interface IndexTarget {
-  name: string;
-  root: string;
-}
-
-export interface IndexOptions {
-  session_id: string;
-  now: () => string;
-  force?: boolean;
-}
+import type { CodeRepo } from "@/db/repositories";
 
 // Directories never worth walking, independent of .gitignore.
 const SKIP_DIRS = new Set([
@@ -51,11 +19,11 @@ const SKIP_DIRS = new Set([
   ".cache",
   ".vscode-test",
 ]);
-const MAX_BYTES = 1_000_000;
+export const MAX_BYTES = 1_000_000;
 // Yield the event loop this often during a long index so a big repo can't
 // monopolize the shared DB — other server processes' writes (and this process's
 // own embedding worker) get scheduling gaps between per-file transactions.
-const YIELD_EVERY = 8;
+export const YIELD_EVERY = 8;
 
 export function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -129,134 +97,9 @@ export function walk(root: string): Candidate[] {
   return out;
 }
 
-export async function indexRepo(
-  code: CodeRepo,
-  queue: EmbeddingQueueRepo,
-  target: IndexTarget,
-  opts: IndexOptions,
-): Promise<IndexStats> {
-  const start = Date.parse(opts.now());
-  const stats: IndexStats = {
-    repo: target.name,
-    files_scanned: 0,
-    files_indexed: 0,
-    files_skipped: 0,
-    symbols_added: 0,
-    symbols_updated: 0,
-    symbols_invalidated: 0,
-    edges_written: 0,
-    duration_ms: 0,
-    parked_embeddings: 0,
-    branch: null,
-    commit: null,
-    dirty: false,
-  };
-
-  const candidates = existsSync(target.root) ? walk(target.root) : [];
-  const onDisk = new Set(candidates.map((c) => c.rel));
-  const dirty: { rel: string; lang: string; extract: FileExtract }[] = [];
-
-  // ---- Pass 1: symbols + defines + per-file hash (transactional per file) ----
-  for (const c of candidates) {
-    stats.files_scanned++;
-    let buf: Buffer;
-    try {
-      if (statSync(c.abs).size > MAX_BYTES) {
-        stats.files_skipped++;
-        continue;
-      }
-      buf = readFileSync(c.abs);
-    } catch {
-      stats.files_skipped++;
-      continue;
-    }
-    if (looksBinary(buf)) {
-      stats.files_skipped++;
-      continue;
-    }
-    const fileHash = sha256(buf);
-    if (!opts.force && code.codeFileHash(target.name, c.rel) === fileHash) {
-      stats.files_skipped++;
-      continue; // hash-gate: unchanged file, nothing parsed or re-embedded
-    }
-
-    const source = buf.toString("utf8");
-    const tree = await parse(c.wasm, source);
-    const extract = extractFile(target.name, c.rel, c.lang, source, tree.rootNode);
-    tree.delete(); // free WASM heap; extractFile has copied out everything it needs
-    const res: FileIndexResult = code.applyFileIndex({
-      repo: target.name,
-      path: c.rel,
-      lang: c.lang,
-      fileHash,
-      symbols: extract.symbols,
-      defines: extract.defines,
-      session_id: opts.session_id,
-      ts: opts.now(),
-    });
-    stats.files_indexed++;
-    stats.symbols_added += res.added;
-    stats.symbols_updated += res.updated;
-    stats.symbols_invalidated += res.invalidated;
-    stats.edges_written += res.edges;
-    dirty.push({ rel: c.rel, lang: c.lang, extract });
-    if (stats.files_indexed % YIELD_EVERY === 0) await yieldToLoop();
-  }
-
-  // ---- Sweep: files gone from disk -> invalidate their symbols ----
-  for (const path of code.listCodeFilePaths(target.name)) {
-    if (!onDisk.has(path))
-      stats.symbols_invalidated += code.removeFile(target.name, path, opts.now());
-  }
-
-  // ---- Pass 2: cross-file imports/calls, resolved against the full directory ----
-  if (dirty.length) {
-    const resolver = buildResolver(code, target.name);
-    let resolved = 0;
-    for (const { rel, lang, extract } of dirty) {
-      const importPairs = resolveImports(resolver, rel, extract);
-      const callPairs = resolveCalls(resolver, rel, lang, extract);
-      stats.edges_written += code.rebuildResolvedEdges(
-        target.name,
-        rel,
-        EdgeType.IMPORTS,
-        importPairs,
-        opts.session_id,
-        opts.now(),
-      );
-      stats.edges_written += code.rebuildResolvedEdges(
-        target.name,
-        rel,
-        EdgeType.CALLS,
-        callPairs,
-        opts.session_id,
-        opts.now(),
-      );
-      if (++resolved % YIELD_EVERY === 0) await yieldToLoop();
-    }
-  }
-
-  const prov = readGitProvenance(target.root);
-  stats.branch = prov.branch;
-  stats.commit = prov.commit;
-  stats.dirty = prov.dirty;
-  code.setRepoProvenance(
-    target.name,
-    target.root,
-    prov.branch,
-    prov.commit,
-    prov.dirty,
-    opts.now(),
-  );
-
-  stats.parked_embeddings = queue.embeddingStats().parked;
-  stats.duration_ms = Math.max(0, Date.parse(opts.now()) - start);
-  return stats;
-}
-
 // ---- cross-file edge resolution --------------------------------------------
 
-interface Resolver {
+export interface Resolver {
   byQualified: Map<string, string>;
   byPathName: Map<string, string>;
   moduleByPath: Map<string, string>;
@@ -353,21 +196,4 @@ export function resolveCalls(
   }
 
   return pairs;
-}
-
-// ---- config ----------------------------------------------------------------
-
-// MEMORY_CODE_ROOTS = "name=path,name2=path2"
-export function parseCodeRoots(env: string | undefined): IndexTarget[] {
-  if (!env) return [];
-
-  return env.split(",").reduce<IndexTarget[]>((acc, part) => {
-    const eq = part.indexOf("=");
-    if (eq < 0) return acc;
-
-    const name = part.slice(0, eq).trim();
-    const root = part.slice(eq + 1).trim();
-
-    return name && root ? [...acc, { name, root }] : acc;
-  }, []);
 }

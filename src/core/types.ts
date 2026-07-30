@@ -239,6 +239,31 @@ export interface SymbolLookup {
   neighbors: NeighborStub[];
 }
 
+// A repo to index: the name symbol identity is content-addressed on, and the
+// directory to walk.
+export interface IndexTarget {
+  name: string;
+  root: string;
+}
+
+// The compact per-repo summary an index run returns — counts and provenance, never
+// symbols or source.
+export interface IndexStats {
+  repo: string;
+  files_scanned: number;
+  files_indexed: number;
+  files_skipped: number;
+  symbols_added: number;
+  symbols_updated: number;
+  symbols_invalidated: number;
+  edges_written: number;
+  duration_ms: number;
+  parked_embeddings: number;
+  branch: string | null;
+  commit: string | null;
+  dirty: boolean;
+}
+
 // ---- external mirrors ------------------------------------------------------
 
 // A registered external mirror source (a row in `mirror_sources`). `kind` becomes
