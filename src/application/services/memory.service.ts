@@ -50,18 +50,18 @@ export class MemoryService {
 
   private selectWithinBudget<T>(items: T[]) {
     const budget = this.retrieval.workingSetTokens;
-    let spent = 0;
 
-    return items.filter((item) => {
-      const estimatedTokens = estimateTokensOf(item);
+    return items.reduce<{ spent: number; items: T[] }>(
+      (acc, item) => {
+        const estimated = estimateTokensOf(item);
 
-      if (spent + estimatedTokens > budget) {
-        return false;
-      }
+        if (acc.spent + estimated > budget) {
+          return acc;
+        }
 
-      spent += estimatedTokens;
-
-      return true;
-    });
+        return { spent: acc.spent + estimated, items: [...acc.items, item] };
+      },
+      { spent: 0, items: [] },
+    ).items;
   }
 }
