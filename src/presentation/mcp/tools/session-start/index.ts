@@ -28,9 +28,6 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
 
     await this.sessionService.ensureSession(sessionId, project, now);
 
-    // TODO: Custom logger
-    // this.ctx.repo.logEvent("session_start", sessionId, null, { project: project }, this.ctx.now());
-
     const workingSet = this.memoryService.getWorkingSet(project ?? undefined);
     const notes = this.embeddingService.getEmbeddingNotes();
 
@@ -41,5 +38,9 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
       hints: ["Search before writing. Prefer update/link over creating near-duplicates."],
       ...(notes.length ? { context_notes: notes } : {}),
     };
+  }
+
+  public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+    return { session_id: result.session_id, detail: { project: result.project ?? null } };
   }
 }

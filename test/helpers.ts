@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
+import { ZodRawShape } from "zod";
 import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
 import {
   CONSOLIDATION_PROVIDER_TOKEN,
@@ -8,6 +9,7 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/domain/ports/rerank-provider";
+import { EventLogService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import {
@@ -23,6 +25,9 @@ import {
 } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
+import { AuditedTool } from "@/presentation/mcp/adapters";
+import { McpTool } from "@/presentation/mcp/tools/contracts";
+import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { createConsolidator } from "@/consolidation";
 import { createReranker } from "@/rerank";
 
@@ -101,4 +106,13 @@ export function setup(opts?: {
     queue: container.resolve(EmbeddingQueueRepo),
     sessions: container.resolve(SessionsRepo),
   };
+}
+
+// Routes a call through the audit boundary the server composes, instead of straight
+// into `invoke` — use it when a test asserts on the `events` log.
+export function callTool<Schema extends ZodRawShape, Response>(
+  tool: McpTool<Schema, Response>,
+  args: ToolArgs<Schema>,
+): Promise<Response> {
+  return new AuditedTool(tool, container.resolve(EventLogService)).invoke(args);
 }

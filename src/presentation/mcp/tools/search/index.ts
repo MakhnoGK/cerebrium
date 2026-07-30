@@ -64,8 +64,23 @@ interface ToolResponse {
   context_notes?: string[];
 }
 
+// Telemetry for the `events` row, carried out of `invoke` on a symbol key: symbols are
+// invisible to JSON.stringify, so this never reaches the agent or costs it tokens.
+// `reranked` is present only on the rerank-eligible path — StatsRepo reads a present
+// key as "eligible" and a 1 as "reranked".
+const AUDIT = Symbol("search.audit");
+
+interface SearchAudit {
+  mode: string;
+  results: number;
+  reranked?: 0 | 1;
+  rerank_candidates?: number;
+}
+
+type AuditedResponse = ToolResponse & { [AUDIT]?: SearchAudit };
+
 @tool()
-export class SearchTool implements McpTool<Schema, ToolResponse> {
+export class SearchTool implements McpTool<Schema, AuditedResponse> {
   public getMetadata = () => metadata;
 
   constructor(
@@ -80,7 +95,7 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     private readonly retrieval: RetrievalConfig,
   ) {}
 
-  async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
+  async invoke(args: ToolArgs<Schema>): Promise<AuditedResponse> {
     const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
@@ -88,8 +103,9 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     const match = toFtsMatch(args.query);
 
     if (!match) {
-      const empty: ToolResponse = { results: [], total_matches: 0 };
+      const empty: AuditedResponse = { results: [], total_matches: 0 };
       if (hints.length) empty.hints = hints;
+      empty[AUDIT] = { mode, results: 0 };
       return empty;
     }
 
@@ -180,6 +196,12 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     // text/vector hits. Graph neighbors are deliberately excluded (they earn their
     // place structurally, not by query relevance). Decay stays a post-multiplier, so
     // score = rerankRelevance × memoryFactor, keeping the memory model intact.
+    const audit: SearchAudit = { mode, results: 0 };
+
+    if (entries.size >= MIN_RERANK) {
+      audit.reranked = 0;
+    }
+
     if (this.reranker.enabled && entries.size >= MIN_RERANK) {
       const base = [...entries.values()];
 
@@ -196,6 +218,9 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
           entry.score =
             rel * memoryFactor(entry.row, now, history) * symbolFactor(entry.row, penalty);
         });
+
+        audit.reranked = 1;
+        audit.rerank_candidates = base.length;
       } catch {
         // Reranker unavailable -> keep the RRF ordering (graceful degradation).
       }
@@ -267,7 +292,7 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
 
     const notes = this.contextNotes(ranked);
 
-    const out: ToolResponse = {
+    const out: AuditedResponse = {
       results,
       total_matches: mode === "vector" ? vecRows.length : ftsTotal,
     };
@@ -275,7 +300,14 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     if (hints.length) out.hints = hints;
     if (notes.length) out.context_notes = notes;
 
+    audit.results = results.length;
+    out[AUDIT] = audit;
+
     return out;
+  }
+
+  public describeEvent(_args: ToolArgs<Schema>, result: AuditedResponse) {
+    return { detail: result[AUDIT] ?? null };
   }
 
   private wantsSymbols(args: ToolArgs<Schema>): boolean {
@@ -294,7 +326,7 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     history: boolean,
     penalty: number,
     hints: string[],
-  ): ToolResponse {
+  ): AuditedResponse {
     const { rows, total } = this.searchRepo.search({
       match,
       project: args.project,
@@ -324,9 +356,11 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
       .slice(0, args.limit)
       .map(({ row }) => toEnvelope(row));
 
-    const out: ToolResponse = { results: ranked, total_matches: total };
+    const out: AuditedResponse = { results: ranked, total_matches: total };
 
     if (hints.length) out.hints = hints;
+
+    out[AUDIT] = { mode: "text", results: ranked.length };
 
     return out;
   }

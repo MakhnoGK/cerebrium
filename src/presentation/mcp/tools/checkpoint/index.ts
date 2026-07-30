@@ -50,15 +50,12 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
       links: existing.map((dst) => ({ dst, type: EdgeType.REFERENCES })),
     });
 
-    // this.ctx.repo.logEvent(
-    //   "checkpoint",
-    //   args.session_id,
-    //   envelope.id,
-    //   { touched: existing.length },
-    //   this.ctx.now(),
-    // );
-
     return hints.length ? { ...envelope, hints } : envelope;
+  }
+
+  public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+    // A fresh checkpoint's only edges are the `references` links to the touched nodes.
+    return { node_id: result.id, detail: { touched: result.edges } };
   }
 
   // TODO: Move to helpers

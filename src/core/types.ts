@@ -1,4 +1,10 @@
-import type { ConsolidationKind, ConsolidationStatus, EdgeType, MemoryKind } from "@/core/vocab";
+import type {
+  ConsolidationKind,
+  ConsolidationStatus,
+  EdgeType,
+  EventAction,
+  MemoryKind,
+} from "@/core/vocab";
 
 // Domain types shared across the repository layer and the tools. Pure — no db or
 // process imports — so both the data layer and callers depend inward on these.
@@ -287,6 +293,15 @@ export interface MirrorRecord {
   native_id: string;
   url: string | null;
   facets: Record<string, unknown> | null;
+}
+
+// One row of the `events` audit log: what a caller did, in one session. Callers
+// describe the event; the writer stamps `ts` from the clock.
+export interface EventDraft {
+  action: EventAction;
+  session_id: string;
+  node_id?: string | null;
+  detail?: unknown;
 }
 
 const SUMMARY_MAX = 160;

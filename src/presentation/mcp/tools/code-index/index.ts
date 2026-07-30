@@ -102,6 +102,22 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
     return out;
   }
 
+  public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+    const indexed = "repos" in result ? result.repos : [result];
+
+    return indexed.map((stats) => ({
+      detail: {
+        repo: stats.repo,
+        indexed: stats.files_indexed,
+        added: stats.symbols_added,
+        updated: stats.symbols_updated,
+        invalidated: stats.symbols_invalidated,
+        branch: stats.branch,
+        commit: stats.commit,
+      },
+    }));
+  }
+
   private getTargets(args: ToolArgs<(typeof metadata)["schema"]>): IndexTarget[] {
     if (args.path) {
       return [{ name: basename(args.path.replace(/\/+$/, "")) || args.path, root: args.path }];
@@ -145,22 +161,6 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
   ) {
     return Promise.all(
       targets.map(async (target) => {
-        // this.ctx.repo.logEvent(
-        //   "code_index",
-        //   args.session_id,
-        //   null,
-        //   {
-        //     repo: stats.repo,
-        //     indexed: stats.files_indexed,
-        //     added: stats.symbols_added,
-        //     updated: stats.symbols_updated,
-        //     invalidated: stats.symbols_invalidated,
-        //     branch: stats.branch,
-        //     commit: stats.commit,
-        //   },
-        //   this.ctx.now(),
-        // );
-
         // TODO: Decouple
         return await this.getRepositoryIndex(target, {
           session_id: args.session_id,

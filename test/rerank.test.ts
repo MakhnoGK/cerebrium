@@ -8,7 +8,7 @@ import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { setup } from "@test/helpers";
+import { callTool, setup } from "@test/helpers";
 
 async function session(project?: string): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({ project })).session_id;
@@ -158,9 +158,88 @@ describe("Rerank stage", () => {
 });
 
 describe("Rerank usage in stats", () => {
-  // Rerank telemetry is derived from search `events` rows; event logging is deferred
-  // until the DI logger lands, so this stays skipped until then.
-  it.skip("should count eligible searches, reranked searches, and candidates scored", () => {
-    // pending: event logging (custom DI logger) — see search tool TODO.
+  it("should count eligible searches, reranked searches, and candidates scored", async () => {
+    // Given — two hits, so the rerank stage has something to reorder.
+    const env = setup({ reranker: new LocalNullReranker() });
+    const s = await session();
+    await w(s, MemoryKind.SEMANTIC, "fact", "Strong", "kafka pipeline kafka pipeline");
+    await w(s, MemoryKind.SEMANTIC, "fact", "Weak", "kafka pipeline widget");
+    const search = container.resolve(SearchTool);
+
+    // When — one eligible hybrid search, plus a text-mode one that can never rerank.
+    await callTool(search, { session_id: s, query: "kafka pipeline", limit: 10 });
+    await callTool(search, { session_id: s, query: "kafka pipeline", mode: "text", limit: 10 });
+
+    // Then
+    expect(env.stats.techStats(env.clock.now()).rerank_usage).toEqual({
+      eligible_searches: 1,
+      reranked_searches: 1,
+      candidates_reranked: 2,
+    });
+  });
+
+  it("should count an eligible search that did not rerank when the reranker is off", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    await w(s, MemoryKind.SEMANTIC, "fact", "Strong", "kafka pipeline kafka pipeline");
+    await w(s, MemoryKind.SEMANTIC, "fact", "Weak", "kafka pipeline widget");
+
+    // When
+    await callTool(container.resolve(SearchTool), {
+      session_id: s,
+      query: "kafka pipeline",
+      limit: 10,
+    });
+
+    // Then
+    expect(env.stats.techStats(env.clock.now()).rerank_usage).toEqual({
+      eligible_searches: 1,
+      reranked_searches: 0,
+      candidates_reranked: 0,
+    });
+  });
+
+  it("should keep the telemetry out of the response the agent receives", async () => {
+    // Given
+    setup({ reranker: new LocalNullReranker() });
+    const s = await session();
+    await w(s, MemoryKind.SEMANTIC, "fact", "Strong", "kafka pipeline kafka pipeline");
+    await w(s, MemoryKind.SEMANTIC, "fact", "Weak", "kafka pipeline widget");
+
+    // When
+    const res = await callTool(container.resolve(SearchTool), {
+      session_id: s,
+      query: "kafka pipeline",
+      limit: 10,
+    });
+
+    // Then
+    expect(Object.keys(JSON.parse(JSON.stringify(res)) as object)).toEqual([
+      "results",
+      "total_matches",
+    ]);
+  });
+
+  it("should count a throwing reranker as eligible but not reranked", async () => {
+    // Given
+    const env = setup({ reranker: new BrokenReranker() });
+    const s = await session();
+    await w(s, MemoryKind.SEMANTIC, "fact", "Strong", "kafka pipeline kafka pipeline");
+    await w(s, MemoryKind.SEMANTIC, "fact", "Weak", "kafka pipeline widget");
+
+    // When
+    await callTool(container.resolve(SearchTool), {
+      session_id: s,
+      query: "kafka pipeline",
+      limit: 10,
+    });
+
+    // Then
+    expect(env.stats.techStats(env.clock.now()).rerank_usage).toEqual({
+      eligible_searches: 1,
+      reranked_searches: 0,
+      candidates_reranked: 0,
+    });
   });
 });

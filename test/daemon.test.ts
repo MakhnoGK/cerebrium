@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
+import { DaemonService } from "@/application/services";
 import {
   clearDaemonPid,
   daemonPidPath,
@@ -16,6 +17,7 @@ import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { nextIdleState, runDaemon } from "@/daemon";
+import { DatabaseConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
 
 const DB = join(tmpdir(), `mk-daemon-${process.pid}.db`);
@@ -64,6 +66,22 @@ describe("Daemon pidfile", () => {
     // Given / When / Then
     expect(isProcessAlive(process.pid)).toBe(true);
     expect(isProcessAlive(2_147_483_646)).toBe(false);
+  });
+});
+
+describe("DaemonService", () => {
+  it("should look for the pidfile beside the configured database, not the default one", () => {
+    // Given
+    const service = new DaemonService(
+      new DatabaseConfig(new StaticConfigSource({ MEMORY_DB_PATH: DB })),
+    );
+
+    // When
+    writeDaemonPid(DB);
+
+    // Then
+    expect(service.getDaemonPidPath(DB)).toBe(daemonPidPath(DB));
+    expect(service.readDaemonPid()).toBe(process.pid);
   });
 });
 
