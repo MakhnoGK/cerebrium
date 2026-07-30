@@ -1,3 +1,4 @@
+export { CodeIndexService } from "@/application/services/code-index.service";
 export { ConsolidationService } from "@/application/services/consolidation.service";
 export { DaemonService } from "@/application/services/daemon.service";
 export { EmbeddingService } from "@/application/services/embedding.service";

@@ -30,11 +30,11 @@ const SKIP_DIRS = new Set([
   ".cache",
   ".vscode-test",
 ]);
-const MAX_BYTES = 1_000_000;
+export const MAX_BYTES = 1_000_000;
 // Yield the event loop this often during a long index so a big repo can't
 // monopolize the shared DB — other server processes' writes (and this process's
 // own embedding worker) get scheduling gaps between per-file transactions.
-const YIELD_EVERY = 8;
+export const YIELD_EVERY = 8;
 
 export function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -235,7 +235,7 @@ export async function indexRepo(
 
 // ---- cross-file edge resolution --------------------------------------------
 
-interface Resolver {
+export interface Resolver {
   byQualified: Map<string, string>;
   byPathName: Map<string, string>;
   moduleByPath: Map<string, string>;
