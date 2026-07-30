@@ -88,19 +88,15 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {
       nodes.push(node);
     }
 
-    // this.ctx.repo.logEvent(
-    //   "get",
-    //   args.session_id,
-    //   args.ids[0] ?? null,
-    //   { count: args.ids.length },
-    //   this.ctx.now(),
-    // );
-
     const out: Record<string, unknown> = { nodes };
 
     if (notFound.length) out.not_found = notFound;
     if (hints.length) out.hints = hints;
 
     return out;
+  }
+
+  public describeEvent(args: ToolArgs<(typeof metadata)["schema"]>) {
+    return { node_id: args.ids[0] ?? null, detail: { count: args.ids.length } };
   }
 }
