@@ -132,17 +132,8 @@ describe("runDaemon loop", () => {
 });
 
 describe("ensureDaemon", () => {
-  const saved = process.env.MEMORY_EMBED_PROVIDER;
-  afterEach(() => {
-    if (saved === undefined) delete process.env.MEMORY_EMBED_PROVIDER;
-    else process.env.MEMORY_EMBED_PROVIDER = saved;
-  });
-
   it("should skip spawning under the local-null provider", () => {
-    // Given
-    process.env.MEMORY_EMBED_PROVIDER = "local-null";
-
-    // When / Then
-    expect(ensureDaemon(DB)).toBe("skipped");
+    // Given / When / Then — the decision comes from the resolved config, not process.env.
+    expect(ensureDaemon({ dbPath: DB, embedProvider: "local-null" })).toBe("skipped");
   });
 });

@@ -1,24 +1,23 @@
 import "reflect-metadata";
-import { container } from "tsyringe";
-import { CLOCK_TOKEN } from "@/domain/ports/clock";
-import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
-import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
-import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
-import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
-import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
-import { openDatabase } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
-import { EnvConfigSource } from "@/infrastructure/config";
-import "@/infrastructure/config/sections";
-import { LocalNullProvider } from "@/embeddings/local-null";
-import { SystemClock } from "@/runtime/system-clock";
-import { createConsolidator } from "@/consolidation";
-import { createReranker } from "@/rerank";
+import { buildContainer } from "@/container";
+import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 
-container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
-container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
-container.registerSingleton(CLOCK_TOKEN, SystemClock);
-container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
-container.register(RERANK_PROVIDER_TOKEN, { useValue: createReranker("off") });
-container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator("manual") });
-container.register(WORKER_OPTIONS_TOKEN, { useValue: {} });
+// The suite wires itself through the same buildContainer the three hosts use, so a token
+// cannot be registered in production and missing here (or the reverse).
+//
+// The pins sit AHEAD of the environment: no model download, no API key, and above all
+// never the real database — an ambient MEMORY_DB_PATH must not point the suite at
+// ~/.cerebrium/memory.db. Everything else still reads the environment live, which the
+// tests that set MEMORY_* inside a test body rely on.
+buildContainer({
+  role: "server",
+  source: new LayeredConfigSource(
+    new StaticConfigSource({
+      MEMORY_DB_PATH: ":memory:",
+      MEMORY_EMBED_PROVIDER: "local-null",
+      MEMORY_RERANK: "off",
+      MEMORY_CONSOLIDATE: "manual",
+    }),
+    new EnvConfigSource(),
+  ),
+});

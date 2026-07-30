@@ -1,34 +1,11 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import Database from "better-sqlite3";
-import { container } from "tsyringe";
-import { CLOCK_TOKEN } from "@/domain/ports/clock";
-import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
-import {
-  CONSOLIDATION_PROVIDER_TOKEN,
-  type ConsolidationProvider,
-} from "@/domain/ports/consolidation-provider";
-import {
-  EMBEDDING_PROVIDER_TOKEN,
-  type EmbeddingProvider,
-} from "@/domain/ports/embedding-provider";
-import { ConsolidationWorker, EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
-import {
-  ConsolidationConfig,
-  DaemonConfig,
-  DatabaseConfig,
-  EmbeddingConfig,
-  EnvConfigSource,
-} from "@/infrastructure/config";
-import "@/infrastructure/config/sections";
-import { openDatabase } from "@/db/database";
+import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
-import { DB_TOKEN } from "@/db/repositories/base";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
-import { SystemClock } from "@/runtime/system-clock";
-import { createConsolidator } from "@/consolidation";
-import { createProvider } from "@/embeddings";
+import { buildContainer } from "@/container";
+import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
 
 // Standalone embedding drain. Outlives any Claude Code session: the MCP server
 // spawns it detached (see ensureDaemon in server.ts) and it keeps draining the
@@ -67,8 +44,12 @@ export function nextIdleState(
   state: IdleState;
   shouldExit: boolean;
 } {
-  if (backlog > 0) return { state: { idleSinceMs: null }, shouldExit: false };
+  if (backlog > 0) {
+    return { state: { idleSinceMs: null }, shouldExit: false };
+  }
+
   const since = prev.idleSinceMs ?? nowMs;
+
   return { state: { idleSinceMs: since }, shouldExit: nowMs - since >= idleExitMs };
 }
 
@@ -95,8 +76,10 @@ export async function runDaemon(
   const consolidateInterval = opts.consolidateIntervalMs ?? IDLE_EXIT_MS;
 
   worker.reconcile();
+
   let idleState: IdleState = { idleSinceMs: null };
   let lastConsolidateMs = -Infinity;
+
   while (!stopped()) {
     await worker.tick();
     const { backlog } = queue.embeddingStats();
@@ -105,39 +88,29 @@ export async function runDaemon(
     // the idle-exit countdown can retire the process.
     if (consolidation && backlog === 0 && now() - lastConsolidateMs >= consolidateInterval) {
       lastConsolidateMs = now();
+
       await consolidation.tick();
     }
+
     const { state, shouldExit } = nextIdleState(idleState, backlog, now(), idleExit);
     idleState = state;
-    if (shouldExit) return;
+
+    if (shouldExit) {
+      return;
+    }
+
     await nap(backlog > 0 ? active : idle);
   }
 }
 
 async function main(): Promise<void> {
-  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
+  const container = buildContainer({ role: "daemon" });
   const dbPath = container.resolve(DatabaseConfig).path;
-  if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
 
-  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
-  const consolidationConfig = container.resolve(ConsolidationConfig);
-  const embeddingConfig = container.resolve(EmbeddingConfig);
-  container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase(dbPath) });
-  container.registerSingleton(CLOCK_TOKEN, SystemClock);
-  // The daemon feeds the model in large batches (vs. the gentle in-process fallback).
-  container.register(WORKER_OPTIONS_TOKEN, {
-    useValue: { batchSize: container.resolve(EmbeddingConfig).batchSize },
-  });
-  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, {
-    useValue: createProvider(
-      embeddingConfig.provider,
-      embeddingConfig.model,
-      embeddingConfig.cacheDir,
-    ),
-  });
-  container.register<ConsolidationProvider>(CONSOLIDATION_PROVIDER_TOKEN, {
-    useValue: createConsolidator(consolidationConfig.provider, consolidationConfig),
-  });
+  // Registrations are lazy, so this bails out before the DB is ever opened.
+  if (isDaemonAlive(dbPath)) {
+    return; // another daemon owns this DB
+  }
 
   const daemonConfig = container.resolve(DaemonConfig);
   const queue = container.resolve(EmbeddingQueueRepo);
@@ -145,13 +118,17 @@ async function main(): Promise<void> {
   const consolidation = container.resolve(ConsolidationWorker);
 
   writeDaemonPid(dbPath);
+
   let stopping = false;
+
   const shutdown = async () => {
     stopping = true;
+
     await Promise.all([worker.stop(), consolidation.stop()]);
     clearDaemonPid(dbPath);
     process.exit(0);
   };
+
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
 
@@ -177,8 +154,10 @@ async function main(): Promise<void> {
 
 if (isMainModule(import.meta.url)) {
   main().catch((err: unknown) => {
+    // No clearDaemonPid() here: the pidfile is written inside main(), which clears it in
+    // its own finally with the resolved path. Clearing it from here would target the
+    // DEFAULT path and could delete a healthy daemon's pidfile.
     process.stderr.write(`cerebrium daemon failed: ${(err as Error).message}\n`);
-    clearDaemonPid();
     process.exit(1);
   });
 }

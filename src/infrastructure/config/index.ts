@@ -2,6 +2,7 @@
 export {
   DefaultConfigSource,
   EnvConfigSource,
+  LayeredConfigSource,
   StaticConfigSource,
 } from "@/infrastructure/config/env-source";
 export { ConfigRegistry, type EffectiveConfig } from "@/infrastructure/config/registry";
