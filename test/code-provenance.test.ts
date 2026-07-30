@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CodeIndexService } from "@/application/services";
 import { readGitProvenance } from "@/code/git";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { CodeConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
 
 const dirs: string[] = [];
@@ -136,6 +137,48 @@ describe("Indexer records provenance", () => {
     // When / Then
     expect(() => code.allRepoProvenance()).not.toThrow();
     expect(code.repoProvenance("api")).toMatchObject({ repo: "api", root: null, branch: "main" });
+  });
+});
+
+describe("CodeIndexService.resolveTargets", () => {
+  // Config is pinned per instance rather than by overriding the container registration,
+  // which would outlive the test that set it.
+  function service(env: Record<string, string | undefined> = {}) {
+    const { code, queue, clock } = setup();
+    const config = new CodeConfig(new StaticConfigSource(env));
+
+    return { indexer: new CodeIndexService(code, queue, clock, config), code, clock };
+  }
+
+  it("should derive the name from the basename when an explicit path is given", () => {
+    // Given / When
+    const targets = service().indexer.resolveTargets({ path: "/repos/api/" });
+
+    // Then
+    expect(targets).toEqual([{ name: "api", root: "/repos/api/" }]);
+  });
+
+  it("should resolve a name against the roots remembered from a prior index-by-path", () => {
+    // Given
+    const { indexer, code, clock } = service();
+    code.setRepoProvenance("api", "/stored/api", null, null, false, clock.t);
+
+    // When / Then
+    expect(indexer.resolveTargets({ repo: "api" })).toEqual([{ name: "api", root: "/stored/api" }]);
+  });
+
+  it("should let a configured root win over a remembered one of the same name", () => {
+    // Given
+    const { indexer, code, clock } = service({ MEMORY_CODE_ROOTS: "api=/env/api" });
+    code.setRepoProvenance("api", "/stored/api", null, null, false, clock.t);
+
+    // When / Then
+    expect(indexer.resolveTargets({ repo: "api" })).toEqual([{ name: "api", root: "/env/api" }]);
+  });
+
+  it("should throw when no root is configured or remembered", () => {
+    // Given / When / Then
+    expect(() => service().indexer.resolveTargets({})).toThrow(/No code roots configured/);
   });
 });
 

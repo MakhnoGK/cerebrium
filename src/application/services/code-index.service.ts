@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { CodeRootsNotConfiguredError, RepositoryNotConfiguredError } from "@/application/errors";
 import { extractFile, FileExtract } from "@/code/extract";
 import { readGitProvenance } from "@/code/git";
 import {
@@ -18,6 +20,7 @@ import { parse } from "@/code/parser";
 import { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
 import type { FileIndexResult, IndexStats, IndexTarget } from "@/core/types";
 import { EdgeType } from "@/core/vocab";
+import { CodeConfig } from "@/infrastructure/config";
 
 export interface IndexRunOptions {
   session_id: string;
@@ -30,7 +33,45 @@ export class CodeIndexService {
     private readonly code: CodeRepo,
     private readonly queue: EmbeddingQueueRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    private readonly codeConfig: CodeConfig,
   ) {}
+
+  // An explicit `path` wins; otherwise a name resolves against the roots configured in
+  // MEMORY_CODE_ROOTS plus those remembered from a prior index-by-path (env wins on a
+  // clash), so a repo indexed once by `path` can later be re-indexed by name.
+  public resolveTargets({ repo, path }: { repo?: string; path?: string }): IndexTarget[] {
+    if (path) {
+      return [{ name: basename(path.replace(/\/+$/, "")) || path, root: path }];
+    }
+
+    const byName = new Map<string, IndexTarget>();
+
+    this.code.storedRepoRoots().forEach((root) => {
+      byName.set(root.name, root);
+    });
+
+    this.codeConfig.roots.forEach((root) => {
+      byName.set(root.name, root);
+    });
+
+    if (repo) {
+      const found = byName.get(repo);
+
+      if (!found) {
+        throw new RepositoryNotConfiguredError(repo);
+      }
+
+      return [found];
+    }
+
+    const known = [...byName.values()];
+
+    if (!known.length) {
+      throw new CodeRootsNotConfiguredError();
+    }
+
+    return known;
+  }
 
   public async indexTargets(targets: IndexTarget[], opts: IndexRunOptions): Promise<IndexStats[]> {
     return Promise.all(targets.map((target) => this.indexTarget(target, opts)));
