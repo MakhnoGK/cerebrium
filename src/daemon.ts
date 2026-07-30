@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 import "reflect-metadata";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
@@ -44,8 +45,12 @@ export function nextIdleState(
   state: IdleState;
   shouldExit: boolean;
 } {
-  if (backlog > 0) return { state: { idleSinceMs: null }, shouldExit: false };
+  if (backlog > 0) {
+    return { state: { idleSinceMs: null }, shouldExit: false };
+  }
+
   const since = prev.idleSinceMs ?? nowMs;
+
   return { state: { idleSinceMs: since }, shouldExit: nowMs - since >= idleExitMs };
 }
 
@@ -72,8 +77,10 @@ export async function runDaemon(
   const consolidateInterval = opts.consolidateIntervalMs ?? IDLE_EXIT_MS;
 
   worker.reconcile();
+
   let idleState: IdleState = { idleSinceMs: null };
   let lastConsolidateMs = -Infinity;
+
   while (!stopped()) {
     await worker.tick();
     const { backlog } = queue.embeddingStats();
@@ -82,11 +89,17 @@ export async function runDaemon(
     // the idle-exit countdown can retire the process.
     if (consolidation && backlog === 0 && now() - lastConsolidateMs >= consolidateInterval) {
       lastConsolidateMs = now();
+
       await consolidation.tick();
     }
+
     const { state, shouldExit } = nextIdleState(idleState, backlog, now(), idleExit);
     idleState = state;
-    if (shouldExit) return;
+
+    if (shouldExit) {
+      return;
+    }
+
     await nap(backlog > 0 ? active : idle);
   }
 }
@@ -96,7 +109,9 @@ async function main(): Promise<void> {
   const dbPath = container.resolve(DatabaseConfig).path;
 
   // Registrations are lazy, so this bails out before the DB is ever opened.
-  if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
+  if (isDaemonAlive(dbPath)) {
+    return; // another daemon owns this DB
+  }
 
   const daemonConfig = container.resolve(DaemonConfig);
   const queue = container.resolve(EmbeddingQueueRepo);
@@ -104,13 +119,17 @@ async function main(): Promise<void> {
   const consolidation = container.resolve(ConsolidationWorker);
 
   writeDaemonPid(dbPath);
+
   let stopping = false;
+
   const shutdown = async () => {
     stopping = true;
+
     await Promise.all([worker.stop(), consolidation.stop()]);
     clearDaemonPid(dbPath);
     process.exit(0);
   };
+
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
 
@@ -136,8 +155,10 @@ async function main(): Promise<void> {
 
 if (isMainModule(import.meta.url)) {
   main().catch((err: unknown) => {
+    // No clearDaemonPid() here: the pidfile is written inside main(), which clears it in
+    // its own finally with the resolved path. Clearing it from here would target the
+    // DEFAULT path and could delete a healthy daemon's pidfile.
     process.stderr.write(`cerebrium daemon failed: ${(err as Error).message}\n`);
-    clearDaemonPid();
     process.exit(1);
   });
 }

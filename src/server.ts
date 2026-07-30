@@ -4,6 +4,7 @@ import { EmbeddingWorker } from "@/application/workers";
 import { isMainModule } from "@/runtime/is-main";
 import { Server } from "@/presentation/mcp/server";
 import { buildContainer } from "@/container";
+import { DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";
 import { ensureDaemon } from "./runtime/ensure-daemon";
 
 async function main(): Promise<void> {
@@ -17,8 +18,13 @@ async function main(): Promise<void> {
   // The embedding drain runs in a detached daemon that outlives this session.
   // Only fall back to an in-process worker if we can't get a daemon up — the
   // worker_lease keeps the two from double-writing if both ever run.
+  const daemon = {
+    dbPath: container.resolve(DatabaseConfig).path,
+    embedProvider: container.resolve(EmbeddingConfig).provider,
+  };
+
   try {
-    if (ensureDaemon() === "skipped") {
+    if (ensureDaemon(daemon) === "skipped") {
       worker.start();
     }
   } catch {
