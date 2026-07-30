@@ -8,6 +8,7 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/domain/ports/rerank-provider";
+import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import {
   CodeRepo,
@@ -22,7 +23,6 @@ import {
 } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
-import { EmbeddingWorker } from "@/embeddings/worker";
 import { createConsolidator } from "@/consolidation";
 import { createReranker } from "@/rerank";
 

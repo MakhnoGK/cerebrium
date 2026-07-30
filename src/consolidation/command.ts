@@ -35,9 +35,8 @@ export class CommandConsolidator implements ConsolidationProvider {
   private readonly runner: CommandRunner;
 
   constructor(opts?: { cmd?: string; timeoutMs?: number; runner?: CommandRunner }) {
-    const cmd = opts?.cmd ?? process.env.MEMORY_CONSOLIDATE_CMD;
-    const timeoutMs =
-      opts?.timeoutMs ?? (Number(process.env.MEMORY_CONSOLIDATE_TIMEOUT_MS) || 60_000);
+    const cmd = opts?.cmd;
+    const timeoutMs = opts?.timeoutMs ?? 60_000;
     this.runner = opts?.runner ?? defaultRunner(cmd, timeoutMs);
   }
 

@@ -18,9 +18,9 @@ export default defineConfig({
   target: "node22",
   outDir: "dist",
   // Each bin is a self-contained bundle at the dist root, so import.meta.url resolves
-  // to dist/ at runtime — copy-assets places migrations there to match.
+  // to dist/ at runtime — copy-assets place migrations there to match.
   splitting: false,
-  sourcemap: true,
+  sourcemap: false,
   clean: true,
   dts: false,
   external,

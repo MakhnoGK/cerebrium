@@ -3,6 +3,7 @@ import "reflect-metadata";
 import Database from "better-sqlite3";
 import { container } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
 import {
   CONSOLIDATION_PROVIDER_TOKEN,
   type ConsolidationProvider,
@@ -11,12 +12,18 @@ import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import { consolidateIntervalMs } from "@/consolidation/config";
-import { ConsolidationWorker } from "@/consolidation/worker";
-import { defaultDbPath, openDatabase } from "@/db/database";
+import { ConsolidationWorker, EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
+import {
+  ConsolidationConfig,
+  DaemonConfig,
+  DatabaseConfig,
+  EmbeddingConfig,
+  EnvConfigSource,
+} from "@/infrastructure/config";
+import "@/infrastructure/config/sections";
+import { openDatabase } from "@/db/database";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
-import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { SystemClock } from "@/runtime/system-clock";
@@ -40,9 +47,9 @@ export interface DaemonOptions {
 // large batches and loop with only an event-loop yield between ticks (not a real
 // sleep) while there is a backlog. The gentle 3s in-process fallback worker is a
 // different, politer citizen — this is not that.
-const ACTIVE_MS = Number(process.env.MEMORY_DAEMON_ACTIVE_MS) || 0;
+const ACTIVE_MS = 0;
 const IDLE_MS = 5000;
-const IDLE_EXIT_MS = Number(process.env.MEMORY_DAEMON_IDLE_MS) || 5 * 60_000;
+const IDLE_EXIT_MS = 5 * 60_000;
 
 export interface IdleState {
   idleSinceMs: number | null;
@@ -85,7 +92,7 @@ export async function runDaemon(
   const nap = opts.sleepMs ?? sleep;
   const now = opts.nowMs ?? Date.now;
   const consolidation = opts.consolidation;
-  const consolidateInterval = opts.consolidateIntervalMs ?? consolidateIntervalMs();
+  const consolidateInterval = opts.consolidateIntervalMs ?? IDLE_EXIT_MS;
 
   worker.reconcile();
   let idleState: IdleState = { idleSinceMs: null };
@@ -108,20 +115,31 @@ export async function runDaemon(
 }
 
 async function main(): Promise<void> {
-  const dbPath = defaultDbPath();
+  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
+  const dbPath = container.resolve(DatabaseConfig).path;
   if (isDaemonAlive(dbPath)) return; // another daemon owns this DB
 
+  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
+  const consolidationConfig = container.resolve(ConsolidationConfig);
+  const embeddingConfig = container.resolve(EmbeddingConfig);
   container.register<Database.Database>(DB_TOKEN, { useValue: openDatabase(dbPath) });
   container.registerSingleton(CLOCK_TOKEN, SystemClock);
   // The daemon feeds the model in large batches (vs. the gentle in-process fallback).
   container.register(WORKER_OPTIONS_TOKEN, {
-    useValue: { batchSize: Number(process.env.MEMORY_EMBED_BATCH) || 64 },
+    useValue: { batchSize: container.resolve(EmbeddingConfig).batchSize },
   });
-  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider() });
+  container.register<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN, {
+    useValue: createProvider(
+      embeddingConfig.provider,
+      embeddingConfig.model,
+      embeddingConfig.cacheDir,
+    ),
+  });
   container.register<ConsolidationProvider>(CONSOLIDATION_PROVIDER_TOKEN, {
-    useValue: createConsolidator(),
+    useValue: createConsolidator(consolidationConfig.provider, consolidationConfig),
   });
 
+  const daemonConfig = container.resolve(DaemonConfig);
   const queue = container.resolve(EmbeddingQueueRepo);
   const worker = container.resolve(EmbeddingWorker);
   const consolidation = container.resolve(ConsolidationWorker);
@@ -138,7 +156,14 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown());
 
   try {
-    await runDaemon(queue, worker, { stopped: () => stopping, consolidation });
+    await runDaemon(queue, worker, {
+      stopped: () => stopping,
+      consolidation,
+      activeIntervalMs: daemonConfig.activeIntervalMs,
+      idleIntervalMs: daemonConfig.idleIntervalMs,
+      idleExitMs: daemonConfig.idleExitMs,
+      consolidateIntervalMs: container.resolve(ConsolidationConfig).intervalMs,
+    });
   } finally {
     // `stopping` is flipped by the SIGTERM/SIGINT handler above; eslint's flow
     // analysis can't see that closure mutation and reads it as always-false.

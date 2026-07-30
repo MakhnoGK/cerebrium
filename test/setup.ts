@@ -1,17 +1,21 @@
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
+import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { EnvConfigSource } from "@/infrastructure/config";
+import "@/infrastructure/config/sections";
 import { LocalNullProvider } from "@/embeddings/local-null";
-import { WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { SystemClock } from "@/runtime/system-clock";
 import { createConsolidator } from "@/consolidation";
 import { createReranker } from "@/rerank";
 
+container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
 container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
 container.registerSingleton(CLOCK_TOKEN, SystemClock);
 container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });

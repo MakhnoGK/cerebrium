@@ -35,11 +35,12 @@ class DisabledConsolidator implements ConsolidationProvider {
 // targets a local Ollama; `command` pipes to any user process. Adding a backend is a
 // one-file change plus a class — the ConsolidationProvider interface is the contract.
 export function createConsolidator(
-  name = process.env.MEMORY_CONSOLIDATE ?? "manual",
+  name = "manual",
+  opts?: { url?: string; model?: string; cmd?: string; timeoutMs?: number },
 ): ConsolidationProvider {
   if (name === "off") return new DisabledConsolidator();
-  if (name === "http") return new HttpConsolidator();
-  if (name === "command") return new CommandConsolidator();
+  if (name === "http") return new HttpConsolidator(opts);
+  if (name === "command") return new CommandConsolidator(opts);
 
   return new ManualConsolidator();
 }

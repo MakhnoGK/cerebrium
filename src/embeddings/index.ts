@@ -5,9 +5,12 @@ import { LocalNullProvider } from "@/embeddings/local-null";
 // Provider chosen by env at startup. Adding a paid/cloud provider is a one-file
 // change here plus a class — the interface is the whole contract.
 export function createProvider(
-  name = process.env.MEMORY_EMBED_PROVIDER || "local",
+  name = "local",
+  model?: string,
+  cacheDir?: string,
 ): EmbeddingProvider {
-  const provider = name === "local-null" ? new LocalNullProvider() : new LocalProvider();
+  const provider =
+    name === "local-null" ? new LocalNullProvider() : new LocalProvider(model, cacheDir);
 
   if (provider.dim !== VECTOR_DIM) {
     throw new Error(

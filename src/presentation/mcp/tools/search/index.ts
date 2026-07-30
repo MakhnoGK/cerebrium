@@ -14,6 +14,7 @@ import { toFtsMatch } from "@/core/fts";
 import { MemoryKind } from "@/core/vocab";
 import { McpTool, tool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { metadata } from "@/presentation/mcp/tools/search/metadata";
+import { RetrievalConfig } from "@/infrastructure/config";
 
 // Candidate ceiling before JS re-rank. Episodic decay only lowers scores, so the
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap
@@ -75,13 +76,15 @@ export class SearchTool implements McpTool<Schema, ToolResponse> {
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     @inject(RERANK_PROVIDER_TOKEN) private readonly reranker: RerankProvider,
+
+    private readonly retrieval: RetrievalConfig,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
     const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
-    const penalty = this.wantsSymbols(args) ? 1 : symbolWeight();
+    const penalty = this.wantsSymbols(args) ? 1 : this.retrieval.symbolWeight;
     const match = toFtsMatch(args.query);
 
     if (!match) {
@@ -357,15 +360,6 @@ function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
   const ageDays = Math.max(0, (now - Date.parse(row.valid_from)) / 86_400_000);
 
   return Math.exp(-ageDays / DECAY_DAYS);
-}
-
-// Knowledge-first ranking: code `symbol` mirrors are down-weighted as base hits
-// so authored + external-mirror knowledge isn't buried under the 100k+ indexed symbols.
-// A relevance multiplier, not a filter — symbols still surface, just below equally matched
-// knowledge. Not applied to graph neighbors (a note->symbol edge earns its place
-// structurally) nor when the caller explicitly asks for symbols (wantsSymbols).
-function symbolWeight(): number {
-  return Number(process.env.MEMORY_SYMBOL_WEIGHT) || 0.5;
 }
 
 function symbolFactor(row: EnrichedRow, penalty: number): number {

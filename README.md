@@ -26,13 +26,16 @@ Clean-architecture layers, no ORM, one directory per MCP tool:
 ```
 src/
   core/            pure primitives — ids, vocab, tokens, chunking, FTS, types (no I/O)
-  domain/ports/    interfaces the inner layers own — Clock, Embedding/Rerank/Consolidation providers
-  application/     use-case services (node, memory, session, hints, embedding, consolidation)
+  domain/ports/    interfaces the inner layers own — Clock, Embedding/Rerank/Consolidation
+                   providers, and the declarative config mechanism
+  application/     services/ (node, memory, session, hints, embedding, consolidation)
+                   workers/  (embedding drain, consolidation sweep)
   db/              SQLite: migrations, per-aggregate repositories, schema snapshot
-  embeddings/      pluggable embedding providers + async worker
+  infrastructure/  config sections + the environment source and registry
+  embeddings/      pluggable embedding providers
   rerank/          pluggable cross-encoder reranker (second-stage precision)
   code/            tree-sitter code indexer (walk, parse, extract, resolve edges)
-  consolidation/   background sweep + pluggable generation adapter
+  consolidation/   pluggable generation adapter (manual / command / http)
   runtime/         process/IO glue (daemon spawn, pid file, system clock, main detection)
   presentation/    the MCP delivery layer — stdio server, output adapter, one dir per tool
   server.ts        stdio MCP server    daemon.ts  embedding drain    stats-cli.ts
@@ -43,10 +46,42 @@ adapters implement the ports, and nothing may import `presentation`. **That dire
 enforced by `no-restricted-imports` — a violation fails `npm run check`,** so the layering
 is a build constraint rather than a convention.
 
+The two background workers are application services that happen to run on a timer, so they
+live in `application/workers/` rather than beside the adapters they drive.
+
 All SQL lives in `src/db/repositories/*`; consumers inject the specific repositories they
 need and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
 once in `core/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
 contract and invariants are in [`CLAUDE.md`](CLAUDE.md).
+
+### Configuration
+
+Settings are declared once as **config sections** and injected where they are used — no
+module reads `process.env` at the point of use. A section declares each property's
+default, validation, and (optionally) a legacy variable name in a single line:
+
+```ts
+@configSection()
+export class RetrievalConfig extends SectionOf("retrieval", {
+  symbolWeight:   num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
+  dedupThreshold: num(0.82).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
+}) {}
+```
+
+Consumers inject the section they need (`SearchTool` takes `RetrievalConfig`), so a
+dependency on configuration is as explicit as any other. A new property gets its variable
+name for free, derived from the config path — adding `graphBase` to the section above
+would read `MEMORY_RETRIEVAL_GRAPH_BASE` with no further bookkeeping. `.env(...)` exists
+only to pin the names that predate the mechanism, which is why the two properties above
+keep their original `MEMORY_SYMBOL_WEIGHT` / `MEMORY_DEDUP_THRESHOLD` spellings.
+
+Two failure modes, deliberately different:
+
+- **Unparseable** (`MEMORY_CONSOLIDATE_SIM=abc`) — falls back to the default *and* is
+  recorded in `ConfigRegistry.ignored()`. A typo must not stop the process starting, but
+  a silent fallback is how config drift stays invisible, so it is surfaced instead.
+- **Out of range** (`MEMORY_CONSOLIDATE_SIM=1.5`) — fatal at startup, naming the variable,
+  the config path, the constraint, and the offending value.
 
 ## Concepts
 
@@ -138,16 +173,17 @@ is searchable via FTS instantly and vector search catches up once the model is w
 ### Development & checks
 
 ```bash
-npm run check        # typecheck + lint + prettier + full Vitest suite — the gate
-npm run build        # tsup bundle; NOT part of `check`, run it after moving files
+npm run check        # typecheck + lint + prettier + Vitest + build — the gate
 npm test             # full Vitest suite (offline, no keys — uses the local-null provider)
+npm run build        # tsup bundle of the three bins to dist/
 npm run inspect      # MCP inspector against a throwaway dev DB (verify tool schemas)
 ```
 
 One root `tsconfig.json` covers `src` + `test` + `scripts`, so `tsc`, Vitest and every
-editor resolve the `@/*` alias identically. `npm run build` is deliberately separate:
-esbuild catches a class of import error `tsc` cannot, so run it after any change that
-moves files or rewrites imports.
+editor resolve the `@/*` alias identically — and tests are genuinely type-checked rather
+than merely transpiled. `npm run build` is part of the gate because esbuild catches a
+class of import error `tsc` cannot: an interface imported as a value type-checks fine and
+breaks the bundle.
 
 To run against the TypeScript source without a build step (throwaway dev DB), register a
 second server pointed at `tsx`:
@@ -159,6 +195,11 @@ claude mcp add cerebrium-dev -s user \
 ```
 
 ## Environment
+
+Every variable below overrides one config-section property (see
+[Configuration](#configuration)). A blank value reads as unset. Numeric values are used
+as given — `0` means `0`, not "fall back to the default" — and a value outside its
+declared range fails at startup rather than being quietly replaced.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
@@ -192,6 +233,11 @@ claude mcp add cerebrium-dev -s user \
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
+| `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
+| `MEMORY_CONSOLIDATE_DISTILL_BATCH` | `200` | Max episodic clusters considered for distillation per sweep. |
+| `MEMORY_CONSOLIDATE_MERGE_BATCH` | `200` | Max duplicate semantic pairs considered per sweep. |
+| `MEMORY_CONSOLIDATE_PRUNE_BATCH` | `200` | Max dead mirror nodes reconciled per sweep. |
+| `MEMORY_CONSOLIDATE_BACKFILL_BATCH` | `10` | Max pending candidates a newly-enabled provider drafts proposals for per sweep. |
 
 The DB opens in WAL mode (`busy_timeout=15000`, foreign keys on) with the
 `sqlite-vec` extension loaded. In practice one stdio server process runs per
@@ -441,6 +487,11 @@ WAL mode (already on) is required for Litestream.
   is checked by lint rather than trusted to review — a wrong-way import fails `npm run check`.
   Providers are ports with swappable adapters, so changing how embeddings, reranking or
   consolidation are produced is a one-file change plus a class.
+- **Configuration as declarative, injectable sections.** A setting is declared once —
+  default, validation and env name together — and injected where it is used, so adding one
+  is a single line and no module reads the environment at the point of use. Unparseable
+  values fall back but are recorded and reportable; out-of-range values fail at startup
+  rather than being silently replaced.
 - **Performance-driven choices.** Batched commits took measured single-writer embedding
   throughput from ~30 to ~176 chunks/s; a benchmark showed CPU int8 inference beating
   CoreML/WebGPU for the 384-dim model, so there is no GPU dependency.

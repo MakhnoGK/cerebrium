@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EmbeddingWorker } from "@/embeddings/worker";
+import { EmbeddingWorker } from "@/application/workers";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
 import { GetTool } from "@/presentation/mcp/tools/get";

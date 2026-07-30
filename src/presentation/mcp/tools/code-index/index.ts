@@ -8,7 +8,6 @@ import {
   IndexStats,
   IndexTarget,
   looksBinary,
-  parseCodeRoots,
   resolveCalls,
   resolveImports,
   sha256,
@@ -23,6 +22,7 @@ import { metadata } from "@/presentation/mcp/tools/code-index/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
+import { CodeConfig } from "@/infrastructure/config";
 
 interface Resolver {
   byQualified: Map<string, string>;
@@ -76,6 +76,8 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
     // TODO: Move to services
     private readonly code: CodeRepo,
     private readonly embeddingsRepo: EmbeddingQueueRepo,
+
+    private readonly codeConfig: CodeConfig,
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
@@ -114,7 +116,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
       byName.set(root.name, root);
     });
 
-    parseCodeRoots(process.env.MEMORY_CODE_ROOTS).forEach((root) => {
+    this.codeConfig.roots.forEach((root) => {
       byName.set(root.name, root);
     });
 

@@ -8,9 +8,9 @@ import { CLOCK_TOKEN } from "@/domain/ports/clock";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
+import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
-import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/embeddings/worker";
 import { SystemClock } from "@/runtime/system-clock";
 import { MemoryKind } from "@/core/vocab";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -44,24 +44,46 @@ interface Dataset {
 }
 
 function reciprocalRank(ranked: string[], gold: Set<string>): number {
-  for (let i = 0; i < ranked.length; i++) if (gold.has(ranked[i]!)) return 1 / (i + 1);
+  for (let i = 0; i < ranked.length; i++) {
+    if (gold.has(ranked[i]!)) {
+      return 1 / (i + 1);
+    }
+  }
+
   return 0;
 }
+
 function ndcgAtK(ranked: string[], gold: Set<string>, k: number): number {
   let dcg = 0;
-  for (let i = 0; i < Math.min(k, ranked.length); i++)
-    if (gold.has(ranked[i]!)) dcg += 1 / Math.log2(i + 2);
+
+  for (let i = 0; i < Math.min(k, ranked.length); i++) {
+    if (gold.has(ranked[i]!)) {
+      dcg += 1 / Math.log2(i + 2);
+    }
+  }
+
   let idcg = 0;
-  for (let i = 0; i < Math.min(k, gold.size); i++) idcg += 1 / Math.log2(i + 2);
+
+  for (let i = 0; i < Math.min(k, gold.size); i++) {
+    idcg += 1 / Math.log2(i + 2);
+  }
+
   return idcg === 0 ? 0 : dcg / idcg;
 }
 function precisionAt1(ranked: string[], gold: Set<string>): number {
   return ranked.length > 0 && gold.has(ranked[0]!) ? 1 : 0;
 }
+
 function recallAtK(ranked: string[], gold: Set<string>, k: number): number {
   const top = new Set(ranked.slice(0, k));
   let hit = 0;
-  for (const g of gold) if (top.has(g)) hit++;
+
+  for (const g of gold) {
+    if (top.has(g)) {
+      hit++;
+    }
+  }
+
   return gold.size === 0 ? 0 : hit / gold.size;
 }
 const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -73,11 +95,13 @@ function titlesToIds(db: Database.Database): Map<string, string> {
     id: string;
     title: string;
   }[];
+
   return new Map(rows.map((r) => [r.title, r.id]));
 }
 
 async function rankedIds(searchTool: SearchTool, sid: string, query: string): Promise<string[]> {
   const res = await searchTool.invoke({ session_id: sid, query, limit: K });
+
   return res.results.map((r) => r.id);
 }
 
@@ -109,6 +133,7 @@ async function main() {
 
   const sid = (await container.resolve(SessionStartTool).invoke({})).session_id;
   const writeTool = container.resolve(WriteTool);
+
   for (const d of data.docs) {
     await writeTool.invoke({
       session_id: sid,
@@ -118,8 +143,10 @@ async function main() {
       content: `${d.title}. ${d.content}`,
     });
   }
+
   const worker = container.resolve(EmbeddingWorker);
   let guard = 0;
+
   while ((await worker.tick()).embedded > 0 && guard++ < 1000) {
     /* drain the embedding queue */
   }
@@ -145,6 +172,7 @@ async function main() {
   };
 
   console.log("per-query nDCG@10 (baseline -> reranked):");
+
   for (const q of data.queries) {
     const gold = goldOf(q);
     const offIds = await rankedIds(searchOff, sid, q.query);
@@ -171,6 +199,7 @@ async function main() {
       `  ${label.padEnd(12)} ${pct(o)}  ->  ${pct(n)}   (${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)} pts)`,
     );
   };
+
   console.log("\naggregate (mean, baseline -> reranked):");
   row("MRR", a.offRR, a.onRR);
   row("nDCG@10", a.offND, a.onND);

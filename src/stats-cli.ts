@@ -2,7 +2,10 @@
 import "reflect-metadata";
 import Database from "better-sqlite3";
 import { container } from "tsyringe";
+import { CONFIG_SOURCE_TOKEN } from "@/domain/ports/config";
 import { defaultDbPath, openDatabaseReadonly } from "@/db/database";
+import { EnvConfigSource, RerankConfig } from "@/infrastructure/config";
+import "@/infrastructure/config/sections";
 import { StatsRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
@@ -27,6 +30,7 @@ function main(): void {
   const dbPath = defaultDbPath();
   const asJson = process.argv.includes("--json");
   const db = openDatabaseReadonly(dbPath);
+  container.register(CONFIG_SOURCE_TOKEN, { useValue: new EnvConfigSource() });
   container.register<Database.Database>(DB_TOKEN, { useValue: db });
   try {
     const s = container.resolve(StatsRepo).techStats(nowIso());
@@ -75,7 +79,7 @@ function main(): void {
     L.push(`  sessions / events          : ${s.content.sessions} / ${s.content.events}`);
     L.push("");
     L.push("Reranking");
-    L.push(`  provider (env)             : ${process.env.MEMORY_RERANK || "off"}`);
+    L.push(`  provider (env)             : ${container.resolve(RerankConfig).provider}`);
     L.push(
       `  eligible / reranked        : ${s.rerank_usage.eligible_searches} / ${s.rerank_usage.reranked_searches}`,
     );

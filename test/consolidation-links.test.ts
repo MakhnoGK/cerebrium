@@ -2,18 +2,18 @@ import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import type { Envelope } from "@/db/repo";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { ConsolidationRepo } from "@/db/repositories/consolidation";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { LocalNullProvider } from "@/embeddings/local-null";
-import { EmbeddingWorker } from "@/embeddings/worker";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
+import { ConsolidationPostureConfig, StaticConfigSource } from "@/infrastructure/config";
 
 const sessionStart = container.resolve(SessionStartTool);
 let edgesRepo: EdgesRepo;
@@ -66,6 +66,12 @@ async function seed(tool: WriteTool, worker: EmbeddingWorker) {
   return { s, twinA, twinB, other };
 }
 
+// Sections are transient, so overriding one in the container is how a test pins a
+// posture — no global env mutation, and it works regardless of resolution order.
+function postureWith(env: Record<string, string>): ConsolidationPostureConfig {
+  return new ConsolidationPostureConfig(new StaticConfigSource(env));
+}
+
 function edgeTypesBetween(a: string, b: string): string[] {
   return edgesRepo
     .edgesOf(a)
@@ -74,8 +80,8 @@ function edgeTypesBetween(a: string, b: string): string[] {
 }
 
 afterEach(() => {
-  delete process.env.MEMORY_CONSOLIDATE_LINKS;
-  delete process.env.MEMORY_CONSOLIDATE_SIM;
+  // A section override is a container registration, so it outlives the test that set it.
+  container.register(ConsolidationPostureConfig, { useValue: postureWith({}) });
 });
 
 describe("Similar node link discovery", () => {
@@ -136,7 +142,10 @@ describe("Similar node link discovery", () => {
 
   it("should queue a link candidate instead of writing an edge when posture is suggest", async () => {
     // Given
-    process.env.MEMORY_CONSOLIDATE_LINKS = "suggest";
+    container.register(ConsolidationPostureConfig, {
+      useValue: postureWith({ MEMORY_CONSOLIDATE_LINKS: "suggest" }),
+    });
+    consolidation = container.resolve(ConsolidationWorker);
     const { twinA, twinB } = await seed(writeTool, embedWorker);
 
     // When
@@ -154,7 +163,10 @@ describe("Similar node link discovery", () => {
 
   it("should do nothing when posture is off", async () => {
     // Given
-    process.env.MEMORY_CONSOLIDATE_LINKS = "off";
+    container.register(ConsolidationPostureConfig, {
+      useValue: postureWith({ MEMORY_CONSOLIDATE_LINKS: "off" }),
+    });
+    consolidation = container.resolve(ConsolidationWorker);
     await seed(writeTool, embedWorker);
 
     // When

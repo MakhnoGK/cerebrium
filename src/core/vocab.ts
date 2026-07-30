@@ -59,6 +59,15 @@ export enum ConsolidationKind {
   PRUNE = "prune",
 }
 
+// Per-behaviour consolidation posture. `suggest` routes to the candidate queue for an
+// agent to review; `auto` applies inline. Balanced defaults ship `auto` for the cheap,
+// reversible behaviours (links, Tier-1 prune) and `suggest` for the destructive ones.
+export enum Posture {
+  OFF = "off",
+  SUGGEST = "suggest",
+  AUTO = "auto",
+}
+
 export enum ConsolidationStatus {
   PENDING = "pending",
   APPLIED = "applied",

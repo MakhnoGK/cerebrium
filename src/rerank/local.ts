@@ -9,12 +9,17 @@ import { type RerankProvider } from "@/domain/ports/rerank-provider";
 // (~90MB) auto-downloads to MEMORY_MODEL_CACHE on first use; no API key, no daemon.
 export class LocalReranker implements RerankProvider {
   readonly name: string;
+  private readonly cacheDir: string;
   readonly version = "1";
   readonly enabled = true;
   private loaded: Promise<Loaded> | null = null;
 
-  constructor(model = process.env.MEMORY_RERANK_MODEL || "Xenova/ms-marco-MiniLM-L-6-v2") {
+  constructor(
+    model = "Xenova/ms-marco-MiniLM-L-6-v2",
+    cacheDir = join(homedir(), ".cerebrium", "models"),
+  ) {
     this.name = model;
+    this.cacheDir = cacheDir;
   }
 
   async rerank(query: string, docs: string[]): Promise<number[]> {
@@ -36,7 +41,7 @@ export class LocalReranker implements RerankProvider {
       // that never enables the reranker — the entire default/test configuration.
       const { AutoTokenizer, AutoModelForSequenceClassification, env } =
         await import("@huggingface/transformers");
-      env.cacheDir = process.env.MEMORY_MODEL_CACHE || join(homedir(), ".cerebrium", "models");
+      env.cacheDir = this.cacheDir;
       const tokenizer = (await AutoTokenizer.from_pretrained(this.name)) as unknown as Tokenizer;
       const model = (await AutoModelForSequenceClassification.from_pretrained(this.name, {
         dtype: "q8",

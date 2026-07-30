@@ -1,8 +1,8 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
+import { EmbeddingWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
 import { isBusy, withBusyRetry } from "@/db/retry";
-import { EmbeddingWorker } from "@/embeddings/worker";
 import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";

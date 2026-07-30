@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
-import { ConsolidationWorker } from "@/consolidation/worker";
+import { ConsolidationWorker } from "@/application/workers";
 import type { ConsolidationCandidate, Envelope } from "@/db/repo";
 import { ConsolidationKind, MemoryKind } from "@/core/vocab";
 import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";

@@ -11,7 +11,7 @@ import { newId } from "@/core/ids";
 const EMBED_LEASE = "embedding";
 
 // Injected so `container.resolve(EmbeddingWorker)` gets the defaults ({}), while tests
-// that need to tune batching/backoff/lease construct a worker manually with an overrides
+// that need to tune batching/backoff/lease construct a worker manually with an override
 // object. Register a default `{}` wherever the worker is resolved (server/daemon/tests).
 export const WORKER_OPTIONS_TOKEN = Symbol("WorkerOptions");
 
@@ -25,7 +25,7 @@ export interface WorkerOptions {
 
 // In-process, async embedding drain. Runs in the same OS process as the single
 // writer (only the main thread touches the DB). A pending node is fully findable
-// via FTS in the meantime — nothing here is on the write path.
+// via FTS in the meantime — nothing here is on the writing path.
 @injectable()
 export class EmbeddingWorker {
   private readonly batchSize: number;
@@ -49,7 +49,7 @@ export class EmbeddingWorker {
     this.backoffBaseMs = opts.backoffBaseMs ?? 1000;
     this.backoffCapMs = opts.backoffCapMs ?? 60_000;
 
-    // Comfortably longer than the tick interval so the holder keeps the lease
+    // Comfortably longer than the tick interval, so the holder keeps the lease
     // across normal ticks; if the process dies, another takes over after it lapses.
     this.leaseTtlMs = opts.leaseTtlMs ?? Math.max(this.intervalMs * 20, 60_000);
   }
@@ -93,7 +93,7 @@ export class EmbeddingWorker {
   // directly with a fixed clock instead of waiting on the interval.
   async tick(): Promise<{ embedded: number; failed: number }> {
     const now = this.now();
-    // Only the lease holder drains — keeps N per-session server processes from all
+    // Only the leaseholder drains — keeps N per-session server processes from all
     // writing embeddings to the shared DB at once.
 
     const isWorkerLeased = await this.embeddingQueue.holdWorkerLease(
