@@ -26,6 +26,7 @@
     "daemon": "MEMORY_DB_PATH=.tmp/dev.db tsx src/daemon.ts",
     "stats": "MEMORY_DB_PATH=.tmp/dev.db tsx src/stats-cli.ts",
     "eval:rerank": "tsx scripts/rerank-eval.mts",
+    "calibrate:report": "tsx scripts/calibration-report.mts",
     "inspect": "MEMORY_DB_PATH=.tmp/dev.db npx @modelcontextprotocol/inspector tsx src/server.ts",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/e2e/**'",
