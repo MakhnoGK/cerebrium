@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { injectable } from "tsyringe";
-import { defaultDbPath } from "@/db/database";
+import { DatabaseConfig } from "@/infrastructure/config";
 
 @injectable()
 export class DaemonService {
+  constructor(private readonly database: DatabaseConfig) {}
+
   isDaemonAlive() {
     const pid = this.readDaemonPid();
     return pid != null && pid !== process.pid && this.isProcessAlive(pid);
@@ -22,7 +24,7 @@ export class DaemonService {
   readDaemonPid() {
     try {
       const pid = Number.parseInt(
-        readFileSync(this.getDaemonPidPath(defaultDbPath()), "utf8").trim(),
+        readFileSync(this.getDaemonPidPath(this.database.path), "utf8").trim(),
         10,
       );
       return Number.isFinite(pid) && pid > 0 ? pid : null;
