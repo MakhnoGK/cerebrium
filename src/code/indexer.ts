@@ -7,30 +7,9 @@ import { readGitProvenance } from "@/code/git";
 import { compileIgnore } from "@/code/ignore";
 import { langForPath } from "@/code/languages";
 import { parse } from "@/code/parser";
-import type { FileIndexResult } from "@/db/repo";
 import type { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
+import type { FileIndexResult, IndexStats, IndexTarget } from "@/core/types";
 import { EdgeType } from "@/core/vocab";
-
-export interface IndexStats {
-  repo: string;
-  files_scanned: number;
-  files_indexed: number;
-  files_skipped: number;
-  symbols_added: number;
-  symbols_updated: number;
-  symbols_invalidated: number;
-  edges_written: number;
-  duration_ms: number;
-  parked_embeddings: number;
-  branch: string | null;
-  commit: string | null;
-  dirty: boolean;
-}
-
-export interface IndexTarget {
-  name: string;
-  root: string;
-}
 
 export interface IndexOptions {
   session_id: string;
@@ -353,21 +332,4 @@ export function resolveCalls(
   }
 
   return pairs;
-}
-
-// ---- config ----------------------------------------------------------------
-
-// MEMORY_CODE_ROOTS = "name=path,name2=path2"
-export function parseCodeRoots(env: string | undefined): IndexTarget[] {
-  if (!env) return [];
-
-  return env.split(",").reduce<IndexTarget[]>((acc, part) => {
-    const eq = part.indexOf("=");
-    if (eq < 0) return acc;
-
-    const name = part.slice(0, eq).trim();
-    const root = part.slice(eq + 1).trim();
-
-    return name && root ? [...acc, { name, root }] : acc;
-  }, []);
 }

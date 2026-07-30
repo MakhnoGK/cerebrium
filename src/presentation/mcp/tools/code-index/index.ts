@@ -5,8 +5,6 @@ import { extractFile, FileExtract } from "@/code/extract";
 import { readGitProvenance } from "@/code/git";
 import {
   IndexOptions,
-  IndexStats,
-  IndexTarget,
   looksBinary,
   resolveCalls,
   resolveImports,
@@ -16,7 +14,7 @@ import {
 } from "@/code/indexer";
 import { parse } from "@/code/parser";
 import { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
-import type { FileIndexResult } from "@/core/types";
+import type { FileIndexResult, IndexStats, IndexTarget } from "@/core/types";
 import { EdgeType } from "@/core/vocab";
 import { metadata } from "@/presentation/mcp/tools/code-index/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
