@@ -3,6 +3,8 @@ import "reflect-metadata";
 import type Database from "better-sqlite3";
 import { SearchRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { chunkContent } from "@/core/chunk";
+import { toFtsMatch } from "@/core/fts";
 import { buildContainer } from "@/container";
 import {
   ConsolidationThresholdsConfig,
@@ -31,6 +33,9 @@ import {
 const MERGE_SWEEP = [0.9, 0.905, 0.91, 0.915, 0.92, 0.925, 0.93, 0.935, 0.94, 0.945, 0.95];
 const DENSITY_SWEEP = [0.85, 0.87, 0.89, 0.9, 0.91, 0.92, 0.925, 0.93, 0.94];
 
+// Jaccard overlap, not cosine: the lexical fallback lives on its own scale.
+const LEXICAL_SWEEP = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.7, 0.9];
+
 // Mirrors the per-node neighbour ceiling in ConsolidationRepo.duplicateSemanticPairs.
 const CAP_PER_NODE = 10;
 
@@ -45,6 +50,7 @@ const DEDUP_SHOWN = 3;
 // writes is noise; link discovery wants a graph that is connected but not saturated.
 const TARGET_DEDUP_HIT_RATE = 0.15;
 const TARGET_LINK_EDGES_PER_NODE = 5;
+const TARGET_LEXICAL_HIT_RATE = 0.15;
 
 interface Pair {
   a: string;
@@ -81,6 +87,12 @@ interface DedupRow {
   hitRate: number;
   meanShown: number;
   p90Shown: number;
+}
+
+interface LexicalRow {
+  threshold: number;
+  hitRate: number;
+  meanShown: number;
 }
 
 interface LinkRow {
@@ -146,6 +158,7 @@ async function report(opts: {
   const fidelity = storedVsRecomputed(pairs, vectors);
   const dedup = dedupDensity(db, opts.searchRepo, vectors, DENSITY_SWEEP);
   const link = linkDensity(db, vectors, DENSITY_SWEEP);
+  const lexical = lexicalDensity(db, opts.searchRepo, LEXICAL_SWEEP);
 
   if (opts.asJson) {
     process.stdout.write(
@@ -158,8 +171,9 @@ async function report(opts: {
           scorers: stats,
           merge_sweep: sweep,
           dedup_density: dedup,
+          lexical_density: lexical,
           link_density: link,
-          recommendation: recommendation(sweep, dedup, link),
+          recommendation: recommendation(sweep, dedup, link, lexical),
         },
         null,
         2,
@@ -224,6 +238,18 @@ async function report(opts: {
   }
   L.push("");
 
+  L.push("── Density arm: the lexical fallback, on its own Jaccard scale ──");
+  L.push("  threshold   writes with a hit   mean shown");
+  for (const r of lexical) {
+    L.push(
+      `  ${r.threshold.toFixed(3)}     ${(r.hitRate * 100).toFixed(1).padStart(8)}%          ` +
+        r.meanShown.toFixed(2),
+    );
+  }
+  L.push("  This path only runs when nothing is embedded yet, and Jaccard is not cosine: a");
+  L.push("  paraphrased duplicate scores ~0.18 here, a verbatim copy ~1.0.");
+  L.push("");
+
   L.push("── Density arm: edges per node link discovery would propose, from scratch ──");
   L.push("  threshold   mean/node   p90/node   max/node   total");
   for (const r of link) {
@@ -238,13 +264,16 @@ async function report(opts: {
   L.push("  KNN, so these counts are an upper bound — the safe direction for a density gate.");
   L.push("");
 
-  const rec = recommendation(sweep, dedup, link);
+  const rec = recommendation(sweep, dedup, link, lexical);
   L.push("── Suggested thresholds ──");
   L.push(
     `  merge   ${rec.mergeSim ?? "—"}   (highest precision at >=0.95, preferring recall on ties)`,
   );
   L.push(
     `  dedup   ${rec.dedupThreshold ?? "—"}   (lowest threshold with <=${(TARGET_DEDUP_HIT_RATE * 100).toFixed(0)}% of writes surfacing a hit)`,
+  );
+  L.push(
+    `  lexical ${rec.lexicalDedupThreshold ?? "—"}   (lowest Jaccard threshold with <=${(TARGET_LEXICAL_HIT_RATE * 100).toFixed(0)}% of writes surfacing a hit)`,
   );
   L.push(
     `  link    ${rec.sim ?? "—"}   (lowest threshold with <=${TARGET_LINK_EDGES_PER_NODE} proposed edges per node)`,
@@ -534,6 +563,57 @@ function thresholdSweep(pairs: Pair[], sweep: number[]): SweepRow[] {
 
 // ---- density ----------------------------------------------------------------
 
+// Replays the write tool's *lexical fallback* — the path taken when nothing is embedded
+// yet. Same probe text, same FTS candidates, same Jaccard, so the gate it suggests is on
+// the scale the fallback actually produces rather than the cosine scale it used to share.
+function lexicalDensity(
+  db: Database.Database,
+  searchRepo: SearchRepo,
+  sweep: number[],
+): LexicalRow[] {
+  const nodes = db
+    .prepare(
+      `SELECT n.id AS id, n.project AS project FROM nodes n
+       WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
+    )
+    .all() as { id: string; project: string | null }[];
+  const text = loadText(db);
+
+  const perProbe: number[][] = [];
+  for (const node of nodes) {
+    const own = text.get(node.id);
+    if (!own) continue;
+    const firstChunk = chunkContent("probe", own.content)[0]?.text ?? own.content;
+    const probe = `${own.title}\n${firstChunk}`;
+    const match = toFtsMatch(probe);
+    if (!match) continue;
+
+    const probeTokens = tokenSet(probe);
+    const scores = searchRepo
+      .search({
+        match,
+        project: node.project ?? undefined,
+        kinds: ["semantic"],
+        history: false,
+        cap: DEDUP_CANDIDATES,
+      })
+      .rows.filter((r) => r.id !== node.id)
+      .map((r) => jaccard(probeTokens, tokenSet(`${r.title} ${r.content}`)));
+    perProbe.push(scores);
+  }
+
+  return sweep.map((threshold) => {
+    const shown = perProbe.map(
+      (scores) => scores.filter((s) => s >= threshold).slice(0, DEDUP_SHOWN).length,
+    );
+    return {
+      threshold,
+      hitRate: shown.length ? shown.filter((n) => n > 0).length / shown.length : 0,
+      meanShown: mean(shown),
+    };
+  });
+}
+
 // Replays the write tool's probe for every live semantic node: its own seed vector as the
 // query, the same filters and cap, itself excluded. Uses SearchRepo, so the measurement
 // inherits the production post-filter behaviour rather than an idealised version of it.
@@ -621,9 +701,11 @@ function recommendation(
   sweep: SweepRow[],
   dedup: DedupRow[],
   link: LinkRow[],
+  lexical: LexicalRow[],
 ): {
   mergeSim: number | null;
   dedupThreshold: number | null;
+  lexicalDedupThreshold: number | null;
   sim: number | null;
   orderingAdjusted: boolean;
 } {
@@ -646,6 +728,8 @@ function recommendation(
   return {
     mergeSim,
     dedupThreshold,
+    lexicalDedupThreshold:
+      lexical.find((r) => r.hitRate <= TARGET_LEXICAL_HIT_RATE)?.threshold ?? null,
     sim: link.find((r) => r.meanEdges <= TARGET_LINK_EDGES_PER_NODE)?.threshold ?? null,
     orderingAdjusted: needsAdjusting,
   };
@@ -674,8 +758,9 @@ function subtract(v: Float64Array, mean: Float64Array): Float64Array {
   return out;
 }
 
+// Matches the write tool's tokenizer exactly; the lexical arm is worthless otherwise.
 function tokenSet(text: string): Set<string> {
-  return new Set(text.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? []);
+  return new Set(text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []);
 }
 
 function jaccard(a: Set<string> | undefined, b: Set<string> | undefined): number {

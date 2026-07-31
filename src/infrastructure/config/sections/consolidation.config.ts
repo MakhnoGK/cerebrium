@@ -34,11 +34,14 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
 }) {}
 
 // `mergeSim` is deliberately higher than the write-time dedup probe so merge stays
-// conservative; `minCluster` below 2 is not a cluster.
+// conservative; `minCluster` below 2 is not a cluster. Both similarity gates are
+// calibrated against a real store by `npm run calibrate:report` — `mergeSim` from the
+// applied/dismissed merge record, `sim` from a target edges-per-node density — and both
+// are specific to the embedding model in use.
 @configSection()
 export class ConsolidationThresholdsConfig extends SectionOf("consolidation.thresholds", {
-  sim: num(0.85).range(0, 1).env("MEMORY_CONSOLIDATE_SIM"),
-  mergeSim: num(0.92).range(0, 1).env("MEMORY_CONSOLIDATE_MERGE_SIM"),
+  sim: num(0.9).range(0, 1).env("MEMORY_CONSOLIDATE_SIM"),
+  mergeSim: num(0.925).range(0, 1).env("MEMORY_CONSOLIDATE_MERGE_SIM"),
   minAgeDays: int(14).nonNegative().env("MEMORY_CONSOLIDATE_MIN_AGE_DAYS"),
   minCluster: int(3).min(2).env("MEMORY_CONSOLIDATE_MIN_CLUSTER"),
 }) {}

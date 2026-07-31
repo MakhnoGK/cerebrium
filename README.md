@@ -67,7 +67,7 @@ default, validation, and (optionally) a legacy variable name in a single line:
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight:   num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
-  dedupThreshold: num(0.82).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
+  dedupThreshold: num(0.92).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
 }) {}
 ```
 
@@ -216,7 +216,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
-| `MEMORY_DEDUP_THRESHOLD` | `0.82` | Similarity above which a write reports `similar_existing`. |
+| `MEMORY_DEDUP_THRESHOLD` | `0.92` | Cosine similarity above which a write reports `similar_existing`. Calibrated, not chosen — see below. |
+| `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
@@ -231,8 +232,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE` | `auto` | Attribute-enrichment posture: `auto` mines keywords/tags/context for each semantic node during the sweep and folds them into its FTS text for wider recall; `off` skips it. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE_BATCH` | `50` | Max un-annotated semantic nodes enriched per sweep. |
-| `MEMORY_CONSOLIDATE_SIM` | `0.85` | Cosine-similarity floor for clustering + link discovery. |
-| `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.92` | Similarity floor for treating two semantic nodes as duplicates. |
+| `MEMORY_CONSOLIDATE_SIM` | `0.9` | Cosine-similarity floor for clustering + link discovery. |
+| `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
@@ -273,7 +274,7 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
 | `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic; `history:true` includes invalidated nodes. **Search before writing.** |
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision. |
-| `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`. |
+| `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
 | `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge. |
 | `link` | Connect two existing nodes with a typed, directed edge (`references`/`documents`/`derived_from`/`supersedes`/`relates_to`). Edges drive graph expansion at search time. |
@@ -303,6 +304,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium` | The MCP server (stdio). Registered in Claude Code. |
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
+| `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 
 ## Code indexing
 
@@ -429,6 +431,38 @@ authors the summary at apply time) or a bring-your-own `command`/`http` backend.
 self-contained local runtime (Ollama + a small model) for the `http` provider lives
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
+
+## Calibrating the similarity gates
+
+Three settings decide when two memories count as related — `MEMORY_DEDUP_THRESHOLD`
+(the write-time probe), `MEMORY_CONSOLIDATE_SIM` (link discovery + episodic
+clustering) and `MEMORY_CONSOLIDATE_MERGE_SIM` (destructive merge) — plus
+`MEMORY_DEDUP_LEXICAL_THRESHOLD` for the probe's Jaccard fallback. **They are
+measured, not chosen**, because a sentence embedder's cosine scale is compressed and
+model-specific: on a single-domain corpus every pair of authored notes can sit inside
+a ~0.85–1.00 band, so a threshold that looks conservative in the abstract fires on
+everything, and a swap of the embedding model invalidates whatever was set before.
+
+`npm run calibrate:report` measures where they belong, read-only, against a real
+store. It has two arms, because only one gate has ground truth:
+
+- **Labelled** — `consolidation_candidates` records every past merge verdict
+  (`applied` / `dismissed`). That is a labelled set: the report scores those pairs,
+  ranks candidate scorers by AUC, and prints precision/recall at each threshold, so
+  `MEMORY_CONSOLIDATE_MERGE_SIM` is a trade you pick off a table rather than a guess.
+  Alternative scorers stay registered behind `--all-scorers` so a rejected idea can be
+  re-tested instead of re-argued.
+- **Density** — the dedup and link gates have no verdicts, so they are set against a
+  target *volume* instead: how often a write would surface a candidate, and how many
+  edges link discovery would propose per node. A gate that flags most writes is noise
+  whatever its precision.
+
+Two properties of the measurement are worth knowing before quoting it. Candidates were
+only ever detected above the gate in force at the time, so recall *below* that gate is
+unmeasurable — the recall column is recall among proposed pairs. And a stored score
+cannot be recomputed from today's vectors (content gets revised, and the detector's
+similarity is asymmetric), so the report reads the recorded score and reports the drift
+rather than pretending to reproduce it.
 
 ## Skill for consuming agents
 

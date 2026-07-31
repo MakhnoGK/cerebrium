@@ -9,8 +9,12 @@ export const metadata = {
     "Create a new memory node. Use `memory_kind:'semantic'` for durable facts, decisions, entities, how-tos, or tasks " +
     "that should outlive this session; use `memory_kind:'episodic'` for a record of what happened (an event_note; " +
     "prefer the `checkpoint` tool for session hand-offs). SEARCH FIRST. On a semantic write the server runs a duplicate " +
-    "probe and returns `similar_existing` (with scores) plus a `context_notes` hint when a near-duplicate exists — the " +
-    "write still succeeds, but prefer `update` or `link`+`invalidate` over keeping two copies of one fact. When a " +
+    "probe and returns `similar_existing` plus a `context_notes` hint when a near-duplicate exists — the " +
+    "write still succeeds, but prefer `update` or `link`+`invalidate` over keeping two copies of one fact. Each " +
+    "candidate carries a `score` (cosine similarity, or lexical overlap when nothing is embedded yet) and a " +
+    "`confidence`: `high` means it also clears the merge threshold, so treat it as the same fact unless you can name " +
+    "the difference; `moderate` means related enough to check. Both gates are calibrated per deployment, so a " +
+    "candidate appearing at all is meaningful. When a " +
     "generating provider is configured, it also returns `reconcile` — a judged action (`noop`|`update`|`supersede`), " +
     "the `target_id` it applies to, and a reason — so you can act on the duplicate precisely; it is advice, never " +
     "auto-applied. Episodic nodes are write-once. Returns the new node's envelope.",

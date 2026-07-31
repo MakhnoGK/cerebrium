@@ -10,6 +10,7 @@ import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
+import { RetrievalConfig } from "@/infrastructure/config";
 
 async function session(tool: SessionStartTool, project?: string): Promise<string> {
   return (await tool.invoke({ project })).session_id;
@@ -65,7 +66,10 @@ describe("Duplicate detection at write time", () => {
 
     // Then
     expect(dup.similar_existing?.[0]?.id).toBe(original.id);
-    expect(dup.similar_existing![0]!.score).toBeGreaterThanOrEqual(0.82);
+    expect(dup.similar_existing![0]!.score).toBeGreaterThanOrEqual(
+      container.resolve(RetrievalConfig).dedupThreshold,
+    );
+    expect(dup.similar_existing![0]!.confidence).toBe("high");
     expect((dup.context_notes ?? []).some((n) => n.startsWith("Possible duplicate of"))).toBe(true);
 
     // When / Then
