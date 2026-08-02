@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { candidateHash } from "@/db/repositories/consolidation";
-import { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
+import { ConsolidationKind, ConsolidationStatus, MemoryKind } from "@/core/vocab";
 import { setup } from "@test/helpers";
 
 describe("ConsolidationRepo candidate queue", () => {
@@ -142,5 +142,60 @@ describe("ConsolidationRepo candidate queue", () => {
       false,
     ); // already resolved
     expect(consolidation.getCandidate(id)!.status).toBe("applied");
+  });
+});
+
+describe("ConsolidationRepo kNN seeding", () => {
+  // A node whose `embedding_meta` row exists while its `chunk_vec` row does not — the
+  // state that made vec0 abort the whole consolidation sweep.
+  async function seedWithVectorlessNode() {
+    const env = setup();
+    const dup = "the http client retries three times with exponential backoff";
+    const mk = (title: string, content: string) =>
+      env.nodes.createNode({
+        memory_kind: MemoryKind.SEMANTIC,
+        type: "fact",
+        title,
+        content,
+        project: null,
+        session_id: "s-1",
+        ts: env.clock.now(),
+      });
+
+    const twinA = await mk("Retry budget", dup);
+    const twinB = await mk("Client retries", dup);
+    const orphan = await mk("Kafka", "ingestion consumes kafka topics by tenant");
+    await env.worker.tick();
+
+    env.db
+      .prepare("DELETE FROM chunk_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE node_id = ?)")
+      .run(orphan.id);
+
+    return { ...env, twinA: twinA.id, twinB: twinB.id, orphan: orphan.id };
+  }
+
+  it("should skip the node and still return the healthy pair when a node has no chunk_vec row", async () => {
+    // Given
+    const { consolidation, twinA, twinB, orphan } = await seedWithVectorlessNode();
+
+    // When
+    const pairs = consolidation.similarLinkCandidates({ minScore: 0.5, limit: 50 });
+
+    // Then
+    expect(pairs.some((p) => [p.src, p.dst].sort().join() === [twinA, twinB].sort().join())).toBe(
+      true,
+    );
+    expect(pairs.some((p) => p.src === orphan || p.dst === orphan)).toBe(false);
+  });
+
+  it("should not throw when merge detection walks a node with no chunk_vec row", async () => {
+    // Given
+    const { consolidation, twinA, twinB } = await seedWithVectorlessNode();
+
+    // When / Then
+    const pairs = consolidation.duplicateSemanticPairs({ minScore: 0.9, limit: 50 });
+    expect(pairs.map((p) => p.member_ids.slice().sort().join())).toContain(
+      [twinA, twinB].sort().join(),
+    );
   });
 });

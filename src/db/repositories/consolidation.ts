@@ -197,6 +197,20 @@ export class ConsolidationRepo extends BaseRepo {
     ).map((r) => r.id);
   }
 
+  // The kNN seed: a node's lowest-seq chunk vector. Null when the node has no vector yet —
+  // the seed sets gate on `embedding_meta`, which can outrun the `chunk_vec` row.
+  // vec0 aborts the statement on a NULL query vector, so callers must skip instead of MATCH.
+  private seedVector(nodeId: string): Buffer | null {
+    const row = this.db
+      .prepare(
+        `SELECT cv.embedding AS embedding FROM chunks c JOIN chunk_vec cv ON cv.chunk_id = c.id
+         WHERE c.node_id = ? AND c.stale = 0 ORDER BY c.seq LIMIT 1`,
+      )
+      .get(nodeId) as { embedding: Buffer } | undefined;
+
+    return row?.embedding ?? null;
+  }
+
   // Nearest valid semantic neighbors of one node, seeded by its lowest-seq embedded
   // chunk vector (best distance per neighbor node), excluding the node itself.
   private nearestSemantic(
@@ -204,14 +218,17 @@ export class ConsolidationRepo extends BaseRepo {
     k: number,
     cap: number,
   ): { id: string; distance: number }[] {
+    const seed = this.seedVector(nodeId);
+
+    if (!seed) {
+      return [];
+    }
+
     return this.db
       .prepare(
         `WITH knn AS (
            SELECT chunk_id, distance FROM chunk_vec
-           WHERE embedding MATCH (
-             SELECT cv.embedding FROM chunks c JOIN chunk_vec cv ON cv.chunk_id = c.id
-             WHERE c.node_id = @node AND c.stale = 0 ORDER BY c.seq LIMIT 1
-           ) AND k = @k
+           WHERE embedding MATCH @seed AND k = @k
          )
          SELECT n.id AS id, MIN(knn.distance) AS distance
          FROM knn
@@ -220,7 +237,7 @@ export class ConsolidationRepo extends BaseRepo {
          WHERE n.id != @node AND n.memory_kind = 'semantic' AND n.invalidated_at IS NULL
          GROUP BY n.id ORDER BY distance ASC LIMIT @cap`,
       )
-      .all({ node: nodeId, k, cap }) as { id: string; distance: number }[];
+      .all({ node: nodeId, seed, k, cap }) as { id: string; distance: number }[];
   }
 
   similarLinkCandidates(opts: {
@@ -303,14 +320,17 @@ export class ConsolidationRepo extends BaseRepo {
     k: number,
     cap: number,
   ): { id: string; distance: number }[] {
+    const seed = this.seedVector(nodeId);
+
+    if (!seed) {
+      return [];
+    }
+
     return this.db
       .prepare(
         `WITH knn AS (
            SELECT chunk_id, distance FROM chunk_vec
-           WHERE embedding MATCH (
-             SELECT cv.embedding FROM chunks c JOIN chunk_vec cv ON cv.chunk_id = c.id
-             WHERE c.node_id = @node AND c.stale = 0 ORDER BY c.seq LIMIT 1
-           ) AND k = @k
+           WHERE embedding MATCH @seed AND k = @k
          )
          SELECT n.id AS id, MIN(knn.distance) AS distance
          FROM knn
@@ -320,7 +340,10 @@ export class ConsolidationRepo extends BaseRepo {
            AND n.consolidated_at IS NULL AND n.valid_from <= @cutoff AND n.project IS @project
          GROUP BY n.id ORDER BY distance ASC LIMIT @cap`,
       )
-      .all({ node: nodeId, project, cutoff, k, cap }) as { id: string; distance: number }[];
+      .all({ node: nodeId, project, cutoff, seed, k, cap }) as {
+      id: string;
+      distance: number;
+    }[];
   }
 
   // Connected components (over the >= minScore similarity graph) of eligible episodics,
