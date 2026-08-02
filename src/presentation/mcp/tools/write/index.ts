@@ -18,17 +18,28 @@ import { MemoryKind, Posture } from "@/core/vocab";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { metadata } from "@/presentation/mcp/tools/write/metadata";
-import { ConsolidationPostureConfig, RetrievalConfig } from "@/infrastructure/config";
+import {
+  ConsolidationPostureConfig,
+  ConsolidationThresholdsConfig,
+  RetrievalConfig,
+} from "@/infrastructure/config";
 
 const DEDUP_CANDIDATES = 5;
+
+// The decision band is ~0.92-0.95 wide, so two decimals would quantise away the
+// distinction the score exists to report.
+const SCORE_PRECISION = 1000;
 
 interface SimilarExisting {
   id: string;
   title: string;
   summary: string;
   score: number;
+  confidence: "high" | "moderate";
   suggestion: string;
 }
+
+type Candidate = Omit<SimilarExisting, "confidence">;
 
 type ToolResponse = Envelope & {
   similar_existing?: SimilarExisting[];
@@ -50,6 +61,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
 
     private readonly posture: ConsolidationPostureConfig,
     private readonly retrieval: RetrievalConfig,
+    private readonly thresholds: ConsolidationThresholdsConfig,
   ) {}
 
   public getMetadata = () => metadata;
@@ -120,7 +132,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
         cap: DEDUP_CANDIDATES,
       };
 
-      let scored: SimilarExisting[] = [];
+      let scored: Candidate[] = [];
       const [qvec] = await this.embeddings.embed([probe], EmbeddingRole.QUERY);
 
       if (qvec) {
@@ -133,7 +145,13 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
         }));
       }
 
+      // Jaccard and cosine are different scales, so the fallback carries its own gate:
+      // a paraphrased duplicate scores ~0.18 lexically, where a cosine gate would be ~0.93.
+      let threshold = this.retrieval.dedupThreshold;
+
       if (!scored.length) {
+        threshold = this.retrieval.lexicalDedupThreshold;
+
         const match = toFtsMatch(probe);
 
         if (match) {
@@ -157,13 +175,15 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
         }
       }
 
-      const threshold = this.retrieval.dedupThreshold;
-
       return scored
         .filter((c) => c.score >= threshold && c.id !== envelope.id)
         .sort((a, b) => b.score - a.score)
         .slice(0, 3)
-        .map((c) => ({ ...c, score: Math.round(c.score * 100) / 100 }));
+        .map((c) => ({
+          ...c,
+          score: Math.round(c.score * SCORE_PRECISION) / SCORE_PRECISION,
+          confidence: c.score >= this.thresholds.mergeSim ? "high" : "moderate",
+        }));
     } catch {
       return []; // dedup is advisory; a probe failure must never block the writing
     }

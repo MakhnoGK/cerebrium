@@ -6,51 +6,25 @@ import type { EventAction } from "@/core/vocab";
 // Sessions and the events audit log — provenance for every tool call.
 @injectable()
 export class SessionsRepo extends BaseRepo {
-  /** @deprecated */
-  ensureSession(id: string, project: string | null, ts: string): { created: boolean } {
-    const row = this.db.prepare("SELECT id FROM sessions WHERE id = ?").get(id);
-
-    if (row) {
-      this.db.prepare("UPDATE sessions SET last_seen = ? WHERE id = ?").run(ts, id);
-      return { created: false };
-    }
-
-    this.db
-      .prepare("INSERT INTO sessions (id, project, started_at, last_seen) VALUES (?, ?, ?, ?)")
+  // Register a session id, or refresh an existing one. Every tool advertises session_id as
+  // "auto-created if unknown" and the server serves queued requests concurrently, so this
+  // must not be a read-then-write: the conflict clause makes the insert unconditional and
+  // its `changes` count is the exact answer to "did this call create it".
+  touch(id: string, project: string | null, ts: string): { created: boolean } {
+    const inserted = this.db
+      .prepare(
+        `INSERT INTO sessions (id, project, started_at, last_seen) VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+      )
       .run(id, project, ts, ts);
 
-    return { created: true };
-  }
+    if (inserted.changes === 1) {
+      return { created: true };
+    }
 
-  async getById(id: string) {
-    return this.db.prepare("SELECT id FROM sessions WHERE id = ?").get(id);
-  }
+    this.db.prepare("UPDATE sessions SET last_seen = ? WHERE id = ?").run(ts, id);
 
-  async update(
-    data: Record<string, number | string | boolean>,
-    filter: Record<string, number | string | boolean>,
-  ) {
-    const set = Object.keys(data)
-      .map((key) => `${key} = ?`)
-      .join(", ");
-
-    const where = Object.keys(filter)
-      .map((key) => `${key} = ?`)
-      .join(" AND ");
-
-    this.db
-      .prepare(`UPDATE sessions SET ${set} WHERE ${where}`)
-      .run(...Object.values(data), ...Object.values(filter));
-  }
-
-  async create(data: Record<string, unknown>) {
-    const fields = Object.keys(data);
-    const columns = fields.join(", ");
-
-    const params = fields.map((field) => `@${field}`).join(", ");
-    const sql = `INSERT INTO sessions (${columns}) VALUES (${params})`;
-
-    this.db.prepare(sql).run(data);
+    return { created: false };
   }
 
   logEvent(

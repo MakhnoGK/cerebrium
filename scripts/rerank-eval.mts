@@ -3,21 +3,19 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
-import { container } from "tsyringe";
-import { CLOCK_TOKEN } from "@/domain/ports/clock";
-import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
-import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import {
+  EMBEDDING_PROVIDER_TOKEN,
+  type EmbeddingProvider,
+} from "@/domain/ports/embedding-provider";
 import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
-import { EmbeddingWorker, WORKER_OPTIONS_TOKEN } from "@/application/workers";
-import { openDatabase } from "@/db/database";
+import { EmbeddingWorker } from "@/application/workers";
 import { DB_TOKEN } from "@/db/repositories/base";
-import { SystemClock } from "@/runtime/system-clock";
 import { MemoryKind } from "@/core/vocab";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { createConsolidator } from "@/consolidation";
-import { createProvider } from "@/embeddings";
+import { buildContainer } from "@/container";
+import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 import { createReranker } from "@/rerank";
 
 // Offline relevance eval: measure whether the `local` cross-encoder reranker
@@ -109,19 +107,25 @@ async function main() {
   const here = dirname(fileURLToPath(import.meta.url));
   const data = JSON.parse(readFileSync(join(here, "rerank-eval.dataset.json"), "utf8")) as Dataset;
 
-  const provider = createProvider(process.env.MEMORY_EMBED_PROVIDER || "local");
-  const db = openDatabase(":memory:");
-  container.register(DB_TOKEN, { useValue: db });
-  container.registerSingleton(CLOCK_TOKEN, SystemClock);
-  container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
-  container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator("manual") });
-  container.register(WORKER_OPTIONS_TOKEN, { useValue: {} });
+  // The one wiring path every host uses, with the DB pinned to memory so a run never
+  // touches the real store. Everything else still comes from the environment, which is
+  // what MEMORY_EMBED_PROVIDER / MEMORY_RERANK document.
+  const container = buildContainer({
+    role: "server",
+    source: new LayeredConfigSource(
+      new StaticConfigSource({ MEMORY_DB_PATH: ":memory:" }),
+      new EnvConfigSource(),
+    ),
+  });
+
+  const db = container.resolve<Database.Database>(DB_TOKEN);
+  const provider = container.resolve<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN);
 
   // Both runs share the same DB + embeddings and differ only in the injected reranker.
   const offScope = container.createChildContainer();
   offScope.register(RERANK_PROVIDER_TOKEN, { useValue: createReranker("off") });
   const onScope = container.createChildContainer();
-  const onReranker = createReranker(process.env.MEMORY_RERANK || "local");
+  const onReranker = createReranker(process.env.MEMORY_RERANK ?? "local");
   onScope.register(RERANK_PROVIDER_TOKEN, { useValue: onReranker });
   const searchOff = offScope.resolve(SearchTool);
   const searchOn = onScope.resolve(SearchTool);
