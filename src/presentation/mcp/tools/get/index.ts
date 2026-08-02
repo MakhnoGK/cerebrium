@@ -5,8 +5,16 @@ import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { metadata } from "@/presentation/mcp/tools/get/metadata";
 
+// `nodes` stays `unknown[]`: its shape varies by node kind (symbol source, mirror facets,
+// a pinned revision), and only its length is needed at the audit boundary.
+interface GetResponse {
+  nodes: unknown[];
+  not_found?: string[];
+  hints?: string[];
+}
+
 @tool()
-export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {
+export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse> {
   public getMetadata = () => metadata;
 
   constructor(
@@ -17,7 +25,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {
     private readonly mirror: MirrorRepo,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
+  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<GetResponse> {
     const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
 
     if (args.rev !== undefined && args.ids.length !== 1) {
@@ -88,7 +96,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {
       nodes.push(node);
     }
 
-    const out: Record<string, unknown> = { nodes };
+    const out: GetResponse = { nodes };
 
     if (notFound.length) out.not_found = notFound;
     if (hints.length) out.hints = hints;
@@ -96,7 +104,18 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], unknown> {
     return out;
   }
 
-  public describeEvent(args: ToolArgs<(typeof metadata)["schema"]>) {
-    return { node_id: args.ids[0] ?? null, detail: { count: args.ids.length } };
+  // The fetch half of the retrieval-outcome log: the requested ids join against the ids a
+  // preceding `search` returned, `found` says how many still resolved.
+  public describeEvent(args: ToolArgs<(typeof metadata)["schema"]>, result: GetResponse) {
+    const detail: Record<string, unknown> = {
+      ids: args.ids,
+      found: result.nodes.length,
+    };
+
+    if (result.not_found?.length) {
+      detail.not_found = result.not_found;
+    }
+
+    return { node_id: args.ids[0] ?? null, detail };
   }
 }

@@ -294,6 +294,12 @@ forgotten by a new tool. A tool contributes the row's `node_id`/`detail` declara
 the optional `describeEvent(args, result)`; `stats`' reranker counters are derived from
 those rows.
 
+`search` and `get` make those rows a **retrieval-outcome log**: a search records its query
+and the ids it returned in rank order, a `get` records the ids it was asked for and how
+many resolved. Joining the two gives an implicit relevance signal (which results an agent
+actually went on to read) without any extra instrumentation — and, because the detail
+rides a `Symbol` key out of the tool, without a single token reaching the agent.
+
 ## Commands
 
 Installed as `bin` entries (available on `PATH` after `npm link` / global install),
