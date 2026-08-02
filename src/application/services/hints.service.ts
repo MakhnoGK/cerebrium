@@ -5,9 +5,12 @@ import { SessionService } from "@/application/services/session.service";
 export class HintsService {
   constructor(private readonly sessionsService: SessionService) {}
 
+  // Kept async: the tool boundary awaits it everywhere, and hint sources beyond the
+  // session check are expected to be I/O-bound.
+
   async getUnknownSessionHints(sessionId: string, project: string | null) {
     const now = new Date().toISOString();
-    const { created } = await this.sessionsService.ensureSession(sessionId, project, now);
+    const { created } = this.sessionsService.ensureSession(sessionId, project, now);
 
     if (created) {
       return [

@@ -116,9 +116,7 @@ function main(): Promise<void> {
   const dbPath = container.resolve(DatabaseConfig).path;
   const retrieval = container.resolve(RetrievalConfig);
   const thresholds = container.resolve(ConsolidationThresholdsConfig);
-  // Constructed, not resolved: tsx/esbuild does not emit `design:paramtypes`, so tsyringe
-  // cannot autowire a repo whose constructor is inherited from BaseRepo.
-  const searchRepo = new SearchRepo(db);
+  const searchRepo = container.resolve(SearchRepo);
 
   const asJson = process.argv.includes("--json");
   const allScorers = process.argv.includes("--all-scorers");

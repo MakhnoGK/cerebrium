@@ -102,7 +102,7 @@ export class ConsolidationWorker {
       return result;
     }
 
-    await this.sessionService.ensureSession(this.ownerId, null, now);
+    this.sessionService.ensureSession(this.ownerId, null, now);
 
     this.discoverLinks(now, result);
     await this.distill(now, result);
