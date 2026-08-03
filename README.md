@@ -558,6 +558,35 @@ node-level — but they are the granularity a chunk-level relevance signal needs
 cost nothing to accumulate. An `outline` fetch is excluded: it is how an agent decides
 whether to read, not a read, so counting it would label a node the agent then skipped.
 
+## Measuring a wire encoding before changing one
+
+`npm run eval:encoding -- --db PATH` answers what a cheaper encoding is actually worth on
+*this* store's list-shaped responses, before a contract every consumer parses gets changed
+for a guess. It replays the queries from the retrieval-outcome log through the real ranking
+pipeline, opens the store read-only, and encodes each response four ways: `json` (what
+ships), `no-dup-sum` (drop a `summary` that only repeats the `best_chunk` beside it),
+`trimmed` (also drop `invalidated:false` and `project:null`), and `toon` (tabular — one
+header, one row per result).
+
+What it found on the live store (169 replayed queries, 1,690 results):
+
+| encoding | search responses | working set |
+|---|---|---|
+| `no-dup-sum` | **−15.5%** | 0.0% |
+| `trimmed` | −19.4% | −4.4% |
+| `toon` | −21.9% | −20.9% |
+
+Read as a decision rather than a score, that says **ship `no-dup-sum` and nothing else**.
+It takes 71% of TOON's win on the payload that dominates, and it is the only rule that
+costs a consumer nothing — the field is dropped only when another field in the same object
+already carries the text. `trimmed` buys 3.9 more points for making every reader interpret
+an absent field as a value, and `toon` buys 6.4 more for changing the wire format of every
+tool at once. The working set inverts the ranking (its envelopes are uniform, and carry no
+`best_chunk` to be redundant with) but it is ~2.5k tokens once per session against 217k
+across searches, so it does not move the decision.
+
+Re-run it before revisiting this: the answer is a property of the corpus, not of the format.
+
 ## Calibrating the similarity gates
 
 Three settings decide when two memories count as related — `MEMORY_DEDUP_THRESHOLD`

@@ -27,12 +27,13 @@
     "stats": "MEMORY_DB_PATH=.tmp/dev.db tsx src/stats-cli.ts",
     "eval:retrieval": "vite-node --config vitest.config.ts scripts/eval-retrieval.mts",
     "calibrate:report": "vite-node --config vitest.config.ts scripts/calibration-report.mts",
-    "smoke:scripts": "npm run eval:retrieval -- --help > /dev/null && npm run calibrate:report -- --help > /dev/null",
+    "smoke:scripts": "npm run eval:retrieval -- --help > /dev/null && npm run calibrate:report -- --help > /dev/null && npm run eval:encoding -- --help > /dev/null",
     "inspect": "MEMORY_DB_PATH=.tmp/dev.db npx @modelcontextprotocol/inspector tsx src/server.ts",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/e2e/**'",
     "test:e2e": "vitest run test/e2e",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:encoding": "vite-node --config vitest.config.ts scripts/eval-encoding.mts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
