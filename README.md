@@ -187,6 +187,14 @@ Sections address the current revision's live chunks, so they cannot be combined 
 `rev` or `as_of` — a superseded body was never chunked under its own headings, and the
 tool says so rather than silently returning the whole thing.
 
+The write side gets the same information as advice. Past `MEMORY_LONG_BODY_CHARS`,
+`write` and `update` add a `context_notes` line — the same advisory channel as the
+duplicate probe, and just as non-blocking. A long node is not a mistake; a living index
+is *meant* to be long. What the note says depends on what it can see: a long body with
+headings can at least be read in parts, and one without any cannot be narrowed at all.
+Neither is enforced, because the store cannot tell a deliberate index from a node that
+quietly accumulated several unrelated facts — but the agent writing it can.
+
 ## Quick start
 
 Requires Node ≥ 22 (developed on Node 26; see `.nvmrc`/`engines`). `better-sqlite3`
@@ -268,6 +276,7 @@ declared range fails at startup rather than being quietly replaced.
 |-----|---------|---------|
 | `MEMORY_DB_PATH` | `~/.cerebrium/memory.db` | SQLite file. `:memory:` for ephemeral. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
+| `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
 | `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model) or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). |
 | `MEMORY_RERANK` | `off` | Second-stage search reranker: `off`, `local` (cross-encoder via transformers.js), or `local-null` (deterministic, offline, for tests). |

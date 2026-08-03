@@ -7,7 +7,9 @@ export const metadata = {
   description:
     "Revise a semantic node by appending a new revision (history is preserved; the old text stays reachable via " +
     "`get` with `rev`). Use this to correct or extend a fact/decision rather than writing a near-duplicate. Episodic " +
-    "nodes are write-once and CANNOT be updated — record what changed as a new node instead. Returns the updated envelope.",
+    "nodes are write-once and CANNOT be updated — record what changed as a new node instead. A revision that leaves the " +
+    "body long enough for every reader to pay for it draws a `context_notes` line saying so; it is advice, never a limit. " +
+    "Returns the updated envelope.",
 
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
