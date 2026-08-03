@@ -1,7 +1,7 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { HintsService } from "@/application/services";
-import { CodeRepo, MirrorRepo, NodesRepo } from "@/db/repositories";
+import { ChunksRepo, CodeRepo, MirrorRepo, NodesRepo } from "@/db/repositories";
 import { MemoryKind } from "@/core/vocab";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
@@ -25,6 +25,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
     private readonly nodes: NodesRepo,
     private readonly code: CodeRepo,
     private readonly mirror: MirrorRepo,
+    private readonly chunks: ChunksRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
@@ -39,6 +40,24 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
     if (args.rev !== undefined && args.as_of !== undefined) {
       throw new Error(
         "`rev` and `as_of` both pick a revision; pass one. `as_of` resolves the revision current at that time.",
+      );
+    }
+
+    if (args.sections !== undefined && args.ids.length !== 1) {
+      throw new Error(
+        "`sections` names one node's headings, so it can only be used when `ids` has exactly one element. " +
+          "Pass `outline:true` instead to see every id's sections.",
+      );
+    }
+
+    const narrowing = args.sections !== undefined || args.outline === true;
+
+    // Sections address live chunks, which only exist for the current revision — a
+    // superseded body was never chunked under its own headings.
+    if (narrowing && (args.rev !== undefined || args.as_of !== undefined)) {
+      throw new Error(
+        "sections address the current revision's chunks, which a past revision does not have; " +
+          "drop `sections`/`outline`, or drop `rev`/`as_of` and narrow the current body.",
       );
     }
 
@@ -120,6 +139,34 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
 
       if (args.include_revisions) {
         node.revisions = this.nodes.listRevisions(id);
+      }
+
+      if (narrowing) {
+        const outline = this.chunks.sections(id);
+
+        node.outline = outline;
+        // Whatever is asked for, it is a slice of the body; the raw source of a code
+        // mirror is not addressable by heading and would defeat the narrowing.
+        delete node.source;
+
+        if (args.sections === undefined) {
+          delete node.content;
+        } else {
+          const picked = this.chunks.sectionText(id, args.sections);
+
+          if (picked.missing.length) {
+            const available = outline.map((s) => s.section);
+
+            throw new Error(
+              `node ${id} has no section named ${picked.missing.map((s) => `"${s}"`).join(", ")}. ` +
+                (available.length
+                  ? `It has: ${available.map((s) => `"${s}"`).join(", ")}.`
+                  : "It has no headings to address; fetch it without `sections`."),
+            );
+          }
+
+          node.content = picked.text;
+        }
       }
 
       nodes.push(node);

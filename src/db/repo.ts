@@ -1,5 +1,6 @@
 export type {
   Envelope,
+  NodeSection,
   NeighborStub,
   RevisionMeta,
   EnrichedRow,

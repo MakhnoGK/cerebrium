@@ -22,6 +22,13 @@ export interface Envelope {
   invalidated: boolean;
 }
 
+// One addressable section of a node's body: the heading path chunks were filed under
+// (or the preamble sentinel), and the size of the text behind it.
+export interface NodeSection {
+  section: string;
+  chars: number;
+}
+
 export interface NeighborStub {
   id: string;
   type: string;

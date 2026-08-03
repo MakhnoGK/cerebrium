@@ -16,7 +16,12 @@ export const metadata = {
     "held it at a past instant — the revision current then, and nothing at all if it did not yet exist or had already " +
     "been invalidated. That is the question to ask when auditing a decision taken on information that has since changed. " +
     "A node that claims one also carries `event_from`/`event_to` — the separate axis of when the fact itself was true, " +
-    "as opposed to when this store learned it.",
+    "as opposed to when this store learned it. " +
+    "A long node need not be fetched whole: ranking has always been section-level, and so is delivery. Pass " +
+    "`outline:true` for the node's sections and their sizes and no body at all, or `sections:[…]` (one id) to get only " +
+    "the named ones — a section name is the `section` a search result reported, naming a heading also addresses every " +
+    "heading beneath it, and `(preamble)` names the text before the first heading. Narrowing always returns the full " +
+    "`outline` alongside, so you can see what was left behind and ask for it.",
 
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
@@ -43,6 +48,23 @@ export const metadata = {
         "ISO-8601 instant: read each node as the store held it then — the revision current at " +
           "that time; ids that did not exist yet, or were already invalidated, come back in " +
           "`not_found`. Cannot be combined with `rev`.",
+      ),
+    sections: z
+      .array(z.string())
+      .min(1)
+      .optional()
+      .describe(
+        "Return only these sections of the body instead of the whole thing; only valid when " +
+          "`ids` has exactly one element. Use the `section` a search result reported, a heading " +
+          "prefix to take its whole subtree, or `(preamble)` for the text before the first " +
+          "heading. Names nothing addresses -> an error listing what the node does have.",
+      ),
+    outline: z
+      .boolean()
+      .optional()
+      .describe(
+        "Return each node's sections and their sizes with no body at all — the cheapest way to " +
+          "decide which part of a long node is worth fetching.",
       ),
   },
 };

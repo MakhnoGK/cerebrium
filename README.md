@@ -106,6 +106,9 @@ Two failure modes, deliberately different:
 - **Chunk** — content-addressed slice of a node's current revision (split by
   headings then paragraphs, ~200–400 tokens). Each chunk gets one embedding.
   Editing one section leaves the other chunks' ids — and their vectors — untouched.
+- **Section** — the heading path a node's chunks are filed under
+  (`H2: Ranking > H3: Decay`), and the unit `get` can deliver instead of a whole
+  body. See below.
 - **Embedding** — a 384-dim vector per chunk, computed **asynchronously** by an
   in-process worker. A node is fully findable via FTS the instant it's written;
   vector search catches up within seconds. `pending_embedding=1` until embedded.
@@ -157,6 +160,31 @@ unless `history:true`), then optionally expands the graph.
   off and the edge type, so the agent sees *why* something surfaced.
 - **`context_notes`** (on any tool response, when relevant): short server-side notes
   — a superseded result, a parked/backlogged embedding queue, a duplicate hint.
+
+## Section-level delivery
+
+Ranking has been chunk-level since the first release; delivery was not. `get`
+returned whole nodes, so a long living document — a plan index, a checkpoint — cost
+its full body every time one of its sections was the reason it surfaced. On the store
+this was built against, **7 nodes over 6k chars accounted for 60% of everything `get`
+ever delivered**, and they were the index nodes read every session.
+
+A **section** is the heading path a node's chunks are filed under, so the addressing
+already existed in the `chunks` table and needed no migration:
+
+- `outline: true` — every named section and its size in characters, no body at all.
+  The cheapest way to decide whether a long node is worth fetching, and which part.
+- `sections: ["H2: Ranking"]` (one id) — only those sections. Naming a heading also
+  takes everything beneath it, so `H2: Ranking` includes `H2: Ranking > H3: Decay`.
+  `(preamble)` names the text before the first heading.
+
+Narrowing always returns the full `outline` beside the narrowed body, so a partial
+read shows what it left behind rather than quietly hiding it. `search` reports the
+matched chunk's `section` next to `best_chunk`, which is the name to pass back.
+
+Sections address the current revision's live chunks, so they cannot be combined with
+`rev` or `as_of` — a superseded body was never chunked under its own headings, and the
+tool says so rather than silently returning the whole thing.
 
 ## Quick start
 
@@ -311,7 +339,7 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 |------|-------------|
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
 | `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
-| `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision. |
+| `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision; `outline`/`sections` to fetch part of a long node instead of all of it. |
 | `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
 | `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge. |
