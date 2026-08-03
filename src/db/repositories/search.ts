@@ -113,6 +113,34 @@ export class SearchRepo extends BaseRepo {
     return { rows, total };
   }
 
+  // Best (lowest-seq) chunk vector per node — the same seed convention the consolidation
+  // kNN uses. Nodes whose chunks are still queued for embedding are simply absent.
+  vectorsFor(ids: string[]): Map<string, Float32Array> {
+    const out = new Map<string, Float32Array>();
+
+    if (!ids.length) return out;
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT c.node_id AS id, cv.embedding AS embedding FROM chunks c
+         JOIN chunk_vec cv ON cv.chunk_id = c.id
+         WHERE c.stale = 0 AND c.node_id IN (${ph})
+         ORDER BY c.node_id, c.seq`,
+      )
+      .all(...ids) as { id: string; embedding: Buffer }[];
+
+    for (const r of rows) {
+      if (out.has(r.id)) continue;
+      out.set(
+        r.id,
+        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
+      );
+    }
+
+    return out;
+  }
+
   private projectClause(project: string | undefined, params: Record<string, unknown>): string {
     if (project === undefined) return "";
     params.project = project;

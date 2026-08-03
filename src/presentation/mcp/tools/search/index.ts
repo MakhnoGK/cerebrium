@@ -263,14 +263,8 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     }
 
     // ---- cut + envelopes -----------------------------------------------------
-    const ranked = [...entries.values()]
-      .sort(
-        (a, b) =>
-          b.score - a.score ||
-          b.row.updated.localeCompare(a.row.updated) ||
-          a.row.id.localeCompare(b.row.id),
-      )
-      .slice(0, args.limit);
+    const ordered = [...entries.values()].sort(byScore);
+    const ranked = this.selectDiverse(ordered, args.limit);
 
     const results = ranked.map((entry) => {
       const envelope: Envelope & {
@@ -374,6 +368,59 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     return out;
   }
 
+  // Maximal Marginal Relevance at the cut: pick greedily by relevance minus the
+  // redundancy against what is already selected, so the returned window repeats itself
+  // less. Both terms are min-max normalized within this candidate set — unlike the merge
+  // gate, nothing here crosses an absolute threshold, and the raw scales (RRF ~0.016 vs
+  // cosine confined to 0.85-1.00 by anisotropy) are not comparable. Candidates with no
+  // stored vector carry no redundancy, so a not-yet-embedded node is never demoted.
+  private selectDiverse(ordered: Entry[], limit: number): Entry[] {
+    const lambda = this.retrieval.mmrLambda;
+
+    if (lambda >= 1 || ordered.length <= limit) {
+      return ordered.slice(0, limit);
+    }
+
+    const vectors = this.searchRepo.vectorsFor(ordered.map((e) => e.row.id));
+
+    if (!vectors.size) {
+      return ordered.slice(0, limit);
+    }
+
+    const relevance = normalize(ordered.map((e) => e.score));
+    const similarity = pairwise(ordered, vectors);
+
+    const pool = ordered.map((_, index) => index);
+    const selected: Entry[] = [];
+    const redundancy = ordered.map(() => 0);
+
+    while (selected.length < limit && pool.length) {
+      let bestSlot = 0;
+      let bestScore = -Infinity;
+
+      pool.forEach((index, slot) => {
+        const marginal = lambda * relevance[index]! - (1 - lambda) * redundancy[index]!;
+
+        if (marginal > bestScore) {
+          bestScore = marginal;
+          bestSlot = slot;
+        }
+      });
+
+      const [picked] = pool.splice(bestSlot, 1);
+
+      if (picked === undefined) break;
+
+      selected.push(ordered[picked]!);
+
+      for (const index of pool) {
+        redundancy[index] = Math.max(redundancy[index]!, similarity(picked, index));
+      }
+    }
+
+    return selected;
+  }
+
   private contextNotes(ranked: Entry[]): string[] {
     const notes = [...this.embeddings.getEmbeddingNotes()];
     const superseded = this.edges.supersededInfo(ranked.map((e) => e.row.id));
@@ -393,6 +440,81 @@ function rerankDoc(e: Entry): string {
   const body = e.best_chunk ?? deriveSummary(e.row.content);
 
   return `${e.row.title}\n${body}`.slice(0, RERANK_DOC_CHARS);
+}
+
+function byScore(a: Entry, b: Entry): number {
+  return (
+    b.score - a.score ||
+    b.row.updated.localeCompare(a.row.updated) ||
+    a.row.id.localeCompare(b.row.id)
+  );
+}
+
+// Min-max to [0,1]; a set with no spread is all-1 so the term stops discriminating
+// instead of amplifying float noise.
+function normalize(values: number[]): number[] {
+  const min = Math.min(...values);
+  const spread = Math.max(...values) - min;
+
+  return values.map((v) => (spread > 0 ? (v - min) / spread : 1));
+}
+
+// Candidate-set similarity, min-max normalized over the pairs that exist. A pair where
+// either side has no stored vector reads 0 — absent, not dissimilar.
+function pairwise(
+  entries: Entry[],
+  vectors: Map<string, Float32Array>,
+): (a: number, b: number) => number {
+  const n = entries.length;
+  const slots = entries.map((e) => vectors.get(e.row.id));
+  const sims = new Float64Array(n * n);
+  let min = Infinity;
+  let max = -Infinity;
+
+  for (let i = 0; i < n; i++) {
+    const left = slots[i];
+
+    if (!left) continue;
+
+    for (let j = i + 1; j < n; j++) {
+      const right = slots[j];
+
+      if (!right) continue;
+
+      const sim = cosine(left, right);
+
+      sims[i * n + j] = sim;
+      sims[j * n + i] = sim;
+
+      if (sim < min) min = sim;
+      if (sim > max) max = sim;
+    }
+  }
+
+  const spread = max - min;
+
+  return (a, b) => {
+    if (!slots[a] || !slots[b]) return 0;
+
+    return spread > 0 ? (sims[a * n + b]! - min) / spread : 0;
+  };
+}
+
+function cosine(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+
+  return na > 0 && nb > 0 ? dot / Math.sqrt(na * nb) : 0;
 }
 
 function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {

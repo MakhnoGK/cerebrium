@@ -119,6 +119,12 @@ invalidated hidden unless `history:true`), then optionally expands the graph.
 - `expand_graph` (default true): after fusion, pull 1-hop neighbors of the top hits
   over valid edges, weighted by edge type (`supersedes` never surfaces a superseded
   node). Ignored in `text` mode.
+- The final cut is diversified with MMR (`MEMORY_MMR_LAMBDA`, `1.0` = off): among
+  equally relevant candidates it prefers the ones that repeat each other least, so a
+  fixed `limit` carries more distinct information. Relevance and redundancy are both
+  min-max normalized within the candidate set — raw RRF and raw cosine are not on
+  comparable scales. The top hit is always the most relevant one; candidates with no
+  stored vector are never demoted; `text` mode is untouched.
 - Each result carries **`matched`**: `text` | `vector` | `both` | `graph`.
 - Vector/both hits carry **`best_chunk`**: the first ~120 chars of the matched chunk
   — often enough to judge relevance without a `get`.
@@ -220,6 +226,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
+| `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |

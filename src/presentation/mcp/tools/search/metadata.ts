@@ -11,7 +11,9 @@ export const metadata = {
     "semantic facts rank steadily, episodic records decay with age, invalidated nodes are hidden unless `history:true`. " +
     "Each result carries `matched` ('text'|'vector'|'both'|'graph'); vector hits include a `best_chunk` snippet (often " +
     "enough to judge relevance without a `get`); graph-expanded neighbors carry `via:{node,edge}` showing why they " +
-    "surfaced. Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
+    "surfaced. The final cut is diversified (MMR, `MEMORY_MMR_LAMBDA`): among equally relevant hits it prefers " +
+    "ones that repeat each other less, so a fixed `limit` carries more distinct information. The top hit is always " +
+    "the most relevant one, and `mode:'text'` is unaffected. Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
     "`MEMORY_RERANK` reranker is enabled, a local cross-encoder rescoring sharpens the " +
     "fused hits' precision before graph expansion — it is off by default, never applies " +
     "to graph neighbors, and never changes which fields a result returns. Code `symbol` mirrors are " +
