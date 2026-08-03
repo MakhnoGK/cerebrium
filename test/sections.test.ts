@@ -4,6 +4,7 @@ import type { Envelope, NodeSection } from "@/db/repo";
 import { PREAMBLE_SECTION } from "@/core/chunk";
 import { MemoryKind } from "@/core/vocab";
 import { GetTool } from "@/presentation/mcp/tools/get";
+import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { UpdateTool } from "@/presentation/mcp/tools/update";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -27,6 +28,8 @@ interface GetNode {
   outline?: NodeSection[];
   source?: string;
 }
+
+type SearchResult = Envelope & { best_chunk?: string; section?: string };
 
 let env: TestEnv;
 let session: string;
@@ -253,5 +256,74 @@ describe("Section-narrowed get", () => {
     // Then
     expect(whole!.content).toBe(BODY);
     expect(whole!.outline).toBeUndefined();
+  });
+});
+
+describe("Search section addressing", () => {
+  const HEADED = [
+    "Opening remarks that name nothing in particular.",
+    "",
+    "## Ranking",
+    "Reciprocal rank fusion blends bm25 scores with cosine similarity.",
+    "",
+    "## Storage",
+    "Litestream replicates the sqlite file to object storage continuously.",
+  ].join("\n");
+
+  async function search(query: string): Promise<SearchResult[]> {
+    const res = await container
+      .resolve(SearchTool)
+      .invoke({ session_id: session, query, limit: 10 });
+
+    return res.results;
+  }
+
+  it("should name the section of the matched chunk when the hit sits under a heading", async () => {
+    // Given
+    const node = await write("Architecture", HEADED);
+    await env.worker.tick();
+
+    // When
+    const hit = (await search("litestream replicates object storage")).find(
+      (r) => r.id === node.id,
+    );
+
+    // Then
+    expect(hit!.best_chunk).toContain("Litestream");
+    expect(hit!.section).toBe("H2: Storage");
+  });
+
+  it("should feed straight back into a narrowed get when a search names a section", async () => {
+    // Given
+    const node = await write("Architecture", HEADED);
+    await env.worker.tick();
+    const hit = (await search("litestream replicates object storage")).find(
+      (r) => r.id === node.id,
+    );
+
+    // When
+    const [narrowed] = await get([node.id], { sections: [hit!.section!] });
+
+    // Then
+    expect(narrowed!.content).toContain("Litestream");
+    expect(narrowed!.content).not.toContain("Reciprocal rank fusion");
+  });
+
+  it("should name no section when the matched chunk precedes the first heading", async () => {
+    // Given
+    const node = await write(
+      "Flat note",
+      "Litestream replicates the sqlite file to object storage.",
+    );
+    await env.worker.tick();
+
+    // When
+    const hit = (await search("litestream replicates object storage")).find(
+      (r) => r.id === node.id,
+    );
+
+    // Then
+    expect(hit!.best_chunk).toBeDefined();
+    expect(hit!.section).toBeUndefined();
   });
 });

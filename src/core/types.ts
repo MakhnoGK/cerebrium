@@ -67,6 +67,7 @@ export interface SearchRow extends EnrichedRow {
 export interface VectorRow extends EnrichedRow {
   distance: number; // cosine distance in [0,2]; cosine similarity = 1 - distance
   chunk_text: string;
+  chunk_heading: string | null; // heading path of the matched chunk; null before the first heading
 }
 
 export interface QueueRow {

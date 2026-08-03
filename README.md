@@ -155,7 +155,8 @@ unless `history:true`), then optionally expands the graph.
   what was true on another", which is the question an audit actually asks.
 - Each result carries **`matched`**: `text` | `vector` | `both` | `graph`.
 - Vector/both hits carry **`best_chunk`**: the first ~120 chars of the matched chunk
-  — often enough to judge relevance without a `get`.
+  — often enough to judge relevance without a `get` — and, when that chunk sits under
+  a heading, the **`section`** naming it, which `get` takes back as an address.
 - Graph-expanded hits carry **`via`**: `{ node, edge }` — which top hit they hung
   off and the edge type, so the agent sees *why* something surfaced.
 - **`context_notes`** (on any tool response, when relevant): short server-side notes

@@ -61,6 +61,7 @@ interface Entry {
   score: number;
   matched: "text" | "vector" | "both" | "graph";
   best_chunk?: string;
+  section?: string;
   via?: { node: string; edge: string };
 }
 
@@ -167,7 +168,14 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const now = Date.parse(this.clock.now());
     const fused = new Map<
       string,
-      { row: Row; rrf: number; text: boolean; vector: boolean; best_chunk?: string }
+      {
+        row: Row;
+        rrf: number;
+        text: boolean;
+        vector: boolean;
+        best_chunk?: string;
+        section?: string;
+      }
     >();
 
     ftsRows.forEach((row, i) => {
@@ -187,6 +195,9 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       if (!e.best_chunk) {
         e.best_chunk = row.chunk_text.slice(0, BEST_CHUNK_CHARS);
+        // Only a headed chunk is worth naming: a preamble match means the node is short
+        // or the hit is in its opening, and neither is a section worth narrowing to.
+        e.section = row.chunk_heading ?? undefined;
       }
 
       fused.set(row.id, e);
@@ -206,6 +217,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           strengthFactor(e.row, this.retrieval.useWeight),
         matched,
         best_chunk: e.best_chunk,
+        section: e.section,
       });
     }
 
@@ -267,6 +279,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       const envelope: Envelope & {
         matched: "text" | "vector" | "graph" | "both";
         best_chunk?: string;
+        section?: string;
         via?: { node: string; edge: string };
       } = {
         ...toEnvelope(entry.row),
@@ -275,6 +288,10 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       if (entry.best_chunk && (entry.matched === "vector" || entry.matched === "both")) {
         envelope.best_chunk = entry.best_chunk;
+
+        if (entry.section) {
+          envelope.section = entry.section;
+        }
       }
 
       if (entry.via) {
