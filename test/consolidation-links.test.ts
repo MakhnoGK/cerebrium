@@ -9,11 +9,15 @@ import { DB_TOKEN } from "@/db/repositories/base";
 import { ConsolidationRepo } from "@/db/repositories/consolidation";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { LocalNullProvider } from "@/embeddings/local-null";
-import { ConsolidationKind, MemoryKind } from "@/core/vocab";
+import { ConsolidationKind, EdgeType, MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
-import { ConsolidationPostureConfig, StaticConfigSource } from "@/infrastructure/config";
+import {
+  ConsolidationPostureConfig,
+  ConsolidationThresholdsConfig,
+  StaticConfigSource,
+} from "@/infrastructure/config";
 
 const sessionStart = container.resolve(SessionStartTool);
 let edgesRepo: EdgesRepo;
@@ -72,6 +76,14 @@ function postureWith(env: Record<string, string>): ConsolidationPostureConfig {
   return new ConsolidationPostureConfig(new StaticConfigSource(env));
 }
 
+function thresholdsWith(env: Record<string, string>): ConsolidationThresholdsConfig {
+  return new ConsolidationThresholdsConfig(new StaticConfigSource(env));
+}
+
+function liveSimilarDegree(id: string): number {
+  return edgesRepo.edgesOf(id).filter((e) => e.edge === "similar_to").length;
+}
+
 function edgeTypesBetween(a: string, b: string): string[] {
   return edgesRepo
     .edgesOf(a)
@@ -82,6 +94,7 @@ function edgeTypesBetween(a: string, b: string): string[] {
 afterEach(() => {
   // A section override is a container registration, so it outlives the test that set it.
   container.register(ConsolidationPostureConfig, { useValue: postureWith({}) });
+  container.register(ConsolidationThresholdsConfig, { useValue: thresholdsWith({}) });
 });
 
 describe("Similar node link discovery", () => {
@@ -226,5 +239,215 @@ describe("Orphan episodic link repair", () => {
     expect((await consolidation.tick()).links_added).toBe(1);
     // When / Then
     expect((await consolidation.tick()).links_added).toBe(0);
+  });
+});
+
+describe("Link degree cap", () => {
+  let writeTool: WriteTool;
+  let embedWorker: EmbeddingWorker;
+  let consolidation: ConsolidationWorker;
+
+  beforeEach(() => {
+    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
+    container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
+    container.register(ConsolidationThresholdsConfig, {
+      useValue: thresholdsWith({ MEMORY_CONSOLIDATE_MAX_LINK_DEGREE: "2" }),
+    });
+
+    embedWorker = container.resolve(EmbeddingWorker);
+    consolidation = container.resolve(ConsolidationWorker);
+    writeTool = container.resolve(WriteTool);
+    edgesRepo = container.resolve(EdgesRepo);
+    consolidationRepo = container.resolve(ConsolidationRepo);
+  });
+
+  // Identical content -> identical local-null vectors, so every pair clears the gate and
+  // only the cap decides how many edges a node ends up with.
+  async function quadruplets(): Promise<string[]> {
+    const s = (await sessionStart.invoke({})).session_id;
+    const dup = "the http client retries three times with exponential backoff";
+    const ids = [
+      await newNode(writeTool, s, "Retry budget", dup),
+      await newNode(writeTool, s, "Client retries", dup),
+      await newNode(writeTool, s, "Backoff policy", dup),
+      await newNode(writeTool, s, "Retry ceiling", dup),
+    ];
+    await embedWorker.tick();
+
+    return ids;
+  }
+
+  it("should stop adding similar_to edges to a node once it reaches the degree cap", async () => {
+    // Given
+    const ids = await quadruplets();
+
+    // When
+    await consolidation.tick();
+
+    // Then
+    for (const id of ids) {
+      expect(liveSimilarDegree(id)).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("should propose nothing further when a later sweep revisits capped nodes", async () => {
+    // Given
+    await quadruplets();
+    const first = await consolidation.tick();
+
+    // When
+    const second = await consolidation.tick();
+
+    // Then
+    expect(first.links_added).toBeGreaterThan(0);
+    expect(second).toMatchObject({ links_added: 0, links_suggested: 0, links_pruned: 0 });
+  });
+});
+
+describe("Similar link prune", () => {
+  let writeTool: WriteTool;
+  let consolidation: ConsolidationWorker;
+  let session: string;
+
+  beforeEach(async () => {
+    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
+    container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
+    // Discovery off: these tests seed the graph by hand so the prune rule is the only
+    // thing under test.
+    container.register(ConsolidationPostureConfig, {
+      useValue: postureWith({ MEMORY_CONSOLIDATE_LINKS: "off" }),
+    });
+    container.register(ConsolidationThresholdsConfig, {
+      useValue: thresholdsWith({ MEMORY_CONSOLIDATE_MAX_LINK_DEGREE: "2" }),
+    });
+
+    consolidation = container.resolve(ConsolidationWorker);
+    writeTool = container.resolve(WriteTool);
+    edgesRepo = container.resolve(EdgesRepo);
+    session = (await sessionStart.invoke({})).session_id;
+  });
+
+  function seedEdge(src: string, dst: string, weight: number): void {
+    edgesRepo.insertEdge(
+      src,
+      dst,
+      EdgeType.SIMILAR_TO,
+      "system",
+      session,
+      "2026-01-01T00:00:00.000Z",
+      weight,
+    );
+  }
+
+  it("should retire only the edge outside the top-2 of both its endpoints when a clique is over cap", async () => {
+    // Given
+    const [a, b, c, d] = await Promise.all([
+      newNode(writeTool, session, "A", "alpha"),
+      newNode(writeTool, session, "B", "beta"),
+      newNode(writeTool, session, "C", "gamma"),
+      newNode(writeTool, session, "D", "delta"),
+    ]);
+    seedEdge(a, b, 0.99);
+    seedEdge(a, c, 0.98);
+    seedEdge(a, d, 0.97);
+    seedEdge(b, c, 0.96);
+    seedEdge(b, d, 0.95);
+    seedEdge(c, d, 0.94);
+
+    // When
+    const result = await consolidation.tick();
+
+    // Then
+    // c-d is the only pair ranking third for both endpoints; every other edge is in
+    // someone's top two.
+    expect(result.links_pruned).toBe(1);
+    expect(edgeTypesBetween(c, d)).not.toContain("similar_to");
+    expect(edgeTypesBetween(a, b)).toContain("similar_to");
+    expect(edgeTypesBetween(b, d)).toContain("similar_to");
+  });
+
+  it("should keep every edge when each endpoint's only anchor would be cut", async () => {
+    // Given
+    const hub = await newNode(writeTool, session, "Hub", "hub");
+    const leaves = [
+      await newNode(writeTool, session, "L1", "one"),
+      await newNode(writeTool, session, "L2", "two"),
+      await newNode(writeTool, session, "L3", "three"),
+      await newNode(writeTool, session, "L4", "four"),
+    ];
+    leaves.forEach((leaf, i) => {
+      seedEdge(hub, leaf, 0.99 - i / 100);
+    });
+
+    // When
+    const result = await consolidation.tick();
+
+    // Then
+    expect(result.links_pruned).toBe(0);
+    for (const leaf of leaves) {
+      expect(liveSimilarDegree(leaf)).toBe(1);
+    }
+  });
+
+  it("should leave agent-authored and non-similar edges untouched when pruning", async () => {
+    // Given
+    const [a, b, c, d] = await Promise.all([
+      newNode(writeTool, session, "A", "alpha"),
+      newNode(writeTool, session, "B", "beta"),
+      newNode(writeTool, session, "C", "gamma"),
+      newNode(writeTool, session, "D", "delta"),
+    ]);
+    seedEdge(a, b, 0.99);
+    seedEdge(a, c, 0.98);
+    seedEdge(a, d, 0.97);
+    seedEdge(b, c, 0.96);
+    seedEdge(b, d, 0.95);
+    edgesRepo.insertEdge(
+      c,
+      d,
+      EdgeType.REFERENCES,
+      "agent",
+      session,
+      "2026-01-01T00:00:00.000Z",
+      0.5,
+    );
+
+    // When
+    await consolidation.tick();
+
+    // Then
+    expect(edgeTypesBetween(c, d)).toContain("references");
+  });
+
+  it("should do nothing when linkPrune posture is off", async () => {
+    // Given
+    container.register(ConsolidationPostureConfig, {
+      useValue: postureWith({
+        MEMORY_CONSOLIDATE_LINKS: "off",
+        MEMORY_CONSOLIDATE_LINK_PRUNE: "off",
+      }),
+    });
+    consolidation = container.resolve(ConsolidationWorker);
+    const [a, b, c, d] = await Promise.all([
+      newNode(writeTool, session, "A", "alpha"),
+      newNode(writeTool, session, "B", "beta"),
+      newNode(writeTool, session, "C", "gamma"),
+      newNode(writeTool, session, "D", "delta"),
+    ]);
+    seedEdge(a, b, 0.99);
+    seedEdge(a, c, 0.98);
+    seedEdge(a, d, 0.97);
+    seedEdge(b, c, 0.96);
+    seedEdge(b, d, 0.95);
+    seedEdge(c, d, 0.94);
+
+    // When
+    const result = await consolidation.tick();
+
+    // Then
+    expect(result.links_pruned).toBe(0);
+    expect(edgeTypesBetween(c, d)).toContain("similar_to");
   });
 });

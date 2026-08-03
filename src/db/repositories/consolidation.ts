@@ -273,6 +273,77 @@ export class ConsolidationRepo extends BaseRepo {
     return out;
   }
 
+  // ---- detection: similar_to degree control ---------------------------------
+  // Discovery gates on an absolute score with no notion of how many neighbors a node
+  // already has, so degree grows with every sweep. These two bound it: `linkDegrees`
+  // stops new edges at the cap, `overCapSimilarLinks` retires the excess already stored.
+
+  // Live similar_to degree of each id, counted over the same graph search expansion and
+  // the UI see: live edges between live non-mirror nodes.
+  linkDegrees(ids: string[]): Map<string, number> {
+    const out = new Map<string, number>(ids.map((id) => [id, 0]));
+
+    if (!ids.length) {
+      return out;
+    }
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT id, count(*) AS degree FROM (
+           SELECT e.src AS id FROM edges e
+           JOIN nodes d ON d.id = e.dst AND d.memory_kind != 'mirror' AND d.invalidated_at IS NULL
+           WHERE e.type = 'similar_to' AND e.invalidated_at IS NULL AND e.src IN (${ph})
+           UNION ALL
+           SELECT e.dst AS id FROM edges e
+           JOIN nodes s ON s.id = e.src AND s.memory_kind != 'mirror' AND s.invalidated_at IS NULL
+           WHERE e.type = 'similar_to' AND e.invalidated_at IS NULL AND e.dst IN (${ph})
+         ) GROUP BY id`,
+      )
+      .all(...ids, ...ids) as { id: string; degree: number }[];
+
+    for (const r of rows) out.set(r.id, r.degree);
+
+    return out;
+  }
+
+  // Live system similar_to edges outside the top `maxDegree` by weight of BOTH their
+  // endpoints, worst first. The either-endpoint rule is what keeps every node's own best
+  // neighbors: a strict per-node cut would strand a node whose best links are not
+  // reciprocated, which is how nodes fall out of the graph entirely.
+  overCapSimilarLinks(opts: { maxDegree: number; limit: number }): { src: string; dst: string }[] {
+    return this.db
+      .prepare(
+        `WITH live AS (
+           SELECT id FROM nodes WHERE memory_kind != 'mirror' AND invalidated_at IS NULL
+         ),
+         se AS (
+           SELECT e.src AS src, e.dst AS dst, e.weight AS weight FROM edges e
+           JOIN live s ON s.id = e.src
+           JOIN live d ON d.id = e.dst
+           WHERE e.type = 'similar_to' AND e.provenance = 'system' AND e.invalidated_at IS NULL
+         ),
+         dir AS (
+           SELECT src AS node, dst AS other, weight FROM se
+           UNION ALL
+           SELECT dst AS node, src AS other, weight FROM se
+         ),
+         rk AS (
+           SELECT node, other,
+                  ROW_NUMBER() OVER (PARTITION BY node ORDER BY weight DESC, other ASC) AS r
+           FROM dir
+         )
+         SELECT se.src AS src, se.dst AS dst, MIN(rk.r) AS best_rank
+         FROM se
+         JOIN rk ON (rk.node = se.src AND rk.other = se.dst)
+                 OR (rk.node = se.dst AND rk.other = se.src)
+         GROUP BY se.src, se.dst
+         HAVING best_rank > @maxDegree
+         ORDER BY best_rank DESC LIMIT @limit`,
+      )
+      .all({ maxDegree: opts.maxDegree, limit: opts.limit }) as { src: string; dst: string }[];
+  }
+
   // ---- detection: episodic clustering for distillation ----------------------
   // Clusters of decayed, not-yet-consolidated episodics that are mutually similar
   // within a project — the raw material a generation provider rolls into one fact.

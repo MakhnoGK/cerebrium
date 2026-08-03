@@ -229,6 +229,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
 | `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
+| `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE` | `auto` | Attribute-enrichment posture: `auto` mines keywords/tags/context for each semantic node during the sweep and folds them into its FTS text for wider recall; `off` skips it. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE_BATCH` | `50` | Max un-annotated semantic nodes enriched per sweep. |
@@ -236,11 +237,13 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
+| `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
 | `MEMORY_CONSOLIDATE_DISTILL_BATCH` | `200` | Max episodic clusters considered for distillation per sweep. |
 | `MEMORY_CONSOLIDATE_MERGE_BATCH` | `200` | Max duplicate semantic pairs considered per sweep. |
 | `MEMORY_CONSOLIDATE_PRUNE_BATCH` | `200` | Max dead mirror nodes reconciled per sweep. |
+| `MEMORY_CONSOLIDATE_LINK_PRUNE_BATCH` | `200` | Max over-cap `similar_to` edges retired per sweep. |
 | `MEMORY_CONSOLIDATE_BACKFILL_BATCH` | `10` | Max pending candidates a newly-enabled provider drafts proposals for per sweep. |
 
 The DB opens in WAL mode (`busy_timeout=15000`, foreign keys on) with the
@@ -419,6 +422,10 @@ into durable knowledge:
   bypasses the penalty.
 - **Link discovery** — writes system `similar_to` edges between highly similar
   semantic nodes (kNN over stored vectors), improving graph expansion over time.
+  Bounded by `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE`: a node stops attracting new edges
+  at the cap, and a prune stage retires stored edges that fall outside the top-N by
+  weight of *both* endpoints — an edge that is a node's own best link is never cut,
+  so pruning cannot strand a node outside the graph.
 - **Distillation** — rolls up clusters of decayed episodics into one durable
   semantic fact, linked `derived_from` each source, stamping the sources
   `consolidated_at` (they stay queryable via `history`).

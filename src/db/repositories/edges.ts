@@ -30,6 +30,17 @@ export class EdgesRepo extends BaseRepo {
       .run(src, dst, type, provenance, weight, ts, session_id);
   }
 
+  // Soft-delete one edge. insertEdge revives an invalidated (src,dst,type) on conflict,
+  // so a retired edge comes back only if something deliberately re-inserts it.
+  invalidateEdge(src: string, dst: string, type: EdgeType, ts: string): void {
+    this.db
+      .prepare(
+        `UPDATE edges SET invalidated_at = ?
+         WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL`,
+      )
+      .run(ts, src, dst, type);
+  }
+
   edgesOf(id: string): NeighborStub[] {
     const out = this.db
       .prepare(
