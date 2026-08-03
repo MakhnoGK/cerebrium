@@ -334,6 +334,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
+| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. See *Evaluating a ranking change*. |
 
 ## Code indexing
 
@@ -464,6 +465,28 @@ authors the summary at apply time) or a bring-your-own `command`/`http` backend.
 self-contained local runtime (Ollama + a small model) for the `http` provider lives
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
+
+## Evaluating a ranking change
+
+`npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It
+seeds a fixed 36-doc corpus (with edges, and with gold answers that cluster into facets)
+into an in-memory DB, embeds it once, then runs the same queries through two or more
+**arms** — named configuration overlays — sharing that one corpus and those embeddings, so
+the only difference between arms is the knob.
+
+```sh
+npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
+```
+
+`Facet@3` is deliberately read at a tighter cut than the relevance metrics: a diversity
+stage trades relevance for distinct information, and at a window wide enough to hold every
+gold answer that trade is invisible. Covering a facet with an *irrelevant* document does
+not count.
+
+**What this is not.** 36 docs in memory cannot reproduce the anisotropy or the candidate
+starvation of a real 125k-node store, and the corpus contains no usage history, so an arm
+that wins here has stopped being a guess — it has not become proven. Ranking defaults that
+matter should also be checked against a copy of a real store.
 
 ## Calibrating the similarity gates
 
