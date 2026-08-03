@@ -7,7 +7,7 @@ export const metadata = {
 
   description:
     "Resolve a pending consolidation candidate from `consolidate_suggest`. reject dismisses it (the exact cluster is " +
-    "never re-proposed). accept applies it: a `link` candidate writes the system similar_to edge between its members; " +
+    "never re-proposed). apply carries it out: a `link` candidate writes the system similar_to edge between its members; " +
     "a `distill` candidate writes a durable semantic fact from its `override` (or its generated proposal), links it " +
     "`derived_from` each source, and stamps the sources consolidated; a `merge` candidate folds the duplicate into the " +
     "canonical survivor — optionally rewriting it from `override`/proposal — re-points authored edges, and supersedes " +
@@ -19,7 +19,7 @@ export const metadata = {
     id: z.string().describe("The consolidation candidate id (from consolidate_suggest)."),
     decision: z
       .nativeEnum(ConsolidationRecommendation)
-      .describe("accept: apply the consolidation. reject: dismiss it (never re-proposed)."),
+      .describe("apply: carry out the consolidation. reject: dismiss it (never re-proposed)."),
     override: z
       .object({
         title: z.string().min(1),
@@ -28,7 +28,7 @@ export const metadata = {
       })
       .optional()
       .describe(
-        "For accepting a distill/merge candidate: the summary/merged body to write, overriding any generated proposal. Required for distill when the candidate has no proposal (e.g. the manual provider); optional for merge.",
+        "When applying a distill/merge candidate: the summary/merged body to write, overriding any generated proposal. Required for distill when the candidate has no proposal (e.g. the manual provider); optional for merge.",
       ),
   },
 };

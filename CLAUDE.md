@@ -49,7 +49,7 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 - `npm test` / `npm run test:watch` — full suite (Vitest) / watch mode.
 - `npm run typecheck` — `tsc --noEmit`. One root `tsconfig.json` covers `src` + `test` + `scripts`, so every tool and every IDE resolves `@/*` identically and tests are genuinely type-checked. `npm run lint` / `lint:fix` — ESLint. `npm run format` / `format:check` — Prettier (imports are auto-sorted into layer groups by `@ianvs/prettier-plugin-sort-imports`).
 - `npm run build` — tsup (esbuild) bundle of the three bins to `dist/` + copy migrations (`scripts/copy-assets.mjs`).
-- ⚠️ **`npm run build` is NOT part of `npm run check`.** esbuild catches a class of import error that `tsc` cannot (see the type-vs-value note above), and a broken bundle has landed unnoticed three times. After any change that moves files or rewrites imports, run `npm run build` **and** smoke-test the bundle over stdio — a successful build does not prove DI still resolves:
+- ⚠️ **`npm run check` ends with `npm run build`, but a green build is NOT a working bundle.** esbuild catches a class of import error that `tsc` cannot (see the type-vs-value note above), and a broken bundle has landed unnoticed three times — but the DI half is invisible to both. Nothing in `check` smoke-tests the bundle, so after any change that moves files, rewrites imports, or adds a constructor-injected class, run it by hand over stdio:
   ```sh
   printf '%s\n%s\n' \
    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"s","version":"1"}}}' \
