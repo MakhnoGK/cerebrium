@@ -18,5 +18,21 @@ export const metadata = {
       .describe("New markdown body (replaces current). Omit to change only the title."),
     title: z.string().min(1).optional().describe("New title."),
     reason: z.string().optional().describe("Why this revision — stored in the node's history."),
+    event_from: z
+      .string()
+      .datetime()
+      .optional()
+      .describe(
+        "Event axis (ISO-8601): when the fact itself became true, as opposed to when you " +
+          "wrote it down. Omit unless you actually know it — omitted means no claim, and " +
+          "reads treat that as an open interval rather than as unknown.",
+      ),
+    event_to: z
+      .string()
+      .datetime()
+      .optional()
+      .describe(
+        "Event axis (ISO-8601): when the fact stopped being true. Must not precede `event_from`.",
+      ),
   },
 };

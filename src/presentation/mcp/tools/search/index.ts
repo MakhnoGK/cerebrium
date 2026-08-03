@@ -136,6 +136,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
         history,
         cap: CANDIDATE_CAP,
         asOf: args.as_of,
+        validAt: args.valid_at,
       });
 
       ftsRows = r.rows.slice(0, FUSE_CAP);
@@ -155,6 +156,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           history,
           cap: FUSE_CAP,
           asOf: args.as_of,
+          validAt: args.valid_at,
         });
       }
     } catch {
@@ -252,7 +254,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     // 1-hop weights. PPR scores only nodes the query did NOT match directly: direct
     // relevance is left exactly as fusion and rerank computed it.
     if ((args.expand_graph ?? true) && entries.size) {
-      for (const entry of this.expandByRank(entries, args.as_of)) {
+      for (const entry of this.expandByRank(entries, args.as_of, args.valid_at)) {
         entries.set(entry.row.id, entry);
       }
     }
@@ -328,6 +330,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       history,
       cap: CANDIDATE_CAP,
       asOf: args.as_of,
+      validAt: args.valid_at,
     });
 
     const now = Date.parse(this.clock.now());
@@ -368,7 +371,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     return out;
   }
 
-  private expandByRank(entries: Map<string, Entry>, asOf?: string): Entry[] {
+  private expandByRank(entries: Map<string, Entry>, asOf?: string, validAt?: string): Entry[] {
     const seeds = [...entries.values()];
     const topScore = Math.max(...seeds.map((s) => s.score));
 
@@ -378,7 +381,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
     const edges = this.edges.subgraphFrom(
       seeds.map((s) => s.row.id),
-      { depth: PPR_DEPTH, cap: this.retrieval.pprFrontier, types: TRAVERSABLE, asOf },
+      { depth: PPR_DEPTH, cap: this.retrieval.pprFrontier, types: TRAVERSABLE, asOf, validAt },
     );
 
     if (!edges.length) {
@@ -405,7 +408,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       this.searchRepo
         .rowsFor(
           surfaced.map(([id]) => id),
-          asOf,
+          { asOf, validAt },
         )
         .map((r) => [r.id, r]),
     );

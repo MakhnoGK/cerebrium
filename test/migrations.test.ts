@@ -22,6 +22,7 @@ const MIGRATION_IDS = [
   "008_consolidation.sql",
   "009_annotations.sql",
   "010_node_usage.cjs",
+  "011_event_time.cjs",
 ];
 
 const dirs: string[] = [];

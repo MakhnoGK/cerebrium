@@ -177,6 +177,10 @@ export interface NewNode {
   session_id: string;
   ts: string;
   links?: { dst: string; type: EdgeType }[];
+  // Event axis — when the fact itself was true, independent of when it was written down.
+  // Absent means no claim; reads treat that as an open interval.
+  event_from?: string;
+  event_to?: string;
 }
 
 // ---- code indexing --------------------------------------------------------

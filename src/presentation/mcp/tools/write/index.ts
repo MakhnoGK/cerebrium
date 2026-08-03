@@ -69,6 +69,16 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
   public async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
     const project = args.project ?? null;
 
+    if (
+      args.event_from !== undefined &&
+      args.event_to !== undefined &&
+      args.event_to < args.event_from
+    ) {
+      throw new Error(
+        "`event_to` precedes `event_from`; a fact cannot stop being true before it started.",
+      );
+    }
+
     const envelope = await this.nodeService.createNode({
       project,
       title: args.title,
@@ -77,6 +87,8 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       memory_kind: args.memory_kind,
       session_id: args.session_id,
       links: args.links,
+      event_from: args.event_from,
+      event_to: args.event_to,
     });
 
     // When a duplicate is found and a judging provider is configured, sharpen the advisory

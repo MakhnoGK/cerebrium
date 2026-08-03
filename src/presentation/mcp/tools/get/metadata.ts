@@ -14,7 +14,9 @@ export const metadata = {
     "Fetching a node also records the use: it earns a small bounded ranking boost, and for an episodic node it restarts " +
     "the decay clock, so what you actually come back to stays retrievable. Pass `as_of` to read the node as the store " +
     "held it at a past instant — the revision current then, and nothing at all if it did not yet exist or had already " +
-    "been invalidated. That is the question to ask when auditing a decision taken on information that has since changed.",
+    "been invalidated. That is the question to ask when auditing a decision taken on information that has since changed. " +
+    "A node that claims one also carries `event_from`/`event_to` — the separate axis of when the fact itself was true, " +
+    "as opposed to when this store learned it.",
 
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),

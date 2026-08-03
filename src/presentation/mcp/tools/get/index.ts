@@ -97,6 +97,11 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
         }
       }
 
+      const window = this.nodes.eventWindow(id);
+
+      if (window?.event_from != null) node.event_from = window.event_from;
+      if (window?.event_to != null) node.event_to = window.event_to;
+
       if (past) {
         node.content = past.content;
         node.shown_rev = past.rev;

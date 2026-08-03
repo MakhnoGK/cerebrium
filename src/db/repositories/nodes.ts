@@ -66,8 +66,8 @@ export class NodesRepo extends BaseRepo {
     this.tx(() => {
       this.db
         .prepare(
-          `INSERT INTO nodes (id, memory_kind, type, title, project, valid_from, created_by_session, created_at)
-           VALUES (@id, @kind, @type, @title, @project, @ts, @session, @ts)`,
+          `INSERT INTO nodes (id, memory_kind, type, title, project, valid_from, created_by_session, created_at, event_from, event_to)
+           VALUES (@id, @kind, @type, @title, @project, @ts, @session, @ts, @eventFrom, @eventTo)`,
         )
         .run({
           id,
@@ -77,6 +77,8 @@ export class NodesRepo extends BaseRepo {
           project: input.project,
           ts: input.ts,
           session: input.session_id,
+          eventFrom: input.event_from ?? null,
+          eventTo: input.event_to ?? null,
         });
       insertRevision(this.db, id, 1, input.content, input.session_id, null, input.ts);
       ftsPut(this.db, id, input.title, input.content);
@@ -259,6 +261,34 @@ export class NodesRepo extends BaseRepo {
       syncChunks(this.db, id, nextRev, content, fields.ts);
     });
     return this.envelope(id)!;
+  }
+
+  // The event window, when one was claimed. Read by `get`; never folded into an envelope.
+  eventWindow(id: string): { event_from: string | null; event_to: string | null } | undefined {
+    return this.db.prepare("SELECT event_from, event_to FROM nodes WHERE id = ?").get(id) as
+      { event_from: string | null; event_to: string | null } | undefined;
+  }
+
+  // Correct a node's event window. Facts of this shape get revised often ("it actually
+  // started earlier"), and the window is node metadata, not content, so this is not a
+  // revision. Only the keys passed are touched.
+  setEventWindow(id: string, window: { event_from?: string; event_to?: string }): void {
+    const sets: string[] = [];
+    const params: Record<string, string> = { id };
+
+    if (window.event_from !== undefined) {
+      sets.push("event_from = @event_from");
+      params.event_from = window.event_from;
+    }
+
+    if (window.event_to !== undefined) {
+      sets.push("event_to = @event_to");
+      params.event_to = window.event_to;
+    }
+
+    if (!sets.length) return;
+
+    this.db.prepare(`UPDATE nodes SET ${sets.join(", ")} WHERE id = @id`).run(params);
   }
 
   // The node's state at an instant on the INGESTION axis: the revision that was current

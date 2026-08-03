@@ -143,6 +143,13 @@ unless `history:true`), then optionally expands the graph.
   that has since changed gets audited.
   **Limit worth knowing:** the FTS index and the vectors hold the *current* wording only,
   so `as_of` decides which nodes are considered — not how they were phrased then.
+- `valid_at` (ISO-8601): the **other** time axis. `as_of` asks *when did we know it*;
+  `valid_at` asks *when was it true*. A node carries an optional event window
+  (`event_from`/`event_to`, set on `write`/`update`), so a note written today about an
+  outage that ran last week records both. A node claiming no window counts as always
+  valid, so `valid_at` narrows a result set rather than emptying it — most nodes never
+  claim one. The two combine: `as_of` + `valid_at` is "what we believed on one date about
+  what was true on another", which is the question an audit actually asks.
 - Each result carries **`matched`**: `text` | `vector` | `both` | `graph`.
 - Vector/both hits carry **`best_chunk`**: the first ~120 chars of the matched chunk
   — often enough to judge relevance without a `get`.

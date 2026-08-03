@@ -57,6 +57,15 @@ export const metadata = {
           "Note the text index holds current wording only, so this decides WHICH nodes are " +
           "considered, not how they were phrased then.",
       ),
+    valid_at: z
+      .string()
+      .optional()
+      .describe(
+        "ISO-8601 instant on the EVENT axis: keep only nodes whose claimed validity window " +
+          "contains it. A node that claims no window counts as always valid, so this narrows " +
+          "rather than empties. Combine with `as_of` for the full question: what we believed " +
+          "on one date about what was true on another.",
+      ),
     mode: z
       .enum(["hybrid", "text", "vector"])
       .optional()

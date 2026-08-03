@@ -109,7 +109,7 @@ export class EdgesRepo extends BaseRepo {
   // `cap` bounds the node set (nearest first), so a hub can't turn one query into a scan.
   subgraphFrom(
     seedIds: string[],
-    opts: { depth: number; cap: number; types: string[]; asOf?: string },
+    opts: { depth: number; cap: number; types: string[]; asOf?: string; validAt?: string },
   ): { src: string; dst: string; type: EdgeType; weight: number }[] {
     if (!seedIds.length || !opts.types.length) return [];
 
@@ -130,12 +130,21 @@ export class EdgesRepo extends BaseRepo {
       .join(",");
 
     if (opts.asOf !== undefined) params.asOf = opts.asOf;
+    if (opts.validAt !== undefined) params.validAt = opts.validAt;
     // Under `as_of` the graph is the graph as it stood then: nodes that existed and were
     // still valid, joined by edges that had been written and not yet retired.
-    const nodeLive =
+    const nodeLive = [
       opts.asOf === undefined
         ? "n.invalidated_at IS NULL"
-        : "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)";
+        : "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      // The event axis applies to graph hits too: a node the query excluded as out of its
+      // validity window must not come back in through diffusion.
+      ...(opts.validAt === undefined
+        ? []
+        : [
+            "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
+          ]),
+    ].join(" AND ");
     const edgeLive =
       opts.asOf === undefined
         ? "e.invalidated_at IS NULL"

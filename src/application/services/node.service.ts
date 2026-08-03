@@ -20,6 +20,8 @@ export class NodeService {
     content,
     project,
     session_id,
+    event_from,
+    event_to,
   }: object & {
     title: string;
     content: string;
@@ -28,6 +30,8 @@ export class NodeService {
     project: string | null;
     session_id: string;
     links: { dst: string; type: EdgeType }[] | undefined;
+    event_from?: string;
+    event_to?: string;
   }) {
     if (memory_kind === MemoryKind.MIRROR) {
       throw new Error(
@@ -63,6 +67,8 @@ export class NodeService {
       content,
       project,
       session_id,
+      event_from,
+      event_to,
       ts: this.clock.now(),
       links,
     });

@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS nodes (
   created_by_session TEXT NOT NULL,
   created_at     TEXT NOT NULL,
   use_count INTEGER NOT NULL DEFAULT 0,      -- times fetched by `get` (importance prior)
-  last_used_at TEXT                          -- last fetch; episodic decays from this
+  last_used_at TEXT,                         -- last fetch; episodic decays from this
+  event_from TEXT,                           -- event axis: when the fact became true (null = unclaimed)
+  event_to TEXT                              -- event axis: when it stopped being true
 );
 
 CREATE TABLE IF NOT EXISTS revisions (
