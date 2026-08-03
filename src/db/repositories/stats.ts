@@ -84,6 +84,8 @@ export class StatsRepo extends BaseRepo {
     const chunks_active = one<{ c: number }>("SELECT COUNT(*) AS c FROM chunks WHERE stale = 0").c;
     const chunks_stale = one<{ c: number }>("SELECT COUNT(*) AS c FROM chunks WHERE stale = 1").c;
     const chunks_embedded = one<{ c: number }>("SELECT COUNT(*) AS c FROM embedding_meta").c;
+    const vectors_authored = one<{ c: number }>("SELECT COUNT(*) AS c FROM chunk_vec").c;
+    const vectors_code = one<{ c: number }>("SELECT COUNT(*) AS c FROM code_vec").c;
     const sessions = one<{ c: number }>("SELECT COUNT(*) AS c FROM sessions").c;
     const events = one<{ c: number }>("SELECT COUNT(*) AS c FROM events").c;
 
@@ -127,6 +129,8 @@ export class StatsRepo extends BaseRepo {
         chunks_stale,
         chunks_embedded,
         chunks_unembedded: Math.max(0, chunks_active - chunks_embedded),
+        vectors_authored,
+        vectors_code,
         sessions,
         events,
       },

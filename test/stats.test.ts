@@ -47,6 +47,8 @@ describe("StatsRepo.techStats", () => {
     expect(after.queue.backlog).toBe(0);
     expect(after.content.chunks_embedded).toBeGreaterThan(0);
     expect(after.content.chunks_unembedded).toBe(0);
+    expect(after.content.vectors_authored).toBe(after.content.chunks_embedded);
+    expect(after.content.vectors_code).toBe(0);
   });
 
   it("should report the embedding lease as active while a worker holds it and lapsed later", async () => {

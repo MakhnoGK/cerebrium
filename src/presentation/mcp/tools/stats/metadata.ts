@@ -7,7 +7,8 @@ export const metadata = {
   description:
     "Operational snapshot of the memory database — no node content, just counts and health. Returns: the embedding " +
     "queue (backlog awaiting vectors, parked items past max retries, oldest enqueued time, attempts histogram); content " +
-    "totals (nodes by kind, edges, chunks embedded vs pending, sessions, events); storage (DB + WAL bytes, page stats); " +
+    "totals (nodes by kind, edges, chunks embedded vs pending, the two vector pools — authored and code — counted " +
+    "separately, sessions, events); storage (DB + WAL bytes, page stats); " +
     "drain health (embedding provider, whether the background daemon is alive, and the current worker-lease holder); " +
     "graph integrity (edges still pointing at soft-deleted nodes, how many of those are authored edges whose target has " +
     "a live successor, and live nodes stranded off the main graph — all three should read 0); " +

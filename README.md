@@ -126,6 +126,16 @@ unless `history:true`), then optionally expands the graph.
 
 - `mode`: `hybrid` (default), `text` (FTS only — cheapest), or
   `vector` (semantic only).
+- **Two vector pools.** The KNN runs before any filter, so one shared table meant the
+  code index — which outnumbers authored memory by ~100:1 — consumed the entire
+  over-fetch and an authored-only search saw a fraction of its own nodes. `chunk_vec`
+  holds authored memory plus curated external mirrors, `code_vec` holds the code-symbol
+  index, and a query sweeps only the pools it can return from: `types:['symbol']` reads
+  code alone, a `kinds` filter without `mirror` reads authored alone, anything else reads
+  both and merges by distance. The budgets differ with the sizes — 1000 for the authored
+  pool, which sweeps all of it in ~5 ms and makes every live authored node a candidate for
+  every query, and 200 for the code pool, where a larger k is not free. A narrow `kinds`
+  filter is therefore a real instruction to the ranker, not just a post-filter.
 - `expand_graph` (default true): after fusion, run **personalized PageRank** over the
   local subgraph (2 hops, frontier-capped), seeded by the matched nodes in proportion to
   their relevance. Rank flows along edge-type conductance × the edge's stored weight,
@@ -339,10 +349,18 @@ and exits, to be respawned by the next session. This keeps the backlog moving ev
 after every Claude session has closed. If a daemon can't be spawned, the server
 falls back to an in-process worker; the lease guarantees the two never double-write.
 
-**Dimension.** The `chunk_vec` table is fixed at `FLOAT[384]` (the default model's
-dimension). If a configured provider reports a different `dim`, the server fails
-loudly at startup — changing the embedding dimension requires a new vector table
-(recreate the DB or add a migration), not a silent reindex.
+**Dimension.** Both vector tables (`chunk_vec`, `code_vec`) are fixed at `FLOAT[384]`
+(the default model's dimension). If a configured provider reports a different `dim`, the
+server fails loudly at startup — changing the embedding dimension requires new vector
+tables (recreate the DB or add a migration), not a silent reindex.
+
+**Stale vectors.** A chunk a later revision drops is marked `stale` and its vector is
+deleted with it, along with its `embedding_meta` row. That is the one place the
+no-hard-deletes invariant is relaxed, and only because the vector index records nothing:
+every row recomputes from `chunks.text`, and the `chunks` row itself is still only
+soft-deleted. Chunk ids are content-addressed, so an edit that restores old text revives
+the chunk — dropping the provenance row with the vector is what makes it re-embed instead
+of counting as already done.
 
 ## Tools
 
