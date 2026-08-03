@@ -56,7 +56,7 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"session_start","arguments":{}}}' \
    | MEMORY_DB_PATH=.tmp/smoke.db MEMORY_EMBED_PROVIDER=local-null node dist/server.js
   ```
-  A real `tools/call` exercises tsyringe constructor injection end to end; `tools/list` alone does not (but should report **16** tools).
+  A real `tools/call` exercises tsyringe constructor injection end to end; `tools/list` alone does not (but should report **17** tools).
 - `npm run dev` — run the server on stdio against a throwaway DB (`MEMORY_DB_PATH=.tmp/dev.db`).
 - `npm run inspect` — MCP inspector session against the dev DB (verify tool schemas render correctly).
 

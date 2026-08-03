@@ -5,6 +5,7 @@ export enum ToolName {
   WRITE = "write",
   UPDATE = "update",
   INVALIDATE = "invalidate",
+  RESTORE = "restore",
   CHECKPOINT = "checkpoint",
   LINK = "link",
   CODE_INDEX = "code_index",

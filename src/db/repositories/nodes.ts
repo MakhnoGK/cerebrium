@@ -343,6 +343,35 @@ export class NodesRepo extends BaseRepo {
     return this.envelope(id)!;
   }
 
+  // Bring a soft-deleted node back, and retire the supersedes edges that killed it —
+  // leaving them live would assert that a live successor replaces a live node. Forward-only:
+  // `invalidated_at` is node metadata, so no revision is written and nothing is rewritten.
+  // Referrers the supersession moved onto the successor are NOT moved back; the successor
+  // is where they have pointed since, and undoing that is a separate decision.
+  // Returns false when the node was not invalidated in the first place.
+  restoreNode(id: string, fields: { ts: string; session_id: string }): boolean {
+    return this.tx(() => {
+      const { changes } = this.db
+        .prepare(
+          "UPDATE nodes SET invalidated_at = NULL WHERE id = ? AND invalidated_at IS NOT NULL",
+        )
+        .run(id);
+      if (!changes) return false;
+
+      const supersedes = this.db
+        .prepare(
+          `SELECT src FROM edges
+            WHERE dst = @id AND type = @type AND invalidated_at IS NULL`,
+        )
+        .all({ id, type: EdgeType.SUPERSEDES }) as { src: string }[];
+
+      for (const e of supersedes) {
+        this.edges.invalidateEdge(e.src, id, EdgeType.SUPERSEDES, fields.ts);
+      }
+      return true;
+    });
+  }
+
   // Move everyone who pointed at a retired node onto its successor, so a referrer whose
   // last anchor was superseded stays in the graph. Only inbound edges: a node's outbound
   // edges are its own claims and retire with it. Only `agent` provenance, matching
