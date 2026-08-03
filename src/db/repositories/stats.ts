@@ -5,6 +5,7 @@ import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { CodeRepo } from "@/db/repositories/code";
 import { EmbeddingQueueRepo } from "@/db/repositories/embedding-queue";
 import type { TechStats } from "@/core/types";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 
 function walBytes(dbPath: string): number {
   if (dbPath === ":memory:" || !dbPath) return 0;
@@ -99,6 +100,8 @@ export class StatsRepo extends BaseRepo {
        FROM events WHERE action = 'search'`,
     );
 
+    const graph = this.graphHealth();
+
     const page_count = Number(this.db.pragma("page_count", { simple: true })) || 0;
     const page_size = Number(this.db.pragma("page_size", { simple: true })) || 0;
     const db_path = this.db.name;
@@ -139,6 +142,7 @@ export class StatsRepo extends BaseRepo {
         lease_expires_at: lease?.expires_at ?? null,
         lease_active: !!lease && lease.expires_at > now,
       },
+      graph,
       rerank_usage: {
         eligible_searches: rerankAgg.eligible ?? 0,
         reranked_searches: rerankAgg.reranked ?? 0,
@@ -146,6 +150,66 @@ export class StatsRepo extends BaseRepo {
       },
       code_repos: this.code.allRepoProvenance(),
       last_activity: one<{ t: string | null }>("SELECT MAX(ts) AS t FROM events").t,
+    };
+  }
+
+  // Integrity of the authored graph: edges left pointing at soft-deleted nodes, and
+  // nodes those edges have stranded. Mirrors are excluded — the indexer owns them and
+  // rebuilds their edges wholesale. `supersedes` is excluded because an edge into a
+  // soft-deleted node is exactly what it is for.
+  // ⚠️ `memory_kind IN (...)` rather than `!= 'mirror'`: only the IN form can drive
+  // idx_nodes_kind_type, and the difference is 213 indexed rows against a 125k scan.
+  private graphHealth(): TechStats["graph"] {
+    const authored = [MemoryKind.SEMANTIC, MemoryKind.EPISODIC];
+
+    const dangling = this.db
+      .prepare(
+        `SELECT COUNT(*) AS all_edges,
+                SUM(CASE WHEN e.provenance = 'agent' AND EXISTS (
+                      SELECT 1 FROM edges s JOIN nodes sn ON sn.id = s.src
+                       WHERE s.dst = nd.id AND s.type = @supersedes
+                         AND s.invalidated_at IS NULL AND sn.invalidated_at IS NULL
+                    ) THEN 1 ELSE 0 END) AS repointable
+           FROM nodes nd
+           JOIN edges e ON e.dst = nd.id
+           JOIN nodes ns ON ns.id = e.src
+          WHERE nd.memory_kind IN (@semantic, @episodic) AND nd.invalidated_at IS NOT NULL
+            AND e.invalidated_at IS NULL AND e.type <> @supersedes
+            AND ns.memory_kind IN (@semantic, @episodic) AND ns.invalidated_at IS NULL`,
+      )
+      .get({
+        semantic: authored[0],
+        episodic: authored[1],
+        supersedes: EdgeType.SUPERSEDES,
+      }) as { all_edges: number; repointable: number | null };
+
+    // Live authored nodes unreachable from the densest hub — i.e. everything a graph
+    // view would render floating. Walks the undirected live subgraph, which is the
+    // authored side only (~200 nodes), never the mirror mass.
+    const detached = this.db
+      .prepare(
+        `WITH RECURSIVE
+         live AS (SELECT id FROM nodes
+                   WHERE memory_kind IN (@semantic, @episodic) AND invalidated_at IS NULL),
+         le AS (SELECT e.src a, e.dst b FROM edges e
+                  JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
+                 WHERE e.invalidated_at IS NULL
+                UNION
+                SELECT e.dst, e.src FROM edges e
+                  JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
+                 WHERE e.invalidated_at IS NULL),
+         seed AS (SELECT a AS id FROM le GROUP BY a ORDER BY COUNT(*) DESC LIMIT 1),
+         reach(id) AS (SELECT id FROM seed
+                       UNION SELECT le.b FROM le JOIN reach ON le.a = reach.id)
+         SELECT COUNT(*) AS c FROM live
+          WHERE EXISTS (SELECT 1 FROM le) AND id NOT IN (SELECT id FROM reach)`,
+      )
+      .get({ semantic: authored[0], episodic: authored[1] }) as { c: number };
+
+    return {
+      dangling_edges: dangling.all_edges,
+      repointable_edges: dangling.repointable ?? 0,
+      detached_nodes: detached.c,
     };
   }
 }

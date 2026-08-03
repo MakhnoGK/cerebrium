@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
-import { MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { StatsTool } from "@/presentation/mcp/tools/stats";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -13,14 +13,15 @@ import { setup } from "@test/helpers";
 async function session(): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({})).session_id;
 }
-async function writeFact(s: string, title: string): Promise<void> {
-  await container.resolve(WriteTool).invoke({
+async function writeFact(s: string, title: string): Promise<string> {
+  const out = (await container.resolve(WriteTool).invoke({
     session_id: s,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
     content: `a durable fact about ${title} with a body of a few words`,
-  });
+  })) as { id: string };
+  return out.id;
 }
 
 describe("StatsRepo.techStats", () => {
@@ -63,6 +64,77 @@ describe("StatsRepo.techStats", () => {
     // Far in the future, the same lease has lapsed.
     const later = new Date(Date.parse(env.clock.t) + 10 * 60_000).toISOString();
     expect(env.stats.techStats(later).drain.lease_active).toBe(false);
+  });
+});
+
+describe("StatsRepo graph integrity", () => {
+  it("should report a clean graph when nothing has been superseded", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    await writeFact(s, "anchor");
+    await writeFact(s, "other");
+
+    // When / Then
+    const snap = env.stats.techStats(env.clock.t).graph;
+    expect(snap).toEqual({ dangling_edges: 0, repointable_edges: 0, detached_nodes: 0 });
+  });
+
+  it("should count an edge left pointing at a superseded node, and call it repointable", async () => {
+    // Given — a referrer, a node about to die, and its live successor.
+    const env = setup();
+    const s = await session();
+    const referrer = await writeFact(s, "referrer");
+    const doomed = await writeFact(s, "doomed");
+    const successor = await writeFact(s, "successor");
+    env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    env.edges.insertEdge(successor, doomed, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
+
+    // When
+    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+
+    // Then — the supersedes edge itself is not counted; the stranded reference is.
+    const snap = env.stats.techStats(env.clock.t).graph;
+    expect(snap.dangling_edges).toBe(1);
+    expect(snap.repointable_edges).toBe(1);
+  });
+
+  it("should not call a system edge repointable, since the sweep recomputes those", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const referrer = await writeFact(s, "referrer");
+    const doomed = await writeFact(s, "doomed");
+    const successor = await writeFact(s, "successor");
+    env.edges.insertEdge(referrer, doomed, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    env.edges.insertEdge(successor, doomed, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
+
+    // When
+    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+
+    // Then
+    const snap = env.stats.techStats(env.clock.t).graph;
+    expect(snap.dangling_edges).toBe(1);
+    expect(snap.repointable_edges).toBe(0);
+  });
+
+  it("should report a node as detached when superseding its only anchor strands it", async () => {
+    // Given — `island` hangs off `doomed` alone, while a hub keeps the rest connected.
+    const env = setup();
+    const s = await session();
+    const hub = await writeFact(s, "hub");
+    const spoke = await writeFact(s, "spoke");
+    const doomed = await writeFact(s, "doomed");
+    const island = await writeFact(s, "island");
+    env.edges.insertEdge(hub, spoke, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    env.edges.insertEdge(hub, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    env.edges.insertEdge(island, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+
+    // When
+    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+
+    // Then
+    expect(env.stats.techStats(env.clock.t).graph.detached_nodes).toBe(1);
   });
 });
 
