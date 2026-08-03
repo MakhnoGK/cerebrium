@@ -7,6 +7,7 @@ import { EventAction, MemoryKind } from "@/core/vocab";
 import { CheckpointTool } from "@/presentation/mcp/tools/checkpoint";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
 import { GetTool } from "@/presentation/mcp/tools/get";
+import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { callTool, setup } from "@test/helpers";
@@ -102,7 +103,7 @@ describe("CheckpointTool.describeEvent", () => {
 });
 
 describe("GetTool.describeEvent", () => {
-  it("should log the first requested id and how many were asked for", async () => {
+  it("should log the requested ids and how many resolved", async () => {
     // Given
     const { db } = setup();
     const session_id = await session();
@@ -120,7 +121,114 @@ describe("GetTool.describeEvent", () => {
     // Then
     const [row] = eventsFor(db, EventAction.GET);
     expect(row?.node_id).toBe(envelope.id);
-    expect(detailOf(row)).toEqual({ count: 2 });
+    expect(detailOf(row)).toEqual({
+      ids: [envelope.id, "missing"],
+      found: 1,
+      not_found: ["missing"],
+    });
+  });
+
+  it("should omit not_found when every requested id resolved", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const envelope = await callTool(container.resolve(WriteTool), {
+      session_id,
+      title: "A fact",
+      content: "Something durable.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+
+    // When
+    await callTool(container.resolve(GetTool), { session_id, ids: [envelope.id] });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.GET);
+    expect(detailOf(row)).toEqual({ ids: [envelope.id], found: 1 });
+  });
+});
+
+describe("SearchTool.describeEvent", () => {
+  it("should log the query and the returned ids in rank order", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const write = container.resolve(WriteTool);
+    const fact = await callTool(write, {
+      session_id,
+      title: "Deploy pipeline",
+      content: "The release pipeline deploys on merge.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+    await callTool(write, {
+      session_id,
+      title: "Unrelated",
+      content: "Nothing to do with shipping.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+
+    // When
+    const result = await callTool(container.resolve(SearchTool), {
+      session_id,
+      query: "release pipeline",
+      limit: 10,
+    });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.SEARCH);
+    expect(result.results.map((e) => e.id)).toEqual([fact.id]);
+    expect(detailOf(row)).toMatchObject({
+      mode: "hybrid",
+      query: "release pipeline",
+      results: 1,
+      ids: [fact.id],
+    });
+  });
+
+  it("should log the ids of a text-mode search under its own mode", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const fact = await callTool(container.resolve(WriteTool), {
+      session_id,
+      title: "Deploy pipeline",
+      content: "The release pipeline deploys on merge.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+
+    // When
+    await callTool(container.resolve(SearchTool), {
+      session_id,
+      query: "release pipeline",
+      mode: "text",
+      limit: 10,
+    });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.SEARCH);
+    expect(detailOf(row)).toEqual({
+      mode: "text",
+      query: "release pipeline",
+      results: 1,
+      ids: [fact.id],
+    });
+  });
+
+  it("should log an empty outcome when the query has no searchable terms", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+
+    // When
+    await callTool(container.resolve(SearchTool), { session_id, query: "***", limit: 10 });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.SEARCH);
+    expect(detailOf(row)).toEqual({ mode: "hybrid", query: "***", results: 0, ids: [] });
   });
 });
 

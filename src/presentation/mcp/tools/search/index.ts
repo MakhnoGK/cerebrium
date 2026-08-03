@@ -66,13 +66,16 @@ interface ToolResponse {
 
 // Telemetry for the `events` row, carried out of `invoke` on a symbol key: symbols are
 // invisible to JSON.stringify, so this never reaches the agent or costs it tokens.
-// `reranked` is present only on the rerank-eligible path — StatsRepo reads a present
-// key as "eligible" and a 1 as "reranked".
+// `query` + `ids` make the row the retrieval-outcome log: joined against the ids a later
+// `get` fetched, they are the implicit relevance signal. `reranked` is present only on the
+// rerank-eligible path — StatsRepo reads a present key as "eligible" and a 1 as "reranked".
 const AUDIT = Symbol("search.audit");
 
 interface SearchAudit {
   mode: string;
+  query: string;
   results: number;
+  ids: string[];
   reranked?: 0 | 1;
   rerank_candidates?: number;
 }
@@ -105,7 +108,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     if (!match) {
       const empty: AuditedResponse = { results: [], total_matches: 0 };
       if (hints.length) empty.hints = hints;
-      empty[AUDIT] = { mode, results: 0 };
+      empty[AUDIT] = { mode, query: args.query, results: 0, ids: [] };
       return empty;
     }
 
@@ -196,7 +199,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     // text/vector hits. Graph neighbors are deliberately excluded (they earn their
     // place structurally, not by query relevance). Decay stays a post-multiplier, so
     // score = rerankRelevance × memoryFactor, keeping the memory model intact.
-    const audit: SearchAudit = { mode, results: 0 };
+    const audit: SearchAudit = { mode, query: args.query, results: 0, ids: [] };
 
     if (entries.size >= MIN_RERANK) {
       audit.reranked = 0;
@@ -301,6 +304,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     if (notes.length) out.context_notes = notes;
 
     audit.results = results.length;
+    audit.ids = results.map((r) => r.id);
     out[AUDIT] = audit;
 
     return out;
@@ -360,7 +364,12 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
     if (hints.length) out.hints = hints;
 
-    out[AUDIT] = { mode: "text", results: ranked.length };
+    out[AUDIT] = {
+      mode: "text",
+      query: args.query,
+      results: ranked.length,
+      ids: ranked.map((r) => r.id),
+    };
 
     return out;
   }
