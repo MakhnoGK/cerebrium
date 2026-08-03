@@ -133,9 +133,25 @@ export function syncChunks(
     });
   }
   const markStale = db.prepare("UPDATE chunks SET stale = 1 WHERE id = ?");
-  for (const row of existing) if (!newIds.has(row.id)) markStale.run(row.id);
+  for (const row of existing) {
+    if (newIds.has(row.id)) continue;
+    markStale.run(row.id);
+    dropVector(db, row.id);
+  }
 
   refreshQueue(db, nodeId, ts);
+}
+
+// Drops a chunk's derived vector and its embedding provenance. The chunk row itself is
+// only ever soft-deleted; this is the vector index, which is regenerable from `chunks.text`
+// and is never the record of anything. Dropping `embedding_meta` with it is what makes a
+// revived chunk (ids are content-addressed, so an edit that restores old text brings one
+// back) re-enqueue instead of counting as embedded with no vector behind it.
+export function dropVector(db: Database.Database, chunkId: string): void {
+  for (const pool of [AUTHORED_VEC, CODE_VEC]) {
+    db.prepare(`DELETE FROM ${pool} WHERE chunk_id = ?`).run(chunkId);
+  }
+  db.prepare("DELETE FROM embedding_meta WHERE chunk_id = ?").run(chunkId);
 }
 
 export { MAX_EMBED_ATTEMPTS };
