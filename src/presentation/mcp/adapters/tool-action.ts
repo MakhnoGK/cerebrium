@@ -8,6 +8,7 @@ const TOOL_ACTIONS: Record<ToolName, EventAction> = {
   [ToolName.WRITE]: EventAction.WRITE,
   [ToolName.UPDATE]: EventAction.UPDATE,
   [ToolName.INVALIDATE]: EventAction.INVALIDATE,
+  [ToolName.RESTORE]: EventAction.RESTORE,
   [ToolName.CHECKPOINT]: EventAction.CHECKPOINT,
   [ToolName.LINK]: EventAction.LINK,
   [ToolName.CODE_INDEX]: EventAction.CODE_INDEX,

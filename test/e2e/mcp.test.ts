@@ -19,7 +19,7 @@ import { createProvider } from "@/embeddings";
 
 // Every test gets its own MCP client backed by a fresh in-memory DB, so ordering and
 // cross-test state never leak. A child DI container re-binds DB_TOKEN, and the Server
-// (with all sixteen tools) is resolved from that scope.
+// (with all seventeen tools) is resolved from that scope.
 async function connect(): Promise<Client> {
   const scope = container.createChildContainer();
   scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
@@ -108,6 +108,7 @@ const ALL_TOOLS = [
   "link",
   "mirror_status",
   "mirror_upsert",
+  "restore",
   "search",
   "session_start",
   "source_register",
@@ -117,7 +118,7 @@ const ALL_TOOLS = [
 ];
 
 describe("MCP server wiring", () => {
-  it("should expose all sixteen tools when a client connects", async () => {
+  it("should expose all seventeen tools when a client connects", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
 

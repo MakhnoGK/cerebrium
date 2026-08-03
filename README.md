@@ -98,7 +98,9 @@ Two failure modes, deliberately different:
 - **Revision** — every node's content is append-only revisions; the current
   content is the latest revision. Old revisions stay readable (`get` with `rev`).
 - **Invalidation** — soft delete only. An invalidated node disappears from normal
-  search but stays reachable with `history:true` and via `get`.
+  search but stays reachable with `history:true` and via `get`. Superseding one moves
+  its authored referrers onto the successor, so nobody is stranded off the graph, and
+  `restore` reverses the retirement without losing the id or its history.
 - **Envelope** — the compact form returned by `search`/`session_start`:
   `{ id, kind, type, title, summary, project, updated, rev, edges, invalidated }`.
   Full content is never in an envelope — call `get` with the ids you want.
@@ -354,7 +356,8 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision; `outline`/`sections` to fetch part of a long node instead of all of it. |
 | `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
-| `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge. |
+| `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge, and moves the dead node's authored referrers onto it. |
+| `restore` | The inverse: bring a soft-deleted node back with its id, revision history and edges intact, retiring the `supersedes` edges into it. For a merge that swallowed a living document. |
 | `link` | Connect two existing nodes with a typed, directed edge (`references`/`documents`/`derived_from`/`supersedes`/`relates_to`). Edges drive graph expansion at search time. |
 | `checkpoint` | Before ending a work block: writes an episodic checkpoint (Summary / Decisions / Open threads) linked to touched nodes, so the next session picks up where you left off. |
 | `code_index` | Index/refresh source repos into `symbol` mirror nodes + code edges. Incremental (per-file hash-gate); run after pulling/changing a repo. Returns a compact per-repo summary, never code. |
@@ -363,8 +366,8 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 | `mirror_upsert` | Upsert curated external records into `mirror` nodes for a registered source. Idempotent by `(source, native_id)`; supply decision-worthy records only, never bulk. Compact count envelope + affected node ids. |
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. |
-| `consolidate_apply` | Resolve a candidate: `accept` applies it (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
-| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), and reranker usage (eligible vs actually reranked searches, candidates scored). `session_id` optional. |
+| `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
+| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), and reranker usage (eligible vs actually reranked searches, candidates scored). `session_id` optional. |
 
 Every tool call updates the session's `last_seen` and appends an `events` row — written at
 the boundary by `AuditedTool`, on failures as well as successes, so provenance cannot be

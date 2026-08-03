@@ -75,6 +75,12 @@ function main(): void {
     );
     L.push(`  sessions / events          : ${s.content.sessions} / ${s.content.events}`);
     L.push("");
+    L.push("Graph integrity");
+    L.push(
+      `  dangling / repointable     : ${s.graph.dangling_edges} / ${s.graph.repointable_edges}`,
+    );
+    L.push(`  detached nodes             : ${s.graph.detached_nodes}`);
+    L.push("");
     L.push("Reranking");
     L.push(`  provider (env)             : ${container.resolve(RerankConfig).provider}`);
     L.push(

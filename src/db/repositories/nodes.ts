@@ -325,10 +325,11 @@ export class NodesRepo extends BaseRepo {
     fields: { ts: string; superseded_by?: string; session_id: string },
   ): Envelope {
     this.tx(() => {
-      this.db
+      const { changes } = this.db
         .prepare("UPDATE nodes SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL")
         .run(fields.ts, id);
-      if (fields.superseded_by) {
+      if (changes && fields.superseded_by) {
+        this.repointReferrers(id, fields.superseded_by, fields.session_id, fields.ts);
         this.edges.insertEdge(
           fields.superseded_by,
           id,
@@ -340,5 +341,64 @@ export class NodesRepo extends BaseRepo {
       }
     });
     return this.envelope(id)!;
+  }
+
+  // Bring a soft-deleted node back, and retire the supersedes edges that killed it —
+  // leaving them live would assert that a live successor replaces a live node. Forward-only:
+  // `invalidated_at` is node metadata, so no revision is written and nothing is rewritten.
+  // Referrers the supersession moved onto the successor are NOT moved back; the successor
+  // is where they have pointed since, and undoing that is a separate decision.
+  // Returns false when the node was not invalidated in the first place.
+  restoreNode(id: string, fields: { ts: string; session_id: string }): boolean {
+    return this.tx(() => {
+      const { changes } = this.db
+        .prepare(
+          "UPDATE nodes SET invalidated_at = NULL WHERE id = ? AND invalidated_at IS NOT NULL",
+        )
+        .run(id);
+      if (!changes) return false;
+
+      const supersedes = this.db
+        .prepare(
+          `SELECT src FROM edges
+            WHERE dst = @id AND type = @type AND invalidated_at IS NULL`,
+        )
+        .all({ id, type: EdgeType.SUPERSEDES }) as { src: string }[];
+
+      for (const e of supersedes) {
+        this.edges.invalidateEdge(e.src, id, EdgeType.SUPERSEDES, fields.ts);
+      }
+      return true;
+    });
+  }
+
+  // Move everyone who pointed at a retired node onto its successor, so a referrer whose
+  // last anchor was superseded stays in the graph. Only inbound edges: a node's outbound
+  // edges are its own claims and retire with it. Only `agent` provenance, matching
+  // `mergeNodes` — system `similar_to` edges are recomputed by the sweep, and re-pointing
+  // one asserts a similarity nobody measured.
+  // ⚠️ Must run BEFORE the `supersedes` edge is written, or it re-points that edge onto
+  // the successor itself.
+  private repointReferrers(id: string, successor: string, session_id: string, ts: string): void {
+    const inbound = this.db
+      .prepare(
+        `SELECT src, type, weight FROM edges
+          WHERE dst = @id AND invalidated_at IS NULL AND provenance = 'agent'`,
+      )
+      .all({ id }) as { src: string; type: string; weight: number }[];
+
+    for (const e of inbound) {
+      this.edges.invalidateEdge(e.src, id, e.type as EdgeType, ts);
+      if (e.src === successor) continue; // self-loop after re-point -> drop
+      this.edges.insertEdge(
+        e.src,
+        successor,
+        e.type as EdgeType,
+        "agent",
+        session_id,
+        ts,
+        e.weight,
+      );
+    }
   }
 }

@@ -5,6 +5,7 @@ import "./get";
 import "./write";
 import "./update";
 import "./invalidate";
+import "./restore";
 import "./checkpoint";
 import "./link";
 import "./code-index";

@@ -152,6 +152,11 @@ export interface TechStats {
     lease_expires_at: string | null;
     lease_active: boolean;
   };
+  graph: {
+    dangling_edges: number; // live edges from a live node into an invalidated one
+    repointable_edges: number; // of those, the authored ones whose target has a live successor
+    detached_nodes: number; // live nodes no longer reachable from the graph's densest hub
+  };
   rerank_usage: {
     eligible_searches: number; // hybrid/vector searches (the rerank-eligible ones)
     reranked_searches: number; // of those, how many actually reranked
