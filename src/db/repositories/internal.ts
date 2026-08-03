@@ -14,7 +14,8 @@ export const ENRICHED = `
   SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
          lr.rev AS rev, lr.ts AS updated, lr.content AS content,
          (SELECT COUNT(*) FROM edges e
-            WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count
+            WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
+         n.use_count, n.last_used_at
   FROM nodes n
   JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
   JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev

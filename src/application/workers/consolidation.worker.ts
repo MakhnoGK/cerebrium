@@ -23,6 +23,7 @@ const CONSOLIDATION_LEASE = "consolidation";
 export interface ConsolidationTickResult {
   links_added: number;
   links_suggested: number;
+  links_pruned: number;
   distilled: number;
   distill_suggested: number;
   merged: number;
@@ -80,6 +81,7 @@ export class ConsolidationWorker {
     const result: ConsolidationTickResult = {
       links_added: 0,
       links_suggested: 0,
+      links_pruned: 0,
       distilled: 0,
       distill_suggested: 0,
       merged: 0,
@@ -105,6 +107,7 @@ export class ConsolidationWorker {
     this.sessionService.ensureSession(this.ownerId, null, now);
 
     this.discoverLinks(now, result);
+    this.pruneLinks(now, result);
     await this.distill(now, result);
     await this.mergeDuplicates(now, result);
     this.pruneMirrors(now, result);
@@ -137,12 +140,29 @@ export class ConsolidationWorker {
       return;
     }
 
-    const pairs = this.consolidationRepo.similarLinkCandidates({
-      minScore: this.thresholds.sim,
-      limit: this.batch.link,
-    });
+    const pairs = this.consolidationRepo
+      .similarLinkCandidates({
+        minScore: this.thresholds.sim,
+        limit: this.batch.link,
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const maxDegree = this.thresholds.maxLinkDegree;
+    const degrees = this.consolidationRepo.linkDegrees([
+      ...new Set(pairs.flatMap((p) => [p.src, p.dst])),
+    ]);
 
     for (const p of pairs) {
+      const srcDegree = degrees.get(p.src) ?? 0;
+      const dstDegree = degrees.get(p.dst) ?? 0;
+
+      if (srcDegree >= maxDegree || dstDegree >= maxDegree) {
+        continue;
+      }
+
+      degrees.set(p.src, srcDegree + 1);
+      degrees.set(p.dst, dstDegree + 1);
+
       if (posture === Posture.AUTO) {
         this.edgesRepo.insertEdge(
           p.src,
@@ -167,6 +187,25 @@ export class ConsolidationWorker {
           result.links_suggested++;
         }
       }
+    }
+  }
+
+  // Retire similar_to edges the cap has already been exceeded by — the backlog the
+  // discovery guard cannot reach, since it only governs new pairs. Soft-invalidate only,
+  // and never below a node's own top `maxLinkDegree`.
+  private pruneLinks(now: string, result: ConsolidationTickResult): void {
+    if (this.posture.linkPrune === Posture.OFF) {
+      return;
+    }
+
+    const stale = this.consolidationRepo.overCapSimilarLinks({
+      maxDegree: this.thresholds.maxLinkDegree,
+      limit: this.batch.linkPrune,
+    });
+
+    for (const edge of stale) {
+      this.edgesRepo.invalidateEdge(edge.src, edge.dst, EdgeType.SIMILAR_TO, now);
+      result.links_pruned++;
     }
   }
 

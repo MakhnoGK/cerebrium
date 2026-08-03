@@ -1,6 +1,6 @@
 import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
-import { ENRICHED } from "@/db/repositories/internal";
+import { ENRICHED, enrichedByIds } from "@/db/repositories/internal";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/core/types";
 import { toEnvelope } from "@/core/types";
 
@@ -15,7 +15,15 @@ const VEC_K = 200;
 export class SearchRepo extends BaseRepo {
   vectorSearch(
     embedding: number[],
-    opts: { project?: string; kinds?: string[]; types?: string[]; history: boolean; cap: number },
+    opts: {
+      project?: string;
+      kinds?: string[];
+      types?: string[];
+      history: boolean;
+      cap: number;
+      asOf?: string;
+      validAt?: string;
+    },
   ): VectorRow[] {
     const where: string[] = ["c.stale = 0"];
     const params: Record<string, unknown> = { q: JSON.stringify(embedding), k: VEC_K };
@@ -31,7 +39,25 @@ export class SearchRepo extends BaseRepo {
       where.push(`n.type IN (${opts.types.map((_, i) => `@t${i}`).join(",")})`);
       opts.types.forEach((t, i) => (params[`t${i}`] = t));
     }
-    if (!opts.history) where.push("n.invalidated_at IS NULL");
+    // `as_of` carries its own liveness rule — a node that was valid then belongs in the
+    // answer even if it has since been invalidated — so it replaces the history flag.
+    if (opts.asOf !== undefined) {
+      where.push(
+        "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      );
+      params.asOf = opts.asOf;
+    } else if (!opts.history) {
+      where.push("n.invalidated_at IS NULL");
+    }
+
+    // Event axis. A node with no claimed window is an open interval, not an unknown to be
+    // filtered out — 125k nodes predate the axis and excluding them would empty the answer.
+    if (opts.validAt !== undefined) {
+      where.push(
+        "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
+      );
+      params.validAt = opts.validAt;
+    }
 
     const rows = this.db
       .prepare(
@@ -39,6 +65,7 @@ export class SearchRepo extends BaseRepo {
          SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
+                n.use_count, n.last_used_at,
                 knn.distance AS distance, c.text AS chunk_text
          FROM knn
          JOIN chunks c ON c.id = knn.chunk_id
@@ -68,6 +95,8 @@ export class SearchRepo extends BaseRepo {
     types?: string[];
     history: boolean;
     cap: number;
+    asOf?: string;
+    validAt?: string;
   }): { rows: SearchRow[]; total: number } {
     const where: string[] = ["node_fts MATCH @match"];
     const params: Record<string, unknown> = { match: opts.match };
@@ -83,7 +112,25 @@ export class SearchRepo extends BaseRepo {
       where.push(`n.type IN (${opts.types.map((_, i) => `@t${i}`).join(",")})`);
       opts.types.forEach((t, i) => (params[`t${i}`] = t));
     }
-    if (!opts.history) where.push("n.invalidated_at IS NULL");
+    // `as_of` carries its own liveness rule — a node that was valid then belongs in the
+    // answer even if it has since been invalidated — so it replaces the history flag.
+    if (opts.asOf !== undefined) {
+      where.push(
+        "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      );
+      params.asOf = opts.asOf;
+    } else if (!opts.history) {
+      where.push("n.invalidated_at IS NULL");
+    }
+
+    // Event axis. A node with no claimed window is an open interval, not an unknown to be
+    // filtered out — 125k nodes predate the axis and excluding them would empty the answer.
+    if (opts.validAt !== undefined) {
+      where.push(
+        "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
+      );
+      params.validAt = opts.validAt;
+    }
     const clause = where.join(" AND ");
 
     const rows = this.db
@@ -91,6 +138,7 @@ export class SearchRepo extends BaseRepo {
         `SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
+                n.use_count, n.last_used_at,
                 bm25(node_fts) AS bm25
          FROM node_fts
          JOIN nodes n ON n.id = node_fts.node_id
@@ -111,6 +159,65 @@ export class SearchRepo extends BaseRepo {
     ).c;
 
     return { rows, total };
+  }
+
+  // Rows for ids the graph surfaced — the same shape the two candidate branches return, so
+  // graph hits go through the identical scoring and envelope path.
+  rowsFor(ids: string[], opts: { asOf?: string; validAt?: string } = {}): EnrichedRow[] {
+    if (!ids.length) return [];
+
+    if (opts.asOf === undefined && opts.validAt === undefined) {
+      return enrichedByIds(this.db, ids).filter((r) => r.invalidated_at == null);
+    }
+
+    const where = [`n.id IN (${ids.map((_, i) => `@i${i}`).join(",")})`];
+    const params: Record<string, string> = Object.fromEntries(ids.map((id, i) => [`i${i}`, id]));
+
+    if (opts.asOf !== undefined) {
+      where.push(
+        "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      );
+      params.asOf = opts.asOf;
+    } else {
+      where.push("n.invalidated_at IS NULL");
+    }
+
+    if (opts.validAt !== undefined) {
+      where.push(
+        "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
+      );
+      params.validAt = opts.validAt;
+    }
+
+    return this.db.prepare(`${ENRICHED} WHERE ${where.join(" AND ")}`).all(params) as EnrichedRow[];
+  }
+
+  // Best (lowest-seq) chunk vector per node — the same seed convention the consolidation
+  // kNN uses. Nodes whose chunks are still queued for embedding are simply absent.
+  vectorsFor(ids: string[]): Map<string, Float32Array> {
+    const out = new Map<string, Float32Array>();
+
+    if (!ids.length) return out;
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT c.node_id AS id, cv.embedding AS embedding FROM chunks c
+         JOIN chunk_vec cv ON cv.chunk_id = c.id
+         WHERE c.stale = 0 AND c.node_id IN (${ph})
+         ORDER BY c.node_id, c.seq`,
+      )
+      .all(...ids) as { id: string; embedding: Buffer }[];
+
+    for (const r of rows) {
+      if (out.has(r.id)) continue;
+      out.set(
+        r.id,
+        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
+      );
+    }
+
+    return out;
   }
 
   private projectClause(project: string | undefined, params: Record<string, unknown>): string {

@@ -34,8 +34,21 @@ export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown>
       );
     }
 
-    if (args.content === undefined && args.title === undefined) {
-      throw new Error("nothing to update — provide `content` and/or `title`.");
+    const window = { event_from: args.event_from, event_to: args.event_to };
+    const touchesWindow = args.event_from !== undefined || args.event_to !== undefined;
+
+    if (args.content === undefined && args.title === undefined && !touchesWindow) {
+      throw new Error("nothing to update — provide `content`, `title` and/or an event window.");
+    }
+
+    if (
+      args.event_from !== undefined &&
+      args.event_to !== undefined &&
+      args.event_to < args.event_from
+    ) {
+      throw new Error(
+        "`event_to` precedes `event_from`; a fact cannot stop being true before it started.",
+      );
     }
 
     if (args.content !== undefined && args.content.length > MAX_CONTENT) {
@@ -44,13 +57,22 @@ export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown>
       );
     }
 
-    const envelope = this.nodes.addRevision(args.id, {
-      content: args.content,
-      title: args.title,
-      session_id: args.session_id,
-      reason: args.reason ?? null,
-      ts: this.clock.now(),
-    });
+    if (touchesWindow) {
+      this.nodes.setEventWindow(args.id, window);
+    }
+
+    // The event window is node metadata, not content, so correcting it alone does not mint
+    // a revision — there is no new body to keep.
+    const envelope =
+      args.content === undefined && args.title === undefined
+        ? this.nodes.envelope(args.id)!
+        : this.nodes.addRevision(args.id, {
+            content: args.content,
+            title: args.title,
+            session_id: args.session_id,
+            reason: args.reason ?? null,
+            ts: this.clock.now(),
+          });
 
     return hints.length ? { ...envelope, hints } : envelope;
   }

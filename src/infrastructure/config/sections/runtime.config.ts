@@ -28,10 +28,16 @@ export class RerankConfig extends SectionOf("rerank", {
 // so they are tuned per deployment rather than baked into the retrieval code.
 // `dedupThreshold` and `lexicalDedupThreshold` are calibrated, not chosen: run
 // `npm run calibrate:report` against a real store and read them off it. They are also
-// scale-specific — an embedding-model swap invalidates both.
+// scale-specific — an embedding-model swap invalidates both. `mmrLambda` at 1.0 is pure
+// relevance, i.e. the diversity pass off; `useWeight` at 0 disables the usage prior, which
+// is the knob to turn down if retrieval starts feeling stuck on the same nodes.
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
+  mmrLambda: num(0.7).range(0, 1).env("MEMORY_MMR_LAMBDA"),
+  useWeight: num(0.25).range(0, 1).env("MEMORY_USE_WEIGHT"),
+  pprAlpha: num(0.5).range(0, 1).env("MEMORY_PPR_ALPHA"),
+  pprFrontier: int(500).positive().env("MEMORY_PPR_FRONTIER"),
   dedupThreshold: num(0.92).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
   lexicalDedupThreshold: num(0.2).range(0, 1).env("MEMORY_DEDUP_LEXICAL_THRESHOLD"),
   workingSetTokens: int(1500).positive().env("MEMORY_WORKING_SET_TOKENS"),

@@ -1,5 +1,5 @@
 {
-  "note": "Offline relevance eval for the search reranker. Docs are short semantic facts; each query gives natural-language phrasing plus the ids of the genuinely relevant docs. The set is seeded to include lexical traps — distractors that share query keywords without answering, and relevant docs that use synonyms — so RRF alone is imperfect and a cross-encoder has room to help. Extend it; it is a seed, not a benchmark.",
+  "note": "Offline relevance eval for the whole retrieval pipeline, not just the reranker. Docs are short semantic facts; each query gives natural-language phrasing plus the ids of the genuinely relevant docs. The set is seeded to include lexical traps (distractors sharing query keywords without answering, relevant docs phrased with synonyms) so RRF alone is imperfect. Two later additions make the diversity and graph stages measurable: docs may carry a `facet`, so a query whose gold answers cluster into several facets can be scored on how many DISTINCT facets the top-k covers (what MMR trades relevance for, and what nDCG cannot see); and `edges` links docs, so a query whose answer is only reachable by following a link scores nothing unless graph expansion works. Extend it; ids are opaque.",
   "docs": [
     {
       "id": "d01",
@@ -150,29 +150,117 @@
       "id": "d30",
       "title": "Graph expansion",
       "content": "After fusion the top hits pull in one-hop neighbours over typed edges so related context surfaces without a keyword match."
+    },
+    {
+      "id": "d31",
+      "title": "Webhook retry policy",
+      "facet": "retry",
+      "content": "Failed webhook deliveries are retried five times with exponential backoff between attempts."
+    },
+    {
+      "id": "d32",
+      "title": "Webhook redelivery schedule",
+      "facet": "retry",
+      "content": "A webhook that fails is re-sent up to five times, each attempt spaced further apart than the last."
+    },
+    {
+      "id": "d33",
+      "title": "Webhook delivery attempts",
+      "facet": "retry",
+      "content": "Delivery is attempted five times in total before the endpoint is marked unhealthy and muted."
+    },
+    {
+      "id": "d34",
+      "title": "Webhook signature verification",
+      "facet": "security",
+      "content": "Every webhook carries an HMAC signature the receiver must verify before trusting the payload."
+    },
+    {
+      "id": "d35",
+      "title": "Payment ledger reconciliation",
+      "content": "The ledger is reconciled against the processor statement every morning before the desk opens."
+    },
+    {
+      "id": "d36",
+      "title": "Nightly settlement job",
+      "content": "The batch posts captured funds at 02:00 UTC and skips anything captured after 23:50 the previous day."
     }
   ],
   "queries": [
-    { "query": "how soon do I have to sign in again after my session starts", "relevant": ["d01"] },
-    { "query": "when am I forced to log back in completely", "relevant": ["d02"] },
-    { "query": "what happens when a customer's card is declined", "relevant": ["d06"] },
-    { "query": "how do I get my money back and how long does it take", "relevant": ["d07"] },
-    { "query": "when do invoices go out to customers", "relevant": ["d05"] },
+    {
+      "query": "how soon do I have to sign in again after my session starts",
+      "relevant": ["d01"]
+    },
+    {
+      "query": "when am I forced to log back in completely",
+      "relevant": ["d02"]
+    },
+    {
+      "query": "what happens when a customer's card is declined",
+      "relevant": ["d06"]
+    },
+    {
+      "query": "how do I get my money back and how long does it take",
+      "relevant": ["d07"]
+    },
+    {
+      "query": "when do invoices go out to customers",
+      "relevant": ["d05"]
+    },
     {
       "query": "messages are piling up unprocessed, what handles that",
       "relevant": ["d10", "d11"]
     },
-    { "query": "which events does the ingestion pipeline read", "relevant": ["d09"] },
-    { "query": "can I ship code on a Saturday", "relevant": ["d13"] },
-    { "query": "how do I undo a broken release", "relevant": ["d14"] },
-    { "query": "how are new features gradually turned on for users", "relevant": ["d16"] },
-    { "query": "why don't reads block while something is writing to the db", "relevant": ["d17"] },
-    { "query": "how do we stop a cold key from hammering the origin", "relevant": ["d21"] },
-    { "query": "what stops one IP from flooding the API", "relevant": ["d22"] },
-    { "query": "who gets paged during a total outage", "relevant": ["d24", "d23"] },
+    {
+      "query": "which events does the ingestion pipeline read",
+      "relevant": ["d09"]
+    },
+    {
+      "query": "can I ship code on a Saturday",
+      "relevant": ["d13"]
+    },
+    {
+      "query": "how do I undo a broken release",
+      "relevant": ["d14"]
+    },
+    {
+      "query": "how are new features gradually turned on for users",
+      "relevant": ["d16"]
+    },
+    {
+      "query": "why don't reads block while something is writing to the db",
+      "relevant": ["d17"]
+    },
+    {
+      "query": "how do we stop a cold key from hammering the origin",
+      "relevant": ["d21"]
+    },
+    {
+      "query": "what stops one IP from flooding the API",
+      "relevant": ["d22"]
+    },
+    {
+      "query": "who gets paged during a total outage",
+      "relevant": ["d24", "d23"]
+    },
     {
       "query": "how are text and semantic search results combined and ordered",
       "relevant": ["d28"]
+    },
+    {
+      "query": "what should I know before consuming our webhooks",
+      "relevant": ["d31", "d32", "d33", "d34"]
+    },
+    {
+      "query": "why would this morning's ledger not balance",
+      "relevant": ["d36"]
+    }
+  ],
+  "edges": [
+    {
+      "src": "d35",
+      "dst": "d36",
+      "type": "references"
     }
   ]
 }

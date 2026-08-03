@@ -30,6 +30,17 @@ export class EdgesRepo extends BaseRepo {
       .run(src, dst, type, provenance, weight, ts, session_id);
   }
 
+  // Soft-delete one edge. insertEdge revives an invalidated (src,dst,type) on conflict,
+  // so a retired edge comes back only if something deliberately re-inserts it.
+  invalidateEdge(src: string, dst: string, type: EdgeType, ts: string): void {
+    this.db
+      .prepare(
+        `UPDATE edges SET invalidated_at = ?
+         WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL`,
+      )
+      .run(ts, src, dst, type);
+  }
+
   edgesOf(id: string): NeighborStub[] {
     const out = this.db
       .prepare(
@@ -89,6 +100,91 @@ export class EdgesRepo extends BaseRepo {
       if (node) out.push({ parent: p.parent, edge: p.edge, node });
     }
     return out;
+  }
+
+  // The local subgraph reachable from `seedIds` within `depth` hops, over live edges of the
+  // given types between live nodes — the input to PPR diffusion at search time. Edges are
+  // returned with their stored `weight`, which plain 1-hop expansion never read. Traversal
+  // is undirected: an edge relates its endpoints regardless of which way it was written.
+  // `cap` bounds the node set (nearest first), so a hub can't turn one query into a scan.
+  subgraphFrom(
+    seedIds: string[],
+    opts: { depth: number; cap: number; types: string[]; asOf?: string; validAt?: string },
+  ): { src: string; dst: string; type: EdgeType; weight: number }[] {
+    if (!seedIds.length || !opts.types.length) return [];
+
+    // Named parameters throughout: the type list appears in three clauses and the as-of
+    // instant in five, and binding each once is what keeps them in step.
+    const params: Record<string, string | number> = { depth: opts.depth, cap: opts.cap };
+    const seedPh = seedIds
+      .map((id, i) => {
+        params[`s${i}`] = id;
+        return `@s${i}`;
+      })
+      .join(",");
+    const typePh = opts.types
+      .map((t, i) => {
+        params[`t${i}`] = t;
+        return `@t${i}`;
+      })
+      .join(",");
+
+    if (opts.asOf !== undefined) params.asOf = opts.asOf;
+    if (opts.validAt !== undefined) params.validAt = opts.validAt;
+    // Under `as_of` the graph is the graph as it stood then: nodes that existed and were
+    // still valid, joined by edges that had been written and not yet retired.
+    const nodeLive = [
+      opts.asOf === undefined
+        ? "n.invalidated_at IS NULL"
+        : "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      // The event axis applies to graph hits too: a node the query excluded as out of its
+      // validity window must not come back in through diffusion.
+      ...(opts.validAt === undefined
+        ? []
+        : [
+            "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
+          ]),
+    ].join(" AND ");
+    const edgeLive =
+      opts.asOf === undefined
+        ? "e.invalidated_at IS NULL"
+        : "e.valid_from <= @asOf AND (e.invalidated_at IS NULL OR e.invalidated_at > @asOf)";
+
+    // There is no index on edges(type), so every clause is driven from node ids instead:
+    // outward hops ride the (src,…) primary key, inward hops ride idx_edges_dst. Filtering
+    // by type inside those lookups is free; filtering by type first is a 380k-row scan.
+    const hop = (join: "src" | "dst") => `
+      SELECT e.${join === "src" ? "dst" : "src"}, reach.depth + 1 FROM reach
+      JOIN edges e ON e.${join} = reach.id
+      JOIN nodes n ON n.id = e.${join === "src" ? "dst" : "src"} AND ${nodeLive}
+      WHERE ${edgeLive} AND e.type IN (${typePh}) AND reach.depth < @depth`;
+
+    return this.db
+      .prepare(
+        `WITH RECURSIVE
+         reach(id, depth) AS (
+           SELECT n.id, 0 FROM nodes n WHERE n.id IN (${seedPh}) AND ${nodeLive}
+           UNION
+           ${hop("src")}
+           UNION
+           ${hop("dst")}
+         ),
+         frontier AS (
+           SELECT id FROM (SELECT id, MIN(depth) AS d FROM reach GROUP BY id)
+            ORDER BY d ASC, id ASC LIMIT @cap
+         )
+         SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight
+         FROM frontier f
+         JOIN edges e ON e.src = f.id
+         WHERE ${edgeLive} AND e.type IN (${typePh})
+           AND e.dst IN (SELECT id FROM frontier)`,
+      )
+      .all(params) as {
+      src: string;
+      dst: string;
+      type: EdgeType;
+      weight: number;
+    }[];
   }
 
   // For context_notes: which of these (invalidated) nodes were superseded, by whom, when.

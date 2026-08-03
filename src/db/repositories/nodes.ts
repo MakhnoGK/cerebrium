@@ -66,8 +66,8 @@ export class NodesRepo extends BaseRepo {
     this.tx(() => {
       this.db
         .prepare(
-          `INSERT INTO nodes (id, memory_kind, type, title, project, valid_from, created_by_session, created_at)
-           VALUES (@id, @kind, @type, @title, @project, @ts, @session, @ts)`,
+          `INSERT INTO nodes (id, memory_kind, type, title, project, valid_from, created_by_session, created_at, event_from, event_to)
+           VALUES (@id, @kind, @type, @title, @project, @ts, @session, @ts, @eventFrom, @eventTo)`,
         )
         .run({
           id,
@@ -77,6 +77,8 @@ export class NodesRepo extends BaseRepo {
           project: input.project,
           ts: input.ts,
           session: input.session_id,
+          eventFrom: input.event_from ?? null,
+          eventTo: input.event_to ?? null,
         });
       insertRevision(this.db, id, 1, input.content, input.session_id, null, input.ts);
       ftsPut(this.db, id, input.title, input.content);
@@ -259,6 +261,63 @@ export class NodesRepo extends BaseRepo {
       syncChunks(this.db, id, nextRev, content, fields.ts);
     });
     return this.envelope(id)!;
+  }
+
+  // The event window, when one was claimed. Read by `get`; never folded into an envelope.
+  eventWindow(id: string): { event_from: string | null; event_to: string | null } | undefined {
+    return this.db.prepare("SELECT event_from, event_to FROM nodes WHERE id = ?").get(id) as
+      { event_from: string | null; event_to: string | null } | undefined;
+  }
+
+  // Correct a node's event window. Facts of this shape get revised often ("it actually
+  // started earlier"), and the window is node metadata, not content, so this is not a
+  // revision. Only the keys passed are touched.
+  setEventWindow(id: string, window: { event_from?: string; event_to?: string }): void {
+    const sets: string[] = [];
+    const params: Record<string, string> = { id };
+
+    if (window.event_from !== undefined) {
+      sets.push("event_from = @event_from");
+      params.event_from = window.event_from;
+    }
+
+    if (window.event_to !== undefined) {
+      sets.push("event_to = @event_to");
+      params.event_to = window.event_to;
+    }
+
+    if (!sets.length) return;
+
+    this.db.prepare(`UPDATE nodes SET ${sets.join(", ")} WHERE id = @id`).run(params);
+  }
+
+  // The node's state at an instant on the INGESTION axis: the revision that was current
+  // then, or undefined if the node did not exist yet or had already been invalidated.
+  // Answers "what did we believe on D", which is how a decision taken on stale information
+  // gets audited. Note the title is not versioned, so only the body is historical.
+  stateAt(id: string, asOf: string): { rev: number; content: string } | undefined {
+    return this.db
+      .prepare(
+        `SELECT r.rev AS rev, r.content AS content FROM revisions r
+         JOIN nodes n ON n.id = r.node_id
+         WHERE r.node_id = @id AND r.ts <= @asOf
+           AND n.created_at <= @asOf
+           AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)
+         ORDER BY r.rev DESC LIMIT 1`,
+      )
+      .get({ id, asOf }) as { rev: number; content: string } | undefined;
+  }
+
+  // The retrieval-outcome signal: an agent spent tokens fetching these nodes. Deliberately
+  // does not touch the latest revision — usage is not an edit, and `updated` orders the
+  // working set and breaks search ties.
+  recordUse(ids: string[], ts: string): void {
+    if (!ids.length) return;
+
+    const ph = ids.map(() => "?").join(",");
+    this.db
+      .prepare(`UPDATE nodes SET use_count = use_count + 1, last_used_at = ? WHERE id IN (${ph})`)
+      .run(ts, ...ids);
   }
 
   invalidateNode(

@@ -90,7 +90,9 @@ Two failure modes, deliberately different:
 
 - **Node** — one memory. Has a `memory_kind`:
   - `episodic` — a record of *what happened* (a `checkpoint` or `event_note`).
-    Write-once; relevance decays with age. **Cannot be updated.**
+    Write-once; relevance decays by *disuse* — the decay clock runs from the last
+    `get`, not from the write, so a record that keeps being read stays reachable.
+    **Cannot be updated.**
   - `semantic` — a durable fact/`decision`/`entity`/`howto`/`task`. Maintained
     via revisions; does not decay.
 - **Revision** — every node's content is append-only revisions; the current
@@ -111,14 +113,43 @@ Two failure modes, deliberately different:
 ## Hybrid search
 
 `search` fuses two candidate lists — FTS5 bm25 and vector KNN — with Reciprocal
-Rank Fusion, then applies the memory model (semantic steady, episodic decays,
-invalidated hidden unless `history:true`), then optionally expands the graph.
+Rank Fusion, then applies the memory model (semantic steady, episodic decays by
+disuse, often-fetched nodes carry a bounded importance boost, invalidated hidden
+unless `history:true`), then optionally expands the graph.
 
 - `mode`: `hybrid` (default), `text` (FTS only — cheapest), or
   `vector` (semantic only).
-- `expand_graph` (default true): after fusion, pull 1-hop neighbors of the top hits
-  over valid edges, weighted by edge type (`supersedes` never surfaces a superseded
-  node). Ignored in `text` mode.
+- `expand_graph` (default true): after fusion, run **personalized PageRank** over the
+  local subgraph (2 hops, frontier-capped), seeded by the matched nodes in proportion to
+  their relevance. Rank flows along edge-type conductance × the edge's stored weight,
+  normalized by degree so a hub can't swallow the diffusion. This is multi-hop by
+  construction, and a node backed by several independent hits beats one backed by a
+  single strong hit. Only nodes the query did *not* match directly are scored this way,
+  and a graph hit is capped at `0.3 ×` the top direct hit, so it never outranks it.
+  `supersedes` is not traversable (a superseded node never surfaces), and neither is code
+  structure (`calls`/`defines`/`imports`) — `documents` keeps the prose↔code join
+  reachable. Ignored in `text` mode.
+- The final cut is diversified with MMR (`MEMORY_MMR_LAMBDA`, `1.0` = off): among
+  equally relevant candidates it prefers the ones that repeat each other least, so a
+  fixed `limit` carries more distinct information. Relevance and redundancy are both
+  min-max normalized within the candidate set — raw RRF and raw cosine are not on
+  comparable scales. The top hit is always the most relevant one; candidates with no
+  stored vector are never demoted; `text` mode is untouched.
+- `as_of` (ISO-8601): run the search against the store **as it stood then** — only nodes
+  already written and not yet invalidated at that instant, graph expansion included. It
+  supersedes `history`, because it carries its own liveness rule: something invalidated
+  since was valid then and belongs in the answer. `get` takes the same argument and
+  returns the revision current at that time. This is how a decision taken on information
+  that has since changed gets audited.
+  **Limit worth knowing:** the FTS index and the vectors hold the *current* wording only,
+  so `as_of` decides which nodes are considered — not how they were phrased then.
+- `valid_at` (ISO-8601): the **other** time axis. `as_of` asks *when did we know it*;
+  `valid_at` asks *when was it true*. A node carries an optional event window
+  (`event_from`/`event_to`, set on `write`/`update`), so a note written today about an
+  outage that ran last week records both. A node claiming no window counts as always
+  valid, so `valid_at` narrows a result set rather than emptying it — most nodes never
+  claim one. The two combine: `as_of` + `valid_at` is "what we believed on one date about
+  what was true on another", which is the question an audit actually asks.
 - Each result carries **`matched`**: `text` | `vector` | `both` | `graph`.
 - Vector/both hits carry **`best_chunk`**: the first ~120 chars of the matched chunk
   — often enough to judge relevance without a `get`.
@@ -220,6 +251,10 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
+| `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
+| `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
+| `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
+| `MEMORY_PPR_FRONTIER` | `500` | Max nodes pulled into the local subgraph PPR runs over, nearest first. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
@@ -229,6 +264,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
 | `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
+| `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE` | `auto` | Attribute-enrichment posture: `auto` mines keywords/tags/context for each semantic node during the sweep and folds them into its FTS text for wider recall; `off` skips it. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE_BATCH` | `50` | Max un-annotated semantic nodes enriched per sweep. |
@@ -236,11 +272,13 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
+| `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
 | `MEMORY_CONSOLIDATE_DISTILL_BATCH` | `200` | Max episodic clusters considered for distillation per sweep. |
 | `MEMORY_CONSOLIDATE_MERGE_BATCH` | `200` | Max duplicate semantic pairs considered per sweep. |
 | `MEMORY_CONSOLIDATE_PRUNE_BATCH` | `200` | Max dead mirror nodes reconciled per sweep. |
+| `MEMORY_CONSOLIDATE_LINK_PRUNE_BATCH` | `200` | Max over-cap `similar_to` edges retired per sweep. |
 | `MEMORY_CONSOLIDATE_BACKFILL_BATCH` | `10` | Max pending candidates a newly-enabled provider drafts proposals for per sweep. |
 
 The DB opens in WAL mode (`busy_timeout=15000`, foreign keys on) with the
@@ -272,7 +310,7 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 | Tool | When to use |
 |------|-------------|
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
-| `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic; `history:true` includes invalidated nodes. **Search before writing.** |
+| `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision. |
 | `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
@@ -311,6 +349,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
+| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. See *Evaluating a ranking change*. |
 
 ## Code indexing
 
@@ -419,6 +458,10 @@ into durable knowledge:
   bypasses the penalty.
 - **Link discovery** — writes system `similar_to` edges between highly similar
   semantic nodes (kNN over stored vectors), improving graph expansion over time.
+  Bounded by `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE`: a node stops attracting new edges
+  at the cap, and a prune stage retires stored edges that fall outside the top-N by
+  weight of *both* endpoints — an edge that is a node's own best link is never cut,
+  so pruning cannot strand a node outside the graph.
 - **Distillation** — rolls up clusters of decayed episodics into one durable
   semantic fact, linked `derived_from` each source, stamping the sources
   `consolidated_at` (they stay queryable via `history`).
@@ -437,6 +480,39 @@ authors the summary at apply time) or a bring-your-own `command`/`http` backend.
 self-contained local runtime (Ollama + a small model) for the `http` provider lives
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
+
+## Evaluating a ranking change
+
+`npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It
+seeds a fixed 36-doc corpus (with edges, and with gold answers that cluster into facets)
+into an in-memory DB, embeds it once, then runs the same queries through two or more
+**arms** — named configuration overlays — sharing that one corpus and those embeddings, so
+the only difference between arms is the knob.
+
+```sh
+npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
+```
+
+`Facet@3` is deliberately read at a tighter cut than the relevance metrics: a diversity
+stage trades relevance for distinct information, and at a window wide enough to hold every
+gold answer that trade is invisible. Covering a facet with an *irrelevant* document does
+not count.
+
+**What this is not.** 36 docs in memory cannot reproduce the anisotropy or the candidate
+starvation of a real 125k-node store, and the corpus contains no usage history, so an arm
+that wins here has stopped being a guess — it has not become proven.
+
+For that, `--db PATH` runs the same arms against a real store. It is opened **read-only**
+and the session-hint write is stubbed out, so a run cannot modify the store it measures.
+Gold labels are mined from the retrieval-outcome log: within one session, a node that `get`
+fetched after a `search` returned it counts as relevant to that query — implicit relevance,
+i.e. what the agent judged worth spending tokens on, not adjudicated truth. The run prints
+how many labelled queries it found and refuses to score below 20 of them (`--min` lowers
+the floor for a smoke test; numbers under it are noise).
+
+Note the signal accrues slowly *by design*: envelopes and `best_chunk` are built so an
+agent can usually answer without calling `get`, and a search nobody follows up on produces
+no label.
 
 ## Calibrating the similarity gates
 
