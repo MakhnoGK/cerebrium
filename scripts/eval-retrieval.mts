@@ -69,6 +69,9 @@ interface Arm {
 interface EvalQuery {
   query: string;
   gold: Set<string>;
+  // Sections of a gold node the agent actually read, when it narrowed the fetch. A finer
+  // label than the node id; nothing scores it yet — the metrics here are node-level.
+  sections?: Map<string, Set<string>>;
 }
 
 interface Scores {
@@ -244,8 +247,14 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
 // Gold labels mined from the retrieval-outcome log (A1): within one session, a node that
 // `get` fetched after a `search` returned it — and before the next search — is treated as
 // relevant to that query. This is implicit relevance, i.e. what the agent judged worth
-// spending tokens on; it is not adjudicated ground truth and carries that bias.
-function goldFromEvents(db: Database.Database): { queries: EvalQuery[]; searches: number } {
+// spending tokens on; it is not adjudicated ground truth and carries that bias. A narrowed
+// fetch also names the sections read, which is a label at chunk granularity; an `outline`
+// fetch is a decision aid rather than a read and is not counted as evidence at all.
+function goldFromEvents(db: Database.Database): {
+  queries: EvalQuery[];
+  searches: number;
+  sectionLabels: number;
+} {
   const rows = db
     .prepare(
       `SELECT session_id, action, detail FROM events
@@ -255,12 +264,20 @@ function goldFromEvents(db: Database.Database): { queries: EvalQuery[]; searches
     .all() as { session_id: string; action: string; detail: string }[];
 
   const queries: EvalQuery[] = [];
-  let open: { query: string; returned: Set<string>; gold: Set<string> } | null = null;
+  let open: {
+    query: string;
+    returned: Set<string>;
+    gold: Set<string>;
+    sections: Map<string, Set<string>>;
+  } | null = null;
   let session = "";
   let searches = 0;
+  let sectionLabels = 0;
 
   const close = () => {
-    if (open?.gold.size) queries.push({ query: open.query, gold: open.gold });
+    if (open?.gold.size) {
+      queries.push({ query: open.query, gold: open.gold, sections: open.sections });
+    }
     open = null;
   };
 
@@ -270,10 +287,10 @@ function goldFromEvents(db: Database.Database): { queries: EvalQuery[]; searches
       session = row.session_id;
     }
 
-    let detail: { ids?: unknown; query?: unknown };
+    let detail: { ids?: unknown; query?: unknown; sections?: unknown; outline?: unknown };
 
     try {
-      detail = JSON.parse(row.detail) as { ids?: unknown; query?: unknown };
+      detail = JSON.parse(row.detail) as typeof detail;
     } catch {
       continue;
     }
@@ -285,19 +302,46 @@ function goldFromEvents(db: Database.Database): { queries: EvalQuery[]; searches
 
       if (typeof detail.query === "string" && ids.length) {
         searches++;
-        open = { query: detail.query, returned: new Set(ids), gold: new Set() };
+        open = {
+          query: detail.query,
+          returned: new Set(ids),
+          gold: new Set(),
+          sections: new Map(),
+        };
       }
 
       continue;
     }
 
+    // An outline decides whether to read; it is not a read, so it is no evidence of relevance.
+    if (detail.outline === true) continue;
+
+    const sections = Array.isArray(detail.sections)
+      ? detail.sections.filter((x) => typeof x === "string")
+      : [];
+
     // A fetch of something the open search never returned says nothing about that query.
-    for (const id of ids) if (open?.returned.has(id)) open.gold.add(id);
+    for (const id of ids) {
+      if (!open?.returned.has(id)) continue;
+
+      open.gold.add(id);
+
+      if (!sections.length) continue;
+
+      const seen = open.sections.get(id) ?? new Set<string>();
+
+      for (const section of sections) {
+        if (!seen.has(section)) sectionLabels++;
+        seen.add(section);
+      }
+
+      open.sections.set(id, seen);
+    }
   }
 
   close();
 
-  return { queries, searches };
+  return { queries, searches, sectionLabels };
 }
 
 async function runArm(
@@ -383,12 +427,15 @@ async function main() {
   console.log(`embeddings: ${provider.name}`);
 
   if (readonly) {
-    const { queries: mined, searches } = goldFromEvents(db);
+    const { queries: mined, searches, sectionLabels } = goldFromEvents(db);
     const pairs = mined.reduce((n, q) => n + q.gold.size, 0);
 
     console.log(`store: ${store} (read-only)`);
     console.log(
-      `gold from the retrieval-outcome log: ${mined.length} queries with a fetch, ${pairs} query→node pairs, out of ${searches} logged searches\n`,
+      `gold from the retrieval-outcome log: ${mined.length} queries with a fetch, ${pairs} query→node pairs, out of ${searches} logged searches`,
+    );
+    console.log(
+      `of those, ${sectionLabels} query→node→section labels (nothing scores them yet; the metrics below are node-level)\n`,
     );
 
     if (mined.length < floor) {

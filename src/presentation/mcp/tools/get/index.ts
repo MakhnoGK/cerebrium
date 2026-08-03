@@ -184,7 +184,9 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
   }
 
   // The fetch half of the retrieval-outcome log: the requested ids join against the ids a
-  // preceding `search` returned, `found` says how many still resolved.
+  // preceding `search` returned, `found` says how many still resolved. A narrowed fetch also
+  // records which sections were read — a finer label than the node id, and the granularity a
+  // chunk-level relevance signal needs.
   public describeEvent(args: ToolArgs<(typeof metadata)["schema"]>, result: GetResponse) {
     const detail: Record<string, unknown> = {
       ids: args.ids,
@@ -193,6 +195,16 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
 
     if (result.not_found?.length) {
       detail.not_found = result.not_found;
+    }
+
+    if (args.sections?.length) {
+      detail.sections = args.sections;
+    }
+
+    // An outline is a decision aid, not a read; keeping it distinguishable stops it
+    // being counted as evidence the agent found the node worth its tokens.
+    if (args.outline === true) {
+      detail.outline = true;
     }
 
     return { node_id: args.ids[0] ?? null, detail };

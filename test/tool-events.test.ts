@@ -147,6 +147,58 @@ describe("GetTool.describeEvent", () => {
     const [row] = eventsFor(db, EventAction.GET);
     expect(detailOf(row)).toEqual({ ids: [envelope.id], found: 1 });
   });
+
+  it("should log which sections were read when the fetch was narrowed", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const envelope = await callTool(container.resolve(WriteTool), {
+      session_id,
+      title: "A fact",
+      content: "## Ranking\nHybrid fusion.\n\n## Storage\nOne SQLite file.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+
+    // When
+    await callTool(container.resolve(GetTool), {
+      session_id,
+      ids: [envelope.id],
+      sections: ["H2: Storage"],
+    });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.GET);
+    expect(detailOf(row)).toEqual({
+      ids: [envelope.id],
+      found: 1,
+      sections: ["H2: Storage"],
+    });
+  });
+
+  it("should mark an outline fetch so it is not counted as a read", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const envelope = await callTool(container.resolve(WriteTool), {
+      session_id,
+      title: "A fact",
+      content: "## Ranking\nHybrid fusion.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+
+    // When
+    await callTool(container.resolve(GetTool), {
+      session_id,
+      ids: [envelope.id],
+      outline: true,
+    });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.GET);
+    expect(detailOf(row)).toEqual({ ids: [envelope.id], found: 1, outline: true });
+  });
 });
 
 describe("SearchTool.describeEvent", () => {

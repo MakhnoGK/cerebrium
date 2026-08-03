@@ -543,6 +543,12 @@ Note the signal accrues slowly *by design*: envelopes and `best_chunk` are built
 agent can usually answer without calling `get`, and a search nobody follows up on produces
 no label.
 
+A narrowed fetch labels more finely: it records *which sections* were read, so the run also
+reports query→node→section pairs. Nothing scores them yet — every metric above is
+node-level — but they are the granularity a chunk-level relevance signal needs, and they
+cost nothing to accumulate. An `outline` fetch is excluded: it is how an agent decides
+whether to read, not a read, so counting it would label a node the agent then skipped.
+
 ## Calibrating the similarity gates
 
 Three settings decide when two memories count as related — `MEMORY_DEDUP_THRESHOLD`
