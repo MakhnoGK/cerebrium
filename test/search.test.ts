@@ -15,7 +15,7 @@ function tools() {
   };
 }
 
-function ids(res: { results: Envelope[] }): string[] {
+function ids(res: { results: { id: string }[] }): string[] {
   return res.results.map((e) => e.id);
 }
 

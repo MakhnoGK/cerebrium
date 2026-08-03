@@ -354,6 +354,16 @@ export function deriveSummary(content: string): string {
   return line.length > SUMMARY_MAX ? line.slice(0, SUMMARY_MAX).trimEnd() + "…" : line;
 }
 
+// True when a result's `best_chunk` already carries what its `summary` says. The summary is
+// the body's first non-heading line and the chunk is the matched slice, so on a hit whose
+// match is the node's opening they are the same sentence shipped twice.
+export function summaryIsRedundant(summary: string, bestChunk: string): boolean {
+  const [shorter, longer] =
+    summary.length <= bestChunk.length ? [summary, bestChunk] : [bestChunk, summary];
+
+  return shorter.length > 0 && longer.startsWith(shorter.replace(/…$/, ""));
+}
+
 export function toEnvelope(row: EnrichedRow): Envelope {
   return {
     id: row.id,

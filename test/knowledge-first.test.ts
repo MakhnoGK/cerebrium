@@ -19,7 +19,7 @@ export function deployPipeline(): void {}
 
 let root: string;
 
-function idsOf(res: { results: Envelope[] }): string[] {
+function idsOf(res: { results: { id: string }[] }): string[] {
   return res.results.map((e) => e.id);
 }
 

@@ -4,7 +4,7 @@ import type { Envelope, NodeSection } from "@/db/repo";
 import { PREAMBLE_SECTION } from "@/core/chunk";
 import { MemoryKind } from "@/core/vocab";
 import { GetTool } from "@/presentation/mcp/tools/get";
-import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SearchTool, type SearchResult } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { UpdateTool } from "@/presentation/mcp/tools/update";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -28,8 +28,6 @@ interface GetNode {
   outline?: NodeSection[];
   source?: string;
 }
-
-type SearchResult = Envelope & { best_chunk?: string; section?: string };
 
 let env: TestEnv;
 let session: string;
@@ -307,6 +305,39 @@ describe("Search section addressing", () => {
     // Then
     expect(narrowed!.content).toContain("Litestream");
     expect(narrowed!.content).not.toContain("Reciprocal rank fusion");
+  });
+
+  it("should drop the summary when best_chunk already carries the same text", async () => {
+    // Given
+    const node = await write(
+      "Flat note",
+      "Litestream replicates the sqlite file to object storage.",
+    );
+    await env.worker.tick();
+
+    // When
+    const hit = (await search("litestream replicates object storage")).find(
+      (r) => r.id === node.id,
+    );
+
+    // Then
+    expect(hit!.best_chunk).toContain("Litestream");
+    expect(hit!.summary).toBeUndefined();
+  });
+
+  it("should keep the summary when best_chunk carries different text", async () => {
+    // Given
+    const node = await write("Architecture", HEADED);
+    await env.worker.tick();
+
+    // When
+    const hit = (await search("litestream replicates object storage")).find(
+      (r) => r.id === node.id,
+    );
+
+    // Then
+    expect(hit!.best_chunk).toContain("Litestream");
+    expect(hit!.summary).toContain("Opening remarks");
   });
 
   it("should name no section when the matched chunk precedes the first heading", async () => {

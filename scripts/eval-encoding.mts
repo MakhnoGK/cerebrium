@@ -207,7 +207,7 @@ async function main(): Promise<void> {
 
     results += res.results.length;
 
-    for (const enc of encodings("results", res.results as unknown as Row[])) {
+    for (const enc of encodings("results", res.results)) {
       const acc = totals.get(enc.name) ?? { chars: 0, tokens: 0 };
 
       totals.set(enc.name, { chars: acc.chars + enc.chars, tokens: acc.tokens + enc.tokens });

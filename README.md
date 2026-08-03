@@ -102,7 +102,9 @@ Two failure modes, deliberately different:
 - **Envelope** — the compact form returned by `search`/`session_start`:
   `{ id, kind, type, title, summary, project, updated, rev, edges, invalidated }`.
   Full content is never in an envelope — call `get` with the ids you want.
-  Hybrid search adds `matched`, and sometimes `best_chunk` / `via` (see below).
+  Hybrid search adds `matched`, and sometimes `best_chunk` / `section` / `via` (see
+  below); it also drops `summary` when the `best_chunk` beside it already opens with
+  the same sentence.
 - **Chunk** — content-addressed slice of a node's current revision (split by
   headings then paragraphs, ~200–400 tokens). Each chunk gets one embedding.
   Editing one section leaves the other chunks' ids — and their vectors — untouched.
@@ -576,7 +578,9 @@ What it found on the live store (169 replayed queries, 1,690 results):
 | `trimmed` | −19.4% | −4.4% |
 | `toon` | −21.9% | −20.9% |
 
-Read as a decision rather than a score, that says **ship `no-dup-sum` and nothing else**.
+Read as a decision rather than a score, that says **ship `no-dup-sum` and nothing else** —
+which is what `search` now does: a result whose `best_chunk` already opens with its
+`summary` ships no `summary`.
 It takes 71% of TOON's win on the payload that dominates, and it is the only rule that
 costs a consumer nothing — the field is dropped only when another field in the same object
 already carries the text. `trimmed` buys 3.9 more points for making every reader interpret

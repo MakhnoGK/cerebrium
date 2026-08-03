@@ -8,7 +8,7 @@ import {
 import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
 import { EmbeddingService, HintsService } from "@/application/services";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
-import { deriveSummary, toEnvelope } from "@/db/repo";
+import { deriveSummary, summaryIsRedundant, toEnvelope } from "@/db/repo";
 import { EdgesRepo, SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
 import { EdgeType, MemoryKind } from "@/core/vocab";
@@ -65,8 +65,18 @@ interface Entry {
   via?: { node: string; edge: string };
 }
 
+// A result is an envelope plus why it surfaced. `summary` is optional because it is dropped
+// when `best_chunk` already carries the same text (see `summaryIsRedundant`).
+export type SearchResult = Omit<Envelope, "summary"> & {
+  summary?: string;
+  matched?: "text" | "vector" | "both" | "graph";
+  best_chunk?: string;
+  section?: string;
+  via?: { node: string; edge: string };
+};
+
 interface ToolResponse {
-  results: Envelope[];
+  results: SearchResult[];
   total_matches: number;
   hints?: string[];
   context_notes?: string[];
@@ -276,12 +286,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const ranked = this.selectDiverse(ordered, args.limit);
 
     const results = ranked.map((entry) => {
-      const envelope: Envelope & {
-        matched: "text" | "vector" | "graph" | "both";
-        best_chunk?: string;
-        section?: string;
-        via?: { node: string; edge: string };
-      } = {
+      const envelope: SearchResult = {
         ...toEnvelope(entry.row),
         matched: entry.matched,
       };
@@ -291,6 +296,10 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
         if (entry.section) {
           envelope.section = entry.section;
+        }
+
+        if (summaryIsRedundant(envelope.summary ?? "", entry.best_chunk)) {
+          delete envelope.summary;
         }
       }
 
