@@ -485,8 +485,19 @@ not count.
 
 **What this is not.** 36 docs in memory cannot reproduce the anisotropy or the candidate
 starvation of a real 125k-node store, and the corpus contains no usage history, so an arm
-that wins here has stopped being a guess — it has not become proven. Ranking defaults that
-matter should also be checked against a copy of a real store.
+that wins here has stopped being a guess — it has not become proven.
+
+For that, `--db PATH` runs the same arms against a real store. It is opened **read-only**
+and the session-hint write is stubbed out, so a run cannot modify the store it measures.
+Gold labels are mined from the retrieval-outcome log: within one session, a node that `get`
+fetched after a `search` returned it counts as relevant to that query — implicit relevance,
+i.e. what the agent judged worth spending tokens on, not adjudicated truth. The run prints
+how many labelled queries it found and refuses to score below 20 of them (`--min` lowers
+the floor for a smoke test; numbers under it are noise).
+
+Note the signal accrues slowly *by design*: envelopes and `best_chunk` are built so an
+agent can usually answer without calling `get`, and a search nobody follows up on produces
+no label.
 
 ## Calibrating the similarity gates
 
