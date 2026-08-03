@@ -49,6 +49,8 @@ export interface EnrichedRow {
   updated: string;
   content: string;
   edge_count: number;
+  use_count: number;
+  last_used_at: string | null;
 }
 
 export interface SearchRow extends EnrichedRow {

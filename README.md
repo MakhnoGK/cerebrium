@@ -90,7 +90,9 @@ Two failure modes, deliberately different:
 
 - **Node** — one memory. Has a `memory_kind`:
   - `episodic` — a record of *what happened* (a `checkpoint` or `event_note`).
-    Write-once; relevance decays with age. **Cannot be updated.**
+    Write-once; relevance decays by *disuse* — the decay clock runs from the last
+    `get`, not from the write, so a record that keeps being read stays reachable.
+    **Cannot be updated.**
   - `semantic` — a durable fact/`decision`/`entity`/`howto`/`task`. Maintained
     via revisions; does not decay.
 - **Revision** — every node's content is append-only revisions; the current
@@ -111,8 +113,9 @@ Two failure modes, deliberately different:
 ## Hybrid search
 
 `search` fuses two candidate lists — FTS5 bm25 and vector KNN — with Reciprocal
-Rank Fusion, then applies the memory model (semantic steady, episodic decays,
-invalidated hidden unless `history:true`), then optionally expands the graph.
+Rank Fusion, then applies the memory model (semantic steady, episodic decays by
+disuse, often-fetched nodes carry a bounded importance boost, invalidated hidden
+unless `history:true`), then optionally expands the graph.
 
 - `mode`: `hybrid` (default), `text` (FTS only — cheapest), or
   `vector` (semantic only).
@@ -227,6 +230,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
+| `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
@@ -282,7 +286,7 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 | Tool | When to use |
 |------|-------------|
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
-| `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic; `history:true` includes invalidated nodes. **Search before writing.** |
+| `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision. |
 | `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |

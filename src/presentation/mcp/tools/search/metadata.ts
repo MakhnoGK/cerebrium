@@ -8,7 +8,9 @@ export const metadata = {
   description:
     "Search memory. Returns compact envelopes only (never full content; call `get` with the ids you want). Default " +
     "mode blends full-text (bm25) and semantic vector similarity via Reciprocal Rank Fusion, then the memory model: " +
-    "semantic facts rank steadily, episodic records decay with age, invalidated nodes are hidden unless `history:true`. " +
+    "semantic facts rank steadily, episodic records decay by disuse (the decay clock restarts whenever a node is " +
+    "actually fetched with `get`, so a record you keep coming back to stays reachable), nodes fetched often carry a " +
+    "small bounded importance boost, and invalidated nodes are hidden unless `history:true`. " +
     "Each result carries `matched` ('text'|'vector'|'both'|'graph'); vector hits include a `best_chunk` snippet (often " +
     "enough to judge relevance without a `get`); graph-expanded neighbors carry `via:{node,edge}` showing why they " +
     "surfaced. The final cut is diversified (MMR, `MEMORY_MMR_LAMBDA`): among equally relevant hits it prefers " +

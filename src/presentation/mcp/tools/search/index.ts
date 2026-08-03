@@ -21,6 +21,7 @@ import { RetrievalConfig } from "@/infrastructure/config";
 // scan; raise or paginate if a project ever holds enough matching nodes to notice.
 const CANDIDATE_CAP = 100;
 const DECAY_DAYS = 14;
+const USE_SATURATION = 20; // fetches at which the importance prior reaches its ceiling
 
 // Hybrid retrieval constants.
 const RRF_K = 60; // RRF damping; 1/(60+rank)
@@ -188,7 +189,11 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       entries.set(e.row.id, {
         row: e.row,
-        score: e.rrf * memoryFactor(e.row, now, history) * symbolFactor(e.row, penalty),
+        score:
+          e.rrf *
+          memoryFactor(e.row, now, history) *
+          symbolFactor(e.row, penalty) *
+          strengthFactor(e.row, this.retrieval.useWeight),
         matched,
         best_chunk: e.best_chunk,
       });
@@ -219,7 +224,10 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           }
 
           entry.score =
-            rel * memoryFactor(entry.row, now, history) * symbolFactor(entry.row, penalty);
+            rel *
+            memoryFactor(entry.row, now, history) *
+            symbolFactor(entry.row, penalty) *
+            strengthFactor(entry.row, this.retrieval.useWeight);
         });
 
         audit.reranked = 1;
@@ -342,7 +350,11 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
         const normalized = best < 0 ? row.bm25 / best : 1;
         return {
           row,
-          score: normalized * memoryFactor(row, now, history) * symbolFactor(row, penalty),
+          score:
+            normalized *
+            memoryFactor(row, now, history) *
+            symbolFactor(row, penalty) *
+            strengthFactor(row, this.retrieval.useWeight),
         };
       })
       .sort(
@@ -517,14 +529,28 @@ function cosine(a: Float32Array, b: Float32Array): number {
   return na > 0 && nb > 0 ? dot / Math.sqrt(na * nb) : 0;
 }
 
+// Episodic relevance decays by DISUSE, not wall-clock age: the clock restarts every time
+// an agent actually fetches the node, so a checkpoint that keeps earning its retrieval
+// stays reachable while an untouched one still falls away.
 function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
   if (history || row.memory_kind !== MemoryKind.EPISODIC) {
     return 1; // history queries drop episodic decay (superseded nodes included, flagged)
   }
 
-  const ageDays = Math.max(0, (now - Date.parse(row.valid_from)) / 86_400_000);
+  const touched = Math.max(Date.parse(row.valid_from), Date.parse(row.last_used_at ?? "") || 0);
+  const ageDays = Math.max(0, (now - touched) / 86_400_000);
 
   return Math.exp(-ageDays / DECAY_DAYS);
+}
+
+// Importance prior: log-scaled in the number of fetches and hard-capped at 1 + weight, so
+// a hot node tilts a close call but can never outrank on popularity alone.
+function strengthFactor(row: EnrichedRow, weight: number): number {
+  if (weight <= 0 || row.use_count <= 0) {
+    return 1;
+  }
+
+  return 1 + weight * Math.min(1, Math.log1p(row.use_count) / Math.log1p(USE_SATURATION));
 }
 
 function symbolFactor(row: EnrichedRow, penalty: number): number {

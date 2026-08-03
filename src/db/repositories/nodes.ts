@@ -261,6 +261,18 @@ export class NodesRepo extends BaseRepo {
     return this.envelope(id)!;
   }
 
+  // The retrieval-outcome signal: an agent spent tokens fetching these nodes. Deliberately
+  // does not touch the latest revision — usage is not an edit, and `updated` orders the
+  // working set and breaks search ties.
+  recordUse(ids: string[], ts: string): void {
+    if (!ids.length) return;
+
+    const ph = ids.map(() => "?").join(",");
+    this.db
+      .prepare(`UPDATE nodes SET use_count = use_count + 1, last_used_at = ? WHERE id IN (${ph})`)
+      .run(ts, ...ids);
+  }
+
   invalidateNode(
     id: string,
     fields: { ts: string; superseded_by?: string; session_id: string },

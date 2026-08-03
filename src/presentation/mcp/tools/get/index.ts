@@ -1,3 +1,5 @@
+import { inject } from "tsyringe";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { HintsService } from "@/application/services";
 import { CodeRepo, MirrorRepo, NodesRepo } from "@/db/repositories";
 import { MemoryKind } from "@/core/vocab";
@@ -23,6 +25,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
     private readonly nodes: NodesRepo,
     private readonly code: CodeRepo,
     private readonly mirror: MirrorRepo,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<GetResponse> {
@@ -35,6 +38,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
 
     const nodes: unknown[] = [];
     const notFound: string[] = [];
+    const used: string[] = [];
 
     for (const id of args.ids) {
       const full = await this.nodes.fullNode(id);
@@ -94,7 +98,10 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
       }
 
       nodes.push(node);
+      used.push(id);
     }
+
+    this.nodes.recordUse(used, this.clock.now());
 
     const out: GetResponse = { nodes };
 

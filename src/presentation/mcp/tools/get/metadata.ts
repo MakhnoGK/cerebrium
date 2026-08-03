@@ -10,7 +10,9 @@ export const metadata = {
     "only, so call `get` after deciding which ids are worth the tokens. Set `include_revisions` to see the edit history, " +
     "or pass `rev` (with a single id) to read a specific superseded revision. For a `symbol` (code mirror) node the result " +
     "also carries `source` (the raw source slice) and `symbol` (repo/path/lang/kind/signature/line span). For an external " +
-    "mirror node it carries `url` (deep link), `facets` (structured metadata), and `mirror` (source_id/native_id).",
+    "mirror node it carries `url` (deep link), `facets` (structured metadata), and `mirror` (source_id/native_id). " +
+    "Fetching a node also records the use: it earns a small bounded ranking boost, and for an episodic node it restarts " +
+    "the decay clock, so what you actually come back to stays retrievable.",
 
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),

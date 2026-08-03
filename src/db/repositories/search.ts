@@ -39,6 +39,7 @@ export class SearchRepo extends BaseRepo {
          SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
+                n.use_count, n.last_used_at,
                 knn.distance AS distance, c.text AS chunk_text
          FROM knn
          JOIN chunks c ON c.id = knn.chunk_id
@@ -91,6 +92,7 @@ export class SearchRepo extends BaseRepo {
         `SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
+                n.use_count, n.last_used_at,
                 bm25(node_fts) AS bm25
          FROM node_fts
          JOIN nodes n ON n.id = node_fts.node_id
