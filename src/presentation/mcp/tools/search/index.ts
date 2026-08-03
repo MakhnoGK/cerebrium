@@ -11,7 +11,7 @@ import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
 import { deriveSummary, toEnvelope } from "@/db/repo";
 import { EdgesRepo, SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
-import { MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
 import { McpTool, tool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { metadata } from "@/presentation/mcp/tools/search/metadata";
 import { RetrievalConfig } from "@/infrastructure/config";
@@ -26,8 +26,10 @@ const USE_SATURATION = 20; // fetches at which the importance prior reaches its 
 // Hybrid retrieval constants.
 const RRF_K = 60; // RRF damping; 1/(60+rank)
 const FUSE_CAP = 40; // top-N from each branch fed into fusion
-const EXPAND_PARENTS = 5; // top fused nodes whose neighbors we pull
-const GRAPH_BASE = 0.3; // graph-surfaced score = 0.3 × parent_score × edge_weight
+const GRAPH_BASE = 0.3; // ceiling for a graph-surfaced hit, as a fraction of the top direct hit
+const PPR_DEPTH = 2; // hops of subgraph pulled around the query-matched nodes
+const PPR_ITERS = 20; // power-iteration ceiling; converges well before this at our scale
+const PPR_EPSILON = 1e-6; // L1 delta at which iteration stops early
 const BEST_CHUNK_CHARS = 120;
 
 // Reranker (optional, env-gated, default off — see createReranker). Runs over the
@@ -36,16 +38,20 @@ const BEST_CHUNK_CHARS = 120;
 const RERANK_DOC_CHARS = 400; // per-candidate text budget handed to the reranker
 const MIN_RERANK = 2; // fewer fused candidates than this -> nothing to reorder
 
-// Edge-type weights for 1-hop expansion. `supersedes` is 0: a superseded node
-// must never be surfaced this way.
+// Edge-type conductance for PPR diffusion: how much rank flows along an edge of this type,
+// multiplied by the edge's own stored weight. `supersedes` is absent, so a superseded node
+// is never reachable this way. Code structure (`calls`/`defines`/`imports`) is absent too —
+// 255k structural edges would swamp the diffusion, and `code_lookup` serves them directly;
+// `documents` is what keeps the prose↔code join traversable.
 const EDGE_WEIGHTS: Record<string, number> = {
-  supersedes: 0,
   derived_from: 0.5,
   documents: 0.7,
   references: 0.7,
   relates_to: 0.5,
   similar_to: 0.3,
 };
+
+const TRAVERSABLE = Object.keys(EDGE_WEIGHTS);
 
 type Row = SearchRow | VectorRow | EnrichedRow;
 type Schema = (typeof metadata)["schema"];
@@ -237,37 +243,16 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       }
     }
 
-    // ---- graph expansion (after fusion + rerank) -----------------------------
+    // ---- graph expansion: personalized PageRank (after fusion + rerank) -------
+    // Diffusion seeded by the query-matched nodes in proportion to their relevance, over the
+    // local subgraph. Multi-hop by construction, and a node backed by several independent
+    // seeds outranks one backed by a single strong seed — neither is expressible with fixed
+    // 1-hop weights. PPR scores only nodes the query did NOT match directly: direct
+    // relevance is left exactly as fusion and rerank computed it.
     if ((args.expand_graph ?? true) && entries.size) {
-      const top = [...entries.values()].sort((a, b) => b.score - a.score).slice(0, EXPAND_PARENTS);
-      const parentScore = new Map(top.map((t) => [t.row.id, t.score]));
-      const graphAdds = new Map<string, Entry>();
-
-      for (const nb of this.edges.neighborsOf(top.map((t) => t.row.id))) {
-        if (entries.has(nb.node.id)) {
-          continue; // already surfaced directly; don't downgrade to graph
-        }
-
-        const weight = EDGE_WEIGHTS[nb.edge] ?? 0;
-        const score = GRAPH_BASE * (parentScore.get(nb.parent) ?? 0) * weight;
-
-        if (score <= 0) {
-          continue;
-        }
-
-        const prev = graphAdds.get(nb.node.id);
-
-        if (!prev || score > prev.score) {
-          graphAdds.set(nb.node.id, {
-            row: nb.node,
-            score,
-            matched: "graph",
-            via: { node: nb.parent, edge: nb.edge },
-          });
-        }
+      for (const entry of this.expandByRank(entries)) {
+        entries.set(entry.row.id, entry);
       }
-
-      for (const [id, entry] of graphAdds) entries.set(id, entry);
     }
 
     // ---- cut + envelopes -----------------------------------------------------
@@ -380,6 +365,59 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     return out;
   }
 
+  private expandByRank(entries: Map<string, Entry>): Entry[] {
+    const seeds = [...entries.values()];
+    const topScore = Math.max(...seeds.map((s) => s.score));
+
+    if (topScore <= 0) {
+      return [];
+    }
+
+    const edges = this.edges.subgraphFrom(
+      seeds.map((s) => s.row.id),
+      { depth: PPR_DEPTH, cap: this.retrieval.pprFrontier, types: TRAVERSABLE },
+    );
+
+    if (!edges.length) {
+      return [];
+    }
+
+    const personalization = new Map(seeds.map((s) => [s.row.id, s.score / topScore]));
+    const { ranks, contributor } = personalizedPageRank(
+      edges,
+      personalization,
+      this.retrieval.pprAlpha,
+    );
+
+    const surfaced = [...ranks].filter(([id]) => !entries.has(id) && ranks.get(id)! > 0);
+
+    if (!surfaced.length) {
+      return [];
+    }
+
+    // Rank mass is an arbitrary scale, so it is normalized within the surfaced set and spent
+    // against a fixed fraction of the best direct hit — a graph hit can never outrank it.
+    const best = Math.max(...surfaced.map(([, r]) => r));
+    const rows = new Map(this.searchRepo.rowsFor(surfaced.map(([id]) => id)).map((r) => [r.id, r]));
+    const out: Entry[] = [];
+
+    for (const [id, rank] of surfaced) {
+      const row = rows.get(id);
+      const via = contributor.get(id);
+
+      if (!row || !via) continue;
+
+      out.push({
+        row,
+        score: GRAPH_BASE * topScore * (rank / best),
+        matched: "graph",
+        via,
+      });
+    }
+
+    return out;
+  }
+
   // Maximal Marginal Relevance at the cut: pick greedily by relevance minus the
   // redundancy against what is already selected, so the returned window repeats itself
   // less. Both terms are min-max normalized within this candidate set — unlike the merge
@@ -452,6 +490,87 @@ function rerankDoc(e: Entry): string {
   const body = e.best_chunk ?? deriveSummary(e.row.content);
 
   return `${e.row.title}\n${body}`.slice(0, RERANK_DOC_CHARS);
+}
+
+// Personalized PageRank over the local subgraph: r = (1-alpha)·p + alpha·W·r, with W the
+// degree-normalized conductance matrix (edge-type weight × the edge's stored weight).
+// Degree normalization is what stops a hub from swallowing the diffusion. Alongside the
+// ranks it returns, per node, the single largest contributor — the honest answer to "why
+// did this surface", which is what the `via` field reports.
+function personalizedPageRank(
+  edges: { src: string; dst: string; type: EdgeType; weight: number }[],
+  personalization: Map<string, number>,
+  alpha: number,
+): { ranks: Map<string, number>; contributor: Map<string, { node: string; edge: string }> } {
+  const adjacency = new Map<string, { to: string; edge: EdgeType; conductance: number }[]>();
+  const degree = new Map<string, number>();
+
+  const connect = (from: string, to: string, edge: EdgeType, conductance: number) => {
+    const list = adjacency.get(from);
+
+    if (list) list.push({ to, edge, conductance });
+    else adjacency.set(from, [{ to, edge, conductance }]);
+
+    degree.set(from, (degree.get(from) ?? 0) + conductance);
+  };
+
+  for (const e of edges) {
+    const conductance = (EDGE_WEIGHTS[e.type] ?? 0) * (e.weight || 1);
+
+    if (conductance <= 0 || e.src === e.dst) continue;
+
+    connect(e.src, e.dst, e.type, conductance);
+    connect(e.dst, e.src, e.type, conductance);
+  }
+
+  const total = [...personalization.values()].reduce((a, b) => a + b, 0);
+
+  if (!adjacency.size || total <= 0) {
+    return { ranks: new Map(), contributor: new Map() };
+  }
+
+  const p = new Map([...personalization].map(([id, v]) => [id, v / total]));
+  let ranks = new Map(p);
+  const contributor = new Map<string, { node: string; edge: string }>();
+
+  for (let iteration = 0; iteration < PPR_ITERS; iteration++) {
+    const next = new Map<string, number>();
+    const bestInflow = new Map<string, number>();
+
+    for (const [id, mass] of ranks) {
+      const out = adjacency.get(id);
+      const deg = degree.get(id);
+
+      if (!out || !deg || mass <= 0) continue;
+
+      for (const edge of out) {
+        const inflow = alpha * mass * (edge.conductance / deg);
+
+        next.set(edge.to, (next.get(edge.to) ?? 0) + inflow);
+
+        if (inflow > (bestInflow.get(edge.to) ?? 0)) {
+          bestInflow.set(edge.to, inflow);
+          contributor.set(edge.to, { node: id, edge: edge.edge });
+        }
+      }
+    }
+
+    for (const [id, seed] of p) {
+      next.set(id, (next.get(id) ?? 0) + (1 - alpha) * seed);
+    }
+
+    let delta = 0;
+
+    for (const id of new Set([...ranks.keys(), ...next.keys()])) {
+      delta += Math.abs((next.get(id) ?? 0) - (ranks.get(id) ?? 0));
+    }
+
+    ranks = next;
+
+    if (delta < PPR_EPSILON) break;
+  }
+
+  return { ranks, contributor };
 }
 
 function byScore(a: Entry, b: Entry): number {

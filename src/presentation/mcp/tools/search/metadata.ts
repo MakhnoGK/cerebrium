@@ -12,8 +12,10 @@ export const metadata = {
     "actually fetched with `get`, so a record you keep coming back to stays reachable), nodes fetched often carry a " +
     "small bounded importance boost, and invalidated nodes are hidden unless `history:true`. " +
     "Each result carries `matched` ('text'|'vector'|'both'|'graph'); vector hits include a `best_chunk` snippet (often " +
-    "enough to judge relevance without a `get`); graph-expanded neighbors carry `via:{node,edge}` showing why they " +
-    "surfaced. The final cut is diversified (MMR, `MEMORY_MMR_LAMBDA`): among equally relevant hits it prefers " +
+    "enough to judge relevance without a `get`); graph-expanded hits carry `via:{node,edge}` naming the hit that " +
+    "contributed most to surfacing them. Graph expansion is personalized PageRank over the local subgraph seeded by " +
+    "the matched nodes, so it reaches multi-hop associations and favours nodes that several matches agree on; a graph " +
+    "hit never outranks the best direct one, and superseded nodes are unreachable this way. The final cut is diversified (MMR, `MEMORY_MMR_LAMBDA`): among equally relevant hits it prefers " +
     "ones that repeat each other less, so a fixed `limit` carries more distinct information. The top hit is always " +
     "the most relevant one, and `mode:'text'` is unaffected. Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
     "`MEMORY_RERANK` reranker is enabled, a local cross-encoder rescoring sharpens the " +

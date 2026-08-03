@@ -119,9 +119,16 @@ unless `history:true`), then optionally expands the graph.
 
 - `mode`: `hybrid` (default), `text` (FTS only — cheapest), or
   `vector` (semantic only).
-- `expand_graph` (default true): after fusion, pull 1-hop neighbors of the top hits
-  over valid edges, weighted by edge type (`supersedes` never surfaces a superseded
-  node). Ignored in `text` mode.
+- `expand_graph` (default true): after fusion, run **personalized PageRank** over the
+  local subgraph (2 hops, frontier-capped), seeded by the matched nodes in proportion to
+  their relevance. Rank flows along edge-type conductance × the edge's stored weight,
+  normalized by degree so a hub can't swallow the diffusion. This is multi-hop by
+  construction, and a node backed by several independent hits beats one backed by a
+  single strong hit. Only nodes the query did *not* match directly are scored this way,
+  and a graph hit is capped at `0.3 ×` the top direct hit, so it never outranks it.
+  `supersedes` is not traversable (a superseded node never surfaces), and neither is code
+  structure (`calls`/`defines`/`imports`) — `documents` keeps the prose↔code join
+  reachable. Ignored in `text` mode.
 - The final cut is diversified with MMR (`MEMORY_MMR_LAMBDA`, `1.0` = off): among
   equally relevant candidates it prefers the ones that repeat each other least, so a
   fixed `limit` carries more distinct information. Relevance and redundancy are both
@@ -231,6 +238,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
+| `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
+| `MEMORY_PPR_FRONTIER` | `500` | Max nodes pulled into the local subgraph PPR runs over, nearest first. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |

@@ -36,6 +36,8 @@ export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
   mmrLambda: num(0.7).range(0, 1).env("MEMORY_MMR_LAMBDA"),
   useWeight: num(0.25).range(0, 1).env("MEMORY_USE_WEIGHT"),
+  pprAlpha: num(0.5).range(0, 1).env("MEMORY_PPR_ALPHA"),
+  pprFrontier: int(500).positive().env("MEMORY_PPR_FRONTIER"),
   dedupThreshold: num(0.92).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
   lexicalDedupThreshold: num(0.2).range(0, 1).env("MEMORY_DEDUP_LEXICAL_THRESHOLD"),
   workingSetTokens: int(1500).positive().env("MEMORY_WORKING_SET_TOKENS"),

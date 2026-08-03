@@ -1,6 +1,6 @@
 import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
-import { ENRICHED } from "@/db/repositories/internal";
+import { ENRICHED, enrichedByIds } from "@/db/repositories/internal";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/core/types";
 import { toEnvelope } from "@/core/types";
 
@@ -113,6 +113,12 @@ export class SearchRepo extends BaseRepo {
     ).c;
 
     return { rows, total };
+  }
+
+  // Rows for ids the graph surfaced — the same shape the two candidate branches return, so
+  // graph hits go through the identical scoring and envelope path.
+  rowsFor(ids: string[]): EnrichedRow[] {
+    return enrichedByIds(this.db, ids).filter((r) => r.invalidated_at == null);
   }
 
   // Best (lowest-seq) chunk vector per node — the same seed convention the consolidation

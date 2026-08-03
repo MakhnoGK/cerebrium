@@ -102,6 +102,65 @@ export class EdgesRepo extends BaseRepo {
     return out;
   }
 
+  // The local subgraph reachable from `seedIds` within `depth` hops, over live edges of the
+  // given types between live nodes — the input to PPR diffusion at search time. Edges are
+  // returned with their stored `weight`, which plain 1-hop expansion never read. Traversal
+  // is undirected: an edge relates its endpoints regardless of which way it was written.
+  // `cap` bounds the node set (nearest first), so a hub can't turn one query into a scan.
+  subgraphFrom(
+    seedIds: string[],
+    opts: { depth: number; cap: number; types: string[] },
+  ): { src: string; dst: string; type: EdgeType; weight: number }[] {
+    if (!seedIds.length || !opts.types.length) return [];
+
+    const seedPh = seedIds.map(() => "?").join(",");
+    const typePh = opts.types.map(() => "?").join(",");
+
+    // There is no index on edges(type), so every clause is driven from node ids instead:
+    // outward hops ride the (src,…) primary key, inward hops ride idx_edges_dst. Filtering
+    // by type inside those lookups is free; filtering by type first is a 380k-row scan.
+    const hop = (join: "src" | "dst") => `
+      SELECT e.${join === "src" ? "dst" : "src"}, reach.depth + 1 FROM reach
+      JOIN edges e ON e.${join} = reach.id
+      JOIN nodes n ON n.id = e.${join === "src" ? "dst" : "src"} AND n.invalidated_at IS NULL
+      WHERE e.invalidated_at IS NULL AND e.type IN (${typePh}) AND reach.depth < ?`;
+
+    return this.db
+      .prepare(
+        `WITH RECURSIVE
+         reach(id, depth) AS (
+           SELECT id, 0 FROM nodes WHERE id IN (${seedPh}) AND invalidated_at IS NULL
+           UNION
+           ${hop("src")}
+           UNION
+           ${hop("dst")}
+         ),
+         frontier AS (
+           SELECT id FROM (SELECT id, MIN(depth) AS d FROM reach GROUP BY id)
+            ORDER BY d ASC, id ASC LIMIT ?
+         )
+         SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight
+         FROM frontier f
+         JOIN edges e ON e.src = f.id
+         WHERE e.invalidated_at IS NULL AND e.type IN (${typePh})
+           AND e.dst IN (SELECT id FROM frontier)`,
+      )
+      .all(
+        ...seedIds,
+        ...opts.types,
+        opts.depth,
+        ...opts.types,
+        opts.depth,
+        opts.cap,
+        ...opts.types,
+      ) as {
+      src: string;
+      dst: string;
+      type: EdgeType;
+      weight: number;
+    }[];
+  }
+
   // For context_notes: which of these (invalidated) nodes were superseded, by whom, when.
   supersededInfo(ids: string[]): Map<string, { by: string; at: string }> {
     const map = new Map<string, { by: string; at: string }>();
