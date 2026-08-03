@@ -10,6 +10,14 @@ import { CODE_ORIGIN, MemoryKind } from "@/core/vocab";
 // invariants read identically wherever a node's content changes. Callers invoke
 // them inside their own transaction.
 
+// Joins `n` to its current revision as `lr`. The correlated MAX is the point: grouping
+// `revisions` first materializes the latest rev of every node in the store, so a query
+// that wanted twenty of them still scanned all 127k rows. Per node it is an index seek.
+export const LATEST_REVISION = `
+  JOIN revisions lr ON lr.node_id = n.id
+    AND lr.rev = (SELECT MAX(r.rev) FROM revisions r WHERE r.node_id = n.id)
+`;
+
 // Shared projection: every node joined to its latest revision + live edge count.
 export const ENRICHED = `
   SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
@@ -18,8 +26,7 @@ export const ENRICHED = `
             WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
          n.use_count, n.last_used_at
   FROM nodes n
-  JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-  JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+  ${LATEST_REVISION}
 `;
 
 // The two vector pools (migration 013). Both are vec0 tables over the same space and

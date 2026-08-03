@@ -5,6 +5,7 @@ import {
   CODE_VEC,
   ENRICHED,
   enrichedByIds,
+  LATEST_REVISION,
   type VectorPool,
 } from "@/db/repositories/internal";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/core/types";
@@ -95,8 +96,7 @@ export class SearchRepo extends BaseRepo {
          FROM knn
          JOIN chunks c ON c.id = knn.chunk_id
          JOIN nodes n ON n.id = c.node_id
-         JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-         JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+         ${LATEST_REVISION}
          WHERE ${where.join(" AND ")}
          ORDER BY knn.distance ASC`,
       )
@@ -183,8 +183,7 @@ export class SearchRepo extends BaseRepo {
                 bm25(node_fts) AS bm25
          FROM node_fts
          JOIN nodes n ON n.id = node_fts.node_id
-         JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-         JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+         ${LATEST_REVISION}
          WHERE ${clause}
          ORDER BY bm25(node_fts)
          LIMIT @cap`,
