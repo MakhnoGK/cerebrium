@@ -68,8 +68,18 @@ probe fired), STOP and reconsider:
 
 - Same fact, now more correct? -> `update` the existing node (keeps history).
 - Replaced by a genuinely new fact? -> `write` the new one, then `invalidate` the old with
-  `superseded_by: <new id>`.
+  `superseded_by: <new id>`. That also moves the old node's referrers onto the new one.
 - Genuinely distinct? -> proceed, and `link` them so the graph connects them.
+
+Each candidate carries a `score` (cosine similarity, or lexical overlap before anything is
+embedded) and a `confidence`. `high` means it also clears the merge gate — treat it as the
+same fact unless you can name the difference. `moderate` means related enough to check.
+Both gates are calibrated per deployment, so a candidate appearing at all is meaningful.
+
+**Retiring the wrong node is recoverable.** If a supersede or an auto-merge takes out a
+node that should have lived — a living index compressed into a lossy summary is the case
+this exists for — call `restore` on it. It comes back with the same id, its whole revision
+history and its edges. Re-publishing the content under a new id throws all three away.
 
 One fact per node. Link liberally — edges are what make graph expansion work.
 
@@ -159,9 +169,10 @@ BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieva
 | `session_start` | First call. session_id + working set. |
 | `search` | Find memories. Envelopes only. Search before writing. |
 | `get` | Content + edges for specific ids (symbol -> raw `source` too). `outline`/`sections` to take part of a long node. |
-| `write` | New node (semantic/episodic). Returns `similar_existing` on a near-dup. |
+| `write` | New node (semantic/episodic). Returns `similar_existing` (with `score`/`confidence`) on a near-dup. |
 | `update` | Revise a **semantic** node (episodic write-once; mirror indexer-only). |
 | `invalidate` | Soft-delete; pass `superseded_by` when a new node replaces it. |
+| `restore` | Undo a wrong retirement — same id, history and edges kept. |
 | `link` | Connect two existing nodes with a typed edge (references/documents/…). |
 | `checkpoint` | Before ending work: summary + decisions + open threads + touched ids. |
 | `code_index` | Index/refresh a repo into symbol mirrors. Incremental; run after changes. |
