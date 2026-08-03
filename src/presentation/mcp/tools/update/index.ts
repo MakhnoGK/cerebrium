@@ -74,6 +74,12 @@ export class UpdateTool implements McpTool<(typeof metadata)["schema"], unknown>
             ts: this.clock.now(),
           });
 
-    return hints.length ? { ...envelope, hints } : envelope;
+    const notes = args.content === undefined ? [] : this.hints.getLongBodyNotes(args.content);
+
+    return {
+      ...envelope,
+      ...(notes.length ? { context_notes: notes } : {}),
+      ...(hints.length ? { hints } : {}),
+    };
   }
 }

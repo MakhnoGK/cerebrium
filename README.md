@@ -102,10 +102,15 @@ Two failure modes, deliberately different:
 - **Envelope** — the compact form returned by `search`/`session_start`:
   `{ id, kind, type, title, summary, project, updated, rev, edges, invalidated }`.
   Full content is never in an envelope — call `get` with the ids you want.
-  Hybrid search adds `matched`, and sometimes `best_chunk` / `via` (see below).
+  Hybrid search adds `matched`, and sometimes `best_chunk` / `section` / `via` (see
+  below); it also drops `summary` when the `best_chunk` beside it already opens with
+  the same sentence.
 - **Chunk** — content-addressed slice of a node's current revision (split by
   headings then paragraphs, ~200–400 tokens). Each chunk gets one embedding.
   Editing one section leaves the other chunks' ids — and their vectors — untouched.
+- **Section** — the heading path a node's chunks are filed under
+  (`H2: Ranking > H3: Decay`), and the unit `get` can deliver instead of a whole
+  body. See below.
 - **Embedding** — a 384-dim vector per chunk, computed **asynchronously** by an
   in-process worker. A node is fully findable via FTS the instant it's written;
   vector search catches up within seconds. `pending_embedding=1` until embedded.
@@ -152,11 +157,45 @@ unless `history:true`), then optionally expands the graph.
   what was true on another", which is the question an audit actually asks.
 - Each result carries **`matched`**: `text` | `vector` | `both` | `graph`.
 - Vector/both hits carry **`best_chunk`**: the first ~120 chars of the matched chunk
-  — often enough to judge relevance without a `get`.
+  — often enough to judge relevance without a `get` — and, when that chunk sits under
+  a heading, the **`section`** naming it, which `get` takes back as an address.
 - Graph-expanded hits carry **`via`**: `{ node, edge }` — which top hit they hung
   off and the edge type, so the agent sees *why* something surfaced.
 - **`context_notes`** (on any tool response, when relevant): short server-side notes
   — a superseded result, a parked/backlogged embedding queue, a duplicate hint.
+
+## Section-level delivery
+
+Ranking has been chunk-level since the first release; delivery was not. `get`
+returned whole nodes, so a long living document — a plan index, a checkpoint — cost
+its full body every time one of its sections was the reason it surfaced. On the store
+this was built against, **7 nodes over 6k chars accounted for 60% of everything `get`
+ever delivered**, and they were the index nodes read every session.
+
+A **section** is the heading path a node's chunks are filed under, so the addressing
+already existed in the `chunks` table and needed no migration:
+
+- `outline: true` — every named section and its size in characters, no body at all.
+  The cheapest way to decide whether a long node is worth fetching, and which part.
+- `sections: ["H2: Ranking"]` (one id) — only those sections. Naming a heading also
+  takes everything beneath it, so `H2: Ranking` includes `H2: Ranking > H3: Decay`.
+  `(preamble)` names the text before the first heading.
+
+Narrowing always returns the full `outline` beside the narrowed body, so a partial
+read shows what it left behind rather than quietly hiding it. `search` reports the
+matched chunk's `section` next to `best_chunk`, which is the name to pass back.
+
+Sections address the current revision's live chunks, so they cannot be combined with
+`rev` or `as_of` — a superseded body was never chunked under its own headings, and the
+tool says so rather than silently returning the whole thing.
+
+The write side gets the same information as advice. Past `MEMORY_LONG_BODY_CHARS`,
+`write` and `update` add a `context_notes` line — the same advisory channel as the
+duplicate probe, and just as non-blocking. A long node is not a mistake; a living index
+is *meant* to be long. What the note says depends on what it can see: a long body with
+headings can at least be read in parts, and one without any cannot be narrowed at all.
+Neither is enforced, because the store cannot tell a deliberate index from a node that
+quietly accumulated several unrelated facts — but the agent writing it can.
 
 ## Quick start
 
@@ -239,6 +278,7 @@ declared range fails at startup rather than being quietly replaced.
 |-----|---------|---------|
 | `MEMORY_DB_PATH` | `~/.cerebrium/memory.db` | SQLite file. `:memory:` for ephemeral. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
+| `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
 | `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model) or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). |
 | `MEMORY_RERANK` | `off` | Second-stage search reranker: `off`, `local` (cross-encoder via transformers.js), or `local-null` (deterministic, offline, for tests). |
@@ -311,7 +351,7 @@ Call `session_start` first; pass the returned `session_id` to every other tool
 |------|-------------|
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
 | `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
-| `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision. |
+| `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision; `outline`/`sections` to fetch part of a long node instead of all of it. |
 | `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
 | `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge. |
@@ -513,6 +553,43 @@ the floor for a smoke test; numbers under it are noise).
 Note the signal accrues slowly *by design*: envelopes and `best_chunk` are built so an
 agent can usually answer without calling `get`, and a search nobody follows up on produces
 no label.
+
+A narrowed fetch labels more finely: it records *which sections* were read, so the run also
+reports query→node→section pairs. Nothing scores them yet — every metric above is
+node-level — but they are the granularity a chunk-level relevance signal needs, and they
+cost nothing to accumulate. An `outline` fetch is excluded: it is how an agent decides
+whether to read, not a read, so counting it would label a node the agent then skipped.
+
+## Measuring a wire encoding before changing one
+
+`npm run eval:encoding -- --db PATH` answers what a cheaper encoding is actually worth on
+*this* store's list-shaped responses, before a contract every consumer parses gets changed
+for a guess. It replays the queries from the retrieval-outcome log through the real ranking
+pipeline, opens the store read-only, and encodes each response four ways: `json` (what
+ships), `no-dup-sum` (drop a `summary` that only repeats the `best_chunk` beside it),
+`trimmed` (also drop `invalidated:false` and `project:null`), and `toon` (tabular — one
+header, one row per result).
+
+What it found on the live store (169 replayed queries, 1,690 results):
+
+| encoding | search responses | working set |
+|---|---|---|
+| `no-dup-sum` | **−15.5%** | 0.0% |
+| `trimmed` | −19.4% | −4.4% |
+| `toon` | −21.9% | −20.9% |
+
+Read as a decision rather than a score, that says **ship `no-dup-sum` and nothing else** —
+which is what `search` now does: a result whose `best_chunk` already opens with its
+`summary` ships no `summary`.
+It takes 71% of TOON's win on the payload that dominates, and it is the only rule that
+costs a consumer nothing — the field is dropped only when another field in the same object
+already carries the text. `trimmed` buys 3.9 more points for making every reader interpret
+an absent field as a value, and `toon` buys 6.4 more for changing the wire format of every
+tool at once. The working set inverts the ranking (its envelopes are uniform, and carry no
+`best_chunk` to be redundant with) but it is ~2.5k tokens once per session against 217k
+across searches, so it does not move the decision.
+
+Re-run it before revisiting this: the answer is a property of the corpus, not of the format.
 
 ## Calibrating the similarity gates
 

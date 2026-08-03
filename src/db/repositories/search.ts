@@ -66,7 +66,7 @@ export class SearchRepo extends BaseRepo {
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
                 n.use_count, n.last_used_at,
-                knn.distance AS distance, c.text AS chunk_text
+                knn.distance AS distance, c.text AS chunk_text, c.heading_path AS chunk_heading
          FROM knn
          JOIN chunks c ON c.id = knn.chunk_id
          JOIN nodes n ON n.id = c.node_id

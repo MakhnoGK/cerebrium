@@ -1,5 +1,6 @@
 export type {
   Envelope,
+  NodeSection,
   NeighborStub,
   RevisionMeta,
   EnrichedRow,
@@ -26,4 +27,4 @@ export type {
   ConsolidationProposal,
   NewCandidate,
 } from "@/core/types";
-export { toEnvelope, deriveSummary } from "@/core/types";
+export { toEnvelope, deriveSummary, summaryIsRedundant } from "@/core/types";

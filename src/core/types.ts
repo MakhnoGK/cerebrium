@@ -22,6 +22,13 @@ export interface Envelope {
   invalidated: boolean;
 }
 
+// One addressable section of a node's body: the heading path chunks were filed under
+// (or the preamble sentinel), and the size of the text behind it.
+export interface NodeSection {
+  section: string;
+  chars: number;
+}
+
 export interface NeighborStub {
   id: string;
   type: string;
@@ -60,6 +67,7 @@ export interface SearchRow extends EnrichedRow {
 export interface VectorRow extends EnrichedRow {
   distance: number; // cosine distance in [0,2]; cosine similarity = 1 - distance
   chunk_text: string;
+  chunk_heading: string | null; // heading path of the matched chunk; null before the first heading
 }
 
 export interface QueueRow {
@@ -344,6 +352,16 @@ export function deriveSummary(content: string): string {
     .find((l) => l.length > 0 && !l.startsWith("#"));
   if (!line) return "";
   return line.length > SUMMARY_MAX ? line.slice(0, SUMMARY_MAX).trimEnd() + "…" : line;
+}
+
+// True when a result's `best_chunk` already carries what its `summary` says. The summary is
+// the body's first non-heading line and the chunk is the matched slice, so on a hit whose
+// match is the node's opening they are the same sentence shipped twice.
+export function summaryIsRedundant(summary: string, bestChunk: string): boolean {
+  const [shorter, longer] =
+    summary.length <= bestChunk.length ? [summary, bestChunk] : [bestChunk, summary];
+
+  return shorter.length > 0 && longer.startsWith(shorter.replace(/…$/, ""));
 }
 
 export function toEnvelope(row: EnrichedRow): Envelope {

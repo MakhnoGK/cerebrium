@@ -8,7 +8,7 @@ import {
 import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
 import { EmbeddingService, HintsService } from "@/application/services";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
-import { deriveSummary, toEnvelope } from "@/db/repo";
+import { deriveSummary, summaryIsRedundant, toEnvelope } from "@/db/repo";
 import { EdgesRepo, SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
 import { EdgeType, MemoryKind } from "@/core/vocab";
@@ -61,11 +61,22 @@ interface Entry {
   score: number;
   matched: "text" | "vector" | "both" | "graph";
   best_chunk?: string;
+  section?: string;
   via?: { node: string; edge: string };
 }
 
+// A result is an envelope plus why it surfaced. `summary` is optional because it is dropped
+// when `best_chunk` already carries the same text (see `summaryIsRedundant`).
+export type SearchResult = Omit<Envelope, "summary"> & {
+  summary?: string;
+  matched?: "text" | "vector" | "both" | "graph";
+  best_chunk?: string;
+  section?: string;
+  via?: { node: string; edge: string };
+};
+
 interface ToolResponse {
-  results: Envelope[];
+  results: SearchResult[];
   total_matches: number;
   hints?: string[];
   context_notes?: string[];
@@ -167,7 +178,14 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const now = Date.parse(this.clock.now());
     const fused = new Map<
       string,
-      { row: Row; rrf: number; text: boolean; vector: boolean; best_chunk?: string }
+      {
+        row: Row;
+        rrf: number;
+        text: boolean;
+        vector: boolean;
+        best_chunk?: string;
+        section?: string;
+      }
     >();
 
     ftsRows.forEach((row, i) => {
@@ -187,6 +205,9 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       if (!e.best_chunk) {
         e.best_chunk = row.chunk_text.slice(0, BEST_CHUNK_CHARS);
+        // Only a headed chunk is worth naming: a preamble match means the node is short
+        // or the hit is in its opening, and neither is a section worth narrowing to.
+        e.section = row.chunk_heading ?? undefined;
       }
 
       fused.set(row.id, e);
@@ -206,6 +227,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           strengthFactor(e.row, this.retrieval.useWeight),
         matched,
         best_chunk: e.best_chunk,
+        section: e.section,
       });
     }
 
@@ -264,17 +286,21 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const ranked = this.selectDiverse(ordered, args.limit);
 
     const results = ranked.map((entry) => {
-      const envelope: Envelope & {
-        matched: "text" | "vector" | "graph" | "both";
-        best_chunk?: string;
-        via?: { node: string; edge: string };
-      } = {
+      const envelope: SearchResult = {
         ...toEnvelope(entry.row),
         matched: entry.matched,
       };
 
       if (entry.best_chunk && (entry.matched === "vector" || entry.matched === "both")) {
         envelope.best_chunk = entry.best_chunk;
+
+        if (entry.section) {
+          envelope.section = entry.section;
+        }
+
+        if (summaryIsRedundant(envelope.summary ?? "", entry.best_chunk)) {
+          delete envelope.summary;
+        }
       }
 
       if (entry.via) {

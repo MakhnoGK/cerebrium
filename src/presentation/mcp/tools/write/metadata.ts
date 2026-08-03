@@ -17,7 +17,10 @@ export const metadata = {
     "candidate appearing at all is meaningful. When a " +
     "generating provider is configured, it also returns `reconcile` — a judged action (`noop`|`update`|`supersede`), " +
     "the `target_id` it applies to, and a reason — so you can act on the duplicate precisely; it is advice, never " +
-    "auto-applied. Episodic nodes are write-once. Returns the new node's envelope.",
+    "auto-applied. A body long enough that every reader pays for it also draws a `context_notes` line saying so — " +
+    "advice, not a limit: a living index is meant to be long, but a node holding several independent facts is better " +
+    "as several nodes, and headings make whatever stays long fetchable in parts. " +
+    "Episodic nodes are write-once. Returns the new node's envelope.",
 
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),

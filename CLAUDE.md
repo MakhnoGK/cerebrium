@@ -12,7 +12,7 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 2. **Append-only revisions.** Never `UPDATE` or `DELETE` a `revisions` row. Current content = latest rev.
 3. **No hard deletes.** Any table. Soft-delete via `invalidated_at` only. Superseded data stays queryable via `history=true`.
 4. **FTS in the write transaction.** The FTS index must never be stale relative to node content. Embeddings are the one sanctioned async exception (queue table).
-5. **Envelopes by default.** No tool returns full node content unless explicitly asked by id. Any new tool or field must justify its token cost.
+5. **Envelopes by default.** No tool returns node content unless explicitly asked by id, and `get` will return part of a body (`outline`/`sections`) rather than all of it when asked. Any new tool or field must justify its token cost.
 6. **Episodic is write-once.** `update` on an episodic node is an error by design — don't "fix" it.
 7. **Provenance everywhere.** Every mutation records its `session_id`; every tool call appends an `events` row.
 

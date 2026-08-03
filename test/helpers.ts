@@ -13,6 +13,7 @@ import { EventLogService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import {
+  ChunksRepo,
   CodeRepo,
   ConsolidationRepo,
   EdgesRepo,
@@ -63,6 +64,7 @@ export interface TestEnv {
   nodes: NodesRepo;
   edges: EdgesRepo;
   search: SearchRepo;
+  chunks: ChunksRepo;
   mirror: MirrorRepo;
   code: CodeRepo;
   consolidation: ConsolidationRepo;
@@ -99,6 +101,7 @@ export function setup(opts?: {
     nodes: container.resolve(NodesRepo),
     edges: container.resolve(EdgesRepo),
     search: container.resolve(SearchRepo),
+    chunks: container.resolve(ChunksRepo),
     mirror: container.resolve(MirrorRepo),
     code: container.resolve(CodeRepo),
     consolidation: container.resolve(ConsolidationRepo),

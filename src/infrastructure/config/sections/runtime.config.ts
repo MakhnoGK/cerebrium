@@ -41,6 +41,7 @@ export class RetrievalConfig extends SectionOf("retrieval", {
   dedupThreshold: num(0.92).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
   lexicalDedupThreshold: num(0.2).range(0, 1).env("MEMORY_DEDUP_LEXICAL_THRESHOLD"),
   workingSetTokens: int(1500).positive().env("MEMORY_WORKING_SET_TOKENS"),
+  longBodyChars: int(4000).nonNegative().env("MEMORY_LONG_BODY_CHARS"),
 }) {}
 
 // `idleIntervalMs` is the poll cadence once the queue is empty; `idleExitMs` is how long

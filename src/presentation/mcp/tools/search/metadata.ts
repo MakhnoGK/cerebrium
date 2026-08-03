@@ -12,7 +12,11 @@ export const metadata = {
     "actually fetched with `get`, so a record you keep coming back to stays reachable), nodes fetched often carry a " +
     "small bounded importance boost, and invalidated nodes are hidden unless `history:true`. " +
     "Each result carries `matched` ('text'|'vector'|'both'|'graph'); vector hits include a `best_chunk` snippet (often " +
-    "enough to judge relevance without a `get`); graph-expanded hits carry `via:{node,edge}` naming the hit that " +
+    "enough to judge relevance without a `get`) and, when the matched chunk sits under a heading, the `section` that " +
+    "names it — pass that straight to `get`'s `sections` to read just that part of a long node instead of all of it. " +
+    "A result whose `best_chunk` already opens with its `summary` ships no `summary` at all, rather than the same " +
+    "sentence twice. " +
+    "Graph-expanded hits carry `via:{node,edge}` naming the hit that " +
     "contributed most to surfacing them. Graph expansion is personalized PageRank over the local subgraph seeded by " +
     "the matched nodes, so it reaches multi-hop associations and favours nodes that several matches agree on; a graph " +
     "hit never outranks the best direct one, and superseded nodes are unreachable this way. `as_of` re-runs the whole " +

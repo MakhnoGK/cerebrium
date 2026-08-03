@@ -106,7 +106,10 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       : null;
 
     const hints = await this.hintsService.getUnknownSessionHints(args.session_id, project);
-    const notes = this.embeddingsService.getEmbeddingNotes();
+    const notes = [
+      ...this.embeddingsService.getEmbeddingNotes(),
+      ...this.hintsService.getLongBodyNotes(args.content),
+    ];
 
     if (similar.length) {
       notes.unshift(

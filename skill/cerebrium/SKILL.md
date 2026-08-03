@@ -32,7 +32,16 @@ compact **envelopes**; fetch full content by id. Two memory kinds:
 `search` -> read envelopes + `best_chunk` snippets -> `get` only the ids you actually need.
 
 - The `best_chunk` snippet on a vector/both hit is often enough to judge relevance —
-  don't `get` unless you need the full body. Tokens are the budget.
+  don't `get` unless you need the full body. Tokens are the budget. (A hit whose
+  `best_chunk` already opens with its `summary` ships no `summary`; that is not a
+  missing field.)
+- **When you do need a long node, take the part you need.** A vector hit also carries
+  `section` — the heading the matched chunk sits under. Pass it straight back as
+  `get sections:["H2: Ranking"]` and you get that section, not the whole body; naming a
+  heading also takes everything beneath it. Unsure which part? `get outline:true` lists
+  every section and its size for almost nothing. A narrowed `get` always returns the full
+  outline too, so you can see what you skipped and ask for it.
+- Sections read the current body, so they can't be combined with `rev`/`as_of`.
 - `matched` tells you *how* a result surfaced: `text` (keyword), `vector` (meaning),
   `both` (strongest), `graph` (a neighbor of a top hit).
 - A `graph` result carries `via: {node, edge}` — the node it hung off and the edge type.
@@ -46,6 +55,10 @@ compact **envelopes**; fetch full content by id. Two memory kinds:
 GOOD: search "retry backoff policy" -> envelope shows best_chunk "…exponential backoff,
       parked after 5 attempts…" -> answer directly, no get needed.
 BAD:  search -> immediately get all 10 ids -> dump 8k tokens to read one sentence.
+
+GOOD: search "consolidation posture" -> hit is a 9k plan index, section "H2: Ladder" ->
+      get ids:[id] sections:["H2: Ladder"] -> ~600 chars instead of 9,000.
+BAD:  get the whole plan index every session to re-read one table.
 ```
 
 ## Write discipline
@@ -59,6 +72,11 @@ probe fired), STOP and reconsider:
 - Genuinely distinct? -> proceed, and `link` them so the graph connects them.
 
 One fact per node. Link liberally — edges are what make graph expansion work.
+
+A long body draws a `context_notes` line saying so. It is advice, not a limit: a living
+index node is *meant* to be long. Take it as a prompt to check whether the body is one
+subject or several, and to give it headings either way — a body with headings can be read
+in parts, one without any can only be fetched whole.
 
 Episodic vs semantic, the decision rule:
 - "We deployed X and hit error Y" -> **episodic** `event_note`.
@@ -140,7 +158,7 @@ BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieva
 |------|-----|
 | `session_start` | First call. session_id + working set. |
 | `search` | Find memories. Envelopes only. Search before writing. |
-| `get` | Full content + edges for specific ids (symbol -> raw `source` too). |
+| `get` | Content + edges for specific ids (symbol -> raw `source` too). `outline`/`sections` to take part of a long node. |
 | `write` | New node (semantic/episodic). Returns `similar_existing` on a near-dup. |
 | `update` | Revise a **semantic** node (episodic write-once; mirror indexer-only). |
 | `invalidate` | Soft-delete; pass `superseded_by` when a new node replaces it. |
