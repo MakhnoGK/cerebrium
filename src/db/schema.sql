@@ -86,9 +86,19 @@ CREATE TABLE IF NOT EXISTS chunks (
   stale        INTEGER NOT NULL DEFAULT 0   -- 1 when a newer revision dropped this chunk
 );
 
+-- Two vector pools, same space and metric, split by lifecycle and size (migration 013).
+-- `chunk_vec` holds authored memory plus curated external mirrors — a few hundred rows,
+-- small enough that a KNN can sweep all of it; `code_vec` holds the code-symbol index,
+-- which is six orders larger, disposable, and rebuildable by `code_index`. Sharing one
+-- table meant every k slot went to code and authored memory was post-filtered to nothing.
 CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(
   chunk_id  TEXT PRIMARY KEY,
   embedding FLOAT[384] distance_metric=cosine  -- dim = provider config (384 = default e5 model)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS code_vec USING vec0(
+  chunk_id  TEXT PRIMARY KEY,
+  embedding FLOAT[384] distance_metric=cosine
 );
 
 CREATE TABLE IF NOT EXISTS embedding_meta (

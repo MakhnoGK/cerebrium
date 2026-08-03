@@ -50,6 +50,11 @@ compact **envelopes**; fetch full content by id. Two memory kinds:
   surfaces invalidated/superseded nodes (flagged) and drops time-decay.
 - `mode: 'text'` is the cheapest exact keyword search; default `hybrid` is almost always
   what you want; `mode: 'vector'` for "find me something like this" with no shared words.
+- **`kinds` is a real instruction to the vector branch, not just a post-filter.** The code
+  index lives in its own vector pool, so `kinds:['semantic','episodic']` makes the search
+  sweep authored memory exhaustively instead of splitting its candidate budget with a
+  100x-larger symbol index. Pass it whenever the answer cannot be a code symbol — and
+  `types:['symbol']` when it must be.
 
 ```
 GOOD: search "retry backoff policy" -> envelope shows best_chunk "…exponential backoff,

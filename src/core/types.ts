@@ -137,6 +137,8 @@ export interface TechStats {
     chunks_stale: number;
     chunks_embedded: number;
     chunks_unembedded: number;
+    vectors_authored: number;
+    vectors_code: number;
     sessions: number;
     events: number;
   };

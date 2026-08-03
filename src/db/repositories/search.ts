@@ -1,13 +1,26 @@
 import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
-import { ENRICHED, enrichedByIds } from "@/db/repositories/internal";
+import {
+  AUTHORED_VEC,
+  CODE_VEC,
+  ENRICHED,
+  enrichedByIds,
+  LATEST_REVISION,
+  type VectorPool,
+} from "@/db/repositories/internal";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/core/types";
 import { toEnvelope } from "@/core/types";
+import { MemoryKind, SYMBOL_TYPE } from "@/core/vocab";
 
-// KNN over-fetch: pull this many nearest chunks, then filter + collapse to the
-// best chunk per node. Generous for a personal-scale store; raise if a project
-// ever holds enough chunks that post-filter starves the candidate set.
-const VEC_K = 200;
+// KNN over-fetch per pool: pull this many nearest chunks, then filter + collapse to the
+// best chunk per node. The two pools carry different budgets because they are different
+// sizes. The authored pool is a few hundred chunks, where 1000 sweeps all of it for ~5 ms
+// and every live authored node becomes a candidate for every query — the post-filter can
+// no longer starve. The code pool is six orders larger, where k is not free (200 -> 1000
+// costs 110 -> 270 ms), so it keeps the over-fetch it was calibrated with.
+// sqlite-vec caps k at 4096.
+const VEC_K = 1000;
+const CODE_VEC_K = 200;
 
 // Read-side retrieval: full-text (bm25), vector KNN, and the session working-set
 // queries. Read-only — no transactions.
@@ -26,7 +39,11 @@ export class SearchRepo extends BaseRepo {
     },
   ): VectorRow[] {
     const where: string[] = ["c.stale = 0"];
-    const params: Record<string, unknown> = { q: JSON.stringify(embedding), k: VEC_K };
+    const params: Record<string, unknown> = {
+      q: JSON.stringify(embedding),
+      k: VEC_K,
+      ck: CODE_VEC_K,
+    };
     if (opts.project !== undefined) {
       where.push("n.project = @project");
       params.project = opts.project;
@@ -59,9 +76,18 @@ export class SearchRepo extends BaseRepo {
       params.validAt = opts.validAt;
     }
 
+    const knn = this.poolsFor(opts)
+      .map(
+        (pool) =>
+          `SELECT chunk_id, distance FROM ${pool} WHERE embedding MATCH @q AND k = ${
+            pool === CODE_VEC ? "@ck" : "@k"
+          }`,
+      )
+      .join(" UNION ALL ");
+
     const rows = this.db
       .prepare(
-        `WITH knn AS (SELECT chunk_id, distance FROM chunk_vec WHERE embedding MATCH @q AND k = @k)
+        `WITH knn AS (${knn})
          SELECT n.id, n.memory_kind, n.type, n.title, n.project, n.valid_from, n.invalidated_at,
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
@@ -70,8 +96,7 @@ export class SearchRepo extends BaseRepo {
          FROM knn
          JOIN chunks c ON c.id = knn.chunk_id
          JOIN nodes n ON n.id = c.node_id
-         JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-         JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+         ${LATEST_REVISION}
          WHERE ${where.join(" AND ")}
          ORDER BY knn.distance ASC`,
       )
@@ -86,6 +111,22 @@ export class SearchRepo extends BaseRepo {
       if (best.length >= opts.cap) break;
     }
     return best;
+  }
+
+  // Which vector pools a query has to sweep. Skipping `code_vec` is the whole point of the
+  // split: it is ~150x the other table, and a query that cannot return a code symbol has no
+  // reason to spend k slots there. `types` narrows harder than `kinds` because `symbol` is
+  // the only code type, while `mirror` also covers the curated external records.
+  private poolsFor(opts: { kinds?: string[]; types?: string[] }): VectorPool[] {
+    if (opts.types?.length && opts.types.every((t) => t === SYMBOL_TYPE)) {
+      return [CODE_VEC];
+    }
+
+    if (opts.kinds?.length && !opts.kinds.includes(MemoryKind.MIRROR)) {
+      return [AUTHORED_VEC];
+    }
+
+    return [AUTHORED_VEC, CODE_VEC];
   }
 
   search(opts: {
@@ -142,8 +183,7 @@ export class SearchRepo extends BaseRepo {
                 bm25(node_fts) AS bm25
          FROM node_fts
          JOIN nodes n ON n.id = node_fts.node_id
-         JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-         JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+         ${LATEST_REVISION}
          WHERE ${clause}
          ORDER BY bm25(node_fts)
          LIMIT @cap`,
@@ -193,28 +233,33 @@ export class SearchRepo extends BaseRepo {
   }
 
   // Best (lowest-seq) chunk vector per node — the same seed convention the consolidation
-  // kNN uses. Nodes whose chunks are still queued for embedding are simply absent.
+  // kNN uses. Nodes whose chunks are still queued for embedding are simply absent. Ids come
+  // from a finished search and may span both pools, so each is queried in turn rather than
+  // unioned: a UNION would make the planner scan a 126k-row vec0 table for a handful of ids.
   vectorsFor(ids: string[]): Map<string, Float32Array> {
     const out = new Map<string, Float32Array>();
 
     if (!ids.length) return out;
 
     const ph = ids.map(() => "?").join(",");
-    const rows = this.db
-      .prepare(
-        `SELECT c.node_id AS id, cv.embedding AS embedding FROM chunks c
-         JOIN chunk_vec cv ON cv.chunk_id = c.id
-         WHERE c.stale = 0 AND c.node_id IN (${ph})
-         ORDER BY c.node_id, c.seq`,
-      )
-      .all(...ids) as { id: string; embedding: Buffer }[];
 
-    for (const r of rows) {
-      if (out.has(r.id)) continue;
-      out.set(
-        r.id,
-        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
-      );
+    for (const pool of [AUTHORED_VEC, CODE_VEC]) {
+      const rows = this.db
+        .prepare(
+          `SELECT c.node_id AS id, v.embedding AS embedding FROM chunks c
+           JOIN ${pool} v ON v.chunk_id = c.id
+           WHERE c.stale = 0 AND c.node_id IN (${ph})
+           ORDER BY c.node_id, c.seq`,
+        )
+        .all(...ids) as { id: string; embedding: Buffer }[];
+
+      for (const r of rows) {
+        if (out.has(r.id)) continue;
+        out.set(
+          r.id,
+          new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
+        );
+      }
     }
 
     return out;

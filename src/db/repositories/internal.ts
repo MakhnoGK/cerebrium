@@ -2,12 +2,21 @@ import type Database from "better-sqlite3";
 import { MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
 import { chunkContent } from "@/core/chunk";
 import type { EnrichedRow } from "@/core/types";
+import { CODE_ORIGIN, MemoryKind } from "@/core/vocab";
 
 // Cross-aggregate primitives shared by the node-write path (NodesRepo), the code
 // mirror (CodeRepo), and the embedding drain (EmbeddingQueueRepo). They keep the SQL
 // explicit and in one place so the FTS-in-write-transaction and chunk/queue
 // invariants read identically wherever a node's content changes. Callers invoke
 // them inside their own transaction.
+
+// Joins `n` to its current revision as `lr`. The correlated MAX is the point: grouping
+// `revisions` first materializes the latest rev of every node in the store, so a query
+// that wanted twenty of them still scanned all 127k rows. Per node it is an index seek.
+export const LATEST_REVISION = `
+  JOIN revisions lr ON lr.node_id = n.id
+    AND lr.rev = (SELECT MAX(r.rev) FROM revisions r WHERE r.node_id = n.id)
+`;
 
 // Shared projection: every node joined to its latest revision + live edge count.
 export const ENRICHED = `
@@ -17,9 +26,22 @@ export const ENRICHED = `
             WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
          n.use_count, n.last_used_at
   FROM nodes n
-  JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-  JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+  ${LATEST_REVISION}
 `;
+
+// The two vector pools (migration 013). Both are vec0 tables over the same space and
+// metric; which one a chunk belongs to follows from its node alone.
+export const AUTHORED_VEC = "chunk_vec";
+export const CODE_VEC = "code_vec";
+export type VectorPool = typeof AUTHORED_VEC | typeof CODE_VEC;
+
+export function vectorPoolFor(db: Database.Database, nodeId: string): VectorPool {
+  const row = db
+    .prepare("SELECT memory_kind AS kind, origin FROM nodes WHERE id = ?")
+    .get(nodeId) as { kind: string; origin: string | null } | undefined;
+
+  return row?.kind === MemoryKind.MIRROR && row.origin === CODE_ORIGIN ? CODE_VEC : AUTHORED_VEC;
+}
 
 export function enrichedById(db: Database.Database, id: string): EnrichedRow | undefined {
   return db.prepare(`${ENRICHED} WHERE n.id = ?`).get(id) as EnrichedRow | undefined;
@@ -111,9 +133,25 @@ export function syncChunks(
     });
   }
   const markStale = db.prepare("UPDATE chunks SET stale = 1 WHERE id = ?");
-  for (const row of existing) if (!newIds.has(row.id)) markStale.run(row.id);
+  for (const row of existing) {
+    if (newIds.has(row.id)) continue;
+    markStale.run(row.id);
+    dropVector(db, row.id);
+  }
 
   refreshQueue(db, nodeId, ts);
+}
+
+// Drops a chunk's derived vector and its embedding provenance. The chunk row itself is
+// only ever soft-deleted; this is the vector index, which is regenerable from `chunks.text`
+// and is never the record of anything. Dropping `embedding_meta` with it is what makes a
+// revived chunk (ids are content-addressed, so an edit that restores old text brings one
+// back) re-enqueue instead of counting as embedded with no vector behind it.
+export function dropVector(db: Database.Database, chunkId: string): void {
+  for (const pool of [AUTHORED_VEC, CODE_VEC]) {
+    db.prepare(`DELETE FROM ${pool} WHERE chunk_id = ?`).run(chunkId);
+  }
+  db.prepare("DELETE FROM embedding_meta WHERE chunk_id = ?").run(chunkId);
 }
 
 export { MAX_EMBED_ATTEMPTS };

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
+import { LATEST_REVISION } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
 import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
 import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
@@ -200,6 +201,8 @@ export class ConsolidationRepo extends BaseRepo {
   // The kNN seed: a node's lowest-seq chunk vector. Null when the node has no vector yet —
   // the seed sets gate on `embedding_meta`, which can outrun the `chunk_vec` row.
   // vec0 aborts the statement on a NULL query vector, so callers must skip instead of MATCH.
+  // `chunk_vec` and not `code_vec`: every consolidation seed is authored memory, and a code
+  // symbol reaching here would return null rather than a wrong vector.
   private seedVector(nodeId: string): Buffer | null {
     const row = this.db
       .prepare(
@@ -570,8 +573,7 @@ export class ConsolidationRepo extends BaseRepo {
       .prepare(
         `SELECT n.id AS id, lr.rev AS rev, n.title AS title, lr.content AS content, n.project AS project
          FROM nodes n
-         JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-         JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+         ${LATEST_REVISION}
          LEFT JOIN revision_annotations ra ON ra.node_id = n.id AND ra.rev = lr.rev
          WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL AND ra.node_id IS NULL
          ORDER BY n.valid_from DESC LIMIT ?`,

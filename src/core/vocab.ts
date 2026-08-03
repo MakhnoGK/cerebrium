@@ -21,11 +21,18 @@ export const WRITABLE_KINDS = [MemoryKind.EPISODIC, MemoryKind.SEMANTIC] as cons
 // vocab/migration change (like `symbols.symbol_kind`). `mirror_upsert` validates only
 // that `type` is a non-empty string, never against this list. Values stay `string` for
 // that reason: this is a per-kind allow-list, not a closed vocabulary.
+export const SYMBOL_TYPE = "symbol";
+
 export const NODE_TYPES: Record<MemoryKind, readonly string[]> = {
   [MemoryKind.EPISODIC]: ["checkpoint", "event_note"],
   [MemoryKind.SEMANTIC]: ["fact", "decision", "entity", "howto", "task"],
-  [MemoryKind.MIRROR]: ["symbol"],
+  [MemoryKind.MIRROR]: [SYMBOL_TYPE],
 };
+
+// `nodes.origin` for the code index. External mirrors carry their source id instead,
+// which is what separates the two vector pools (migration 013): a `mirror` node is only
+// code if its origin is this.
+export const CODE_ORIGIN = "repo";
 
 export enum EdgeType {
   REFERENCES = "references",

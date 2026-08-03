@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
-import { ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
+import { ftsPut, insertRevision, LATEST_REVISION, syncChunks } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
 import type {
   MirrorItem,
@@ -204,8 +204,7 @@ export class MirrorRepo extends BaseRepo {
           .prepare(
             `SELECT n.id AS id, n.title AS title, n.invalidated_at AS invalidated_at, lr.content AS content
              FROM nodes n
-             JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-             JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+             ${LATEST_REVISION}
              WHERE n.external_id = ? AND n.memory_kind = 'mirror' AND n.origin = ?`,
           )
           .get(externalId, source.kind) as

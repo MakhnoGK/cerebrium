@@ -28,7 +28,10 @@ export const metadata = {
     "fused hits' precision before graph expansion — it is off by default, never applies " +
     "to graph neighbors, and never changes which fields a result returns. Code `symbol` mirrors are " +
     "down-weighted as direct hits so authored and external-mirror knowledge ranks first; ask for them " +
-    "explicitly (`types:['symbol']` or `kinds:['mirror']`) to rank them normally. ALWAYS search before writing.",
+    "explicitly (`types:['symbol']` or `kinds:['mirror']`) to rank them normally. The code index sits in " +
+    "its own vector pool, so filtering it out (`kinds` without `mirror`) is not just a post-filter: the " +
+    "vector branch then sweeps authored memory exhaustively rather than spending its candidate budget on " +
+    "code, which is what makes a narrow `kinds` filter genuinely worth passing. ALWAYS search before writing.",
 
   schema: {
     session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
