@@ -211,6 +211,25 @@ describe("Vector pool routing", () => {
     expect(kinds.has(MemoryKind.SEMANTIC)).toBe(true);
   });
 
+  it("should make every live authored node a candidate when the authored pool fits under k", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const ids: string[] = [];
+    for (let i = 0; i < 40; i++) ids.push((await writeFact(s, `Fact ${i}`)).id);
+    await drain(env);
+
+    // When
+    const rows = env.search.vectorSearch(await query(env, "anything at all"), {
+      kinds: [MemoryKind.SEMANTIC],
+      history: false,
+      cap: 100,
+    });
+
+    // Then
+    expect(new Set(rows.map((r) => r.id))).toEqual(new Set(ids));
+  });
+
   it("should resolve MMR vectors for nodes from either pool", async () => {
     // Given
     const env = setup();

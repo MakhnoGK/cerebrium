@@ -12,9 +12,14 @@ import { toEnvelope } from "@/core/types";
 import { MemoryKind, SYMBOL_TYPE } from "@/core/vocab";
 
 // KNN over-fetch per pool: pull this many nearest chunks, then filter + collapse to the
-// best chunk per node. Generous for a personal-scale store; raise if a project
-// ever holds enough chunks that post-filter starves the candidate set.
-const VEC_K = 200;
+// best chunk per node. The two pools carry different budgets because they are different
+// sizes. The authored pool is a few hundred chunks, where 1000 sweeps all of it for ~5 ms
+// and every live authored node becomes a candidate for every query — the post-filter can
+// no longer starve. The code pool is six orders larger, where k is not free (200 -> 1000
+// costs 110 -> 270 ms), so it keeps the over-fetch it was calibrated with.
+// sqlite-vec caps k at 4096.
+const VEC_K = 1000;
+const CODE_VEC_K = 200;
 
 // Read-side retrieval: full-text (bm25), vector KNN, and the session working-set
 // queries. Read-only — no transactions.
@@ -33,7 +38,11 @@ export class SearchRepo extends BaseRepo {
     },
   ): VectorRow[] {
     const where: string[] = ["c.stale = 0"];
-    const params: Record<string, unknown> = { q: JSON.stringify(embedding), k: VEC_K };
+    const params: Record<string, unknown> = {
+      q: JSON.stringify(embedding),
+      k: VEC_K,
+      ck: CODE_VEC_K,
+    };
     if (opts.project !== undefined) {
       where.push("n.project = @project");
       params.project = opts.project;
@@ -67,7 +76,12 @@ export class SearchRepo extends BaseRepo {
     }
 
     const knn = this.poolsFor(opts)
-      .map((pool) => `SELECT chunk_id, distance FROM ${pool} WHERE embedding MATCH @q AND k = @k`)
+      .map(
+        (pool) =>
+          `SELECT chunk_id, distance FROM ${pool} WHERE embedding MATCH @q AND k = ${
+            pool === CODE_VEC ? "@ck" : "@k"
+          }`,
+      )
       .join(" UNION ALL ");
 
     const rows = this.db
