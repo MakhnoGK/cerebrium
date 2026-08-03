@@ -36,6 +36,12 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
       throw new Error("`rev` can only be used when `ids` has exactly one element.");
     }
 
+    if (args.rev !== undefined && args.as_of !== undefined) {
+      throw new Error(
+        "`rev` and `as_of` both pick a revision; pass one. `as_of` resolves the revision current at that time.",
+      );
+    }
+
     const nodes: unknown[] = [];
     const notFound: string[] = [];
     const used: string[] = [];
@@ -44,6 +50,15 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
       const full = await this.nodes.fullNode(id);
 
       if (!full) {
+        notFound.push(id);
+        continue;
+      }
+
+      // Under as_of the node has to have existed and still been valid then; a node that was
+      // not yet written, or already invalidated, is simply absent from that view.
+      const past = args.as_of === undefined ? undefined : this.nodes.stateAt(id, args.as_of);
+
+      if (args.as_of !== undefined && !past) {
         notFound.push(id);
         continue;
       }
@@ -80,6 +95,11 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
             node.facets = rec.facets;
           }
         }
+      }
+
+      if (past) {
+        node.content = past.content;
+        node.shown_rev = past.rev;
       }
 
       if (args.rev !== undefined) {

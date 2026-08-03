@@ -15,7 +15,14 @@ const VEC_K = 200;
 export class SearchRepo extends BaseRepo {
   vectorSearch(
     embedding: number[],
-    opts: { project?: string; kinds?: string[]; types?: string[]; history: boolean; cap: number },
+    opts: {
+      project?: string;
+      kinds?: string[];
+      types?: string[];
+      history: boolean;
+      cap: number;
+      asOf?: string;
+    },
   ): VectorRow[] {
     const where: string[] = ["c.stale = 0"];
     const params: Record<string, unknown> = { q: JSON.stringify(embedding), k: VEC_K };
@@ -31,7 +38,16 @@ export class SearchRepo extends BaseRepo {
       where.push(`n.type IN (${opts.types.map((_, i) => `@t${i}`).join(",")})`);
       opts.types.forEach((t, i) => (params[`t${i}`] = t));
     }
-    if (!opts.history) where.push("n.invalidated_at IS NULL");
+    // `as_of` carries its own liveness rule — a node that was valid then belongs in the
+    // answer even if it has since been invalidated — so it replaces the history flag.
+    if (opts.asOf !== undefined) {
+      where.push(
+        "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      );
+      params.asOf = opts.asOf;
+    } else if (!opts.history) {
+      where.push("n.invalidated_at IS NULL");
+    }
 
     const rows = this.db
       .prepare(
@@ -69,6 +85,7 @@ export class SearchRepo extends BaseRepo {
     types?: string[];
     history: boolean;
     cap: number;
+    asOf?: string;
   }): { rows: SearchRow[]; total: number } {
     const where: string[] = ["node_fts MATCH @match"];
     const params: Record<string, unknown> = { match: opts.match };
@@ -84,7 +101,16 @@ export class SearchRepo extends BaseRepo {
       where.push(`n.type IN (${opts.types.map((_, i) => `@t${i}`).join(",")})`);
       opts.types.forEach((t, i) => (params[`t${i}`] = t));
     }
-    if (!opts.history) where.push("n.invalidated_at IS NULL");
+    // `as_of` carries its own liveness rule — a node that was valid then belongs in the
+    // answer even if it has since been invalidated — so it replaces the history flag.
+    if (opts.asOf !== undefined) {
+      where.push(
+        "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)",
+      );
+      params.asOf = opts.asOf;
+    } else if (!opts.history) {
+      where.push("n.invalidated_at IS NULL");
+    }
     const clause = where.join(" AND ");
 
     const rows = this.db
@@ -117,8 +143,21 @@ export class SearchRepo extends BaseRepo {
 
   // Rows for ids the graph surfaced — the same shape the two candidate branches return, so
   // graph hits go through the identical scoring and envelope path.
-  rowsFor(ids: string[]): EnrichedRow[] {
-    return enrichedByIds(this.db, ids).filter((r) => r.invalidated_at == null);
+  rowsFor(ids: string[], asOf?: string): EnrichedRow[] {
+    if (!ids.length) return [];
+
+    if (asOf === undefined) {
+      return enrichedByIds(this.db, ids).filter((r) => r.invalidated_at == null);
+    }
+
+    const ph = ids.map(() => "?").join(",");
+
+    return this.db
+      .prepare(
+        `${ENRICHED} WHERE n.id IN (${ph})
+         AND n.created_at <= ? AND (n.invalidated_at IS NULL OR n.invalidated_at > ?)`,
+      )
+      .all(...ids, asOf, asOf) as EnrichedRow[];
   }
 
   // Best (lowest-seq) chunk vector per node — the same seed convention the consolidation

@@ -109,12 +109,37 @@ export class EdgesRepo extends BaseRepo {
   // `cap` bounds the node set (nearest first), so a hub can't turn one query into a scan.
   subgraphFrom(
     seedIds: string[],
-    opts: { depth: number; cap: number; types: string[] },
+    opts: { depth: number; cap: number; types: string[]; asOf?: string },
   ): { src: string; dst: string; type: EdgeType; weight: number }[] {
     if (!seedIds.length || !opts.types.length) return [];
 
-    const seedPh = seedIds.map(() => "?").join(",");
-    const typePh = opts.types.map(() => "?").join(",");
+    // Named parameters throughout: the type list appears in three clauses and the as-of
+    // instant in five, and binding each once is what keeps them in step.
+    const params: Record<string, string | number> = { depth: opts.depth, cap: opts.cap };
+    const seedPh = seedIds
+      .map((id, i) => {
+        params[`s${i}`] = id;
+        return `@s${i}`;
+      })
+      .join(",");
+    const typePh = opts.types
+      .map((t, i) => {
+        params[`t${i}`] = t;
+        return `@t${i}`;
+      })
+      .join(",");
+
+    if (opts.asOf !== undefined) params.asOf = opts.asOf;
+    // Under `as_of` the graph is the graph as it stood then: nodes that existed and were
+    // still valid, joined by edges that had been written and not yet retired.
+    const nodeLive =
+      opts.asOf === undefined
+        ? "n.invalidated_at IS NULL"
+        : "n.created_at <= @asOf AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)";
+    const edgeLive =
+      opts.asOf === undefined
+        ? "e.invalidated_at IS NULL"
+        : "e.valid_from <= @asOf AND (e.invalidated_at IS NULL OR e.invalidated_at > @asOf)";
 
     // There is no index on edges(type), so every clause is driven from node ids instead:
     // outward hops ride the (src,…) primary key, inward hops ride idx_edges_dst. Filtering
@@ -122,14 +147,14 @@ export class EdgesRepo extends BaseRepo {
     const hop = (join: "src" | "dst") => `
       SELECT e.${join === "src" ? "dst" : "src"}, reach.depth + 1 FROM reach
       JOIN edges e ON e.${join} = reach.id
-      JOIN nodes n ON n.id = e.${join === "src" ? "dst" : "src"} AND n.invalidated_at IS NULL
-      WHERE e.invalidated_at IS NULL AND e.type IN (${typePh}) AND reach.depth < ?`;
+      JOIN nodes n ON n.id = e.${join === "src" ? "dst" : "src"} AND ${nodeLive}
+      WHERE ${edgeLive} AND e.type IN (${typePh}) AND reach.depth < @depth`;
 
     return this.db
       .prepare(
         `WITH RECURSIVE
          reach(id, depth) AS (
-           SELECT id, 0 FROM nodes WHERE id IN (${seedPh}) AND invalidated_at IS NULL
+           SELECT n.id, 0 FROM nodes n WHERE n.id IN (${seedPh}) AND ${nodeLive}
            UNION
            ${hop("src")}
            UNION
@@ -137,23 +162,15 @@ export class EdgesRepo extends BaseRepo {
          ),
          frontier AS (
            SELECT id FROM (SELECT id, MIN(depth) AS d FROM reach GROUP BY id)
-            ORDER BY d ASC, id ASC LIMIT ?
+            ORDER BY d ASC, id ASC LIMIT @cap
          )
          SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight
          FROM frontier f
          JOIN edges e ON e.src = f.id
-         WHERE e.invalidated_at IS NULL AND e.type IN (${typePh})
+         WHERE ${edgeLive} AND e.type IN (${typePh})
            AND e.dst IN (SELECT id FROM frontier)`,
       )
-      .all(
-        ...seedIds,
-        ...opts.types,
-        opts.depth,
-        ...opts.types,
-        opts.depth,
-        opts.cap,
-        ...opts.types,
-      ) as {
+      .all(params) as {
       src: string;
       dst: string;
       type: EdgeType;

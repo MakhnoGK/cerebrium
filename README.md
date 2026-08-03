@@ -135,6 +135,14 @@ unless `history:true`), then optionally expands the graph.
   min-max normalized within the candidate set — raw RRF and raw cosine are not on
   comparable scales. The top hit is always the most relevant one; candidates with no
   stored vector are never demoted; `text` mode is untouched.
+- `as_of` (ISO-8601): run the search against the store **as it stood then** — only nodes
+  already written and not yet invalidated at that instant, graph expansion included. It
+  supersedes `history`, because it carries its own liveness rule: something invalidated
+  since was valid then and belongs in the answer. `get` takes the same argument and
+  returns the revision current at that time. This is how a decision taken on information
+  that has since changed gets audited.
+  **Limit worth knowing:** the FTS index and the vectors hold the *current* wording only,
+  so `as_of` decides which nodes are considered — not how they were phrased then.
 - Each result carries **`matched`**: `text` | `vector` | `both` | `graph`.
 - Vector/both hits carry **`best_chunk`**: the first ~120 chars of the matched chunk
   — often enough to judge relevance without a `get`.

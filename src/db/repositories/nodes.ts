@@ -261,6 +261,23 @@ export class NodesRepo extends BaseRepo {
     return this.envelope(id)!;
   }
 
+  // The node's state at an instant on the INGESTION axis: the revision that was current
+  // then, or undefined if the node did not exist yet or had already been invalidated.
+  // Answers "what did we believe on D", which is how a decision taken on stale information
+  // gets audited. Note the title is not versioned, so only the body is historical.
+  stateAt(id: string, asOf: string): { rev: number; content: string } | undefined {
+    return this.db
+      .prepare(
+        `SELECT r.rev AS rev, r.content AS content FROM revisions r
+         JOIN nodes n ON n.id = r.node_id
+         WHERE r.node_id = @id AND r.ts <= @asOf
+           AND n.created_at <= @asOf
+           AND (n.invalidated_at IS NULL OR n.invalidated_at > @asOf)
+         ORDER BY r.rev DESC LIMIT 1`,
+      )
+      .get({ id, asOf }) as { rev: number; content: string } | undefined;
+  }
+
   // The retrieval-outcome signal: an agent spent tokens fetching these nodes. Deliberately
   // does not touch the latest revision — usage is not an edit, and `updated` orders the
   // working set and breaks search ties.

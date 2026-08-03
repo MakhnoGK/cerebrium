@@ -15,7 +15,9 @@ export const metadata = {
     "enough to judge relevance without a `get`); graph-expanded hits carry `via:{node,edge}` naming the hit that " +
     "contributed most to surfacing them. Graph expansion is personalized PageRank over the local subgraph seeded by " +
     "the matched nodes, so it reaches multi-hop associations and favours nodes that several matches agree on; a graph " +
-    "hit never outranks the best direct one, and superseded nodes are unreachable this way. The final cut is diversified (MMR, `MEMORY_MMR_LAMBDA`): among equally relevant hits it prefers " +
+    "hit never outranks the best direct one, and superseded nodes are unreachable this way. `as_of` re-runs the whole " +
+    "thing against the store as it stood at a past instant, which is how you see what was knowable when a decision was " +
+    "made. The final cut is diversified (MMR, `MEMORY_MMR_LAMBDA`): among equally relevant hits it prefers " +
     "ones that repeat each other less, so a fixed `limit` carries more distinct information. The top hit is always " +
     "the most relevant one, and `mode:'text'` is unaffected. Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
     "`MEMORY_RERANK` reranker is enabled, a local cross-encoder rescoring sharpens the " +
@@ -45,6 +47,15 @@ export const metadata = {
       .optional()
       .describe(
         "Include invalidated/superseded nodes and drop episodic time-decay — for 'what did we try before'.",
+      ),
+    as_of: z
+      .string()
+      .optional()
+      .describe(
+        "ISO-8601 instant: search the store as it stood then — only nodes already written and " +
+          "not yet invalidated at that time, graph expansion included. Supersedes `history`. " +
+          "Note the text index holds current wording only, so this decides WHICH nodes are " +
+          "considered, not how they were phrased then.",
       ),
     mode: z
       .enum(["hybrid", "text", "vector"])

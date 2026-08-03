@@ -135,6 +135,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
         types: args.types,
         history,
         cap: CANDIDATE_CAP,
+        asOf: args.as_of,
       });
 
       ftsRows = r.rows.slice(0, FUSE_CAP);
@@ -153,6 +154,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           types: args.types,
           history,
           cap: FUSE_CAP,
+          asOf: args.as_of,
         });
       }
     } catch {
@@ -250,7 +252,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     // 1-hop weights. PPR scores only nodes the query did NOT match directly: direct
     // relevance is left exactly as fusion and rerank computed it.
     if ((args.expand_graph ?? true) && entries.size) {
-      for (const entry of this.expandByRank(entries)) {
+      for (const entry of this.expandByRank(entries, args.as_of)) {
         entries.set(entry.row.id, entry);
       }
     }
@@ -325,6 +327,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       types: args.types,
       history,
       cap: CANDIDATE_CAP,
+      asOf: args.as_of,
     });
 
     const now = Date.parse(this.clock.now());
@@ -365,7 +368,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     return out;
   }
 
-  private expandByRank(entries: Map<string, Entry>): Entry[] {
+  private expandByRank(entries: Map<string, Entry>, asOf?: string): Entry[] {
     const seeds = [...entries.values()];
     const topScore = Math.max(...seeds.map((s) => s.score));
 
@@ -375,7 +378,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
     const edges = this.edges.subgraphFrom(
       seeds.map((s) => s.row.id),
-      { depth: PPR_DEPTH, cap: this.retrieval.pprFrontier, types: TRAVERSABLE },
+      { depth: PPR_DEPTH, cap: this.retrieval.pprFrontier, types: TRAVERSABLE, asOf },
     );
 
     if (!edges.length) {
@@ -398,7 +401,14 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     // Rank mass is an arbitrary scale, so it is normalized within the surfaced set and spent
     // against a fixed fraction of the best direct hit — a graph hit can never outrank it.
     const best = Math.max(...surfaced.map(([, r]) => r));
-    const rows = new Map(this.searchRepo.rowsFor(surfaced.map(([id]) => id)).map((r) => [r.id, r]));
+    const rows = new Map(
+      this.searchRepo
+        .rowsFor(
+          surfaced.map(([id]) => id),
+          asOf,
+        )
+        .map((r) => [r.id, r]),
+    );
     const out: Entry[] = [];
 
     for (const [id, rank] of surfaced) {
