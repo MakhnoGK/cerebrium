@@ -24,6 +24,7 @@ const MIGRATION_IDS = [
   "010_node_usage.cjs",
   "011_event_time.cjs",
   "012_repoint_dangling_edges.cjs",
+  "013_split_vector_pools.cjs",
 ];
 
 const dirs: string[] = [];
@@ -81,6 +82,7 @@ describe("Migrations as single source of truth", () => {
       "node_fts",
       "chunks",
       "chunk_vec",
+      "code_vec",
       "embedding_meta",
       "embedding_queue",
       "code_files",

@@ -200,6 +200,8 @@ export class ConsolidationRepo extends BaseRepo {
   // The kNN seed: a node's lowest-seq chunk vector. Null when the node has no vector yet —
   // the seed sets gate on `embedding_meta`, which can outrun the `chunk_vec` row.
   // vec0 aborts the statement on a NULL query vector, so callers must skip instead of MATCH.
+  // `chunk_vec` and not `code_vec`: every consolidation seed is authored memory, and a code
+  // symbol reaching here would return null rather than a wrong vector.
   private seedVector(nodeId: string): Buffer | null {
     const row = this.db
       .prepare(

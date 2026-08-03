@@ -1,10 +1,14 @@
 import { injectable } from "tsyringe";
 import { BaseRepo, MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
 import {
+  AUTHORED_VEC,
+  CODE_VEC,
   countUnembedded,
   enrichedById,
   refreshQueue,
   syncChunks,
+  vectorPoolFor,
+  type VectorPool,
 } from "@/db/repositories/internal";
 import type { QueueRow, UnembeddedChunk } from "@/core/types";
 
@@ -67,8 +71,14 @@ export class EmbeddingQueueRepo extends BaseRepo {
       return;
     }
 
-    const delVec = this.db.prepare("DELETE FROM chunk_vec WHERE chunk_id = ?");
-    const insVec = this.db.prepare("INSERT INTO chunk_vec (chunk_id, embedding) VALUES (?, ?)");
+    const stmts = (pool: VectorPool) => ({
+      del: this.db.prepare(`DELETE FROM ${pool} WHERE chunk_id = ?`),
+      ins: this.db.prepare(`INSERT INTO ${pool} (chunk_id, embedding) VALUES (?, ?)`),
+    });
+    const vec: Record<VectorPool, ReturnType<typeof stmts>> = {
+      [AUTHORED_VEC]: stmts(AUTHORED_VEC),
+      [CODE_VEC]: stmts(CODE_VEC),
+    };
     const meta = this.db.prepare(
       `INSERT INTO embedding_meta (chunk_id, model, model_version, ts) VALUES (?, ?, ?, ?)
        ON CONFLICT(chunk_id) DO UPDATE SET model = excluded.model, model_version = excluded.model_version, ts = excluded.ts`,
@@ -76,9 +86,11 @@ export class EmbeddingQueueRepo extends BaseRepo {
 
     this.tx(() => {
       for (const { nodeId, items } of batch) {
+        const pool = vec[vectorPoolFor(this.db, nodeId)];
+
         for (const it of items) {
-          delVec.run(it.chunkId);
-          insVec.run(it.chunkId, JSON.stringify(it.vector));
+          pool.del.run(it.chunkId);
+          pool.ins.run(it.chunkId, JSON.stringify(it.vector));
           meta.run(it.chunkId, model, version, ts);
         }
 

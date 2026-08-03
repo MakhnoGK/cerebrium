@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
 import { chunkContent } from "@/core/chunk";
 import type { EnrichedRow } from "@/core/types";
+import { CODE_ORIGIN, MemoryKind } from "@/core/vocab";
 
 // Cross-aggregate primitives shared by the node-write path (NodesRepo), the code
 // mirror (CodeRepo), and the embedding drain (EmbeddingQueueRepo). They keep the SQL
@@ -20,6 +21,20 @@ export const ENRICHED = `
   JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
   JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
 `;
+
+// The two vector pools (migration 013). Both are vec0 tables over the same space and
+// metric; which one a chunk belongs to follows from its node alone.
+export const AUTHORED_VEC = "chunk_vec";
+export const CODE_VEC = "code_vec";
+export type VectorPool = typeof AUTHORED_VEC | typeof CODE_VEC;
+
+export function vectorPoolFor(db: Database.Database, nodeId: string): VectorPool {
+  const row = db
+    .prepare("SELECT memory_kind AS kind, origin FROM nodes WHERE id = ?")
+    .get(nodeId) as { kind: string; origin: string | null } | undefined;
+
+  return row?.kind === MemoryKind.MIRROR && row.origin === CODE_ORIGIN ? CODE_VEC : AUTHORED_VEC;
+}
 
 export function enrichedById(db: Database.Database, id: string): EnrichedRow | undefined {
   return db.prepare(`${ENRICHED} WHERE n.id = ?`).get(id) as EnrichedRow | undefined;
