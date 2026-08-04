@@ -313,7 +313,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
-| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
+| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
@@ -546,6 +546,16 @@ authors the summary at apply time) or a bring-your-own `command`/`http` backend.
 self-contained local runtime (Ollama + a small model) for the `http` provider lives
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
+
+The `http` provider asks the backend to answer **without its reasoning mode** (`think:
+false`). This is a latency fix, not a style preference: the adapter reads only
+`message.content`, so hidden reasoning is decode time spent on text nothing consumes.
+Measured 2026-08-04 on a real 6 kB merge cluster against `gemma4:12b-it-qat` — 61.8 s
+with reasoning on versus 24.9 s with it off, for the same 1.1 kB of parsed JSON, plus
+3.2 kB of thinking discarded on arrival. That 2.5× is what used to push calls past the
+old 60 s timeout and make proposals vanish mid-decode. A backend with no reasoning mode
+rejects the field with a 400; the provider retries once without it and stops sending it
+for the rest of the process.
 
 When generation fails, the sweep degrades to a proposal-less suggestion rather than
 blocking or guessing — a weak or absent model must never author durable memory. That

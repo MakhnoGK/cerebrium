@@ -237,7 +237,53 @@ describe("HttpConsolidator (injected fetch)", () => {
     expect(body.model).toBe("m");
     expect(body.stream).toBe(false);
     expect(body.format).toBeDefined();
+    expect(body.think).toBe(false);
     expect((body.messages as { role: string }[])[0]!.role).toBe("system");
+  });
+
+  it("should retry without the reasoning flag when the backend rejects it, then stop sending it", async () => {
+    // Given — a backend that 400s on `think` and answers normally without it.
+    const bodies: Record<string, unknown>[] = [];
+    const fetchFn: FetchFn = (_url, init) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+
+      bodies.push(body);
+
+      return Promise.resolve(
+        "think" in body
+          ? new Response("registry.ollama.ai/library/m does not support thinking", { status: 400 })
+          : new Response(
+              JSON.stringify({ message: { content: '{"title":"T","summary":"S","body":"B"}' } }),
+              { status: 200 },
+            ),
+      );
+    };
+    const p = new HttpConsolidator({ fetchFn });
+
+    // When
+    const first = await p.generate(TASK);
+    const second = await p.generate(TASK);
+
+    // Then
+    expect(first).toMatchObject({ title: "T" });
+    expect(second).toMatchObject({ title: "T" });
+    expect(bodies.map((b) => "think" in b)).toEqual([true, false, false]);
+  });
+
+  it("should surface a 400 that has nothing to do with reasoning instead of retrying it", async () => {
+    // Given
+    let calls = 0;
+    const fetchFn: FetchFn = () => {
+      calls++;
+
+      return Promise.resolve(new Response("invalid model name", { status: 400 }));
+    };
+
+    // When / Then
+    await expect(new HttpConsolidator({ fetchFn }).generate(TASK)).rejects.toThrow(
+      /HTTP 400: invalid model name/,
+    );
+    expect(calls).toBe(1);
   });
 
   it("should throw when the response is non-2xx or is missing the content field", async () => {
