@@ -33,11 +33,14 @@ export class RerankConfig extends SectionOf("rerank", {
 // is the knob to turn down if retrieval starts feeling stuck on the same nodes. `graphBase`
 // caps a graph-surfaced hit as a fraction of the best direct hit, so at 0 the graph stage
 // still surfaces neighbours but never lifts one over a directly matched node.
+// `graphBase` and `mmrLambda` were measured against the gold set on 2026-08-04 (see the
+// README): 0.3 sits on a plateau and 1.0 collapses P@1, while diversity below 0.85 costs
+// relevance without buying coverage of the answers a query actually has.
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
   graphBase: num(0.3).range(0, 1).env("MEMORY_GRAPH_BASE"),
-  mmrLambda: num(0.7).range(0, 1).env("MEMORY_MMR_LAMBDA"),
+  mmrLambda: num(0.85).range(0, 1).env("MEMORY_MMR_LAMBDA"),
   useWeight: num(0.25).range(0, 1).env("MEMORY_USE_WEIGHT"),
   pprAlpha: num(0.5).range(0, 1).env("MEMORY_PPR_ALPHA"),
   pprFrontier: int(500).positive().env("MEMORY_PPR_FRONTIER"),

@@ -304,10 +304,10 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
-| `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
+| `MEMORY_MMR_LAMBDA` | `0.85` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. Calibrated against the gold set — see *Calibrating the ranking constants*. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
 | `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
-| `MEMORY_GRAPH_BASE` | `0.3` | Ceiling a graph-surfaced hit may reach, as a fraction of the best direct hit. `0` still surfaces neighbours but never lifts one over a directly matched node. |
+| `MEMORY_GRAPH_BASE` | `0.3` | Ceiling a graph-surfaced hit may reach, as a fraction of the best direct hit. `0` still surfaces neighbours but never lifts one over a directly matched node. Calibrated — see *Calibrating the ranking constants*. |
 | `MEMORY_PPR_FRONTIER` | `500` | Max nodes pulled into the local subgraph PPR runs over, nearest first. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
@@ -628,6 +628,46 @@ reports query→node→section pairs. Nothing scores them yet — every metric a
 node-level — but they are the granularity a chunk-level relevance signal needs, and they
 cost nothing to accumulate. An `outline` fetch is excluded: it is how an agent decides
 whether to read, not a read, so counting it would label a node the agent then skipped.
+
+## Calibrating the ranking constants
+
+Measured 2026-08-04 against the author's store (223 live authored nodes) with a gold set
+of **1,888 labels — 1,734 generated, 149 adjudicated, 5 mined**. Two runs, because the
+two label sources answer different questions: 300 sampled queries dominated by generated
+ones, and all 149 adjudicated queries on their own. Percentage points versus the shipped
+default.
+
+| Arm | Generated-heavy (300 q) | Adjudicated only (149 q) |
+|---|---|---|
+| `MEMORY_GRAPH_BASE=0` | nDCG −0.1, Rec −0.1 | nDCG −0.5, **Rec −1.1** |
+| `MEMORY_GRAPH_BASE=0.5` | nDCG −0.2, Rec −0.6 | nDCG +0.2, Rec +0.1 |
+| `MEMORY_GRAPH_BASE=1.0` | **nDCG −10.5**, P@1 38.3→16.0 | **nDCG −14.6**, P@1 60.4→26.2 |
+| `MEMORY_MMR_LAMBDA=0.85` | nDCG +0.1, Rec −0.2 | nDCG +1.1, Rec +1.5 |
+| `MEMORY_MMR_LAMBDA=1.0` | nDCG +0.4, Rec +0.4 | nDCG +1.9, Rec +1.8 |
+| `MEMORY_USE_WEIGHT=0` | nDCG +0.8, P@1 +1.7 | nDCG +0.1, P@1 +0.7 |
+| `MEMORY_USE_WEIGHT=0.5` | nDCG −0.1, Rec +0.3 | nDCG +0.5, P@1 +2.7 |
+
+**`MEMORY_GRAPH_BASE` stays at `0.3`** — measured, no longer guessed. It sits on a plateau:
+0 through 0.5 move nothing much, and at `1.0` a graph hit reaches the top direct hit's
+score and P@1 collapses by more than half. Note the two label sources *disagree about
+whether graph expansion earns its place*: switching it off is free on generated questions
+and costs 1.1 points of recall on real ones. That is the bias the split exists to expose —
+a question written from one section never needs a link followed, and a question an agent
+actually asked often does.
+
+**`MEMORY_MMR_LAMBDA` moves `0.7` → `0.85`.** Both label sources agree in direction, and a
+third run with the reranker on (`MEMORY_RERANK=local`, the deployed configuration, since
+MMR runs after it) agrees again: +0.9 nDCG, +0.8 Rec. On adjudicated queries — which carry
+2.1 relevant nodes each — Recall@10 *is* coverage of the answers a query has, so the old
+default was not buying diversity, it was swapping a relevant hit for a merely different
+one. `1.0` measured better still, but turning a stage off on labels that cannot see
+redundancy is a larger claim than this evidence supports.
+
+**`MEMORY_USE_WEIGHT` stays at `0.25` — unresolved, not confirmed.** The two sources
+disagree in *direction* (one prefers `0`, the other `0.5`), and neither can see what the
+prior is for: labels record which node answers a question, never that a memory earned its
+place by being useful repeatedly. Do not move it on this evidence; it needs a signal about
+use, not about relevance.
 
 ## Measuring a wire encoding before changing one
 
