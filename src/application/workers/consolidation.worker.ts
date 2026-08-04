@@ -14,11 +14,22 @@ import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
 import {
   ConsolidationBatchConfig,
+  ConsolidationConfig,
   ConsolidationPostureConfig,
   ConsolidationThresholdsConfig,
 } from "@/infrastructure/config";
 
 const CONSOLIDATION_LEASE = "consolidation";
+
+const MAX_ERROR_CHARS = 500;
+
+// Bounded, so a provider that answers with a whole HTML error page cannot dominate the
+// tick result an operator reads.
+function errorText(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+
+  return (message || "unknown generation error").slice(0, MAX_ERROR_CHARS);
+}
 
 export interface ConsolidationTickResult {
   links_added: number;
@@ -33,7 +44,16 @@ export interface ConsolidationTickResult {
   proposals_backfilled: number;
   rejected: number;
   annotated: number;
+  generation_failures: number;
+  last_error: string | null;
 }
+
+// How a generation attempt ended. A failure and "no generating provider" both yield no
+// draft, but they are not the same event — one is a broken sweep, the other is the
+// configured posture — so a bare `error: null` marks the second. Collapsing the two into
+// one `null` return is what hid a 28% timeout rate for weeks.
+type GenerationOutcome =
+  { generated: true; result: ConsolidationResult } | { generated: false; error: string | null };
 
 // The background consolidation sweep. Runs in the daemon (the one sanctioned writer)
 // under its own worker_lease role, so exactly one process consolidates — never
@@ -43,7 +63,7 @@ export interface ConsolidationTickResult {
 @injectable()
 export class ConsolidationWorker {
   private readonly ownerId = newId();
-  private readonly leaseTtlMs: number;
+  private stopping = false;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -58,24 +78,26 @@ export class ConsolidationWorker {
 
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
 
+    private readonly config: ConsolidationConfig,
     private readonly posture: ConsolidationPostureConfig,
     private readonly thresholds: ConsolidationThresholdsConfig,
     private readonly batch: ConsolidationBatchConfig,
-  ) {
-    // TODO: Config service
-    this.leaseTtlMs = 60_000;
-  }
+  ) {}
 
   private now() {
     return this.clock.now();
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+
     await this.queueRepo.releaseWorkerLease(CONSOLIDATION_LEASE, this.ownerId);
   }
 
   // One consolidation pass. Side-effecting; tests call it directly with a fixed clock.
-  // Only the leaseholder does work — a non-holder returns zeros.
+  // Only the leaseholder does work — a non-holder returns zeros. The lease is re-checked
+  // between clusters, so losing it (or being stopped) ends the sweep where it stands and
+  // returns what was already done.
   async tick(): Promise<ConsolidationTickResult> {
     const now = this.now();
     const result: ConsolidationTickResult = {
@@ -91,16 +113,11 @@ export class ConsolidationWorker {
       proposals_backfilled: 0,
       rejected: 0,
       annotated: 0,
+      generation_failures: 0,
+      last_error: null,
     };
 
-    const isWorkerReleased = await this.queueRepo.holdWorkerLease(
-      CONSOLIDATION_LEASE,
-      this.ownerId,
-      this.leaseTtlMs,
-      this.now(),
-    );
-
-    if (!isWorkerReleased) {
+    if (!(await this.holdLease())) {
       return result;
     }
 
@@ -117,18 +134,56 @@ export class ConsolidationWorker {
     return result;
   }
 
-  // Generate a judged proposal for a cluster; null if no provider or generation fails
-  // (caller degrades to a proposal-less suggestion, never blocks).
-  private async tryGenerate(task: ConsolidationTask): Promise<ConsolidationResult | null> {
+  // Claim or renew the lease, and report whether this worker may keep working. Called
+  // once at tick entry and again between clusters: a generation call runs for minutes,
+  // so a lease claimed only at entry would read as expired for most of a sweep — to the
+  // System tab, to a competing process, and to the one-writer invariant. `stop()` closes
+  // the gate first, so a released lease is never re-claimed by a tick already in flight.
+  private async holdLease(): Promise<boolean> {
+    if (this.stopping) {
+      return false;
+    }
+
+    return this.queueRepo.holdWorkerLease(
+      CONSOLIDATION_LEASE,
+      this.ownerId,
+      this.config.leaseTtlMs,
+      this.now(),
+    );
+  }
+
+  // One generation attempt, reported in full: the draft, or why there isn't one.
+  private async runGeneration(task: ConsolidationTask): Promise<GenerationOutcome> {
     if (!this.consolidator.enabled) {
-      return null;
+      return { generated: false, error: null };
     }
 
     try {
-      return await this.consolidator.generate(task);
-    } catch {
-      return null;
+      return { generated: true, result: await this.consolidator.generate(task) };
+    } catch (err) {
+      return { generated: false, error: errorText(err) };
     }
+  }
+
+  // Generate a judged proposal for a cluster; null if no provider or generation fails
+  // (caller degrades to a proposal-less suggestion, never blocks). A failure is counted
+  // and its reason kept on the tick result, so degrading stays graceful without being mute.
+  private async tryGenerate(
+    task: ConsolidationTask,
+    result: ConsolidationTickResult,
+  ): Promise<ConsolidationResult | null> {
+    const outcome = await this.runGeneration(task);
+
+    if (outcome.generated) {
+      return outcome.result;
+    }
+
+    if (outcome.error !== null) {
+      result.generation_failures++;
+      result.last_error = outcome.error;
+    }
+
+    return null;
   }
 
   // similar_to link discovery. Deterministic kNN over stored vectors; no
@@ -231,15 +286,22 @@ export class ConsolidationWorker {
     });
 
     for (const cluster of clusters) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
         continue;
       }
 
-      const gen = await this.tryGenerate({
-        kind: ConsolidationKind.DISTILL,
-        project: cluster.project,
-        inputs: this.consolidationRepo.candidateInputs(cluster.member_ids),
-      });
+      const gen = await this.tryGenerate(
+        {
+          kind: ConsolidationKind.DISTILL,
+          project: cluster.project,
+          inputs: this.consolidationRepo.candidateInputs(cluster.member_ids),
+        },
+        result,
+      );
 
       // Provider judged these not worth consolidating -> record a dismissed candidate
       // (with the reason) so it is auditable and never re-proposed.
@@ -312,6 +374,10 @@ export class ConsolidationWorker {
     });
 
     for (const pair of pairs) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
         continue;
       }
@@ -322,11 +388,14 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const gen = await this.tryGenerate({
-        kind: ConsolidationKind.MERGE,
-        project: pair.project,
-        inputs: this.consolidationRepo.candidateInputs(pair.member_ids),
-      });
+      const gen = await this.tryGenerate(
+        {
+          kind: ConsolidationKind.MERGE,
+          project: pair.project,
+          inputs: this.consolidationRepo.candidateInputs(pair.member_ids),
+        },
+        result,
+      );
 
       // Provider judged these distinct (not a true duplicate) -> dismiss with the reason.
       if (gen?.recommendation === ConsolidationRecommendation.REJECT) {
@@ -393,6 +462,10 @@ export class ConsolidationWorker {
     }
 
     for (const cand of this.consolidationRepo.pendingNeedingProposal(this.batch.backfill)) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       if (cand.kind !== ConsolidationKind.DISTILL && cand.kind !== ConsolidationKind.MERGE) {
         continue;
       }
@@ -403,7 +476,10 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const gen = await this.tryGenerate({ kind: cand.kind, project: cand.project, inputs });
+      const gen = await this.tryGenerate(
+        { kind: cand.kind, project: cand.project, inputs },
+        result,
+      );
 
       if (!gen) {
         continue; // generation failed -> leave for a later sweep
@@ -467,6 +543,10 @@ export class ConsolidationWorker {
     }
 
     for (const node of this.consolidationRepo.unannotatedSemantic(this.batch.annotate)) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       let a;
 
       try {
@@ -475,7 +555,10 @@ export class ConsolidationWorker {
           content: node.content,
           project: node.project,
         });
-      } catch {
+      } catch (err) {
+        result.generation_failures++;
+        result.last_error = errorText(err);
+
         continue;
       }
 

@@ -38,7 +38,7 @@ interface ChatResponse {
 const DEFAULTS = {
   url: "http://127.0.0.1:11434/api/chat",
   model: "gemma4:12b-it-qat",
-  timeoutMs: 60_000,
+  timeoutMs: 500_000,
 };
 
 export class HttpConsolidator implements ConsolidationProvider {
@@ -75,7 +75,9 @@ export class HttpConsolidator implements ConsolidationProvider {
 
   // One structured-output chat round-trip. Returns the raw message.content string for a
   // task-specific parser. Any transport failure, non-2xx, timeout, or malformed body
-  // throws — the caller (daemon or write tool) then degrades gracefully.
+  // throws — the caller (daemon or write tool) then degrades gracefully. Every throw names
+  // what went wrong, because the caller's only other signal is the absence of a proposal:
+  // a timeout, a dead endpoint and a model with nothing to say look identical otherwise.
   private async chat(system: string, user: string, format: object): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -97,13 +99,30 @@ export class HttpConsolidator implements ConsolidationProvider {
         }),
         signal: controller.signal,
       });
-      if (!res.ok) throw new Error(`consolidation http provider: HTTP ${String(res.status)}`);
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+
+        throw new Error(
+          `consolidation http provider: HTTP ${String(res.status)}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+        );
+      }
       const body = (await res.json()) as ChatResponse;
       const content = body.message?.content;
       if (typeof content !== "string") {
         throw new Error("consolidation http provider: response missing message.content");
       }
       return content;
+    } catch (err) {
+      // The abort surfaces as a generic DOMException, which reads like a network blip.
+      // Naming the timeout is what tells an operator to raise it rather than hunt a bug.
+      if (controller.signal.aborted) {
+        throw new Error(
+          `consolidation http provider: timed out after ${String(this.timeoutMs)}ms (MEMORY_CONSOLIDATE_TIMEOUT_MS)`,
+          { cause: err },
+        );
+      }
+
+      throw err;
     } finally {
       clearTimeout(timer);
     }

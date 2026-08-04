@@ -311,7 +311,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
-| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `60000` | Generation timeout for `http`/`command`. |
+| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
+| `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
 | `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |
@@ -541,6 +542,15 @@ authors the summary at apply time) or a bring-your-own `command`/`http` backend.
 self-contained local runtime (Ollama + a small model) for the `http` provider lives
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
+
+When generation fails, the sweep degrades to a proposal-less suggestion rather than
+blocking or guessing — a weak or absent model must never author durable memory. That
+degradation is deliberately indistinguishable *in the store* from the `manual` posture,
+so the reason lives on the sweep instead: the tick counts `generation_failures` and keeps
+the last error text, and the daemon writes a line to stderr whenever a sweep loses one.
+Provider errors name the cause — the HTTP status with the response body, or the timeout
+and the variable that governs it — because the alternative signal, a candidate arriving
+for review with no proposal, looks exactly like a model with nothing to say.
 
 ## Evaluating a ranking change
 
