@@ -413,7 +413,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
-| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. See *Evaluating a ranking change*. |
+| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
 
 ## Code indexing
 
@@ -587,6 +587,24 @@ the floor for a smoke test; numbers under it are noise).
 Note the signal accrues slowly *by design*: envelopes and `best_chunk` are built so an
 agent can usually answer without calling `get`, and a search nobody follows up on produces
 no label.
+
+### The gold file
+
+`--gold PATH` supplies labels the log cannot: a JSONL file (format in `scripts/gold.ts`)
+whose entries carry a query, the node ids that answer it, and an `origin` — `generated`
+(a question written from one section, which is then the gold), `adjudicated` (a real query
+from the log with each candidate judged), or `mined` (the implicit signal above). File and
+log are merged, the same question from two sources becoming one query with the union of
+its labels, and `--origin` scores a subset — which is how you check whether synthetic
+questions and real ones agree before trusting a constant to the synthetic ones.
+
+Labels pointing at nodes that are no longer live are dropped and counted: an invalidated
+or merged-away node cannot be returned, so scoring it would count a correct ranking as a
+miss. A growing share of dropped labels is the signal to regenerate.
+
+**The gold file is deliberately not in this repository.** It is derived from the contents
+of one private store and points at that store's ids, so it lives beside the DB
+(`~/.cerebrium/gold.jsonl`); only the machinery to build and read it is versioned here.
 
 A narrowed fetch labels more finely: it records *which sections* were read, so the run also
 reports query→node→section pairs. Nothing scores them yet — every metric above is
