@@ -204,3 +204,37 @@ export function countByOrigin(entries: GoldEntry[]): Record<GoldOrigin, number> 
 
   return counts;
 }
+
+const STOPWORDS = new Set(
+  (
+    "the and for that this with from what when which where how why does did are was were has " +
+    "have had its not but can could should would will into than then there their who whom " +
+    "about after before between under over only also any all one two because"
+  ).split(" "),
+);
+
+export function contentWords(text: string): Set<string> {
+  const words = text
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/)
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+
+  return new Set(words);
+}
+
+// Share of a question's content words that appear verbatim in the section it was written
+// from. A question that echoes its source scores near 1 and is worthless as a label: it
+// hands BM25 the answer and never asks the vector side to bridge any vocabulary at all —
+// which is precisely the side the uncalibrated constants govern.
+export function lexicalOverlap(question: string, section: string): number {
+  const asked = contentWords(question);
+
+  if (!asked.size) return 1;
+
+  const source = contentWords(section);
+  let shared = 0;
+
+  for (const word of asked) if (source.has(word)) shared++;
+
+  return shared / asked.size;
+}

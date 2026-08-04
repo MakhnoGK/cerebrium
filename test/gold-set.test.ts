@@ -5,6 +5,7 @@ import {
   appendGold,
   countByOrigin,
   filterByOrigin,
+  lexicalOverlap,
   parseGoldLine,
   parseOrigins,
   pruneStale,
@@ -167,6 +168,39 @@ describe("toEvalQueries", () => {
 
     // Then
     expect([...query!.sections!.get("n1")!]).toEqual(["H2: Lease", "H2: Renewal"]);
+  });
+});
+
+describe("lexicalOverlap", () => {
+  const section =
+    "The consolidation worker claims a lease per tick at a hardcoded sixty second TTL and " +
+    "never renews it, so a long generation call expires the lease mid sweep.";
+
+  it("should score a question that echoes its section near one", () => {
+    // Given / When
+    const overlap = lexicalOverlap(
+      "What TTL does the consolidation worker lease claim per tick?",
+      section,
+    );
+
+    // Then
+    expect(overlap).toBeGreaterThan(0.8);
+  });
+
+  it("should score a paraphrased question well below the echo threshold", () => {
+    // Given / When
+    const overlap = lexicalOverlap(
+      "What makes a background job lose its exclusive claim while a slow model reply is pending?",
+      section,
+    );
+
+    // Then
+    expect(overlap).toBeLessThan(0.5);
+  });
+
+  it("should treat a question with no content words as an echo", () => {
+    // Given / When / Then
+    expect(lexicalOverlap("How is it?", section)).toBe(1);
   });
 });
 

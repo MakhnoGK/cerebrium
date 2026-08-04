@@ -414,6 +414,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
+| `npm run gold:generate` | Writes labelled queries for the eval by asking the local model what each section of the store answers. Read-only on the store, resumable, appends to a gold JSONL that lives outside the repo. See *The gold file*. |
 
 ## Code indexing
 
@@ -601,6 +602,13 @@ questions and real ones agree before trusting a constant to the synthetic ones.
 Labels pointing at nodes that are no longer live are dropped and counted: an invalidated
 or merged-away node cannot be returned, so scoring it would count a correct ranking as a
 miss. A growing share of dropped labels is the signal to regenerate.
+
+`npm run gold:generate -- --db PATH` builds the `generated` half: for every section of
+every live authored node it asks the local model (the same Ollama sidecar the `http`
+consolidation provider uses) for questions that section answers, and the section becomes
+the label. It appends per section, so an interrupted run resumes; it drops any question
+that shares more than `--max-overlap` of its content words with its own source, because a
+question echoing its section hands BM25 the answer and never exercises the vector side.
 
 **The gold file is deliberately not in this repository.** It is derived from the contents
 of one private store and points at that store's ids, so it lives beside the DB
