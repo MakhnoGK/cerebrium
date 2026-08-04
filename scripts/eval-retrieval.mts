@@ -100,6 +100,9 @@ eval-retrieval — labelled relevance eval across configuration arms.
              Labels pointing at nodes no longer live are dropped and counted. Needs --db.
   --origin O Comma-separated subset of generated,adjudicated,mined — score only labels of
              those origins, e.g. to check whether synthetic questions and real ones agree.
+  --sample N Score a stable subset of N queries, chosen by hashing the query text — the
+             same subset for every arm and for every re-run, so a sweep over a few
+             thousand labels stays interactive without making two runs incomparable.
   --min N    Lower that floor. Numbers below it are noise; use it to smoke-test the path
              or to peek at early data, not to draw conclusions.
   --help     This text.
@@ -135,6 +138,29 @@ function parseArms(argv: string[]): Arm[] {
   }
 
   return arms.length ? arms : [{ name: "base", env: {} }];
+}
+
+function num(argv: string[], name: string, fallback: number): number {
+  const i = argv.indexOf(name);
+  const parsed = i < 0 ? NaN : Number(argv[i + 1]);
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+// A subset chosen by hashing the query text, not by shuffling: every arm must score the
+// identical set, and a re-run days later must too, or two numbers stop being comparable.
+function sample(queries: EvalQuery[], size: number): EvalQuery[] {
+  if (!Number.isFinite(size) || queries.length <= size) return queries;
+
+  const hash = (s: string): number => {
+    let h = 2166136261;
+
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+
+    return h >>> 0;
+  };
+
+  return [...queries].sort((a, b) => hash(a.query) - hash(b.query)).slice(0, size);
 }
 
 function reciprocalRank(ranked: string[], gold: Set<string>): number {
@@ -461,7 +487,7 @@ async function main() {
       (id) => live.has(id),
     );
 
-    queries = toEvalQueries(kept);
+    queries = sample(toEvalQueries(kept), num(argv, "--sample", Infinity));
 
     const pairs = queries.reduce((n, q) => n + q.gold.size, 0);
     const counts = countByOrigin(kept);
@@ -478,8 +504,8 @@ async function main() {
       `retrieval-outcome log: ${mined.length} queries with a fetch, out of ${searches} logged searches`,
     );
     console.log(
-      `scoring ${queries.length} distinct queries, ${pairs} query→node pairs ` +
-        `(generated ${counts.generated}, adjudicated ${counts.adjudicated}, mined ${counts.mined})`,
+      `labels: ${kept.length} entries (generated ${counts.generated}, adjudicated ${counts.adjudicated}, mined ${counts.mined}) ` +
+        `-> scoring ${queries.length} distinct queries, ${pairs} query→node pairs`,
     );
 
     if (droppedLabels) {
