@@ -6,6 +6,7 @@ import type Database from "better-sqlite3";
 import { container as root } from "tsyringe";
 import { HintsService } from "@/application/services";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { MemoryKind } from "@/core/vocab";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
@@ -21,6 +22,12 @@ import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infr
 // the labels and make every future arm look like a regression; pooling across modes is the
 // cheapest way to widen what gets seen. It does not remove the bias — a node no mode
 // retrieves can still never be labelled.
+//
+// The pool is authored-only unless `--include-mirrors`. Measured 2026-08-04: with mirrors
+// in, a real query's 21 pooled candidates were vendor PHP and the judge correctly answered
+// "none" — the store is 99% code index, so the notes never reached the judge at all. The
+// eval still scores the full unfiltered ranking; a code symbol outranking the gold note is
+// a real cost and must stay visible.
 //
 // The store is opened READ-ONLY through the `cli` role and the session-hint write is
 // stubbed out, exactly as `eval-retrieval --db` does.
@@ -48,10 +55,17 @@ gold-adjudicate — label real queries by judging each candidate on its own.
                   FILE      a path: one query per line
   --limit N     Stop after N queries (default all).
   --pool N      Candidates per retrieval mode (default 10). Three modes are pooled.
+  --include-mirrors
+                Also offer code symbols and external records as candidates. Off by
+                default: the store is 99% code index, so an unfiltered pool is vendor
+                source the judge rejects, and the authored note that answers the question
+                never reaches it.
   --excerpt N   Characters of each candidate shown to the judge (default 400).
   --model M     Judging model (default ${DEFAULT_MODEL}).
   --url U       Chat endpoint (default ${DEFAULT_URL}).
   --timeout MS  Per-call timeout (default 180000).
+  --show N      Print the candidate list and the judge's raw reply for the first N
+                queries — the only way to tell "nothing answers this" from a bad prompt.
   --help        This text.
 `;
 
@@ -151,6 +165,8 @@ async function main(): Promise<void> {
   const model = arg(argv, "--model") ?? DEFAULT_MODEL;
   const url = arg(argv, "--url") ?? DEFAULT_URL;
   const timeoutMs = num(argv, "--timeout", 180_000);
+  let show = num(argv, "--show", 0);
+  const includeMirrors = argv.includes("--include-mirrors");
 
   const container = buildContainer({
     role: "cli",
@@ -209,7 +225,13 @@ async function main(): Promise<void> {
     const ids = new Set<string>();
 
     for (const mode of ["hybrid", "text", "vector"] as const) {
-      const res = await tool.invoke({ session_id: "gold-adjudicate", query, limit: pool, mode });
+      const res = await tool.invoke({
+        session_id: "gold-adjudicate",
+        query,
+        limit: pool,
+        mode,
+        ...(includeMirrors ? {} : { kinds: [MemoryKind.SEMANTIC, MemoryKind.EPISODIC] }),
+      });
 
       for (const hit of res.results) ids.add(hit.id);
     }
@@ -239,6 +261,14 @@ async function main(): Promise<void> {
 
     const parsed = parseJsonObject(raw);
     const answers = Array.isArray(parsed?.answers) ? parsed.answers : [];
+
+    if (show > 0) {
+      show--;
+      console.log(`\n  Q: ${query}`);
+      console.log(candidates.map((c, i) => `    ${String(i + 1)}. ${c.title}`).join("\n"));
+      console.log(`    judge: ${raw.trim().slice(0, 200)}\n`);
+    }
+
     const gold = answers
       .map((n) => (typeof n === "number" ? candidates[n - 1] : undefined))
       .filter((c): c is Candidate => !!c)
