@@ -29,10 +29,11 @@ interface ChatResponse {
 }
 
 // HTTP generation provider, defaulting to a local Ollama `/api/chat` with structured
-// outputs (`format` = the result JSON schema) so the reply parses cleanly. Any transport
-// failure, non-2xx, timeout, or malformed body throws — the caller (daemon) then degrades
-// to `suggest`, exactly like the reranker's graceful fallback. `fetchFn` is injectable so
-// the contract is testable offline without a live model.
+// outputs (`format` = the result JSON schema) so the reply parses cleanly, and with the
+// model's reasoning mode off (see `post`). Any transport failure, non-2xx, timeout, or
+// malformed body throws — the caller (daemon) then degrades to `suggest`, exactly like the
+// reranker's graceful fallback. `fetchFn` is injectable so the contract is testable offline
+// without a live model.
 // Fallbacks for a directly-constructed adapter (tests). Production values come from
 // ConsolidationConfig via createConsolidator.
 const DEFAULTS = {
@@ -49,6 +50,8 @@ export class HttpConsolidator implements ConsolidationProvider {
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly fetchFn: FetchFn;
+  // Flipped for the process once a backend rejects the field; see `chat`.
+  private thinkSupported = true;
 
   constructor(opts?: { url?: string; model?: string; timeoutMs?: number; fetchFn?: FetchFn }) {
     this.url = opts?.url ?? DEFAULTS.url;
@@ -84,21 +87,16 @@ export class HttpConsolidator implements ConsolidationProvider {
       controller.abort();
     }, this.timeoutMs);
     try {
-      const res = await this.fetchFn(this.url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          stream: false,
-          format,
-          options: { temperature: 0.2 },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        }),
-        signal: controller.signal,
-      });
+      let res = await this.post(system, user, format, controller.signal);
+
+      // A backend that has no reasoning mode rejects the field outright. Retrying once
+      // without it, and remembering that for the process, keeps this adapter working
+      // against any Ollama-compatible model instead of failing every call on one word.
+      if (!res.ok && this.thinkSupported && (await rejectsThinking(res))) {
+        this.thinkSupported = false;
+        res = await this.post(system, user, format, controller.signal);
+      }
+
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
 
@@ -127,4 +125,46 @@ export class HttpConsolidator implements ConsolidationProvider {
       clearTimeout(timer);
     }
   }
+
+  // ⚠️ `think: false` is a latency fix, not a preference. A reasoning model spends its
+  // decode budget on hidden thought that this adapter never reads: measured 2026-08-04 on
+  // a real 6k-char merge cluster, the same call takes 61.8 s with reasoning on and 24.9 s
+  // with it off, for the same 1.1 kB of parsed JSON. That 2.5x is what pushed calls past
+  // the old 60 s timeout and made proposals vanish mid-decode.
+  private post(
+    system: string,
+    user: string,
+    format: object,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    return this.fetchFn(this.url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: this.model,
+        stream: false,
+        format,
+        ...(this.thinkSupported ? { think: false } : {}),
+        options: { temperature: 0.2 },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+      signal,
+    });
+  }
+}
+
+// Ollama answers a `think` it cannot honour with a 400 naming the field. Read from a clone
+// so the caller can still consume the original body for its own error message.
+async function rejectsThinking(res: Response): Promise<boolean> {
+  if (res.status !== 400) return false;
+
+  const detail = await res
+    .clone()
+    .text()
+    .catch(() => "");
+
+  return /think/i.test(detail);
 }
