@@ -311,7 +311,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
-| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `60000` | Generation timeout for `http`/`command`. |
+| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
+| `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
 | `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |

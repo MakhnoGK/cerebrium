@@ -38,7 +38,7 @@ interface ChatResponse {
 const DEFAULTS = {
   url: "http://127.0.0.1:11434/api/chat",
   model: "gemma4:12b-it-qat",
-  timeoutMs: 60_000,
+  timeoutMs: 500_000,
 };
 
 export class HttpConsolidator implements ConsolidationProvider {

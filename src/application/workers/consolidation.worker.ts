@@ -14,6 +14,7 @@ import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
 import {
   ConsolidationBatchConfig,
+  ConsolidationConfig,
   ConsolidationPostureConfig,
   ConsolidationThresholdsConfig,
 } from "@/infrastructure/config";
@@ -43,7 +44,7 @@ export interface ConsolidationTickResult {
 @injectable()
 export class ConsolidationWorker {
   private readonly ownerId = newId();
-  private readonly leaseTtlMs: number;
+  private stopping = false;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -58,24 +59,26 @@ export class ConsolidationWorker {
 
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
 
+    private readonly config: ConsolidationConfig,
     private readonly posture: ConsolidationPostureConfig,
     private readonly thresholds: ConsolidationThresholdsConfig,
     private readonly batch: ConsolidationBatchConfig,
-  ) {
-    // TODO: Config service
-    this.leaseTtlMs = 60_000;
-  }
+  ) {}
 
   private now() {
     return this.clock.now();
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+
     await this.queueRepo.releaseWorkerLease(CONSOLIDATION_LEASE, this.ownerId);
   }
 
   // One consolidation pass. Side-effecting; tests call it directly with a fixed clock.
-  // Only the leaseholder does work — a non-holder returns zeros.
+  // Only the leaseholder does work — a non-holder returns zeros. The lease is re-checked
+  // between clusters, so losing it (or being stopped) ends the sweep where it stands and
+  // returns what was already done.
   async tick(): Promise<ConsolidationTickResult> {
     const now = this.now();
     const result: ConsolidationTickResult = {
@@ -93,14 +96,7 @@ export class ConsolidationWorker {
       annotated: 0,
     };
 
-    const isWorkerReleased = await this.queueRepo.holdWorkerLease(
-      CONSOLIDATION_LEASE,
-      this.ownerId,
-      this.leaseTtlMs,
-      this.now(),
-    );
-
-    if (!isWorkerReleased) {
+    if (!(await this.holdLease())) {
       return result;
     }
 
@@ -115,6 +111,24 @@ export class ConsolidationWorker {
     await this.annotate(now, result);
 
     return result;
+  }
+
+  // Claim or renew the lease, and report whether this worker may keep working. Called
+  // once at tick entry and again between clusters: a generation call runs for minutes,
+  // so a lease claimed only at entry would read as expired for most of a sweep — to the
+  // System tab, to a competing process, and to the one-writer invariant. `stop()` closes
+  // the gate first, so a released lease is never re-claimed by a tick already in flight.
+  private async holdLease(): Promise<boolean> {
+    if (this.stopping) {
+      return false;
+    }
+
+    return this.queueRepo.holdWorkerLease(
+      CONSOLIDATION_LEASE,
+      this.ownerId,
+      this.config.leaseTtlMs,
+      this.now(),
+    );
   }
 
   // Generate a judged proposal for a cluster; null if no provider or generation fails
@@ -231,6 +245,10 @@ export class ConsolidationWorker {
     });
 
     for (const cluster of clusters) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
         continue;
       }
@@ -312,6 +330,10 @@ export class ConsolidationWorker {
     });
 
     for (const pair of pairs) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
         continue;
       }
@@ -393,6 +415,10 @@ export class ConsolidationWorker {
     }
 
     for (const cand of this.consolidationRepo.pendingNeedingProposal(this.batch.backfill)) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       if (cand.kind !== ConsolidationKind.DISTILL && cand.kind !== ConsolidationKind.MERGE) {
         continue;
       }
@@ -467,6 +493,10 @@ export class ConsolidationWorker {
     }
 
     for (const node of this.consolidationRepo.unannotatedSemantic(this.batch.annotate)) {
+      if (!(await this.holdLease())) {
+        return;
+      }
+
       let a;
 
       try {
