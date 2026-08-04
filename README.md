@@ -142,7 +142,8 @@ unless `history:true`), then optionally expands the graph.
   normalized by degree so a hub can't swallow the diffusion. This is multi-hop by
   construction, and a node backed by several independent hits beats one backed by a
   single strong hit. Only nodes the query did *not* match directly are scored this way,
-  and a graph hit is capped at `0.3 ×` the top direct hit, so it never outranks it.
+  and a graph hit is capped at `MEMORY_GRAPH_BASE ×` the top direct hit (`0.3` by
+  default), so it never outranks it.
   `supersedes` is not traversable (a superseded node never surfaces), and neither is code
   structure (`calls`/`defines`/`imports`) — `documents` keeps the prose↔code join
   reachable. Ignored in `text` mode.
@@ -306,6 +307,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
 | `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
+| `MEMORY_GRAPH_BASE` | `0.3` | Ceiling a graph-surfaced hit may reach, as a fraction of the best direct hit. `0` still surfaces neighbours but never lifts one over a directly matched node. |
 | `MEMORY_PPR_FRONTIER` | `500` | Max nodes pulled into the local subgraph PPR runs over, nearest first. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
@@ -562,6 +564,7 @@ the only difference between arms is the knob.
 
 ```sh
 npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
+npm run eval:retrieval -- --arm shy:MEMORY_GRAPH_BASE=0.1 --arm bold:MEMORY_GRAPH_BASE=0.6
 ```
 
 `Facet@3` is deliberately read at a tighter cut than the relevance metrics: a diversity

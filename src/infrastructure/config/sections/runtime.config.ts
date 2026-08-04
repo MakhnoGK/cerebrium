@@ -30,10 +30,13 @@ export class RerankConfig extends SectionOf("rerank", {
 // `npm run calibrate:report` against a real store and read them off it. They are also
 // scale-specific — an embedding-model swap invalidates both. `mmrLambda` at 1.0 is pure
 // relevance, i.e. the diversity pass off; `useWeight` at 0 disables the usage prior, which
-// is the knob to turn down if retrieval starts feeling stuck on the same nodes.
+// is the knob to turn down if retrieval starts feeling stuck on the same nodes. `graphBase`
+// caps a graph-surfaced hit as a fraction of the best direct hit, so at 0 the graph stage
+// still surfaces neighbours but never lifts one over a directly matched node.
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
+  graphBase: num(0.3).range(0, 1).env("MEMORY_GRAPH_BASE"),
   mmrLambda: num(0.7).range(0, 1).env("MEMORY_MMR_LAMBDA"),
   useWeight: num(0.25).range(0, 1).env("MEMORY_USE_WEIGHT"),
   pprAlpha: num(0.5).range(0, 1).env("MEMORY_PPR_ALPHA"),

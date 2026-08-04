@@ -26,7 +26,6 @@ const USE_SATURATION = 20; // fetches at which the importance prior reaches its 
 // Hybrid retrieval constants.
 const RRF_K = 60; // RRF damping; 1/(60+rank)
 const FUSE_CAP = 40; // top-N from each branch fed into fusion
-const GRAPH_BASE = 0.3; // ceiling for a graph-surfaced hit, as a fraction of the top direct hit
 const PPR_DEPTH = 2; // hops of subgraph pulled around the query-matched nodes
 const PPR_ITERS = 20; // power-iteration ceiling; converges well before this at our scale
 const PPR_EPSILON = 1e-6; // L1 delta at which iteration stops early
@@ -428,7 +427,8 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     }
 
     // Rank mass is an arbitrary scale, so it is normalized within the surfaced set and spent
-    // against a fixed fraction of the best direct hit — a graph hit can never outrank it.
+    // against a fraction (`MEMORY_GRAPH_BASE`) of the best direct hit — a graph hit can never
+    // outrank it.
     const best = Math.max(...surfaced.map(([, r]) => r));
     const rows = new Map(
       this.searchRepo
@@ -448,7 +448,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       out.push({
         row,
-        score: GRAPH_BASE * topScore * (rank / best),
+        score: this.retrieval.graphBase * topScore * (rank / best),
         matched: "graph",
         via,
       });
