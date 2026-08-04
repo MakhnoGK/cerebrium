@@ -254,6 +254,32 @@ describe("HttpConsolidator (injected fetch)", () => {
     );
   });
 
+  it("should carry the response body in the error when the endpoint returns non-2xx", async () => {
+    // Given
+    const bad: FetchFn = () =>
+      Promise.resolve(new Response("model 'gemma4:12b-it-qat' not found", { status: 404 }));
+
+    // When / Then
+    await expect(new HttpConsolidator({ fetchFn: bad }).generate(TASK)).rejects.toThrow(
+      /HTTP 404: model 'gemma4:12b-it-qat' not found/,
+    );
+  });
+
+  it("should name the timeout rather than surface a bare abort when the request outlasts timeoutMs", async () => {
+    // Given — a backend that only ever settles when the caller gives up.
+    const hangs: FetchFn = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("This operation was aborted", "AbortError"));
+        });
+      });
+
+    // When / Then
+    await expect(
+      new HttpConsolidator({ fetchFn: hangs, timeoutMs: 5 }).generate(TASK),
+    ).rejects.toThrow(/timed out after 5ms \(MEMORY_CONSOLIDATE_TIMEOUT_MS\)/);
+  });
+
   it("should post the reconcile schema and parse the verdict when reconciling", async () => {
     // Given
     let captured: { body: Record<string, unknown> } | null = null;

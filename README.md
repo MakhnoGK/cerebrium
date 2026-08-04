@@ -543,6 +543,15 @@ self-contained local runtime (Ollama + a small model) for the `http` provider li
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
 
+When generation fails, the sweep degrades to a proposal-less suggestion rather than
+blocking or guessing — a weak or absent model must never author durable memory. That
+degradation is deliberately indistinguishable *in the store* from the `manual` posture,
+so the reason lives on the sweep instead: the tick counts `generation_failures` and keeps
+the last error text, and the daemon writes a line to stderr whenever a sweep loses one.
+Provider errors name the cause — the HTTP status with the response body, or the timeout
+and the variable that governs it — because the alternative signal, a candidate arriving
+for review with no proposal, looks exactly like a model with nothing to say.
+
 ## Evaluating a ranking change
 
 `npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It
