@@ -126,6 +126,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     // ---- candidate generation (branches independent; either may be empty) ----
     let ftsRows: SearchRow[] = [];
     let ftsTotal = 0;
+    let ftsChunks = new Map<string, { chunk_text: string; chunk_heading: string | null }>();
 
     if (mode !== "vector") {
       const r = this.searchRepo.search({
@@ -141,6 +142,10 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       ftsRows = r.rows.slice(0, FUSE_CAP);
       ftsTotal = r.total;
+      ftsChunks = this.searchRepo.bestFtsChunksFor(
+        ftsRows.map((r) => r.id),
+        match,
+      );
     }
 
     let vecRows: VectorRow[] = [];
@@ -182,6 +187,12 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       e.rrf += 1 / (RRF_K + i + 1);
       e.text = true;
+
+      const chunk = ftsChunks.get(row.id);
+      if (chunk && !e.best_chunk) {
+        e.best_chunk = chunk.chunk_text.slice(0, BEST_CHUNK_CHARS);
+        e.section = chunk.chunk_heading ?? undefined;
+      }
 
       fused.set(row.id, e);
     });
@@ -315,11 +326,30 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const now = Date.parse(this.clock.now());
     const best = Math.min(...rows.map((r) => r.bm25));
 
+    const ftsChunks = this.searchRepo.bestFtsChunksFor(
+      rows.map((r) => r.id),
+      match,
+    );
+
     const ranked = rows
       .map((row) => {
         const normalized = best < 0 ? row.bm25 / best : 1;
+        const chunk = ftsChunks.get(row.id);
+        const envelope: SearchResult = toEnvelope(row);
+        
+        if (chunk) {
+          envelope.best_chunk = chunk.chunk_text.slice(0, BEST_CHUNK_CHARS);
+          if (chunk.chunk_heading) {
+            envelope.section = chunk.chunk_heading;
+          }
+          if (summaryIsRedundant(envelope.summary ?? "", envelope.best_chunk)) {
+            delete envelope.summary;
+          }
+        }
+        
         return {
           row,
+          envelope,
           score:
             normalized *
             memoryFactor(row, now, history) *
@@ -334,7 +364,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           a.row.id.localeCompare(b.row.id),
       )
       .slice(0, args.limit)
-      .map(({ row }) => toEnvelope(row));
+      .map(({ envelope }) => envelope);
 
     const out: AuditedResponse = { results: ranked, total_matches: total };
 

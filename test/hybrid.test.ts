@@ -219,13 +219,13 @@ describe("Search mode variants", () => {
     expect(res.context_notes).toBeUndefined();
     const envRow = (res.results as unknown as Record<string, unknown>[])[0]!;
     expect(Object.keys(envRow).sort()).toEqual([
+      "best_chunk",
       "edges",
       "id",
       "invalidated",
       "kind",
       "project",
       "rev",
-      "summary",
       "title",
       "type",
       "updated",

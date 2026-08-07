@@ -72,6 +72,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5(
   node_id UNINDEXED, title, content, tokenize='porter unicode61'
 );
 
+-- Phase 4: Section-level FTS. Maintains an index over individual chunks to support
+-- section-level scoring and token-efficient snippet retrieval for text searches.
+CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
+  chunk_id UNINDEXED, node_id UNINDEXED, text, tokenize='porter unicode61'
+);
+
 -- Phase 2: retrieval. Chunk text + vectors for hybrid search. The vec0 virtual
 -- table requires the sqlite-vec extension to be loaded first (see db/database.ts).
 -- Embeddings are computed asynchronously by the in-process worker; a node is

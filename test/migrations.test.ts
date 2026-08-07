@@ -26,6 +26,7 @@ const MIGRATION_IDS = [
   "012_repoint_dangling_edges.cjs",
   "013_split_vector_pools.cjs",
   "014_purge_stale_chunk_vectors.cjs",
+  "015_chunk_fts.sql",
 ];
 
 const dirs: string[] = [];
