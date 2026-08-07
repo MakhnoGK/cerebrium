@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyHost, type Applied } from "@scripts/agent-apply";
 import {
   DEFAULT_ENV_KEYS,
   defaultEnv,
@@ -15,23 +16,26 @@ import {
   type SurfaceStatus,
 } from "@scripts/agent-hosts";
 
-// Reports what each agent host still needs to use Cerebrium as memory. Read-only —
-// see install/README.md for the procedure this checks against.
+// Reports — and with --apply, installs — what each agent host needs to use Cerebrium as
+// memory. See install/README.md for the procedure this checks against.
 
 const HELP = `
-agent-setup — report how far each agent host is from using Cerebrium as memory.
+agent-setup — report or install what each agent host needs to use Cerebrium as memory.
 
   npm run agent:setup -- [options]
 
-  --host H     Host to inspect: ${HOSTS.join(" | ")} | all (default all).
+  --host H     Host to act on: ${HOSTS.join(" | ")} | all (default all).
+  --apply      Write the missing surfaces. Without it, nothing is written.
+  --force      Move an existing skill *copy* aside (kept, never deleted) and link instead.
   --repo PATH  Working tree the hosts should point at (default: this checkout).
-  --home PATH  Home directory to inspect (default: $HOME). For testing a fake home.
+  --home PATH  Home directory to act on (default: $HOME). For testing a fake home.
   --json       Emit the plan as JSON instead of a table.
   --check      Exit non-zero if a detected host is missing anything.
   --help       This text.
 
-Nothing is written. Surfaces reported per host: mcp, skill, rules, hook — see
-install/hosts.md for where each one lives, and why all four are needed.
+Surfaces per host: mcp, skill, rules, hook — see install/hosts.md for where each one
+lives, and why all four are needed. --apply never touches the database, deletes nothing,
+and edits files you own only between the cerebrium:start/end markers.
 `;
 
 const GLYPH: Record<SurfaceStatus, string> = {
@@ -58,6 +62,15 @@ function hasCommand(cmd: string): boolean {
   } catch {
     return false;
   }
+}
+
+function run(cmd: string, args: string[]): void {
+  execFileSync(cmd, args, { stdio: "inherit" });
+}
+
+function outcomeGlyph(applied: Applied): string {
+  if (applied.outcome === "failed") return "✗";
+  return applied.outcome === "skipped" ? "→" : "✓";
 }
 
 function report(plans: HostPlan[], env: Record<string, string>, discovered: boolean): void {
@@ -107,7 +120,19 @@ function main(): void {
   const base: PlanInput = { home, repoRoot, env: {}, hasCommand };
   const discovered = discoverEnv(base);
   const env = discovered ?? defaultEnv(home, repoRoot);
-  const plans = planAll({ ...base, env }, hosts);
+  const input: PlanInput = { ...base, env };
+
+  if (flag("apply")) {
+    for (const host of hosts) {
+      const applied = applyHost(host, input, { force: flag("force"), run });
+      process.stdout.write(`\n${host}\n`);
+      if (applied.length === 0) process.stdout.write("  nothing to do\n");
+      for (const a of applied) process.stdout.write(`  ${outcomeGlyph(a)} ${a.detail}\n`);
+    }
+    process.stdout.write("\nRe-checking:\n");
+  }
+
+  const plans = planAll(input, hosts);
 
   if (flag("json")) {
     process.stdout.write(`${JSON.stringify({ repoRoot, home, env, plans }, null, 2)}\n`);
