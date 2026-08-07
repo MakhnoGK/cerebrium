@@ -237,17 +237,22 @@ claude mcp add cerebrium -s user \
 session `/mcp` lists its tools (`session_start`, `search`, `write`, …). The SQLite file
 and its `~/.cerebrium/models` cache are created on first use — no manual DB setup.
 
-**4 — (Recommended) Install the skill** so the agent knows *how* to use the memory
-(session lifecycle, search-before-write, retrieval economy), not just that the tools
-exist:
+**4 — Install the discipline, not just the tools.** An agent handed 17 tools and no
+doctrine calls `write` without searching and fills the store with duplicates. One command
+installs the skill, the always-on retrieval rules and a session-start hook for every agent
+host it finds — Claude Code, Codex CLI and Antigravity:
 
 ```bash
-cp -r skill/cerebrium ~/.claude/skills/cerebrium
+npm run agent:setup            # what each host is missing; writes nothing
+npm run agent:setup -- --apply # install it
 ```
 
-That's it — open Claude Code in any project and the agent can call `session_start`,
-`search`, `write`, `checkpoint`, and the rest. See [Tools](#tools) for the full surface
-and [Skill for consuming agents](#skill-for-consuming-agents) for the usage discipline.
+It links the skill into each host rather than copying it, so the doctrine can never fall
+behind this working tree. See [Agent hosts](#agent-hosts) for what it writes where.
+
+That's it — open your agent in any project and it can call `session_start`, `search`,
+`write`, `checkpoint`, and the rest. See [Tools](#tools) for the full surface and
+[Skill for consuming agents](#skill-for-consuming-agents) for the usage discipline.
 
 **One-time model download.** The default `local` embedding provider runs
 [transformers.js](https://github.com/huggingface/transformers.js) in-process and
@@ -409,12 +414,13 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 
 | Command | What it does |
 |---------|--------------|
-| `cerebrium` | The MCP server (stdio). Registered in Claude Code. |
+| `cerebrium` | The MCP server (stdio). Registered in each agent host — see *Agent hosts*. |
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
 | `npm run gold:generate` | Writes labelled queries for the eval by asking the local model what each section of the store answers. Read-only on the store, resumable, appends to a gold JSONL that lives outside the repo. See *The gold file*. |
+| `npm run agent:setup` | Reports what each agent host still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it by booting the server and calling `session_start`. Read-only without `--apply`, and it never touches the store. See *Agent hosts*. |
 | `npm run gold:adjudicate` | Labels real logged queries by judging pooled candidates one by one, giving the multi-label gold a generated question cannot. Read-only, resumable, same gold JSONL. See *The gold file*. |
 
 ## Code indexing
@@ -744,14 +750,51 @@ rather than pretending to reproduce it.
 
 ## Skill for consuming agents
 
-`skill/cerebrium/SKILL.md` teaches a consuming agent (e.g. Claude Code) the
-usage *discipline* — session lifecycle, search-before-write, retrieval economy,
-episodic-vs-semantic — not the API. Install it by copying the folder into a skills
-directory the agent loads:
+`skill/cerebrium/SKILL.md` teaches a consuming agent the usage *discipline* — session
+lifecycle, search-before-write, retrieval economy, episodic-vs-semantic — not the API.
+`skill/cerebrium-setup/SKILL.md` is the other half: it teaches an agent to install
+Cerebrium into whatever host it is running in.
+
+Install both with `npm run agent:setup -- --apply`, or by hand:
 
 ```bash
-cp -r skill/cerebrium ~/.claude/skills/cerebrium
+ln -s "$PWD/skill/cerebrium" ~/.claude/skills/cerebrium   # or ~/.codex/skills/…
 ```
+
+**Link, never copy.** A copy stops tracking the repository the moment it is made, and
+that is not hypothetical: the installed copy once sat four tools behind for three weeks,
+so an agent reading it did not know external mirrors existed. The tradeoff is that a
+symlink follows the *working tree* — whatever branch is checked out is what every host
+reads, so switch back to the main line before relying on it.
+
+## Agent hosts
+
+Cerebrium is a stdio MCP server, so any MCP-capable host can call its tools. What does not
+travel with the transport is the discipline that makes it useful, so setup installs four
+surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, and a
+**session-start hook**.
+
+| Host | MCP | Skill | Rules | Hook |
+|------|-----|-------|-------|------|
+| Claude Code | `claude mcp add -s user` | symlink in `~/.claude/skills/` | block in `~/.claude/CLAUDE.md` | `SessionStart` in `~/.claude/settings.json` |
+| Codex CLI | `codex mcp add` | symlink in `~/.codex/skills/` | block in `~/.codex/AGENTS.md` | `SessionStart` in `~/.codex/hooks.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | block in each project's `AGENTS.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
+
+The rules block is written between `cerebrium:start`/`cerebrium:end` markers and replaced
+in place on later runs, so the rest of a file you maintain is never touched. Two steps are
+deliberately left to you and named in the report: Codex's `hooks = true` under `[features]`
+(appending a second `[features]` table would corrupt the TOML) and its hook trust prompt,
+which is a security gate and not ours to pre-approve.
+
+`npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
+server over stdio against a throwaway store, calls `session_start`, counts the tools and
+runs the hook script. `install/README.md` has the per-host procedure by hand, and
+`install/hosts.md` records what was verified on which host version.
+
+**More than one host at once** means more than one server process on one SQLite file. That
+is allowed — see invariant #1 in `CLAUDE.md` — and measured: two servers doing 120
+interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
+landed and searchable.
 
 ## Backup (Litestream)
 
