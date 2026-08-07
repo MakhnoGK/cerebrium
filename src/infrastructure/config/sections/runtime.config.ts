@@ -17,13 +17,6 @@ export class EmbeddingConfig extends SectionOf("embedding", {
   batchSize: int(64).positive().env("MEMORY_EMBED_BATCH"),
 }) {}
 
-@configSection()
-export class RerankConfig extends SectionOf("rerank", {
-  provider: str("off").env("MEMORY_RERANK"),
-  model: str("Xenova/ms-marco-MiniLM-L-6-v2").env("MEMORY_RERANK_MODEL"),
-  cacheDir: str(home("models")).env("MEMORY_MODEL_CACHE"),
-}) {}
-
 // Ranking and write-path policy. These are the knobs that shape what the agent gets back,
 // so they are tuned per deployment rather than baked into the retrieval code.
 // `dedupThreshold` and `lexicalDedupThreshold` are calibrated, not chosen: run

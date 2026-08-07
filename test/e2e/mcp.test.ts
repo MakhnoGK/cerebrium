@@ -612,7 +612,7 @@ describe("checkpoint tool", () => {
 });
 
 describe("stats tool", () => {
-  it("should report queue, content, drain, and rerank sections when called", async () => {
+  it("should report queue, content, and drain sections when called", async () => {
     const client = await connect();
     const sid = await startSession(client);
     await writeFact(client, sid, "x", "a durable fact with a body of words");
@@ -627,7 +627,7 @@ describe("stats tool", () => {
     expect(res.content.nodes_total).toBe(1);
     expect(res.drain.provider).toBe("local-null@1");
     expect(res.drain).toHaveProperty("daemon_alive");
-    expect(res.rerank).toHaveProperty("enabled");
+
   });
 
   it("should work without a session_id when peeked read-only", async () => {

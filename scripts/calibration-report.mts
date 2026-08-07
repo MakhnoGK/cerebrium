@@ -105,9 +105,7 @@ interface LinkRow {
 
 function main(): Promise<void> {
   if (process.argv.includes("--help")) {
-    process.stdout.write(
-      "usage: npm run calibrate:report -- [--json] [--all-scorers] [--cross-encoder]\n",
-    );
+    process.stdout.write("usage: npm run calibrate:report -- [--json] [--all-scorers]\n");
     return Promise.resolve();
   }
 
@@ -120,7 +118,6 @@ function main(): Promise<void> {
 
   const asJson = process.argv.includes("--json");
   const allScorers = process.argv.includes("--all-scorers");
-  const withCrossEncoder = process.argv.includes("--cross-encoder");
 
   return report({
     db,
@@ -133,7 +130,6 @@ function main(): Promise<void> {
     },
     asJson,
     allScorers,
-    withCrossEncoder,
   });
 }
 
@@ -144,12 +140,11 @@ async function report(opts: {
   live: { dedupThreshold: number; sim: number; mergeSim: number };
   asJson: boolean;
   allScorers: boolean;
-  withCrossEncoder: boolean;
 }): Promise<void> {
   const { db, live } = opts;
   const vectors = loadSemanticVectors(db);
   const pairs = loadLabelledPairs(db, vectors);
-  const scorers = await buildScorers(db, vectors, pairs, opts.allScorers, opts.withCrossEncoder);
+  const scorers = await buildScorers(db, vectors, pairs, opts.allScorers);
 
   const stats = scorers.map(({ name, scored }) => scorerStats(name, scored));
   const sweep = thresholdSweep(pairs, MERGE_SWEEP);
@@ -352,7 +347,6 @@ async function buildScorers(
   vectors: Map<string, NodeVectors>,
   pairs: Pair[],
   allScorers: boolean,
-  withCrossEncoder: boolean,
 ): Promise<{ name: string; scored: Scored[] }[]> {
   const of = (name: string, score: (p: Pair) => number) => ({
     name,
@@ -382,10 +376,6 @@ async function buildScorers(
       of("title jaccard (REJECTED)", (p) => jaccard(titles.get(p.a), titles.get(p.b))),
       of("content jaccard (REJECTED)", (p) => jaccard(tokens.get(p.a), tokens.get(p.b))),
     );
-  }
-
-  if (withCrossEncoder) {
-    out.push({ name: "cross-encoder (REJECTED)", scored: await crossEncoderScores(db, pairs) });
   }
 
   return out;
@@ -495,24 +485,6 @@ function loadText(db: Database.Database): Map<string, { title: string; content: 
     )
     .all() as { id: string; title: string; content: string }[];
   return new Map(rows.map((r) => [r.id, { title: r.title, content: r.content }]));
-}
-
-async function crossEncoderScores(db: Database.Database, pairs: Pair[]): Promise<Scored[]> {
-  const { LocalReranker } = await import("@/rerank/local");
-  const reranker = new LocalReranker();
-  const text = loadText(db);
-  const doc = (id: string) => {
-    const t = text.get(id);
-    return t ? `${t.title}\n${t.content}`.slice(0, 400) : "";
-  };
-
-  const out: Scored[] = [];
-  for (const p of pairs) {
-    const [ab] = await reranker.rerank(doc(p.a), [doc(p.b)]);
-    const [ba] = await reranker.rerank(doc(p.b), [doc(p.a)]);
-    out.push({ positive: p.positive, value: ((ab ?? 0) + (ba ?? 0)) / 2 });
-  }
-  return out;
 }
 
 // ---- metrics ----------------------------------------------------------------

@@ -3,7 +3,6 @@ import { CLOCK_TOKEN } from "@/domain/ports/clock";
 import { CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
-import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
@@ -12,13 +11,11 @@ import {
   DatabaseConfig,
   EmbeddingConfig,
   EnvConfigSource,
-  RerankConfig,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
 import { SystemClock } from "@/runtime/system-clock";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
-import { createReranker } from "@/rerank";
 
 // Which process is being wired. A role selects *hosted behaviour* — whether this
 // process drains the queue in large batches, whether it may write at all — never which
@@ -44,7 +41,6 @@ export const KERNEL_TOKENS = {
   clock: CLOCK_TOKEN,
   workerOptions: WORKER_OPTIONS_TOKEN,
   embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
-  rerankProvider: RERANK_PROVIDER_TOKEN,
   consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
 } as const;
 
@@ -89,14 +85,6 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
       const config = c.resolve(EmbeddingConfig);
 
       return createProvider(config.provider, config.model, config.cacheDir);
-    }),
-  });
-
-  target.register(RERANK_PROVIDER_TOKEN, {
-    useFactory: instanceCachingFactory((c) => {
-      const config = c.resolve(RerankConfig);
-
-      return createReranker(config.provider, config.model, config.cacheDir);
     }),
   });
 
