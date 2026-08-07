@@ -139,6 +139,13 @@ install returns a `session_id` and a working set; a broken one returns a transpo
 ## Running more than one host
 
 Each host spawns its own server process, so two hosts open at once means two writers against
-one SQLite file. Read invariant #1 in [CLAUDE.md](../CLAUDE.md) before doing that — the store
-is built around a single-writer discipline, and what concurrent hosts are allowed to do is
-stated there rather than left to chance.
+one SQLite file. That is allowed, and it was measured rather than assumed: two servers doing
+120 interleaved writes and searches against one store finished in 246 ms with zero errors
+(p95 7 ms), and every node landed and was searchable. WAL, a 15 s busy timeout and the retry
+helper serialize them; the `worker_lease` still elects a single owner for the background
+roles. Invariant #1 in [CLAUDE.md](../CLAUDE.md) states the amendment and its limits.
+
+One thing that measurement did find: two processes opening a **brand new, unmigrated** store
+at the same instant used to race, and the loser died on the migration ledger's primary key.
+Fixed — the ledger is now read inside the write transaction — but it is why the store should
+be created once, by whichever host you set up first, before you open a second.

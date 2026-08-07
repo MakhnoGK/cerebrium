@@ -105,6 +105,23 @@ describe("Migrations as single source of truth", () => {
     db.close();
   });
 
+  it("should re-apply a migration without error when its ledger row is missing", () => {
+    // Given — what the loser of a cold-start race sees: work already done, ledger says no.
+    const path = tmpDbPath();
+    const first = openDatabase(path);
+    first.prepare("DELETE FROM schema_migrations WHERE id = ?").run(MIGRATION_IDS[0]!);
+    first.close();
+
+    // When / Then
+    const second = openDatabase(path);
+    expect(
+      (
+        second.prepare("SELECT id FROM schema_migrations ORDER BY id").all() as { id: string }[]
+      ).map((r) => r.id),
+    ).toEqual(MIGRATION_IDS);
+    second.close();
+  });
+
   it("should stay byte-equivalent to what migrations build when schema.sql is compared (drift guard)", () => {
     // Given / When
     const fromMigrations = openDatabase(":memory:");
