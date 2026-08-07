@@ -49,14 +49,14 @@ The design contracts are documented in `README.md` (concepts, tools, ranking mod
 - `npm test` / `npm run test:watch` — full suite (Vitest) / watch mode.
 - `npm run typecheck` — `tsc --noEmit`. One root `tsconfig.json` covers `src` + `test` + `scripts`, so every tool and every IDE resolves `@/*` identically and tests are genuinely type-checked. `npm run lint` / `lint:fix` — ESLint. `npm run format` / `format:check` — Prettier (imports are auto-sorted into layer groups by `@ianvs/prettier-plugin-sort-imports`).
 - `npm run build` — tsup (esbuild) bundle of the three bins to `dist/` + copy migrations (`scripts/copy-assets.mjs`).
-- ⚠️ **`npm run check` ends with `npm run build`, but a green build is NOT a working bundle.** esbuild catches a class of import error that `tsc` cannot (see the type-vs-value note above), and a broken bundle has landed unnoticed three times — but the DI half is invisible to both. Nothing in `check` smoke-tests the bundle, so after any change that moves files, rewrites imports, or adds a constructor-injected class, run it by hand over stdio:
+- ⚠️ **A green build is NOT a working bundle.** esbuild catches a class of import error that `tsc` cannot (see the type-vs-value note above), and a broken bundle has landed unnoticed three times — but the DI half is invisible to both. `npm run check` now ends with `npm run smoke:bundle`, which boots `dist/server.js` over stdio against a throwaway store and calls `session_start` for real: a `tools/call` exercises tsyringe constructor injection end to end, where `tools/list` alone does not (but should report **17** tools). The equivalent by hand, when you want to watch it:
   ```sh
   printf '%s\n%s\n' \
    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"s","version":"1"}}}' \
    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"session_start","arguments":{}}}' \
    | MEMORY_DB_PATH=.tmp/smoke.db MEMORY_EMBED_PROVIDER=local-null node dist/server.js
   ```
-  A real `tools/call` exercises tsyringe constructor injection end to end; `tools/list` alone does not (but should report **17** tools).
+- `npm run agent:setup` — report what each agent host (Claude Code, Codex, Antigravity) still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it. Read-only without `--apply`, and it never touches the store. The doctrine it installs lives in `install/`; see `install/hosts.md` for the per-host surfaces.
 - `npm run dev` — run the server on stdio against a throwaway DB (`MEMORY_DB_PATH=.tmp/dev.db`).
 - `npm run inspect` — MCP inspector session against the dev DB (verify tool schemas render correctly).
 

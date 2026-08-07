@@ -15,6 +15,7 @@ import {
   type PlanInput,
   type SurfaceStatus,
 } from "@scripts/agent-hosts";
+import { verify } from "@scripts/agent-verify";
 
 // Reports — and with --apply, installs — what each agent host needs to use Cerebrium as
 // memory. See install/README.md for the procedure this checks against.
@@ -29,8 +30,11 @@ agent-setup — report or install what each agent host needs to use Cerebrium as
   --force      Move an existing skill *copy* aside (kept, never deleted) and link instead.
   --repo PATH  Working tree the hosts should point at (default: this checkout).
   --home PATH  Home directory to act on (default: $HOME). For testing a fake home.
+  --verify     Prove it works: boot the bundle, call session_start against a throwaway
+               store, and run the hook script. Never touches the real memory. Exits
+               non-zero if any of that fails.
   --json       Emit the plan as JSON instead of a table.
-  --check      Exit non-zero if a detected host is missing anything.
+  --check      Exit non-zero if a detected host is missing a surface.
   --help       This text.
 
 Surfaces per host: mcp, skill, rules, hook — see install/hosts.md for where each one
@@ -98,7 +102,7 @@ function report(plans: HostPlan[], env: Record<string, string>, discovered: bool
   );
 }
 
-function main(): void {
+async function main(): Promise<void> {
   if (flag("help")) {
     process.stdout.write(HELP);
     return;
@@ -140,9 +144,17 @@ function main(): void {
     report(plans, env, discovered !== null);
   }
 
+  if (flag("verify")) {
+    process.stdout.write("\nVerification:\n");
+    for (const result of await verify(input, hosts)) {
+      if (!result.ok) process.exitCode = 1;
+      process.stdout.write(`  ${result.ok ? "✓" : "✗"} ${result.name}: ${result.detail}\n`);
+    }
+  }
+
   if (flag("check") && plans.some((p) => p.detected && pending(p).length > 0)) {
     process.exitCode = 1;
   }
 }
 
-main();
+await main();

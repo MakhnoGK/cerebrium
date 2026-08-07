@@ -27,24 +27,21 @@ duplicates. The wiring is the easy half; the doctrine is the point.
 
 ## Procedure
 
-1. **Identify the host you are running in.** Claude Code, Codex CLI and Antigravity each keep
-   these four surfaces in different places. Do not guess a path — read
-   [hosts.md](../../install/hosts.md), which records what was verified per host, and use the
-   exact locations there. If you are in a host that file does not cover, say so and stop
-   rather than inventing a layout.
-2. **Follow [install/README.md](../../install/README.md)** for that host. It has the commands
-   and the reference environment.
-3. **Never copy the skill.** Symlink it, or declare its path, exactly as `hosts.md` says. A
-   copy silently falls behind the repo — that has already happened once, for three weeks.
-4. **Edit files you do not own only between the markers.** `install/always-on.md` ships with
-   `cerebrium:start` / `cerebrium:end` markers. Insert the file verbatim; on a repeat run,
-   replace what is between the markers and leave every other line of that file untouched.
-   These are the user's hand-maintained instruction files.
-5. **Reuse an existing registration's environment** if any host is already wired up. One store
-   per machine — a second `MEMORY_DB_PATH` means a second memory, which defeats the point.
-6. **Verify by calling, not by reading config.** Start a session on the host and call
-   `session_start`. A `session_id` and a working set means it works; anything else means it
-   does not, whatever the config file says.
+1. **Identify the host you are running in**, and build the bundle the hosts will launch:
+   `npm install && npm run build`.
+2. **Report first, then apply.** `npm run agent:setup` writes nothing and tells you exactly
+   which of the four surfaces each host is missing. Then `npm run agent:setup -- --apply`
+   (add `--host <id>` to limit it, `--force` only if it reports a skill *copy* in the way).
+3. **Do by hand only what the report says it cannot do**, following
+   [install/README.md](../../install/README.md): Codex's `hooks = true` under `[features]`,
+   and Antigravity's per-project rules block. Both are explained in the report itself.
+4. **Verify by calling, not by reading config.** `npm run agent:setup -- --verify` boots the
+   server and calls `session_start` against a throwaway store. Then start a session on the
+   host itself and call `session_start` there — that is the only thing that proves the host's
+   own wiring, and it takes ten seconds.
+5. **If you are in a host none of this covers**, say so and stop rather than inventing a
+   layout. [hosts.md](../../install/hosts.md) records what was actually verified per host;
+   adding a host means verifying its four surfaces and writing them down there.
 
 ## Boundaries
 
@@ -53,6 +50,10 @@ duplicates. The wiring is the easy half; the doctrine is the point.
   Writing that entry yourself bypasses a security gate.
 - **Never touch the database.** Setup is config files and symlinks. The store is written only
   through the MCP server.
+- **Never copy the skill.** Symlink it, or declare its path — the installer does this for you.
+  A copy silently falls behind the repo; that has already happened once, for three weeks.
+- **Never rewrite a file the user maintains.** The always-on rules go between the
+  `cerebrium:start`/`cerebrium:end` markers and nowhere else.
 - **Report what you could not verify.** An artifact written for a host that is not installed on
   this machine is a plausible guess, not a working install — say which is which.
 

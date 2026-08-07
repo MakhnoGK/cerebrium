@@ -23,6 +23,25 @@ Two files are the source, and both live here:
   It carries its own `cerebrium:start` / `cerebrium:end` markers, so it can be pasted verbatim
   into a file you do not own and replaced in place later.
 
+## The short way
+
+```bash
+npm install && npm run build
+npm run agent:setup                 # what each host still needs — writes nothing
+npm run agent:setup -- --apply      # install it
+npm run agent:setup -- --verify     # prove it: boots the server, calls session_start
+```
+
+`--apply` writes only the surfaces the report showed as missing, re-running is a no-op,
+and files you own are edited only between the `cerebrium:start`/`cerebrium:end` markers.
+Add `--host codex` to work on one host, and `--force` to move an existing skill *copy*
+aside (kept, never deleted) so it can be replaced by a link.
+
+Two things it deliberately leaves to you, both explained in its own output: Codex's
+`hooks = true` under `[features]` (appending a second `[features]` table would corrupt
+the TOML) and Antigravity's per-project rules block. The rest of this file is the same
+procedure by hand, and the reference for what the script is doing.
+
 ## 0 — Prerequisites
 
 ```bash
@@ -108,9 +127,14 @@ it to "use the cerebrium skill" loads `SKILL.md` from the working tree.
 
 ## 4 — Confirm it actually works
 
-Registration is not proof. In a fresh session on the host, ask the agent to call
-`session_start` and report what came back. A working install returns a `session_id` and a
-working set; a broken one returns a transport error, and the difference is worth ten seconds.
+Registration is not proof. `npm run agent:setup -- --verify` boots the built server over
+stdio against a throwaway store, calls `session_start`, counts the tools it exposes, and
+runs the hook script — the real memory is never opened, and it exits non-zero if any of
+that fails.
+
+That covers the server. The host's own wiring is worth ten more seconds: in a fresh
+session, ask the agent to call `session_start` and report what came back. A working
+install returns a `session_id` and a working set; a broken one returns a transport error.
 
 ## Running more than one host
 
