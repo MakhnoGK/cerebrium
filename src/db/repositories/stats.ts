@@ -115,7 +115,9 @@ export class StatsRepo extends BaseRepo {
         chunks_active,
         chunks_stale,
         chunks_embedded,
-        chunks_unembedded: Math.max(0, chunks_active - chunks_embedded),
+        chunks_unembedded: one<{ c: number }>(
+          "SELECT COUNT(*) AS c FROM chunks c WHERE c.stale = 0 AND NOT EXISTS (SELECT 1 FROM embedding_meta m WHERE m.chunk_id = c.id)",
+        ).c,
         vectors_authored,
         vectors_code,
         sessions,
