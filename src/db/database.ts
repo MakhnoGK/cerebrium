@@ -52,12 +52,6 @@ function runMigrations(db: Database.Database): void {
   db.exec(
     "CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
   );
-  const applied = new Set<string>(
-    db
-      .prepare("SELECT id FROM schema_migrations")
-      .all()
-      .map((r) => (r as { id: string }).id),
-  );
   // `.cjs` migrations exist for data transforms SQLite can't express (e.g. a hash
   // recompute); they export `up(db)` and are require()d synchronously so this stays
   // sync. They sort in with `.sql` by their numeric filename prefix.
@@ -65,15 +59,26 @@ function runMigrations(db: Database.Database): void {
     .filter((f) => f.endsWith(".sql") || f.endsWith(".cjs"))
     .sort();
   const record = db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)");
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    db.transaction(() => {
+
+  // The ledger is read INSIDE the write transaction: two processes opening the same
+  // fresh store otherwise both read an empty ledger and the loser dies on the
+  // schema_migrations primary key. BEGIN IMMEDIATE makes the second one wait
+  // (busy_timeout) and then find the work already done.
+  db.transaction(() => {
+    const applied = new Set<string>(
+      db
+        .prepare("SELECT id FROM schema_migrations")
+        .all()
+        .map((r) => (r as { id: string }).id),
+    );
+    for (const file of files) {
+      if (applied.has(file)) continue;
       if (file.endsWith(".cjs")) {
         (requireCjs(join(dir, file)) as { up: (db: Database.Database) => void }).up(db);
       } else {
         db.exec(readFileSync(join(dir, file), "utf8"));
       }
       record.run(file, nowIso());
-    })();
-  }
+    }
+  }).immediate();
 }

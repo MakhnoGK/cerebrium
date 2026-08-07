@@ -109,7 +109,7 @@ BAD:  cram both into one node titled "auth stuff".
 
 ## Code
 
-The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP) into `symbol` mirror
+The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP/Rust) into `symbol` mirror
 nodes (functions, methods, classes, interfaces, types, enums, traits, consts,
 modules) with code edges (`defines`/`imports`/`calls`). Symbols are **mirrors**: derived from source, not
 authored — never `write`/`update` them by hand (both are rejected). They are
@@ -185,6 +185,9 @@ BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieva
 | `source_register` | Register/update an external mirror source (per-deployment; no creds). |
 | `mirror_upsert` | Upsert curated external records into mirror nodes. Idempotent, not bulk. |
 | `mirror_status` | List registered sources + freshness (last sync, stale, node count). |
+| `consolidate_suggest` | Review what the background sweep queued: distill/merge/link/prune candidates. |
+| `consolidate_apply` | Resolve a candidate — `apply` or `reject`. Destructive applies on index nodes deserve care; `restore` exists because one already ate a hand-maintained index. |
+| `stats` | Operational snapshot: embedding queue, content totals, storage, daemon health, graph integrity. No content. |
 
 ## Notes worth reading
 
