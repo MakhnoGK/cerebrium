@@ -8,7 +8,6 @@ import {
   type ConsolidationProvider,
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
-import { RERANK_PROVIDER_TOKEN, RerankProvider } from "@/domain/ports/rerank-provider";
 import { EventLogService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
@@ -30,7 +29,6 @@ import { AuditedTool } from "@/presentation/mcp/adapters";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { createConsolidator } from "@/consolidation";
-import { createReranker } from "@/rerank";
 
 export interface TestClock extends Clock {
   t: string;
@@ -58,7 +56,6 @@ export interface TestEnv {
   clock: TestClock;
   worker: EmbeddingWorker;
   provider: EmbeddingProvider;
-  reranker: RerankProvider;
   consolidator: ConsolidationProvider;
   // Per-aggregate repositories (the composition root was removed).
   nodes: NodesRepo;
@@ -76,26 +73,22 @@ export interface TestEnv {
 export function setup(opts?: {
   start?: string;
   provider?: EmbeddingProvider;
-  reranker?: RerankProvider;
   consolidator?: ConsolidationProvider;
 }): TestEnv {
   const db = openDatabase(":memory:");
   const clock = makeClock(opts?.start ?? "2026-01-01T00:00:00.000Z");
   const provider = opts?.provider ?? new LocalNullProvider();
-  const reranker = opts?.reranker ?? createReranker("off");
   const consolidator = opts?.consolidator ?? createConsolidator("manual");
 
   container.register(DB_TOKEN, { useValue: db });
   container.register(CLOCK_TOKEN, { useValue: clock });
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
-  container.register(RERANK_PROVIDER_TOKEN, { useValue: reranker });
   container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: consolidator });
 
   return {
     db,
     clock,
     provider,
-    reranker,
     consolidator,
     worker: container.resolve(EmbeddingWorker),
     nodes: container.resolve(NodesRepo),

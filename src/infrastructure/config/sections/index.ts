@@ -15,6 +15,5 @@ export {
   DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
-  RerankConfig,
   RetrievalConfig,
 } from "@/infrastructure/config/sections/runtime.config";
