@@ -627,7 +627,6 @@ describe("stats tool", () => {
     expect(res.content.nodes_total).toBe(1);
     expect(res.drain.provider).toBe("local-null@1");
     expect(res.drain).toHaveProperty("daemon_alive");
-
   });
 
   it("should work without a session_id when peeked read-only", async () => {
