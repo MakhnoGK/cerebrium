@@ -50,6 +50,7 @@ function write(title: string, content: string): Promise<WriteResult> {
     .then(({ session_id }) =>
       container.resolve(WriteTool).invoke({
         session_id,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title,

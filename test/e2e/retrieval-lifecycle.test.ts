@@ -35,6 +35,7 @@ describe("Retrieval lifecycle end-to-end", () => {
     // 1) write a fact -> immediately findable via FTS while pending_embedding = 1
     const fact = (await write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
@@ -96,6 +97,7 @@ describe("Retrieval lifecycle end-to-end", () => {
     // 3) write a near-duplicate -> similar_existing returned
     const dup = (await write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",

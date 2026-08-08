@@ -1,7 +1,8 @@
 import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { NodesRepo } from "@/db/repositories";
-import { MemoryKind, NODE_TYPES, typeAllowedForKind, type EdgeType } from "@/core/vocab";
+import { EdgeType, MemoryKind, NODE_TYPES, typeAllowedForKind } from "@/core/vocab";
 
 const MAX_CONTENT = 50_000;
 
@@ -9,6 +10,7 @@ const MAX_CONTENT = 50_000;
 export class NodeService {
   constructor(
     private readonly nodesRepo: NodesRepo,
+    private readonly references: NodeReferenceService,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
@@ -22,6 +24,7 @@ export class NodeService {
     session_id,
     event_from,
     event_to,
+    parent_node_id,
   }: object & {
     title: string;
     content: string;
@@ -30,6 +33,7 @@ export class NodeService {
     project: string | null;
     session_id: string;
     links: { dst: string; type: EdgeType }[] | undefined;
+    parent_node_id: string | null;
     event_from?: string;
     event_to?: string;
   }) {
@@ -52,12 +56,22 @@ export class NodeService {
       );
     }
 
-    for (const link of links ?? []) {
-      if (!(await this.nodesRepo.exists(link.dst))) {
-        throw new Error(
-          `Link destination '${link.dst}' does not exist. Create it first or fix the id.`,
-        );
+    const resolvedLinks = [...(links ?? [])];
+
+    if (parent_node_id !== null) {
+      this.references.requireLive(parent_node_id, "parent node");
+
+      if (
+        !resolvedLinks.some(
+          (link) => link.dst === parent_node_id && link.type === EdgeType.RELATES_TO,
+        )
+      ) {
+        resolvedLinks.push({ dst: parent_node_id, type: EdgeType.RELATES_TO });
       }
+    }
+
+    for (const link of resolvedLinks) {
+      this.references.requireLive(link.dst, "link destination");
     }
 
     return this.nodesRepo.createNode({
@@ -70,7 +84,7 @@ export class NodeService {
       event_from,
       event_to,
       ts: this.clock.now(),
-      links,
+      links: resolvedLinks,
     });
   }
 }

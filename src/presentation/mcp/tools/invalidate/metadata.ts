@@ -11,14 +11,12 @@ export const metadata = {
 
   schema: {
     session_id: sessionIdSchema,
-    id: nodeIdSchema.describe(
-      "Exact id of the node to invalidate, copied from a Cerebrium result.",
-    ),
+    id: nodeIdSchema,
     reason: z.string().min(1).describe("Why it's no longer valid — recorded in the activity log."),
     superseded_by: nodeIdSchema
       .optional()
       .describe(
-        "Id of the node that replaces this one; creates a 'supersedes' edge from the new node to this one.",
+        "Exact live replacement node id copied from a Cerebrium result; never invent, guess, or transform it. Creates a 'supersedes' edge from the new node to this one.",
       ),
   },
 };

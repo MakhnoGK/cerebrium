@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {

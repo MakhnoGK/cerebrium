@@ -16,9 +16,10 @@ know this?". Anything durable you then learn from code, an issue tracker, or the
 
 ## Session lifecycle
 
-- **`session_start` first**, before any other memory tool. It returns a `session_id` (pass it
-  to every subsequent call) and a budgeted working set — recent facts, the last checkpoints
-  with content, open tasks, stats. Read it to orient.
+- **`session_start` first**, before any other memory tool. It is the sole source of agent
+  session ids. Copy the returned `session_id` verbatim into every subsequent call; never
+  invent, guess, transform, or reuse one from another task. If it is unavailable, call
+  `session_start` again. Read its budgeted working set to orient.
 - **`checkpoint` before ending a substantial work block**: summary, decisions with reasons,
   open threads, touched node ids — so the next session resumes cleanly.
 
@@ -32,7 +33,9 @@ know this?". Anything durable you then learn from code, an issue tracker, or the
   returns just the ones you name.
 - **`write`** — create a node: `semantic` for durable facts/decisions/entities/howtos/tasks,
   `episodic` for a record of what happened. One fact per node. A `similar_existing` hint means
-  STOP and prefer `update` or `invalidate`+`supersedes` over a near-duplicate.
+  STOP and prefer `update` or `invalidate`+`supersedes` over a near-duplicate. Always pass
+  `parent_node_id`: copy an exact live node id to create `relates_to`, or pass `null` for an
+  intentionally isolated node. Never infer or invent it.
 - **`update`** / **`invalidate`** / **`restore`** — revise a semantic node (episodic is
   write-once); soft-delete, passing `superseded_by` when a newer node replaces it; undo a
   wrong retirement with id, history and edges intact.
@@ -45,6 +48,10 @@ know this?". Anything durable you then learn from code, an issue tracker, or the
   fetch with the source's own tools, then upsert. Curate; never bulk-dump.
 - **`consolidate_suggest`** / **`consolidate_apply`** — review and resolve what the background
   sweep queued. **`stats`** — operational snapshot, no content.
+
+Every session/node/candidate id is opaque. Copy it exactly from the tool that returned it;
+never synthesize one. References to invalidated nodes are rejected, with the terminal live
+successor named when there is exactly one; retry with that returned id only after checking it.
 
 ## Code is a mirror, not authored knowledge
 

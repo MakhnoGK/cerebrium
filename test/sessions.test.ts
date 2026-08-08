@@ -42,9 +42,9 @@ describe("SessionService", () => {
     const env = setup();
     const service = container.resolve(SessionService);
 
-    expect(() => service.requireSession(UNKNOWN, env.clock.now())).toThrow(
-      `Unknown session_id ${UNKNOWN}`,
-    );
+    expect(() => {
+      service.requireSession(UNKNOWN, env.clock.now());
+    }).toThrow(`Unknown session_id ${UNKNOWN}`);
     expect(countSessions(env, UNKNOWN)).toBe(0);
   });
 });
@@ -57,6 +57,7 @@ describe("Direct tool calls", () => {
     await expect(
       write.invoke({
         session_id: UNKNOWN,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Refund policy",

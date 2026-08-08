@@ -203,4 +203,16 @@ export class EdgesRepo extends BaseRepo {
     for (const r of rows) map.set(r.id, { by: r.by, at: r.at });
     return map;
   }
+
+  liveSuccessorsOf(id: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT src FROM edges
+           WHERE dst = ? AND type = 'supersedes' AND invalidated_at IS NULL
+           ORDER BY valid_from DESC, src ASC`,
+        )
+        .all(id) as { src: string }[]
+    ).map((row) => row.src);
+  }
 }

@@ -10,7 +10,7 @@ export class SessionsRepo extends BaseRepo {
     this.db
       .prepare(
         `INSERT INTO sessions (id, project, started_at, last_seen) VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
+         ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen`,
       )
       .run(id, project, ts, ts);
   }

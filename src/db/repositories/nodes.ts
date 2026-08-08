@@ -25,6 +25,15 @@ export class NodesRepo extends BaseRepo {
     return !!this.db.prepare("SELECT 1 FROM nodes WHERE id = ?").get(id);
   }
 
+  referenceState(id: string): "live" | "invalidated" | "missing" {
+    const row = this.db.prepare("SELECT invalidated_at FROM nodes WHERE id = ?").get(id) as
+      { invalidated_at: string | null } | undefined;
+
+    if (!row) return "missing";
+
+    return row.invalidated_at === null ? "live" : "invalidated";
+  }
+
   // The mirror provenance of a node, or undefined if it doesn't exist. Lets the
   // invalidate guard tell a code mirror (origin='repo', indexer-only) from an
   // external mirror (agent-curated, retirable by hand) from an authored node.

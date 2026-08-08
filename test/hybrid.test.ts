@@ -21,9 +21,15 @@ function w(
   content: string,
   project?: string,
 ): Promise<Envelope> {
-  return container
-    .resolve(WriteTool)
-    .invoke({ session_id: s, memory_kind: kind, type, title, content, project });
+  return container.resolve(WriteTool).invoke({
+    session_id: s,
+    parent_node_id: null,
+    memory_kind: kind,
+    type,
+    title,
+    content,
+    project,
+  });
 }
 
 type Result = Envelope & {

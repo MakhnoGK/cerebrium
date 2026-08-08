@@ -20,8 +20,6 @@ import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
 
-const session_start = container.resolve(SessionStartTool);
-
 // An enabled provider double: it only judges duplicates. `generate` is unused here.
 class FakeJudge implements ConsolidationProvider {
   readonly name = "fake";
@@ -56,7 +54,7 @@ type WriteOut = Record<string, unknown> & {
 };
 
 async function session(project?: string): Promise<string> {
-  return (await session_start.invoke({ project })).session_id;
+  return (await container.resolve(SessionStartTool).invoke({ project })).session_id;
 }
 
 function writeFact(s: string, title: string, content: string): Promise<WriteOut> {
@@ -64,6 +62,7 @@ function writeFact(s: string, title: string, content: string): Promise<WriteOut>
 
   return write.invoke({
     session_id: s,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,

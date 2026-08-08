@@ -1,4 +1,4 @@
-import { HintsService } from "@/application/services";
+import { HintsService, NodeReferenceService } from "@/application/services";
 import { NodesRepo } from "@/db/repositories";
 import { Envelope } from "@/core/types";
 import { EdgeType, MemoryKind } from "@/core/vocab";
@@ -20,6 +20,7 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
 
   constructor(
     private readonly hints: HintsService,
+    private readonly references: NodeReferenceService,
     // TODO: Think how to move to service
     private readonly nodes: NodesRepo,
   ) {}
@@ -27,16 +28,8 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
     const hints = await this.hints.getSessionHints(args.session_id);
 
-    const existing = await this.filterAsync(args.touched_node_ids ?? [], (id) =>
-      this.nodes.exists(id),
-    );
-    const dropped = await this.filterAsync(
-      args.touched_node_ids ?? [],
-      async (id) => !(await this.nodes.exists(id)),
-    );
-
-    if (dropped.length) {
-      hints.push(`Ignored ${dropped.length} unknown touched_node_ids: ${dropped.join(", ")}.`);
+    for (const id of args.touched_node_ids ?? []) {
+      this.references.requireLive(id, "touched node");
     }
 
     const envelope = await this.nodes.createNode({
@@ -47,7 +40,10 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
       project: args.project ?? null,
       session_id: args.session_id,
       ts: new Date().toISOString(),
-      links: existing.map((dst) => ({ dst, type: EdgeType.REFERENCES })),
+      links: (args.touched_node_ids ?? []).map((dst) => ({
+        dst,
+        type: EdgeType.REFERENCES,
+      })),
     });
 
     return hints.length ? { ...envelope, hints } : envelope;
@@ -56,21 +52,6 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
   public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
     // A fresh checkpoint's only edges are the `references` links to the touched nodes.
     return { node_id: result.id, detail: { touched: result.edges } };
-  }
-
-  // TODO: Move to helpers
-  private async filterAsync<T>(items: T[], callback: (item: T) => Promise<boolean>): Promise<T[]> {
-    const result: T[] = [];
-
-    for (const item of items) {
-      const callbackResult = await callback(item);
-
-      if (callbackResult) {
-        result.push(item);
-      }
-    }
-
-    return result;
   }
 }
 

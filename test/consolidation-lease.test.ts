@@ -66,6 +66,7 @@ async function queueThree(env: TestEnv): Promise<string[]> {
     for (const suffix of ["a", "b"]) {
       const node = (await container.resolve(WriteTool).invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: `${topic} ${suffix}`,

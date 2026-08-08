@@ -87,6 +87,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       type: args.type,
       memory_kind: args.memory_kind,
       session_id: args.session_id,
+      parent_node_id: args.parent_node_id,
       links: args.links,
       event_from: args.event_from,
       event_to: args.event_to,

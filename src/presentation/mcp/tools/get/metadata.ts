@@ -25,7 +25,11 @@ export const metadata = {
 
   schema: {
     session_id: sessionIdSchema,
-    ids: nodeIdsSchema.min(1).describe("Node ids to fetch, from search/session_start envelopes."),
+    ids: nodeIdsSchema
+      .min(1)
+      .describe(
+        "Exact node ids copied from Cerebrium result envelopes; never invent, guess, or transform them.",
+      ),
     include_revisions: z
       .boolean()
       .optional()

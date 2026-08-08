@@ -372,15 +372,16 @@ of counting as already done.
 
 ## Tools
 
-Call `session_start` first; pass the returned `session_id` to every other tool
-(an unknown id is auto-created, with a hint).
+Call `session_start` first and copy its returned `session_id` verbatim into every other tool.
+Unknown or malformed ids are rejected; they are never auto-created. Treat every session,
+node, and candidate id as opaque and never invent or transform one.
 
 | Tool | When to use |
 |------|-------------|
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
 | `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision; `outline`/`sections` to fetch part of a long node instead of all of it. |
-| `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
+| `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Required `parent_node_id` is an exact live id (atomic `relates_to`) or `null` (intentionally isolated); it is never inferred. Optional `links` add more typed edges. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
 | `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge, and moves the dead node's authored referrers onto it. |
 | `restore` | The inverse: bring a soft-deleted node back with its id, revision history and edges intact, retiring the `supersedes` edges into it. For a merge that swallowed a living document. |

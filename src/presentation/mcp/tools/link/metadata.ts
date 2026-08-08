@@ -13,8 +13,8 @@ export const metadata = {
 
   schema: {
     session_id: sessionIdSchema,
-    src: nodeIdSchema.describe("Exact source node id copied from a Cerebrium result."),
-    dst: nodeIdSchema.describe("Exact destination node id copied from a Cerebrium result."),
+    src: nodeIdSchema,
+    dst: nodeIdSchema,
     type: z
       .nativeEnum(EdgeType)
       .describe(

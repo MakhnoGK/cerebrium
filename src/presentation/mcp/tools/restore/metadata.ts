@@ -15,7 +15,7 @@ export const metadata = {
 
   schema: {
     session_id: sessionIdSchema,
-    id: nodeIdSchema.describe("Exact id of the invalidated node to bring back."),
+    id: nodeIdSchema,
     reason: z
       .string()
       .min(1)

@@ -82,6 +82,7 @@ describe("External mirrors end-to-end", () => {
     // A decision documents the incident — the payoff link.
     const decision = (await write.invoke({
       session_id: sid,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache-TTL jitter to prevent stampede",

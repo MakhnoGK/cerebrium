@@ -86,6 +86,7 @@ async function writeFact(
       name: "write",
       arguments: {
         session_id: sid,
+        parent_node_id: null,
         memory_kind: "semantic",
         type: "fact",
         title,
@@ -229,6 +230,7 @@ describe("session_start tool", () => {
       name: "write",
       arguments: {
         session_id: sid,
+        parent_node_id: null,
         memory_kind: "semantic",
         type: "task",
         title: "Task 1",
@@ -256,6 +258,26 @@ describe("session_start tool", () => {
 });
 
 describe("write tool", () => {
+  it("should require an explicit nullable parent instead of inferring one", async () => {
+    const client = await connect();
+    const sid = await startSession(client);
+    const res = asError(
+      await client.callTool({
+        name: "write",
+        arguments: {
+          session_id: sid,
+          memory_kind: "semantic",
+          type: "fact",
+          title: "No parent contract",
+          content: "This call intentionally omits parent_node_id.",
+        },
+      }),
+    );
+
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("parent_node_id");
+  });
+
   it("should return an envelope with an id when a semantic fact is written", async () => {
     const client = await connect();
     const sid = await startSession(client);
@@ -306,6 +328,7 @@ describe("write tool", () => {
         name: "write",
         arguments: {
           session_id: sid,
+          parent_node_id: null,
           memory_kind: "mirror",
           type: "symbol",
           title: "x",
@@ -370,6 +393,7 @@ describe("search tool", () => {
       name: "write",
       arguments: {
         session_id: sid,
+        parent_node_id: null,
         memory_kind: "episodic",
         type: "event_note",
         title: "B",
@@ -464,6 +488,7 @@ describe("update tool", () => {
         name: "write",
         arguments: {
           session_id: sid,
+          parent_node_id: null,
           memory_kind: "episodic",
           type: "event_note",
           title: "E",
@@ -658,10 +683,10 @@ describe("checkpoint tool", () => {
     expect(got.nodes[0]!.content).toContain("chose X");
   });
 
-  it("should note ignored ids when touched_node_ids include unknown nodes", async () => {
+  it("should reject unknown touched_node_ids", async () => {
     const client = await connect();
     const sid = await startSession(client, "cp");
-    const res = payload<{ hints?: string[] }>(
+    const res = asError(
       await client.callTool({
         name: "checkpoint",
         arguments: {
@@ -672,7 +697,9 @@ describe("checkpoint tool", () => {
         },
       }),
     );
-    expect((res.hints ?? []).some((h) => /Ignored .*unknown/.test(h))).toBe(true);
+
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain(`touched node ${UNKNOWN_NODE_ID} does not exist`);
   });
 });
 

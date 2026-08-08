@@ -26,6 +26,7 @@ async function twinsWithSuggestedLink(env: TestEnv, t: ReturnType<typeof tools>)
     (
       (await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title,

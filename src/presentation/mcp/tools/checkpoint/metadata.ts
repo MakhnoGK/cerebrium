@@ -23,6 +23,8 @@ export const metadata = {
       .describe("Unfinished work / questions to pick up next time."),
     touched_node_ids: nodeIdsSchema
       .optional()
-      .describe("Ids of nodes this session touched; linked via 'references'."),
+      .describe(
+        "Exact live node ids copied from Cerebrium results; never invent, guess, or transform them. The checkpoint links to them via 'references'.",
+      ),
   },
 };

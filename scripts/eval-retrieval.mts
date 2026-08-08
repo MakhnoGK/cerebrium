@@ -278,6 +278,7 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
   for (const d of data.docs) {
     await writeTool.invoke({
       session_id: sid,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: d.title,

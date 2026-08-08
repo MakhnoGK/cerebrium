@@ -16,6 +16,7 @@ async function session(): Promise<string> {
 async function writeFact(s: string, title: string): Promise<string> {
   const out = (await container.resolve(WriteTool).invoke({
     session_id: s,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,

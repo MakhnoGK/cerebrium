@@ -13,7 +13,7 @@ export const metadata = {
 
   schema: {
     session_id: sessionIdSchema,
-    id: nodeIdSchema.describe("Exact id of the semantic node to revise."),
+    id: nodeIdSchema,
     content: z
       .string()
       .optional()

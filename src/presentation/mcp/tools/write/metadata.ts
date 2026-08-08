@@ -38,6 +38,11 @@ export const metadata = {
       .min(1)
       .describe("Markdown body. First non-heading line becomes the summary."),
     project: z.string().optional().describe("Project scope; omit for a global memory."),
+    parent_node_id: nodeIdSchema
+      .nullable()
+      .describe(
+        "Exact live parent node id to connect with 'relates_to', or null for an intentionally isolated node. Required; never infer or invent it.",
+      ),
     links: z
       .array(z.object({ dst: nodeIdSchema, type: z.nativeEnum(EdgeType) }))
       .optional()
