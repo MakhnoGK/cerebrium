@@ -241,7 +241,7 @@ function registerViaCli(
       ...extra,
       ...envFlags(input.env, envFlag),
       "--",
-      "node",
+      input.nodePath,
       serverPath(input.repoRoot),
     ]);
   } catch (err) {
@@ -298,7 +298,7 @@ function applyAntigravity(input: PlanInput, _opts: ApplyOptions, todo: SurfaceSt
     out.push(
       updateJson("mcp", path, (file) => {
         const servers = record(file.mcpServers);
-        servers.cerebrium = desiredMcp(input.repoRoot, input.env);
+        servers.cerebrium = desiredMcp(input.repoRoot, input.env, input.nodePath);
         file.mcpServers = servers;
       }),
     );

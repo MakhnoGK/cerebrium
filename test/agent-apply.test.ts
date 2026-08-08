@@ -34,6 +34,7 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
   return {
     home,
     repoRoot: REPO,
+    nodePath: process.execPath,
     env: { MEMORY_DB_PATH: join(home, ".cerebrium", "memory.db") },
     hasCommand: () => true,
     ...over,
@@ -98,6 +99,7 @@ describe("applyHost", () => {
     const add = ran.find((r) => r.args[1] === "add")!;
     expect(add.cmd).toBe("codex");
     expect(add.args).toContain("--env");
+    expect(add.args[add.args.indexOf("--") + 1]).toBe(process.execPath);
     expect(add.args.at(-1)).toBe(join(REPO, "dist", "server.js"));
   });
 
@@ -390,6 +392,7 @@ describe("Environment", () => {
       join(home, ".cerebrium", "memory.db"),
     );
     expect(config.mcpServers.cerebrium.args).toEqual([join(REPO, "dist", "server.js")]);
+    expect(config.mcpServers.cerebrium.command).toBe(process.execPath);
   });
 
   it("should default the store under the inspected home when nothing is registered", () => {

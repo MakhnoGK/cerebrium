@@ -96,7 +96,7 @@ async function server(input: PlanInput): Promise<VerifyResult> {
   }
   const scratch = mkdtempSync(join(tmpdir(), "cerebrium-verify-"));
   try {
-    const out = await speak(path, {
+    const out = await speak(input.nodePath, path, {
       MEMORY_DB_PATH: join(scratch, "verify.db"),
       MEMORY_EMBED_PROVIDER: "local-null",
     });
@@ -119,9 +119,9 @@ async function server(input: PlanInput): Promise<VerifyResult> {
   }
 }
 
-function speak(path: string, env: Record<string, string>): Promise<string> {
+function speak(nodePath: string, path: string, env: Record<string, string>): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("node", [path], {
+    const child = spawn(nodePath, [path], {
       env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "ignore"],
     });
@@ -156,9 +156,16 @@ function speak(path: string, env: Record<string, string>): Promise<string> {
   });
 }
 
-function runHook(script: string, host: HostId, invocationNum: number): Promise<string> {
+function runHook(
+  nodePath: string,
+  script: string,
+  host: HostId,
+  invocationNum: number,
+): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn("node", [script, "--host", host], { stdio: ["pipe", "pipe", "ignore"] });
+    const child = spawn(nodePath, [script, "--host", host], {
+      stdio: ["pipe", "pipe", "ignore"],
+    });
     let text = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -175,10 +182,10 @@ function runHook(script: string, host: HostId, invocationNum: number): Promise<s
 async function hook(input: PlanInput, host: HostId): Promise<VerifyResult> {
   const script = hookScript(input.repoRoot);
   try {
-    const first = await runHook(script, host, 0);
+    const first = await runHook(input.nodePath, script, host, 0);
     JSON.parse(first);
     if (host === "antigravity") {
-      const second: unknown = JSON.parse(await runHook(script, host, 1));
+      const second: unknown = JSON.parse(await runHook(input.nodePath, script, host, 1));
       const secondRecord =
         typeof second === "object" && second !== null ? (second as Record<string, unknown>) : {};
       const once = first.includes("session_start") && Object.keys(secondRecord).length === 0;

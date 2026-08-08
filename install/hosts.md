@@ -53,6 +53,11 @@ and the IDE.
 | Hook | `~/.gemini/config/hooks.json` | `PreInvocation` with `injectSteps[].ephemeralMessage` |
 | Permissions | IDE: `~/.gemini/config/config.json`; CLI: `~/.gemini/antigravity-cli/settings.json` | explicit allow entry for each current Cerebrium tool; unrelated grants are preserved |
 
+Every MCP registration uses the canonical absolute Node executable selected by this repo's
+`.nvmrc`, never bare `node`. `better-sqlite3` is ABI-bound: setup checks the current Node against
+`.nvmrc` and opens `:memory:` with the addon before it mutates any host config. Rerun setup after
+changing/removing the NVM version or rebuilding native dependencies.
+
 Antigravity discovers skills from `skills/<name>/SKILL.md` under a customization root **or**
 from any path declared in `skills.json`. The declared path is what setup uses: it points at the
 working tree, so the skill can never fall behind the repo.

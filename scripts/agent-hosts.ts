@@ -33,6 +33,7 @@ export interface HostPlan {
 export interface PlanInput {
   home: string;
   repoRoot: string;
+  nodePath: string;
   env: Record<string, string>;
   hasCommand: (cmd: string) => boolean;
 }
@@ -109,8 +110,12 @@ export function hookCommand(repoRoot: string, host: HostId): string {
   return `node ${hookScript(repoRoot)} --host ${host}`;
 }
 
-export function desiredMcp(repoRoot: string, env: Record<string, string>): McpEntry {
-  return { command: "node", args: [serverPath(repoRoot)], env };
+export function desiredMcp(
+  repoRoot: string,
+  env: Record<string, string>,
+  nodePath: string,
+): McpEntry {
+  return { command: nodePath, args: [serverPath(repoRoot)], env };
 }
 
 export function alwaysOnBlock(repoRoot: string): string {
@@ -182,13 +187,59 @@ function state(
 }
 
 /** A JSON `mcpServers` entry is current when it launches this working tree's bundle. */
-function mcpState(entry: unknown, target: string, repoRoot: string): SurfaceState {
+function mcpState(
+  entry: unknown,
+  target: string,
+  repoRoot: string,
+  nodePath: string,
+): SurfaceState {
   if (entry === undefined) return state("mcp", "missing", target, "no cerebrium server registered");
-  const args = record(entry).args;
-  const points = Array.isArray(args) && args.some((a) => a === serverPath(repoRoot));
-  return points
-    ? state("mcp", "ok", target, "registered against this working tree")
-    : state("mcp", "stale", target, "registered against a different path");
+  const config = record(entry);
+  const exactArgs =
+    Array.isArray(config.args) &&
+    config.args.length === 1 &&
+    config.args[0] === serverPath(repoRoot);
+  const exactRuntime = config.command === nodePath;
+  return exactArgs && exactRuntime
+    ? state("mcp", "ok", target, "registered against this working tree and Node runtime")
+    : state("mcp", "stale", target, "registered against a different path or Node runtime");
+}
+
+function tomlSection(text: string, name: string): string | null {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `[${name}]`);
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const next = rest.findIndex((line) => /^\s*\[/.test(line));
+  return (next === -1 ? rest : rest.slice(0, next)).join("\n");
+}
+
+function tomlString(section: string, key: string): string | null {
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*("(?:[^"\\\\]|\\\\.)*")\\s*$`, "m");
+  const match = pattern.exec(section);
+  if (match === null) return null;
+  const encoded = match[1];
+  if (encoded === undefined) return null;
+  try {
+    const value: unknown = JSON.parse(encoded);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function tomlStringArray(section: string, key: string): string[] | null {
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*(\\[[^\\n]*\\])\\s*$`, "m");
+  const match = pattern.exec(section);
+  if (match === null) return null;
+  const encoded = match[1];
+  if (encoded === undefined) return null;
+  try {
+    const value: unknown = JSON.parse(encoded);
+    return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function skillLinkState(link: string, repoRoot: string): SurfaceState {
@@ -323,7 +374,7 @@ function planClaude(input: PlanInput): HostPlan {
     surfaces: [
       mcp.state === "conflict"
         ? jsonConflict("mcp", claudeJson)
-        : mcpState(record(mcp.value.mcpServers).cerebrium, claudeJson, repoRoot),
+        : mcpState(record(mcp.value.mcpServers).cerebrium, claudeJson, repoRoot, input.nodePath),
       skillLinkState(join(dir, "skills", "cerebrium"), repoRoot),
       rulesState(join(dir, "CLAUDE.md"), repoRoot),
       hooks.state === "conflict"
@@ -341,8 +392,12 @@ function planCodex(input: PlanInput): HostPlan {
   const hooksJson = join(dir, "hooks.json");
 
   const toml = readText(configToml) ?? "";
-  const registered = toml.includes("[mcp_servers.cerebrium]");
-  const pointsHere = registered && toml.includes(serverPath(repoRoot));
+  const section = tomlSection(toml, "mcp_servers.cerebrium");
+  const registered = section !== null;
+  const pointsHere =
+    section !== null &&
+    tomlString(section, "command") === input.nodePath &&
+    JSON.stringify(tomlStringArray(section, "args")) === JSON.stringify([serverPath(repoRoot)]);
   const hooks = readJson(hooksJson);
   const hookPresent =
     hooks.state === "missing" ? null : JSON.stringify(hooks.value).includes(hookScript(repoRoot));
@@ -367,7 +422,9 @@ function planCodex(input: PlanInput): HostPlan {
             "mcp",
             pointsHere ? "ok" : "stale",
             configToml,
-            pointsHere ? "registered against this working tree" : "registered against another path",
+            pointsHere
+              ? "registered against this working tree and Node runtime"
+              : "registered against another path or Node runtime",
           )
         : state("mcp", "missing", configToml, "no [mcp_servers.cerebrium] table"),
       skillLinkState(join(dir, "skills", "cerebrium"), repoRoot),
@@ -406,7 +463,7 @@ function planAntigravity(input: PlanInput): HostPlan {
     surfaces: [
       mcp.state === "conflict"
         ? jsonConflict("mcp", mcpJson)
-        : mcpState(record(mcp.value.mcpServers).cerebrium, mcpJson, repoRoot),
+        : mcpState(record(mcp.value.mcpServers).cerebrium, mcpJson, repoRoot, input.nodePath),
       skills.state === "conflict"
         ? jsonConflict("skill", skillsJson)
         : declared

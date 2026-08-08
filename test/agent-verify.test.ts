@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseRpcResponses, storeWritable } from "@scripts/agent-verify";
+import { parseRpcResponses, storeWritable, verify } from "@scripts/agent-verify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 let dir: string;
@@ -90,5 +90,24 @@ describe("Antigravity session reminder", () => {
   it("should emit an empty payload on invocation 1", () => {
     // Given / When / Then
     expect(invoke(1)).toEqual({});
+  });
+});
+
+describe("verify runtime", () => {
+  it("should boot the server with the planned absolute Node executable", async () => {
+    // Given / When
+    const results = await verify(
+      {
+        home: dir,
+        repoRoot: REPO,
+        nodePath: join(dir, "missing-node"),
+        env: { MEMORY_DB_PATH: join(dir, "memory.db") },
+        hasCommand: () => false,
+      },
+      [],
+    );
+
+    // Then
+    expect(results.find((result) => result.name === "server")).toMatchObject({ ok: false });
   });
 });

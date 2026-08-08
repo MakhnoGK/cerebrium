@@ -212,7 +212,7 @@ quietly accumulated several unrelated facts — but the agent writing it can.
 
 ## Quick start
 
-Requires Node ≥ 22 (developed on Node 26; see `.nvmrc`/`engines`). `better-sqlite3`
+Requires Node ≥ 22 (developed on Node 22; run `nvm use` from this repo). `better-sqlite3`
 and `sqlite-vec` are native modules that build/download on install.
 
 **1 — Clone and build.**
@@ -230,7 +230,8 @@ the point. Point it at the built `dist/server.js` by absolute path:
 ```bash
 claude mcp add cerebrium -s user \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- node /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ```
 
 **3 — Verify.** `claude mcp list` should show `cerebrium`, and inside a Claude Code
@@ -797,6 +798,12 @@ which is a security gate and not ours to pre-approve.
 Antigravity adds one host-specific surface: explicit Cerebrium permissions in the IDE and CLI
 settings. Setup merges the current tool grants into both active configs, preserves unrelated
 entries, and refuses malformed JSON or permission shapes instead of overwriting them.
+
+Setup reads the numeric version in `.nvmrc`, verifies that it is running under that Node, opens
+an in-memory `better-sqlite3` database as a native-addon preflight, and registers the canonical
+absolute Node executable in every MCP host. This avoids GUI and terminal `PATH` differences
+silently selecting incompatible Node ABIs. After changing or removing the NVM version, run
+`nvm use && npm install`, then rerun agent setup to migrate the registrations.
 
 `npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
 server over stdio against a throwaway store, calls `session_start`, counts the tools and

@@ -15,6 +15,7 @@ import {
   type PlanInput,
   type SurfaceStatus,
 } from "@scripts/agent-hosts";
+import { assertNativeRuntime, resolveNodeRuntime } from "@scripts/agent-runtime";
 import { verify } from "@scripts/agent-verify";
 
 // Reports — and with --apply, installs — what each agent host needs to use Cerebrium as
@@ -78,8 +79,14 @@ function outcomeGlyph(applied: Applied): string {
   return applied.outcome === "skipped" ? "→" : "✓";
 }
 
-function report(plans: HostPlan[], env: Record<string, string>, discovered: boolean): void {
+function report(
+  plans: HostPlan[],
+  env: Record<string, string>,
+  discovered: boolean,
+  nodePath: string,
+): void {
   const source = discovered ? "reused from an existing registration" : "defaults";
+  process.stdout.write(`\nNode runtime (.nvmrc): ${nodePath}\n`);
   process.stdout.write(`\nEnvironment (${source}):\n`);
   for (const key of DEFAULT_ENV_KEYS) {
     if (env[key] !== undefined) process.stdout.write(`  ${key}=${env[key]}\n`);
@@ -112,6 +119,14 @@ async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(option("repo", join(here, "..")));
   const home = resolve(option("home", homedir()));
+  let nodePath: string;
+  try {
+    nodePath = resolveNodeRuntime(repoRoot);
+  } catch (err) {
+    process.stderr.write(`Runtime error: ${String(err)}\n`);
+    process.exitCode = 1;
+    return;
+  }
   const requested = option("host", "all");
   const hosts: HostId[] =
     requested === "all" ? [...HOSTS] : HOSTS.filter((h) => h === requested).map((h) => h);
@@ -122,12 +137,19 @@ async function main(): Promise<void> {
     return;
   }
 
-  const base: PlanInput = { home, repoRoot, env: {}, hasCommand };
+  const base: PlanInput = { home, repoRoot, nodePath, env: {}, hasCommand };
   const discovered = discoverEnv(base);
   const env = discovered ?? defaultEnv(home, repoRoot);
   const input: PlanInput = { ...base, env };
 
   if (flag("apply")) {
+    try {
+      assertNativeRuntime(repoRoot, nodePath);
+    } catch (err) {
+      process.stderr.write(`Runtime preflight failed: ${String(err)}\n`);
+      process.exitCode = 1;
+      return;
+    }
     let unresolved = false;
     for (const host of hosts) {
       const applied = applyHost(host, input, { force: flag("force"), run });
@@ -145,9 +167,9 @@ async function main(): Promise<void> {
   const plans = planAll(input, hosts);
 
   if (flag("json")) {
-    process.stdout.write(`${JSON.stringify({ repoRoot, home, env, plans }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ repoRoot, home, nodePath, env, plans }, null, 2)}\n`);
   } else {
-    report(plans, env, discovered !== null);
+    report(plans, env, discovered !== null, nodePath);
   }
 
   if (flag("verify")) {

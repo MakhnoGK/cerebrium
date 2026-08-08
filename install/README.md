@@ -48,7 +48,8 @@ npm install
 npm run build
 ```
 
-Node ≥ 22. One store per machine, not per repo: every host points at the same
+Node ≥ 22. Run `nvm use` first; `.nvmrc` is the runtime source of truth. One store per machine,
+not per repo: every host points at the same
 `MEMORY_DB_PATH`. If a host is already registered, copy its environment rather than inventing
 a second one — two stores means two memories, which is the failure this system exists to
 prevent.
@@ -70,7 +71,8 @@ working directory, not yours.
 ```bash
 claude mcp add cerebrium -s user \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- node /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ln -s /ABSOLUTE/PATH/TO/cerebrium/skill/cerebrium ~/.claude/skills/cerebrium
 ```
 
@@ -84,7 +86,8 @@ Verify: `claude mcp list` shows `cerebrium`; `/mcp` in a session lists its tools
 ```bash
 codex mcp add cerebrium \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- node /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ln -s /ABSOLUTE/PATH/TO/cerebrium/skill/cerebrium ~/.codex/skills/cerebrium
 ```
 
@@ -103,7 +106,7 @@ Add to `~/.gemini/config/mcp_config.json`:
 {
   "mcpServers": {
     "cerebrium": {
-      "command": "node",
+      "command": "/ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node",
       "args": ["/ABSOLUTE/PATH/TO/cerebrium/dist/server.js"],
       "env": { "MEMORY_DB_PATH": "/ABSOLUTE/PATH/TO/HOME/.cerebrium/memory.db" }
     }
@@ -128,6 +131,12 @@ it to "use the cerebrium skill" loads `SKILL.md` from the working tree.
 
 After changing rules, permissions, or the MCP bundle, restart Antigravity and start a fresh
 conversation so the host rediscovers the tool catalog and runs the first-invocation hook.
+
+The Node command must be the canonical absolute executable selected by `.nvmrc`, because
+`better-sqlite3` is a native addon and a GUI may resolve bare `node` to another ABI. The setup
+command validates `.nvmrc`, opens an in-memory SQLite database before writing config, and pins
+that executable automatically. After an NVM upgrade/removal, rerun `nvm use && npm install`
+and then rerun setup.
 
 ## 4 — Confirm it actually works
 
