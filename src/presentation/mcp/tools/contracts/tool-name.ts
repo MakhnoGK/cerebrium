@@ -15,5 +15,6 @@ export enum ToolName {
   MIRROR_STATUS = "mirror_status",
   CONSOLIDATE_SUGGEST = "consolidate_suggest",
   CONSOLIDATE_APPLY = "consolidate_apply",
+  CONSOLIDATE_RETRY = "consolidate_retry",
   STATS = "stats",
 }

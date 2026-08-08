@@ -91,12 +91,12 @@ export async function runDaemon(
 
       const swept = await consolidation.tick();
 
-      // The rest of the tick result has nowhere to go yet; a generation failure cannot
-      // wait for that, since the only other trace it leaves is a candidate that reaches
-      // review with no proposal — indistinguishable from a provider with nothing to say.
-      if (swept.generation_failures > 0) {
+      const total =
+        swept.distilled + swept.merged + swept.pruned + swept.links_added + swept.annotated;
+      const failures = swept.generation_failures;
+      if (total > 0 || failures > 0) {
         process.stderr.write(
-          `consolidation: ${String(swept.generation_failures)} generation failure(s), last: ${swept.last_error ?? "unknown"}\n`,
+          `consolidation: ${total} actions${failures > 0 ? `, ${String(failures)} failure(s) (last: ${swept.last_error ?? "unknown"})` : ""}\n`,
         );
       }
     }

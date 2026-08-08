@@ -106,6 +106,7 @@ const ALL_TOOLS = [
   "code_index",
   "code_lookup",
   "consolidate_apply",
+  "consolidate_retry",
   "consolidate_suggest",
   "get",
   "invalidate",
@@ -122,7 +123,7 @@ const ALL_TOOLS = [
 ];
 
 describe("MCP server wiring", () => {
-  it("should expose all seventeen tools when a client connects", async () => {
+  it("should expose all eighteen tools when a client connects", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
 

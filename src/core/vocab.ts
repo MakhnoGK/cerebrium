@@ -98,6 +98,8 @@ export enum EventAction {
   MIRROR_STATUS = "mirror_status",
   CONSOLIDATE_SUGGEST = "consolidate_suggest",
   CONSOLIDATE_APPLY = "consolidate_apply",
+  CONSOLIDATE_RETRY = "consolidate_retry",
+  CONSOLIDATE_TICK = "consolidate_tick",
   STATS = "stats",
 }
 

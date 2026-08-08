@@ -82,6 +82,19 @@ function main(): void {
     L.push(`  detached nodes             : ${s.graph.detached_nodes}`);
     L.push("");
 
+    L.push("Consolidation");
+    L.push(`  runs total                 : ${s.consolidation.runs_total}`);
+    L.push(
+      `  candidates                 : ${s.consolidation.pending} pending, ${s.consolidation.applied} applied, ${s.consolidation.dismissed} dismissed`,
+    );
+    if (s.consolidation.runs_total > 0) {
+      L.push(`  last run                   : ${s.consolidation.last_run_at ?? "—"}`);
+      L.push(
+        `  last error                 : ${s.consolidation.last_error ? `${s.consolidation.last_error} (at ${s.consolidation.last_stage})` : "none"}`,
+      );
+    }
+    L.push("");
+
     L.push("Storage");
     L.push(
       `  db                         : ${fmtBytes(s.storage.db_bytes)}  (${s.storage.page_count} pages × ${s.storage.page_size} B)`,

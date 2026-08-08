@@ -18,6 +18,7 @@ const TOOL_ACTIONS: Record<ToolName, EventAction> = {
   [ToolName.MIRROR_STATUS]: EventAction.MIRROR_STATUS,
   [ToolName.CONSOLIDATE_SUGGEST]: EventAction.CONSOLIDATE_SUGGEST,
   [ToolName.CONSOLIDATE_APPLY]: EventAction.CONSOLIDATE_APPLY,
+  [ToolName.CONSOLIDATE_RETRY]: EventAction.CONSOLIDATE_RETRY,
   [ToolName.STATS]: EventAction.STATS,
 };
 
