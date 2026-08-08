@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { readFileSync, appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { appendGold, readGoldFile } from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
 import type Database from "better-sqlite3";

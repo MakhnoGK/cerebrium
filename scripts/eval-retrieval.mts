@@ -18,10 +18,10 @@ import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import { matchesSection, sectionName } from "@/core/chunk";
 import { HintsService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { matchesSection, sectionName } from "@/core/chunk";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -243,7 +243,9 @@ function sectionAccuracy(
       if (goldSecs && goldSecs.size > 0) {
         possible++;
         const rSec = sectionName(r.section ?? null);
-        if ([...goldSecs].some((s) => matchesSection(r.section ?? null, s) || matchesSection(s, rSec))) {
+        if (
+          [...goldSecs].some((s) => matchesSection(r.section ?? null, s) || matchesSection(s, rSec))
+        ) {
           hits++;
         }
       }
@@ -548,9 +550,7 @@ async function main() {
       );
     }
 
-    console.log(
-      `of those, ${sectionLabels} query→node→section labels from the log\n`,
-    );
+    console.log(`of those, ${sectionLabels} query→node→section labels from the log\n`);
 
     if (queries.length < floor) {
       console.log(
@@ -588,7 +588,9 @@ async function main() {
     );
   }
 
-  console.log(`arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K} | SecAcc@${K}`);
+  console.log(
+    `arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K} | SecAcc@${K}`,
+  );
   console.log("-------------+-------+---------+-------+--------+---------+----------");
 
   const table: { arm: Arm; scores: Scores }[] = [];

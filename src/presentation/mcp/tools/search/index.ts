@@ -336,7 +336,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
         const normalized = best < 0 ? row.bm25 / best : 1;
         const chunk = ftsChunks.get(row.id);
         const envelope: SearchResult = toEnvelope(row);
-        
+
         if (chunk) {
           envelope.best_chunk = chunk.chunk_text.slice(0, BEST_CHUNK_CHARS);
           if (chunk.chunk_heading) {
@@ -346,7 +346,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
             delete envelope.summary;
           }
         }
-        
+
         return {
           row,
           envelope,

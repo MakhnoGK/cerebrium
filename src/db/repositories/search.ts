@@ -267,7 +267,10 @@ export class SearchRepo extends BaseRepo {
 
   // Best FTS match chunk per node, using the section-level chunk_fts index. Allows FTS hits
   // to provide a token-efficient snippet and section name, same as the vector path.
-  bestFtsChunksFor(ids: string[], match: string): Map<string, { chunk_text: string; chunk_heading: string | null }> {
+  bestFtsChunksFor(
+    ids: string[],
+    match: string,
+  ): Map<string, { chunk_text: string; chunk_heading: string | null }> {
     const out = new Map<string, { chunk_text: string; chunk_heading: string | null }>();
     if (!ids.length) return out;
 
@@ -278,7 +281,7 @@ export class SearchRepo extends BaseRepo {
          FROM chunk_fts
          JOIN chunks c ON c.id = chunk_fts.chunk_id
          WHERE chunk_fts.node_id IN (${ph}) AND chunk_fts MATCH ?
-         ORDER BY chunk_fts.node_id, bm25(chunk_fts)`
+         ORDER BY chunk_fts.node_id, bm25(chunk_fts)`,
       )
       .all(...ids, match) as { id: string; chunk_text: string; chunk_heading: string | null }[];
 
