@@ -67,6 +67,30 @@ describe("StatsRepo.techStats", () => {
     const later = new Date(Date.parse(env.clock.t) + 10 * 60_000).toISOString();
     expect(env.stats.techStats(later).drain.lease_active).toBe(false);
   });
+
+  it("should count active unembedded chunks when stale embeddings outnumber active chunks", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const nodeId = await writeFact(s, "active without an embedding");
+
+    // When
+    const insertChunk = env.db.prepare(
+      "INSERT INTO chunks (id, node_id, rev, heading_path, seq, text, stale) VALUES (?, ?, 1, NULL, ?, ?, 1)",
+    );
+    const insertMeta = env.db.prepare(
+      "INSERT INTO embedding_meta (chunk_id, model, model_version, ts) VALUES (?, 'test', '1', ?)",
+    );
+    for (const [seq, id] of ["stale-a", "stale-b"].entries()) {
+      insertChunk.run(id, nodeId, seq, `stale chunk ${seq}`);
+      insertMeta.run(id, env.clock.t);
+    }
+
+    // Then
+    const content = env.stats.techStats(env.clock.t).content;
+    expect(content.chunks_embedded).toBeGreaterThan(content.chunks_active);
+    expect(content.chunks_unembedded).toBe(1);
+  });
 });
 
 describe("StatsRepo graph integrity", () => {
