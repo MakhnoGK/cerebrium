@@ -25,6 +25,7 @@ function writeFact(
 ) {
   return writeTool.invoke({
     session_id: s,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
@@ -90,12 +91,13 @@ describe("Duplicate detection at write time", () => {
   it("should skip the duplicate probe when the write is episodic", async () => {
     // Given
     const s = await session(sessionTool, P);
-    await writeFact(writeTool, "Token TTL", ORIGINAL, P);
+    await writeFact(writeTool, s, "Token TTL", ORIGINAL, P);
     await worker.tick();
 
     // When
     const note = await writeTool.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: "Token TTL",

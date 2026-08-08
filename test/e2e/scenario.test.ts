@@ -33,6 +33,7 @@ describe("Multi-session hand-off", () => {
     const a = (await t.sessionStart.invoke({ project: P })).session_id;
     const f1 = (await t.write.invoke({
       session_id: a,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Token TTL",
@@ -41,6 +42,7 @@ describe("Multi-session hand-off", () => {
     })) as Envelope;
     await t.write.invoke({
       session_id: a,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Use RS256",
@@ -49,6 +51,7 @@ describe("Multi-session hand-off", () => {
     });
     await t.write.invoke({
       session_id: a,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Refresh flow",

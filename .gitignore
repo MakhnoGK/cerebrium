@@ -8,3 +8,8 @@ dist/
 .idea
 .vscode
 .zed
+
+# The clean-agent entry point is versioned; a global ignore of .claude would drop it.
+!.claude/
+.claude/*
+!.claude/skills/

@@ -89,19 +89,6 @@ export class StatsRepo extends BaseRepo {
     const sessions = one<{ c: number }>("SELECT COUNT(*) AS c FROM sessions").c;
     const events = one<{ c: number }>("SELECT COUNT(*) AS c FROM events").c;
 
-    // Rerank usage from search-event telemetry: a search logs `reranked` only when it
-    // reached the rerank-eligible path (hybrid/vector), so a present key = eligible.
-    const rerankAgg = one<{
-      eligible: number | null;
-      reranked: number | null;
-      candidates: number | null;
-    }>(
-      `SELECT SUM(CASE WHEN json_extract(detail, '$.reranked') IS NOT NULL THEN 1 ELSE 0 END) AS eligible,
-              SUM(CASE WHEN json_extract(detail, '$.reranked') = 1 THEN 1 ELSE 0 END) AS reranked,
-              COALESCE(SUM(json_extract(detail, '$.rerank_candidates')), 0) AS candidates
-       FROM events WHERE action = 'search'`,
-    );
-
     const graph = this.graphHealth();
 
     const page_count = Number(this.db.pragma("page_count", { simple: true })) || 0;
@@ -128,7 +115,9 @@ export class StatsRepo extends BaseRepo {
         chunks_active,
         chunks_stale,
         chunks_embedded,
-        chunks_unembedded: Math.max(0, chunks_active - chunks_embedded),
+        chunks_unembedded: one<{ c: number }>(
+          "SELECT COUNT(*) AS c FROM chunks c WHERE c.stale = 0 AND NOT EXISTS (SELECT 1 FROM embedding_meta m WHERE m.chunk_id = c.id)",
+        ).c,
         vectors_authored,
         vectors_code,
         sessions,
@@ -147,11 +136,6 @@ export class StatsRepo extends BaseRepo {
         lease_active: !!lease && lease.expires_at > now,
       },
       graph,
-      rerank_usage: {
-        eligible_searches: rerankAgg.eligible ?? 0,
-        reranked_searches: rerankAgg.reranked ?? 0,
-        candidates_reranked: rerankAgg.candidates ?? 0,
-      },
       code_repos: this.code.allRepoProvenance(),
       last_activity: one<{ t: string | null }>("SELECT MAX(ts) AS t FROM events").t,
     };

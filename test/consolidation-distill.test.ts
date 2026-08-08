@@ -23,6 +23,7 @@ async function seedEpisodics(env: TestEnv, n = 3): Promise<{ s: string; ids: str
   for (let i = 0; i < n; i++) {
     const node = (await write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: `Rollback ${tags[i]!}`,

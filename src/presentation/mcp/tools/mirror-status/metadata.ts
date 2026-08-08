@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.MIRROR_STATUS,
@@ -11,7 +11,7 @@ export const metadata = {
     "Envelopes only — no record content. Returns an empty list when no sources are registered.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     source_id: z
       .string()
       .optional()

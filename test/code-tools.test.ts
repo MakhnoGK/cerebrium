@@ -130,6 +130,7 @@ describe("Mirror discipline", () => {
     await expect(
       container.resolve(WriteTool).invoke({
         session_id,
+        parent_node_id: null,
         memory_kind: MemoryKind.MIRROR,
         type: "symbol",
         title: "x",

@@ -16,6 +16,7 @@ async function session(): Promise<string> {
 async function writeFact(s: string, title: string): Promise<string> {
   const out = (await container.resolve(WriteTool).invoke({
     session_id: s,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
@@ -67,6 +68,30 @@ describe("StatsRepo.techStats", () => {
     const later = new Date(Date.parse(env.clock.t) + 10 * 60_000).toISOString();
     expect(env.stats.techStats(later).drain.lease_active).toBe(false);
   });
+
+  it("should count active unembedded chunks when stale embeddings outnumber active chunks", async () => {
+    // Given
+    const env = setup();
+    const s = await session();
+    const nodeId = await writeFact(s, "active without an embedding");
+
+    // When
+    const insertChunk = env.db.prepare(
+      "INSERT INTO chunks (id, node_id, rev, heading_path, seq, text, stale) VALUES (?, ?, 1, NULL, ?, ?, 1)",
+    );
+    const insertMeta = env.db.prepare(
+      "INSERT INTO embedding_meta (chunk_id, model, model_version, ts) VALUES (?, 'test', '1', ?)",
+    );
+    for (const [seq, id] of ["stale-a", "stale-b"].entries()) {
+      insertChunk.run(id, nodeId, seq, `stale chunk ${seq}`);
+      insertMeta.run(id, env.clock.t);
+    }
+
+    // Then
+    const content = env.stats.techStats(env.clock.t).content;
+    expect(content.chunks_embedded).toBeGreaterThan(content.chunks_active);
+    expect(content.chunks_unembedded).toBe(1);
+  });
 });
 
 describe("StatsRepo graph integrity", () => {
@@ -101,7 +126,7 @@ describe("StatsRepo graph integrity", () => {
     expect(snap.repointable_edges).toBe(1);
   });
 
-  it("should not call a system edge repointable, since the sweep recomputes those", async () => {
+  it("should retire system similarities when a node is invalidated", async () => {
     // Given
     const env = setup();
     const s = await session();
@@ -116,7 +141,7 @@ describe("StatsRepo graph integrity", () => {
 
     // Then
     const snap = env.stats.techStats(env.clock.t).graph;
-    expect(snap.dangling_edges).toBe(1);
+    expect(snap.dangling_edges).toBe(0);
     expect(snap.repointable_edges).toBe(0);
   });
 

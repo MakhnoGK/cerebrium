@@ -38,6 +38,7 @@ async function corpus(
   const strong = (
     (await write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Deploy pipeline",
@@ -47,6 +48,7 @@ async function corpus(
   const weak = (
     (await write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Notebook",

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ConsolidationKind } from "@/core/vocab";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.CONSOLIDATE_SUGGEST,
@@ -15,7 +15,7 @@ export const metadata = {
     "these, then commit or dismiss each with `consolidate_apply`. Returns an empty list when nothing is queued.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     kind: z
       .nativeEnum(ConsolidationKind)
       .optional()

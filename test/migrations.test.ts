@@ -26,6 +26,9 @@ const MIGRATION_IDS = [
   "012_repoint_dangling_edges.cjs",
   "013_split_vector_pools.cjs",
   "014_purge_stale_chunk_vectors.cjs",
+  "015_chunk_fts.sql",
+  "016_repair_post_supersede_edges.cjs",
+  "017_retire_stale_similarities.cjs",
 ];
 
 const dirs: string[] = [];
@@ -103,6 +106,23 @@ describe("Migrations as single source of truth", () => {
     ).map((r) => r.id);
     expect(applied).toEqual(MIGRATION_IDS);
     db.close();
+  });
+
+  it("should re-apply a migration without error when its ledger row is missing", () => {
+    // Given — what the loser of a cold-start race sees: work already done, ledger says no.
+    const path = tmpDbPath();
+    const first = openDatabase(path);
+    first.prepare("DELETE FROM schema_migrations WHERE id = ?").run(MIGRATION_IDS[0]!);
+    first.close();
+
+    // When / Then
+    const second = openDatabase(path);
+    expect(
+      (
+        second.prepare("SELECT id FROM schema_migrations ORDER BY id").all() as { id: string }[]
+      ).map((r) => r.id),
+    ).toEqual(MIGRATION_IDS);
+    second.close();
   });
 
   it("should stay byte-equivalent to what migrations build when schema.sql is compared (drift guard)", () => {

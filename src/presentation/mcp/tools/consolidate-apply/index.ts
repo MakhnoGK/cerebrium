@@ -3,7 +3,7 @@ import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import { HintsService } from "@/application/services";
 import { ConsolidationRepo, EdgesRepo, NodesRepo } from "@/db/repositories";
-import { ConsolidationKind, ConsolidationStatus, EdgeType } from "@/core/vocab";
+import { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 import { metadata } from "@/presentation/mcp/tools/consolidate-apply/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
@@ -22,111 +22,89 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
-    const candidate = this.consolidation.getCandidate(args.id);
+    const hints = await this.hints.getSessionHints(args.session_id);
+    const current = this.consolidation.getCandidate(args.id);
 
-    if (!candidate) throw new Error(`no consolidation candidate ${args.id}.`);
-    if (candidate.status !== ConsolidationStatus.PENDING) {
-      throw new Error(`candidate ${args.id} is already ${candidate.status}.`);
+    if (!current) throw new Error(`no consolidation candidate ${args.id}.`);
+    if (current.status !== ConsolidationStatus.PENDING) {
+      throw new Error(`candidate ${args.id} is already ${current.status}.`);
     }
 
     const now = this.clock.now();
+    const resolved = this.consolidation.resolveCandidateAtomically(
+      args.id,
+      args.session_id,
+      now,
+      (candidate) => {
+        if (args.decision === ConsolidationRecommendation.REJECT) {
+          return ConsolidationStatus.DISMISSED;
+        }
 
-    if (args.decision === ConsolidationRecommendation.REJECT) {
-      this.consolidation.resolveCandidate(
-        args.id,
-        ConsolidationStatus.DISMISSED,
-        args.session_id,
-        now,
-      );
+        if (candidate.kind === ConsolidationKind.LINK) {
+          const [src, dst] = candidate.member_ids;
+          if (!src || !dst) throw new Error(`link candidate ${args.id} is malformed.`);
 
-      const rejected: Record<string, unknown> = { ok: true, id: args.id, status: "dismissed" };
-      if (hints.length) rejected.hints = hints;
+          const inserted = this.edges.insertSystemSimilarityIfLive(
+            src,
+            dst,
+            args.session_id,
+            now,
+            candidate.score,
+          );
+          return inserted ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+        }
 
-      return rejected;
-    }
+        if (candidate.kind === ConsolidationKind.DISTILL) {
+          const result = args.override ?? candidate.proposal;
+          if (!result) {
+            throw new Error(
+              `distill candidate ${args.id} has no proposal — provide override {title,summary,body}.`,
+            );
+          }
 
-    if (candidate.kind === ConsolidationKind.LINK) {
-      const [src, dst] = candidate.member_ids;
+          this.nodes.applyDistillation({
+            title: result.title,
+            content: result.body,
+            project: candidate.project,
+            sourceIds: candidate.member_ids,
+            session_id: args.session_id,
+            ts: now,
+          });
+          return ConsolidationStatus.APPLIED;
+        }
 
-      if (!src || !dst) throw new Error(`link candidate ${args.id} is malformed.`);
-      this.edges.insertEdge(
-        src,
-        dst,
-        EdgeType.SIMILAR_TO,
-        "system",
-        args.session_id,
-        now,
-        candidate.score,
-      );
-      this.consolidation.resolveCandidate(
-        args.id,
-        ConsolidationStatus.APPLIED,
-        args.session_id,
-        now,
-      );
-    } else if (candidate.kind === ConsolidationKind.DISTILL) {
-      const result = args.override ?? candidate.proposal;
+        if (candidate.kind === ConsolidationKind.MERGE) {
+          const survivor = candidate.canonical_id;
+          const loser = candidate.member_ids.find((mid) => mid !== survivor);
+          if (!survivor || !loser) throw new Error(`merge candidate ${args.id} is malformed.`);
+          const merged = args.override ?? candidate.proposal;
+          const applied = this.nodes.applyMerge({
+            survivorId: survivor,
+            loserId: loser,
+            session_id: args.session_id,
+            ts: now,
+            merged: merged ? { title: merged.title, body: merged.body } : undefined,
+          });
+          return applied ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+        }
 
-      if (!result) {
-        throw new Error(
-          `distill candidate ${args.id} has no proposal — provide override {title,summary,body}.`,
-        );
-      }
+        const [target] = candidate.member_ids;
+        if (!target) throw new Error(`prune candidate ${args.id} is malformed.`);
+        this.nodes.invalidateNode(target, { ts: now, session_id: args.session_id });
+        return ConsolidationStatus.APPLIED;
+      },
+    );
 
-      this.nodes.applyDistillation({
-        title: result.title,
-        content: result.body,
-        project: candidate.project,
-        sourceIds: candidate.member_ids,
-        session_id: args.session_id,
-        ts: now,
-      });
-      this.consolidation.resolveCandidate(
-        args.id,
-        ConsolidationStatus.APPLIED,
-        args.session_id,
-        now,
-      );
-    } else if (candidate.kind === ConsolidationKind.MERGE) {
-      const survivor = candidate.canonical_id;
-      const loser = candidate.member_ids.find((mid) => mid !== survivor);
-
-      if (!survivor || !loser) throw new Error(`merge candidate ${args.id} is malformed.`);
-      const merged = args.override ?? candidate.proposal;
-
-      this.nodes.applyMerge({
-        survivorId: survivor,
-        loserId: loser,
-        session_id: args.session_id,
-        ts: now,
-        merged: merged ? { title: merged.title, body: merged.body } : undefined,
-      });
-      this.consolidation.resolveCandidate(
-        args.id,
-        ConsolidationStatus.APPLIED,
-        args.session_id,
-        now,
-      );
-    } else {
-      // prune: soft-invalidate the dead mirror node
-      const [target] = candidate.member_ids;
-      if (!target) throw new Error(`prune candidate ${args.id} is malformed.`);
-
-      this.nodes.invalidateNode(target, { ts: now, session_id: args.session_id });
-      this.consolidation.resolveCandidate(
-        args.id,
-        ConsolidationStatus.APPLIED,
-        args.session_id,
-        now,
-      );
+    if (!resolved) {
+      const latest = this.consolidation.getCandidate(args.id);
+      throw new Error(`candidate ${args.id} is already ${latest?.status ?? "resolved"}.`);
     }
 
     const out: Record<string, unknown> = {
       ok: true,
       id: args.id,
-      status: "applied",
-      kind: candidate.kind,
+      status: resolved.status,
+      kind: resolved.candidate.kind,
     };
 
     if (hints.length) out.hints = hints;

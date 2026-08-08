@@ -30,6 +30,7 @@ function weightOf(value: string): RetrievalConfig {
 function write(title: string, content: string, kind = MemoryKind.SEMANTIC): Promise<Envelope> {
   return container.resolve(WriteTool).invoke({
     session_id: session,
+    parent_node_id: null,
     memory_kind: kind,
     type: kind === MemoryKind.EPISODIC ? "event_note" : "fact",
     title,

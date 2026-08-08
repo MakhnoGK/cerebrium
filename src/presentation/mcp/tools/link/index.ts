@@ -1,7 +1,7 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
-import { EmbeddingService, HintsService } from "@/application/services";
-import { EdgesRepo, NodesRepo } from "@/db/repositories";
+import { EmbeddingService, HintsService, NodeReferenceService } from "@/application/services";
+import { EdgesRepo } from "@/db/repositories";
 import { SYSTEM_EDGE_TYPES } from "@/core/vocab";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
@@ -14,13 +14,13 @@ export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {
   constructor(
     private readonly hints: HintsService,
     private readonly embeddings: EmbeddingService,
-    private readonly nodes: NodesRepo,
+    private readonly references: NodeReferenceService,
     private readonly edges: EdgesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     if ((SYSTEM_EDGE_TYPES as readonly string[]).includes(args.type)) {
       throw new Error(
@@ -29,10 +29,8 @@ export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {
     }
 
     if (args.src === args.dst) throw new Error("cannot link a node to itself.");
-    if (!(await this.nodes.exists(args.src)))
-      throw new Error(`src node ${args.src} does not exist.`);
-    if (!(await this.nodes.exists(args.dst)))
-      throw new Error(`dst node ${args.dst} does not exist.`);
+    this.references.requireLive(args.src, "src node");
+    this.references.requireLive(args.dst, "dst node");
 
     const weight = args.weight ?? 1.0;
 

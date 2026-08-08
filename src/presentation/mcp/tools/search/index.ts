@@ -5,10 +5,9 @@ import {
   EmbeddingRole,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
 import { EmbeddingService, HintsService } from "@/application/services";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@/db/repo";
-import { deriveSummary, summaryIsRedundant, toEnvelope } from "@/db/repo";
+import { summaryIsRedundant, toEnvelope } from "@/db/repo";
 import { EdgesRepo, SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
 import { EdgeType, MemoryKind } from "@/core/vocab";
@@ -26,17 +25,10 @@ const USE_SATURATION = 20; // fetches at which the importance prior reaches its 
 // Hybrid retrieval constants.
 const RRF_K = 60; // RRF damping; 1/(60+rank)
 const FUSE_CAP = 40; // top-N from each branch fed into fusion
-const GRAPH_BASE = 0.3; // ceiling for a graph-surfaced hit, as a fraction of the top direct hit
 const PPR_DEPTH = 2; // hops of subgraph pulled around the query-matched nodes
 const PPR_ITERS = 20; // power-iteration ceiling; converges well before this at our scale
 const PPR_EPSILON = 1e-6; // L1 delta at which iteration stops early
 const BEST_CHUNK_CHARS = 120;
-
-// Reranker (optional, env-gated, default off — see createReranker). Runs over the
-// fused base hits before graph expansion; replaces the RRF relevance core with a
-// cross-encoder score. Kept small for interactive latency.
-const RERANK_DOC_CHARS = 400; // per-candidate text budget handed to the reranker
-const MIN_RERANK = 2; // fewer fused candidates than this -> nothing to reorder
 
 // Edge-type conductance for PPR diffusion: how much rank flows along an edge of this type,
 // multiplied by the edge's own stored weight. `supersedes` is absent, so a superseded node
@@ -94,8 +86,6 @@ interface SearchAudit {
   query: string;
   results: number;
   ids: string[];
-  reranked?: 0 | 1;
-  rerank_candidates?: number;
 }
 
 type AuditedResponse = ToolResponse & { [AUDIT]?: SearchAudit };
@@ -111,13 +101,12 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     private readonly edges: EdgesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
-    @inject(RERANK_PROVIDER_TOKEN) private readonly reranker: RerankProvider,
 
     private readonly retrieval: RetrievalConfig,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<AuditedResponse> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : this.retrieval.symbolWeight;
@@ -137,6 +126,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     // ---- candidate generation (branches independent; either may be empty) ----
     let ftsRows: SearchRow[] = [];
     let ftsTotal = 0;
+    let ftsChunks = new Map<string, { chunk_text: string; chunk_heading: string | null }>();
 
     if (mode !== "vector") {
       const r = this.searchRepo.search({
@@ -152,6 +142,10 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       ftsRows = r.rows.slice(0, FUSE_CAP);
       ftsTotal = r.total;
+      ftsChunks = this.searchRepo.bestFtsChunksFor(
+        ftsRows.map((r) => r.id),
+        match,
+      );
     }
 
     let vecRows: VectorRow[] = [];
@@ -194,6 +188,12 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       e.rrf += 1 / (RRF_K + i + 1);
       e.text = true;
 
+      const chunk = ftsChunks.get(row.id);
+      if (chunk && !e.best_chunk) {
+        e.best_chunk = chunk.chunk_text.slice(0, BEST_CHUNK_CHARS);
+        e.section = chunk.chunk_heading ?? undefined;
+      }
+
       fused.set(row.id, e);
     });
 
@@ -231,43 +231,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       });
     }
 
-    // ---- rerank (base hits only, before graph expansion) ---------------------
-    // Precision stage on top of RRF recall: a cross-encoder rescoring of the fused
-    // text/vector hits. Graph neighbors are deliberately excluded (they earn their
-    // place structurally, not by query relevance). Decay stays a post-multiplier, so
-    // score = rerankRelevance × memoryFactor, keeping the memory model intact.
     const audit: SearchAudit = { mode, query: args.query, results: 0, ids: [] };
-
-    if (entries.size >= MIN_RERANK) {
-      audit.reranked = 0;
-    }
-
-    if (this.reranker.enabled && entries.size >= MIN_RERANK) {
-      const base = [...entries.values()];
-
-      try {
-        const scores = await this.reranker.rerank(args.query, base.map(rerankDoc));
-
-        base.forEach((entry, index) => {
-          const rel = scores[index];
-
-          if (rel == null || Number.isNaN(rel)) {
-            return;
-          }
-
-          entry.score =
-            rel *
-            memoryFactor(entry.row, now, history) *
-            symbolFactor(entry.row, penalty) *
-            strengthFactor(entry.row, this.retrieval.useWeight);
-        });
-
-        audit.reranked = 1;
-        audit.rerank_candidates = base.length;
-      } catch {
-        // Reranker unavailable -> keep the RRF ordering (graceful degradation).
-      }
-    }
 
     // ---- graph expansion: personalized PageRank (after fusion + rerank) -------
     // Diffusion seeded by the query-matched nodes in proportion to their relevance, over the
@@ -362,11 +326,30 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const now = Date.parse(this.clock.now());
     const best = Math.min(...rows.map((r) => r.bm25));
 
+    const ftsChunks = this.searchRepo.bestFtsChunksFor(
+      rows.map((r) => r.id),
+      match,
+    );
+
     const ranked = rows
       .map((row) => {
         const normalized = best < 0 ? row.bm25 / best : 1;
+        const chunk = ftsChunks.get(row.id);
+        const envelope: SearchResult = toEnvelope(row);
+
+        if (chunk) {
+          envelope.best_chunk = chunk.chunk_text.slice(0, BEST_CHUNK_CHARS);
+          if (chunk.chunk_heading) {
+            envelope.section = chunk.chunk_heading;
+          }
+          if (summaryIsRedundant(envelope.summary ?? "", envelope.best_chunk)) {
+            delete envelope.summary;
+          }
+        }
+
         return {
           row,
+          envelope,
           score:
             normalized *
             memoryFactor(row, now, history) *
@@ -381,7 +364,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
           a.row.id.localeCompare(b.row.id),
       )
       .slice(0, args.limit)
-      .map(({ row }) => toEnvelope(row));
+      .map(({ envelope }) => envelope);
 
     const out: AuditedResponse = { results: ranked, total_matches: total };
 
@@ -428,7 +411,8 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     }
 
     // Rank mass is an arbitrary scale, so it is normalized within the surfaced set and spent
-    // against a fixed fraction of the best direct hit — a graph hit can never outrank it.
+    // against a fraction (`MEMORY_GRAPH_BASE`) of the best direct hit — a graph hit can never
+    // outrank it.
     const best = Math.max(...surfaced.map(([, r]) => r));
     const rows = new Map(
       this.searchRepo
@@ -448,7 +432,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
       out.push({
         row,
-        score: GRAPH_BASE * topScore * (rank / best),
+        score: this.retrieval.graphBase * topScore * (rank / best),
         matched: "graph",
         via,
       });
@@ -520,15 +504,6 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
     return notes;
   }
-}
-
-// The short text a candidate is judged on: title + its best snippet (the vector
-// best_chunk when present, else the derived summary), capped to a fixed budget. Never
-// the full node content — token economy holds through the rerank stage too.
-function rerankDoc(e: Entry): string {
-  const body = e.best_chunk ?? deriveSummary(e.row.content);
-
-  return `${e.row.title}\n${body}`.slice(0, RERANK_DOC_CHARS);
 }
 
 // Personalized PageRank over the local subgraph: r = (1-alpha)·p + alpha·W·r, with W the

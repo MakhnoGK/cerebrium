@@ -22,6 +22,7 @@ async function session(): Promise<string> {
 async function writeLong(s: string): Promise<Envelope> {
   return container.resolve(WriteTool).invoke({
     session_id: s,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title: "A node with many chunks",

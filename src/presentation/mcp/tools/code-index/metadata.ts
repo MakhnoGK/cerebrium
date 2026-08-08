@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.CODE_INDEX,
@@ -14,7 +14,7 @@ export const metadata = {
     "the code afterwards use `search` (by meaning) or `code_lookup` (by structure), then `get` for a symbol's source.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     repo: z
       .string()
       .optional()

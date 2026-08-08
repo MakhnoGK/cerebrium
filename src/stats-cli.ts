@@ -7,7 +7,7 @@ import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { nowIso } from "@/core/ids";
 import { buildContainer } from "@/container";
-import { DatabaseConfig, RerankConfig } from "@/infrastructure/config";
+import { DatabaseConfig } from "@/infrastructure/config";
 
 // Read-only inspection command: `cerebrium-stats`. Safe to run anytime,
 // including while no MCP server or daemon is up — it never writes.
@@ -81,13 +81,7 @@ function main(): void {
     );
     L.push(`  detached nodes             : ${s.graph.detached_nodes}`);
     L.push("");
-    L.push("Reranking");
-    L.push(`  provider (env)             : ${container.resolve(RerankConfig).provider}`);
-    L.push(
-      `  eligible / reranked        : ${s.rerank_usage.eligible_searches} / ${s.rerank_usage.reranked_searches}`,
-    );
-    L.push(`  candidates reranked        : ${s.rerank_usage.candidates_reranked}`);
-    L.push("");
+
     L.push("Storage");
     L.push(
       `  db                         : ${fmtBytes(s.storage.db_bytes)}  (${s.storage.page_count} pages × ${s.storage.page_size} B)`,

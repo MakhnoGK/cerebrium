@@ -84,6 +84,7 @@ describe("Tier-1 mirror prune", () => {
     const { s } = await orphanSymbol(env);
     const fact = (await container.resolve(WriteTool).invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Keep me",

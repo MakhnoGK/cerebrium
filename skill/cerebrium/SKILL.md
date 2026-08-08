@@ -19,9 +19,10 @@ compact **envelopes**; fetch full content by id. Two memory kinds:
 
 ## Session lifecycle
 
-1. **`session_start` first — always.** It returns your `session_id` (pass it to every
-   other call) and a budgeted working set: recent facts, the last checkpoints *with
-   content*, open tasks, and stats. Read it to orient before doing anything.
+1. **`session_start` first — always.** It is the sole source of agent session ids. Copy
+   the returned `session_id` verbatim into every other call; never invent, guess,
+   transform, or reuse one from another task. If you no longer have it, call
+   `session_start` again. Read its working set before doing anything.
 2. **`checkpoint` before ending any substantial work block.** A good checkpoint has:
    a `summary` (where you left off), `decisions` (each with its reason), `open_threads`
    (what to pick up next), and `touched_node_ids` (nodes you changed). This is how the
@@ -76,6 +77,16 @@ probe fired), STOP and reconsider:
   `superseded_by: <new id>`. That also moves the old node's referrers onto the new one.
 - Genuinely distinct? -> proceed, and `link` them so the graph connects them.
 
+**Treat every id as opaque.** Copy session, node, and candidate ids exactly from the tool
+that returned them. Never synthesize, repair, shorten, or guess an id. A reference to an
+invalidated node is rejected; when Cerebrium names one terminal live successor, inspect that
+node and retry with its exact id if it is the intended target.
+
+Every `write` must include `parent_node_id`. Use an exact live node id to create an atomic
+`relates_to` edge, or `null` to state that the new node is intentionally isolated. Never
+infer a parent from session history or invent one. Extra typed relationships still belong
+in `links`.
+
 Each candidate carries a `score` (cosine similarity, or lexical overlap before anything is
 embedded) and a `confidence`. `high` means it also clears the merge gate — treat it as the
 same fact unless you can name the difference. `moderate` means related enough to check.
@@ -102,14 +113,15 @@ Episodic vs semantic, the decision rule:
 GOOD: search "token TTL" -> hit exists -> update it to "10 minutes", reason "shortened".
 BAD:  write a second "Token TTL" fact -> two contradictory nodes, note-sprawl.
 
-GOOD: write decision "Use RS256"; write fact "JWKS rotates weekly";
+GOOD: write decision "Use RS256" with parent_node_id:null; write fact "JWKS rotates weekly"
+      with parent_node_id:<decision id>;
       link src=decision dst=fact type=references.
 BAD:  cram both into one node titled "auth stuff".
 ```
 
 ## Code
 
-The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP) into `symbol` mirror
+The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP/Rust) into `symbol` mirror
 nodes (functions, methods, classes, interfaces, types, enums, traits, consts,
 modules) with code edges (`defines`/`imports`/`calls`). Symbols are **mirrors**: derived from source, not
 authored — never `write`/`update` them by hand (both are rejected). They are
@@ -185,6 +197,9 @@ BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieva
 | `source_register` | Register/update an external mirror source (per-deployment; no creds). |
 | `mirror_upsert` | Upsert curated external records into mirror nodes. Idempotent, not bulk. |
 | `mirror_status` | List registered sources + freshness (last sync, stale, node count). |
+| `consolidate_suggest` | Review what the background sweep queued: distill/merge/link/prune candidates. |
+| `consolidate_apply` | Resolve a candidate — `apply` or `reject`. Destructive applies on index nodes deserve care; `restore` exists because one already ate a hand-maintained index. |
+| `stats` | Operational snapshot: embedding queue, content totals, storage, daemon health, graph integrity. No content. |
 
 ## Notes worth reading
 

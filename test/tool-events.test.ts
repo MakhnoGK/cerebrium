@@ -61,6 +61,7 @@ describe("WriteTool.describeEvent", () => {
     // When
     const envelope = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "A fact",
       content: "Something durable.",
       type: "fact",
@@ -82,6 +83,7 @@ describe("CheckpointTool.describeEvent", () => {
     const session_id = await session();
     const first = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "One",
       content: "First.",
       type: "fact",
@@ -92,7 +94,7 @@ describe("CheckpointTool.describeEvent", () => {
     const envelope = await callTool(container.resolve(CheckpointTool), {
       session_id,
       summary: "Where we left off.",
-      touched_node_ids: [first.id, "01JUNKJUNKJUNKJUNKJUNKJUNK"],
+      touched_node_ids: [first.id],
     });
 
     // Then
@@ -109,6 +111,7 @@ describe("GetTool.describeEvent", () => {
     const session_id = await session();
     const envelope = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "A fact",
       content: "Something durable.",
       type: "fact",
@@ -134,6 +137,7 @@ describe("GetTool.describeEvent", () => {
     const session_id = await session();
     const envelope = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "A fact",
       content: "Something durable.",
       type: "fact",
@@ -154,6 +158,7 @@ describe("GetTool.describeEvent", () => {
     const session_id = await session();
     const envelope = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "A fact",
       content: "## Ranking\nHybrid fusion.\n\n## Storage\nOne SQLite file.",
       type: "fact",
@@ -182,6 +187,7 @@ describe("GetTool.describeEvent", () => {
     const session_id = await session();
     const envelope = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "A fact",
       content: "## Ranking\nHybrid fusion.",
       type: "fact",
@@ -209,6 +215,7 @@ describe("SearchTool.describeEvent", () => {
     const write = container.resolve(WriteTool);
     const fact = await callTool(write, {
       session_id,
+      parent_node_id: null,
       title: "Deploy pipeline",
       content: "The release pipeline deploys on merge.",
       type: "fact",
@@ -216,6 +223,7 @@ describe("SearchTool.describeEvent", () => {
     });
     await callTool(write, {
       session_id,
+      parent_node_id: null,
       title: "Unrelated",
       content: "Nothing to do with shipping.",
       type: "fact",
@@ -246,6 +254,7 @@ describe("SearchTool.describeEvent", () => {
     const session_id = await session();
     const fact = await callTool(container.resolve(WriteTool), {
       session_id,
+      parent_node_id: null,
       title: "Deploy pipeline",
       content: "The release pipeline deploys on merge.",
       type: "fact",

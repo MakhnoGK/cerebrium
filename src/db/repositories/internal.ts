@@ -122,6 +122,11 @@ export function syncChunks(
      VALUES (@id, @node_id, @rev, @heading_path, @seq, @text, 0)
      ON CONFLICT(id) DO UPDATE SET rev = @rev, seq = @seq, heading_path = @heading_path, stale = 0`,
   );
+  const insertFts = db.prepare(
+    "INSERT INTO chunk_fts (chunk_id, node_id, text) VALUES (@id, @node_id, @text)",
+  );
+  const existingSet = new Set(existing.map((r) => r.id));
+
   for (const c of chunks) {
     upsert.run({
       id: c.id,
@@ -131,6 +136,13 @@ export function syncChunks(
       seq: c.seq,
       text: c.text,
     });
+    if (!existingSet.has(c.id)) {
+      insertFts.run({
+        id: c.id,
+        node_id: nodeId,
+        text: c.text,
+      });
+    }
   }
   const markStale = db.prepare("UPDATE chunks SET stale = 1 WHERE id = ?");
   for (const row of existing) {
@@ -151,6 +163,7 @@ export function dropVector(db: Database.Database, chunkId: string): void {
   for (const pool of [AUTHORED_VEC, CODE_VEC]) {
     db.prepare(`DELETE FROM ${pool} WHERE chunk_id = ?`).run(chunkId);
   }
+  db.prepare("DELETE FROM chunk_fts WHERE chunk_id = ?").run(chunkId);
   db.prepare("DELETE FROM embedding_meta WHERE chunk_id = ?").run(chunkId);
 }
 

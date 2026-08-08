@@ -25,6 +25,15 @@ export class NodesRepo extends BaseRepo {
     return !!this.db.prepare("SELECT 1 FROM nodes WHERE id = ?").get(id);
   }
 
+  referenceState(id: string): "live" | "invalidated" | "missing" {
+    const row = this.db.prepare("SELECT invalidated_at FROM nodes WHERE id = ?").get(id) as
+      { invalidated_at: string | null } | undefined;
+
+    if (!row) return "missing";
+
+    return row.invalidated_at === null ? "live" : "invalidated";
+  }
+
   // The mirror provenance of a node, or undefined if it doesn't exist. Lets the
   // invalidate guard tell a code mirror (origin='repo', indexer-only) from an
   // external mirror (agent-curated, retirable by hand) from an authored node.
@@ -142,8 +151,16 @@ export class NodesRepo extends BaseRepo {
     session_id: string;
     ts: string;
     merged?: { title: string; body: string };
-  }): Envelope {
-    this.tx(() => {
+  }): Envelope | undefined {
+    const applied = this.tx(() => {
+      const live = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM nodes
+           WHERE id IN (@survivor, @loser) AND invalidated_at IS NULL`,
+        )
+        .get({ survivor: input.survivorId, loser: input.loserId }) as { count: number };
+      if (live.count !== 2) return false;
+
       if (input.merged) {
         this.addRevision(input.survivorId, {
           content: input.merged.body,
@@ -187,8 +204,9 @@ export class NodesRepo extends BaseRepo {
         superseded_by: input.survivorId,
         session_id: input.session_id,
       });
+      return true;
     });
-    return this.envelope(input.survivorId)!;
+    return applied ? this.envelope(input.survivorId)! : undefined;
   }
 
   // Attribute enrichment apply: record the generated annotation for a node's
@@ -328,6 +346,9 @@ export class NodesRepo extends BaseRepo {
       const { changes } = this.db
         .prepare("UPDATE nodes SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL")
         .run(fields.ts, id);
+      if (changes) {
+        this.edges.invalidateSystemSimilaritiesOf(id, fields.ts);
+      }
       if (changes && fields.superseded_by) {
         this.repointReferrers(id, fields.superseded_by, fields.session_id, fields.ts);
         this.edges.insertEdge(

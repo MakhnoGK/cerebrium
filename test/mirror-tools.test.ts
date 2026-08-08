@@ -196,6 +196,7 @@ describe("Link payoff: a note documents a mirror record", () => {
 
     const decision = (await t.write.invoke({
       session_id: sid,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Add cache jitter to prevent stampede",

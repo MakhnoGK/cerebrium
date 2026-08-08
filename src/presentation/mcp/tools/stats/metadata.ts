@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.STATS,
@@ -18,9 +17,6 @@ export const metadata = {
     "'has anything fallen out of the graph', and 'is the reranker running'.",
 
   schema: {
-    session_id: z
-      .string()
-      .optional()
-      .describe("The id from session_start (auto-created if unknown). Omit for a read-only peek."),
+    session_id: sessionIdSchema.optional(),
   },
 };

@@ -4,7 +4,6 @@ import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import { RERANK_PROVIDER_TOKEN, type RerankProvider } from "@/domain/ports/rerank-provider";
 import { DaemonService, HintsService } from "@/application/services";
 import { StatsRepo } from "@/db/repositories";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
@@ -22,16 +21,13 @@ export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> 
     private readonly statsRepo: StatsRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
-    @inject(RERANK_PROVIDER_TOKEN) private readonly reranker: RerankProvider,
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
     const stats = this.statsRepo.techStats(this.clock.now());
-    const hints = args.session_id
-      ? await this.hints.getUnknownSessionHints(args.session_id, null)
-      : [];
+    const hints = args.session_id ? await this.hints.getSessionHints(args.session_id) : [];
 
-    const { rerank_usage, ...rest } = stats;
+    const { ...rest } = stats;
 
     return {
       ...rest,
@@ -40,11 +36,6 @@ export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> 
         provider: `${this.provider.name}@${this.provider.version}`,
         daemon_alive: this.daemon.isDaemonAlive(),
         daemon_pid: this.daemon.readDaemonPid(),
-      },
-      rerank: {
-        provider: `${this.reranker.name}@${this.reranker.version}`,
-        enabled: this.reranker.enabled,
-        ...rerank_usage,
       },
       ...(hints.length ? { hints } : {}),
     };

@@ -159,11 +159,6 @@ export interface TechStats {
     repointable_edges: number; // of those, the authored ones whose target has a live successor
     detached_nodes: number; // live nodes no longer reachable from the graph's densest hub
   };
-  rerank_usage: {
-    eligible_searches: number; // hybrid/vector searches (the rerank-eligible ones)
-    reranked_searches: number; // of those, how many actually reranked
-    candidates_reranked: number; // total candidates scored across all rerank passes
-  };
   code_repos: RepoProvenance[];
   last_activity: string | null;
 }

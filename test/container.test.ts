@@ -6,8 +6,6 @@ import { container as globalContainer } from "tsyringe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
-import type { RerankProvider } from "@/domain/ports/rerank-provider";
-import { RERANK_PROVIDER_TOKEN } from "@/domain/ports/rerank-provider";
 import {
   ConsolidationWorker,
   EmbeddingWorker,
@@ -27,7 +25,6 @@ const ROLES: HostRole[] = ["server", "daemon", "cli"];
 const OFFLINE = {
   MEMORY_DB_PATH: ":memory:",
   MEMORY_EMBED_PROVIDER: "local-null",
-  MEMORY_RERANK: "off",
   MEMORY_CONSOLIDATE: "manual",
 };
 
@@ -54,7 +51,6 @@ describe("buildContainer", () => {
 
     // Then
     expect(c.resolve<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN).name).toBe("local-null");
-    expect(c.resolve<RerankProvider>(RERANK_PROVIDER_TOKEN).enabled).toBe(false);
   });
 
   it("should batch the drain for the daemon and stay gentle for every other role", () => {

@@ -19,7 +19,6 @@ import {
   StaticConfigSource,
 } from "@/infrastructure/config";
 
-const sessionStart = container.resolve(SessionStartTool);
 let edgesRepo: EdgesRepo;
 let consolidationRepo: ConsolidationRepo;
 
@@ -32,6 +31,7 @@ async function newNode(
   return (
     (await writeTool.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title,
@@ -49,6 +49,7 @@ async function newEpisodic(
   return (
     (await tool.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title,
@@ -58,7 +59,7 @@ async function newEpisodic(
 }
 
 async function seed(tool: WriteTool, worker: EmbeddingWorker) {
-  const s = (await sessionStart.invoke({})).session_id;
+  const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
   // Two nodes with identical content -> identical local-null vectors (cosine 1.0);
   // a third, disjoint node stays unlinked.
   const dup = "the http client retries three times with exponential backoff";
@@ -209,7 +210,7 @@ describe("Orphan episodic link repair", () => {
 
   it("should link an unlinked episodic to its nearest semantic neighbor when swept", async () => {
     // Given
-    const s = (await sessionStart.invoke({})).session_id;
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const topic = "the http client retries three times with exponential backoff";
     const fact = await newNode(writeTool, s, "Retry budget", topic);
     const orphan = await newEpisodic(writeTool, s, "Touched the retry logic", topic);
@@ -229,7 +230,7 @@ describe("Orphan episodic link repair", () => {
 
   it("should re-seed nothing when the episodic already has an edge", async () => {
     // Given
-    const s = (await sessionStart.invoke({})).session_id;
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const topic = "the http client retries three times with exponential backoff";
     await newNode(writeTool, s, "Retry budget", topic);
     await newEpisodic(writeTool, s, "Touched the retry logic", topic);
@@ -265,7 +266,7 @@ describe("Link degree cap", () => {
   // Identical content -> identical local-null vectors, so every pair clears the gate and
   // only the cap decides how many edges a node ends up with.
   async function quadruplets(): Promise<string[]> {
-    const s = (await sessionStart.invoke({})).session_id;
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const dup = "the http client retries three times with exponential backoff";
     const ids = [
       await newNode(writeTool, s, "Retry budget", dup),
@@ -326,7 +327,7 @@ describe("Similar link prune", () => {
     consolidation = container.resolve(ConsolidationWorker);
     writeTool = container.resolve(WriteTool);
     edgesRepo = container.resolve(EdgesRepo);
-    session = (await sessionStart.invoke({})).session_id;
+    session = (await container.resolve(SessionStartTool).invoke({})).session_id;
   });
 
   function seedEdge(src: string, dst: string, weight: number): void {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { nodeIdSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.RESTORE,
@@ -14,8 +14,8 @@ export const metadata = {
     "currently invalidated. Returns the restored envelope.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("Id of the invalidated node to bring back."),
+    session_id: sessionIdSchema,
+    id: nodeIdSchema,
     reason: z
       .string()
       .min(1)

@@ -2,6 +2,16 @@ import "reflect-metadata";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  countByOrigin,
+  filterByOrigin,
+  parseOrigins,
+  pruneStale,
+  readGoldFile,
+  toEvalQueries,
+  type EvalQuery,
+  type GoldEntry,
+} from "@scripts/gold";
 import type Database from "better-sqlite3";
 import { container, type DependencyContainer } from "tsyringe";
 import {
@@ -11,6 +21,7 @@ import {
 import { HintsService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { matchesSection, sectionName } from "@/core/chunk";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -64,22 +75,13 @@ interface Arm {
   env: Record<string, string>;
 }
 
-// One scored question, however its labels were produced: from the seeded dataset or mined
-// from the retrieval-outcome log.
-interface EvalQuery {
-  query: string;
-  gold: Set<string>;
-  // Sections of a gold node the agent actually read, when it narrowed the fetch. A finer
-  // label than the node id; nothing scores it yet — the metrics here are node-level.
-  sections?: Map<string, Set<string>>;
-}
-
 interface Scores {
   rr: number[];
   ndcg: number[];
   p1: number[];
   recall: number[];
   facets: number[];
+  secAcc: number[];
 }
 
 const HELP = `
@@ -95,6 +97,14 @@ eval-retrieval — labelled relevance eval across configuration arms.
              labels are mined from the retrieval-outcome log: within a session, a node a
              \`get\` fetched after a \`search\` returned it counts as relevant to that query.
              Prints the volume it found and refuses to score below ${MIN_GOLD_QUERIES} labelled queries.
+  --gold P   JSONL gold file (see scripts/gold.ts) merged with the mined labels: the same
+             question from two sources becomes one query with the union of its labels.
+             Labels pointing at nodes no longer live are dropped and counted. Needs --db.
+  --origin O Comma-separated subset of generated,adjudicated,mined — score only labels of
+             those origins, e.g. to check whether synthetic questions and real ones agree.
+  --sample N Score a stable subset of N queries, chosen by hashing the query text — the
+             same subset for every arm and for every re-run, so a sweep over a few
+             thousand labels stays interactive without making two runs incomparable.
   --min N    Lower that floor. Numbers below it are noise; use it to smoke-test the path
              or to peek at early data, not to draw conclusions.
   --help     This text.
@@ -103,10 +113,11 @@ Examples
   npm run eval:retrieval -- --arm off:MEMORY_RERANK=off --arm on:MEMORY_RERANK=local
   npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
   npm run eval:retrieval -- --arm flat:MEMORY_USE_WEIGHT=0 --arm usage:MEMORY_USE_WEIGHT=0.25
+  npm run eval:retrieval -- --db ~/.cerebrium/memory.db --gold ~/.cerebrium/gold.jsonl
 
-Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, and Facet@${FACET_K} —
-the share of distinct gold facets covered by the returned set, which is what a diversity
-stage trades relevance for and what nDCG cannot see.
+Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, Facet@${FACET_K} (the 
+share of distinct gold facets covered by the returned set), and SecAcc@${K} (the share of 
+returned gold nodes whose returned chunk fell into a gold section).
 `;
 
 function parseArms(argv: string[]): Arm[] {
@@ -129,6 +140,29 @@ function parseArms(argv: string[]): Arm[] {
   }
 
   return arms.length ? arms : [{ name: "base", env: {} }];
+}
+
+function num(argv: string[], name: string, fallback: number): number {
+  const i = argv.indexOf(name);
+  const parsed = i < 0 ? NaN : Number(argv[i + 1]);
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+// A subset chosen by hashing the query text, not by shuffling: every arm must score the
+// identical set, and a re-run days later must too, or two numbers stop being comparable.
+function sample(queries: EvalQuery[], size: number): EvalQuery[] {
+  if (!Number.isFinite(size) || queries.length <= size) return queries;
+
+  const hash = (s: string): number => {
+    let h = 2166136261;
+
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+
+    return h >>> 0;
+  };
+
+  return [...queries].sort((a, b) => hash(a.query) - hash(b.query)).slice(0, size);
 }
 
 function reciprocalRank(ranked: string[], gold: Set<string>): number {
@@ -189,6 +223,38 @@ function facetCoverage(
   return covered.size / wanted.size;
 }
 
+// How often the returned section (best_chunk's heading) matches one of the gold
+// section labels for a returned gold node.
+function sectionAccuracy(
+  ranked: { id: string; section?: string }[],
+  gold: Set<string>,
+  sections: Map<string, Set<string>> | undefined,
+  k: number,
+): number {
+  if (!sections || sections.size === 0) return NaN;
+
+  let possible = 0;
+  let hits = 0;
+
+  for (let i = 0; i < Math.min(k, ranked.length); i++) {
+    const r = ranked[i]!;
+    if (gold.has(r.id)) {
+      const goldSecs = sections.get(r.id);
+      if (goldSecs && goldSecs.size > 0) {
+        possible++;
+        const rSec = sectionName(r.section ?? null);
+        if (
+          [...goldSecs].some((s) => matchesSection(r.section ?? null, s) || matchesSection(s, rSec))
+        ) {
+          hits++;
+        }
+      }
+    }
+  }
+
+  return possible > 0 ? hits / possible : NaN;
+}
+
 // NaN for an empty sample, so a metric nothing was observed for prints as "-" instead of
 // as a confident zero.
 const mean = (xs: number[]): number =>
@@ -212,6 +278,7 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
   for (const d of data.docs) {
     await writeTool.invoke({
       session_id: sid,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: d.title,
@@ -251,7 +318,7 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
 // fetch also names the sections read, which is a label at chunk granularity; an `outline`
 // fetch is a decision aid rather than a read and is not counted as evidence at all.
 function goldFromEvents(db: Database.Database): {
-  queries: EvalQuery[];
+  entries: GoldEntry[];
   searches: number;
   sectionLabels: number;
 } {
@@ -263,7 +330,7 @@ function goldFromEvents(db: Database.Database): {
     )
     .all() as { session_id: string; action: string; detail: string }[];
 
-  const queries: EvalQuery[] = [];
+  const entries: GoldEntry[] = [];
   let open: {
     query: string;
     returned: Set<string>;
@@ -276,7 +343,12 @@ function goldFromEvents(db: Database.Database): {
 
   const close = () => {
     if (open?.gold.size) {
-      queries.push({ query: open.query, gold: open.gold, sections: open.sections });
+      entries.push({
+        query: open.query,
+        gold: [...open.gold],
+        origin: "mined",
+        sections: Object.fromEntries([...open.sections].map(([id, names]) => [id, [...names]])),
+      });
     }
     open = null;
   };
@@ -341,7 +413,18 @@ function goldFromEvents(db: Database.Database): {
 
   close();
 
-  return { queries, searches, sectionLabels };
+  return { entries, searches, sectionLabels };
+}
+
+// A label is only worth scoring while the node it points at is still live: an invalidated
+// or merged-away node cannot be returned, so keeping it would score a correct ranking as
+// a miss.
+function liveNodes(db: Database.Database): Set<string> {
+  const rows = db.prepare("SELECT id FROM nodes WHERE invalidated_at IS NULL").all() as {
+    id: string;
+  }[];
+
+  return new Set(rows.map((r) => r.id));
 }
 
 async function runArm(
@@ -375,12 +458,13 @@ async function runArm(
   const sid = shared.readonly
     ? "eval-readonly"
     : (await scope.resolve(SessionStartTool).invoke({})).session_id;
-  const scores: Scores = { rr: [], ndcg: [], p1: [], recall: [], facets: [] };
+  const scores: Scores = { rr: [], ndcg: [], p1: [], recall: [], facets: [], secAcc: [] };
 
   for (const q of queries) {
     const res = await tool.invoke({ session_id: sid, query: q.query, limit: K });
     const ranked = res.results.map((r) => r.id);
     const facet = facetCoverage(ranked, q.gold, facetOf, FACET_K);
+    const secAcc = sectionAccuracy(res.results, q.gold, q.sections, K);
 
     scores.rr.push(reciprocalRank(ranked, q.gold));
     scores.ndcg.push(ndcgAtK(ranked, q.gold, K));
@@ -388,6 +472,7 @@ async function runArm(
     scores.recall.push(recallAtK(ranked, q.gold, K));
 
     if (!Number.isNaN(facet)) scores.facets.push(facet);
+    if (!Number.isNaN(secAcc)) scores.secAcc.push(secAcc);
   }
 
   return scores;
@@ -427,27 +512,55 @@ async function main() {
   console.log(`embeddings: ${provider.name}`);
 
   if (readonly) {
-    const { queries: mined, searches, sectionLabels } = goldFromEvents(db);
-    const pairs = mined.reduce((n, q) => n + q.gold.size, 0);
+    const { entries: mined, searches, sectionLabels } = goldFromEvents(db);
+    const goldPath = argv.includes("--gold") ? argv[argv.indexOf("--gold") + 1] : undefined;
+    const fromFile = goldPath ? readGoldFile(goldPath) : { entries: [], malformed: 0 };
+    const origins = parseOrigins(
+      argv.includes("--origin") ? argv[argv.indexOf("--origin") + 1] : undefined,
+    );
+    const live = liveNodes(db);
+    const { kept, droppedLabels, droppedQueries } = pruneStale(
+      filterByOrigin([...fromFile.entries, ...mined], origins),
+      (id) => live.has(id),
+    );
+
+    queries = sample(toEvalQueries(kept), num(argv, "--sample", Infinity));
+
+    const pairs = queries.reduce((n, q) => n + q.gold.size, 0);
+    const counts = countByOrigin(kept);
 
     console.log(`store: ${store} (read-only)`);
+
+    if (goldPath) {
+      console.log(
+        `gold file: ${goldPath} — ${fromFile.entries.length} entries${fromFile.malformed ? `, ${fromFile.malformed} malformed lines skipped` : ""}`,
+      );
+    }
+
     console.log(
-      `gold from the retrieval-outcome log: ${mined.length} queries with a fetch, ${pairs} query→node pairs, out of ${searches} logged searches`,
+      `retrieval-outcome log: ${mined.length} queries with a fetch, out of ${searches} logged searches`,
     );
     console.log(
-      `of those, ${sectionLabels} query→node→section labels (nothing scores them yet; the metrics below are node-level)\n`,
+      `labels: ${kept.length} entries (generated ${counts.generated}, adjudicated ${counts.adjudicated}, mined ${counts.mined}) ` +
+        `-> scoring ${queries.length} distinct queries, ${pairs} query→node pairs`,
     );
 
-    if (mined.length < floor) {
+    if (droppedLabels) {
       console.log(
-        `Not enough labelled data to measure anything: ${mined.length} usable queries, ${floor} is the floor.\n` +
-          `The log only carries ids for searches made after A1 shipped, so this grows with use.\n` +
-          `Re-run when the number above crosses the floor; the seeded corpus (no --db) works today.`,
+        `dropped ${droppedLabels} labels pointing at nodes no longer live (${droppedQueries} queries lost every label) — regenerate if this share grows`,
+      );
+    }
+
+    console.log(`of those, ${sectionLabels} query→node→section labels from the log\n`);
+
+    if (queries.length < floor) {
+      console.log(
+        `Not enough labelled data to measure anything: ${queries.length} usable queries, ${floor} is the floor.\n` +
+          `Mined labels grow only with use; manufacture the rest with \`gold-generate\` and \`gold-adjudicate\`,\n` +
+          `then pass the file with --gold. The seeded corpus (no --db) works today.`,
       );
       return;
     }
-
-    queries = mined;
   } else {
     const data = JSON.parse(
       readFileSync(join(here, "eval-retrieval.dataset.json"), "utf8"),
@@ -467,6 +580,7 @@ async function main() {
           .map((datasetId) => byTitle.get(titleOf.get(datasetId) ?? ""))
           .filter((x): x is string => !!x),
       ),
+      origins: new Set<never>(),
     }));
     facetOf = new Map(
       data.docs
@@ -475,8 +589,10 @@ async function main() {
     );
   }
 
-  console.log(`arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K}`);
-  console.log("-------------+-------+---------+-------+--------+---------");
+  console.log(
+    `arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K} | SecAcc@${K}`,
+  );
+  console.log("-------------+-------+---------+-------+--------+---------+----------");
 
   const table: { arm: Arm; scores: Scores }[] = [];
 
@@ -485,7 +601,7 @@ async function main() {
 
     table.push({ arm, scores });
     console.log(
-      `${arm.name.padEnd(12)} | ${pct(mean(scores.rr))} | ${pct(mean(scores.ndcg))}   | ${pct(mean(scores.p1))} | ${pct(mean(scores.recall))}  | ${pct(mean(scores.facets))}`,
+      `${arm.name.padEnd(12)} | ${pct(mean(scores.rr))} | ${pct(mean(scores.ndcg))}   | ${pct(mean(scores.p1))} | ${pct(mean(scores.recall))}  | ${pct(mean(scores.facets))}   | ${pct(mean(scores.secAcc))}`,
     );
   }
 
@@ -504,7 +620,7 @@ async function main() {
       };
 
       console.log(
-        `  ${row.arm.name.padEnd(12)} nDCG ${d(first.scores.ndcg, row.scores.ndcg).padStart(6)}   Rec ${d(first.scores.recall, row.scores.recall).padStart(6)}   Facet ${d(first.scores.facets, row.scores.facets).padStart(6)}`,
+        `  ${row.arm.name.padEnd(12)} nDCG ${d(first.scores.ndcg, row.scores.ndcg).padStart(6)}   Rec ${d(first.scores.recall, row.scores.recall).padStart(6)}   Facet ${d(first.scores.facets, row.scores.facets).padStart(6)}   SecAcc ${d(first.scores.secAcc, row.scores.secAcc).padStart(6)}`,
       );
     }
   }

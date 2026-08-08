@@ -29,6 +29,7 @@ describe("Ranking blends text relevance with the memory model", () => {
 
     const old = (await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "Deploy",
@@ -37,6 +38,7 @@ describe("Ranking blends text relevance with the memory model", () => {
     env.clock.advanceDays(59);
     const fresh = (await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "Deploy",
@@ -45,6 +47,7 @@ describe("Ranking blends text relevance with the memory model", () => {
     env.clock.advanceDays(1);
     const fact = (await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Deploy",
@@ -66,6 +69,7 @@ describe("Ranking blends text relevance with the memory model", () => {
 
     const old = (await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "x",
@@ -74,6 +78,7 @@ describe("Ranking blends text relevance with the memory model", () => {
     env.clock.advanceDays(60);
     const fresh = (await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
       title: "x",
@@ -103,6 +108,7 @@ describe("Search is robust and filterable", () => {
     const s = (await t.sessionStart.invoke({})).session_id;
     await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "T",
@@ -137,6 +143,7 @@ describe("Search is robust and filterable", () => {
     const s = (await t.sessionStart.invoke({})).session_id;
     await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "A",
@@ -144,6 +151,7 @@ describe("Search is robust and filterable", () => {
     });
     await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: "B",

@@ -38,7 +38,7 @@ interface ChatResponse {
 const DEFAULTS = {
   url: "http://127.0.0.1:11434/api/chat",
   model: "gemma4:12b-it-qat",
-  timeoutMs: 500_000,
+  timeoutMs: 60_000,
 };
 
 export class HttpConsolidator implements ConsolidationProvider {
@@ -75,56 +75,40 @@ export class HttpConsolidator implements ConsolidationProvider {
 
   // One structured-output chat round-trip. Returns the raw message.content string for a
   // task-specific parser. Any transport failure, non-2xx, timeout, or malformed body
-  // throws — the caller (daemon or write tool) then degrades gracefully. Every throw names
-  // what went wrong, because the caller's only other signal is the absence of a proposal:
-  // a timeout, a dead endpoint and a model with nothing to say look identical otherwise.
+  // throws — the caller (daemon or write tool) then degrades gracefully.
   private async chat(system: string, user: string, format: object): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
     }, this.timeoutMs);
     try {
-      const res = await this.fetchFn(this.url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          stream: false,
-          format,
-          options: { temperature: 0.2 },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
+      let res = await this.post(system, user, format, controller.signal);
 
-        throw new Error(
-          `consolidation http provider: HTTP ${String(res.status)}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
-        );
+      // A backend that has no reasoning mode rejects the field outright. Retrying once
+      // without it, and remembering that for the process, keeps this adapter working
+      // against any Ollama-compatible model instead of failing every call on one word.
+      if (!res.ok && this.thinkSupported && (await rejectsThinking(res))) {
+        this.thinkSupported = false;
+        res = await this.post(system, user, format, controller.signal);
       }
+      if (!res.ok) throw new Error(`consolidation http provider: HTTP ${String(res.status)}`);
       const body = (await res.json()) as ChatResponse;
       const content = body.message?.content;
       if (typeof content !== "string") {
         throw new Error("consolidation http provider: response missing message.content");
       }
       return content;
-    } catch (err) {
-      // The abort surfaces as a generic DOMException, which reads like a network blip.
-      // Naming the timeout is what tells an operator to raise it rather than hunt a bug.
-      if (controller.signal.aborted) {
-        throw new Error(
-          `consolidation http provider: timed out after ${String(this.timeoutMs)}ms (MEMORY_CONSOLIDATE_TIMEOUT_MS)`,
-          { cause: err },
-        );
-      }
-
-      throw err;
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+async function rejectsThinking(res: Response): Promise<boolean> {
+  try {
+    const text = await res.clone().text();
+    return text.includes("reasoning_effort") || text.includes("invalid parameter");
+  } catch {
+    return false;
   }
 }

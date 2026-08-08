@@ -21,6 +21,7 @@ async function mk(s: string, title: string, content: string): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title,
@@ -136,6 +137,50 @@ describe("Semantic dedup / merge", () => {
     const loser = [a, b].find((id) => env.nodes.envelope(id)!.invalidated)!;
     expect(loser).toBeDefined();
     expect((await env.nodes.fullNode(survivor))!.content).toBe("merged body");
+  });
+
+  it("should dismiss an overlapping merge after its shared loser was already retired", async () => {
+    const env = setup();
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const loser = await mk(s, "Shared loser", SHARED);
+    const first = await mk(s, "First survivor", `${SHARED} first`);
+    const second = await mk(s, "Second survivor", `${SHARED} second`);
+    const firstCandidate = env.consolidation.insertCandidate({
+      kind: ConsolidationKind.MERGE,
+      member_ids: [first, loser],
+      canonical_id: first,
+      score: 0.99,
+      detected_at: env.clock.t,
+    })!;
+    const secondCandidate = env.consolidation.insertCandidate({
+      kind: ConsolidationKind.MERGE,
+      member_ids: [second, loser],
+      canonical_id: second,
+      score: 0.98,
+      detected_at: env.clock.t,
+    })!;
+    const apply = container.resolve(ConsolidateApplyTool);
+
+    const firstResult = (await apply.invoke({
+      session_id: s,
+      id: firstCandidate,
+      decision: ConsolidationRecommendation.APPLY,
+    })) as { status: string };
+    const secondResult = (await apply.invoke({
+      session_id: s,
+      id: secondCandidate,
+      decision: ConsolidationRecommendation.APPLY,
+    })) as { status: string };
+
+    expect(firstResult.status).toBe("applied");
+    expect(secondResult.status).toBe("dismissed");
+    expect(env.nodes.envelope(loser)!.invalidated).toBe(true);
+    expect(env.nodes.envelope(first)!.invalidated).toBe(false);
+    expect(env.nodes.envelope(second)!.invalidated).toBe(false);
+    expect(env.consolidation.getCandidate(secondCandidate)!.status).toBe("dismissed");
+    expect(env.edges.edgesOf(second).some((e) => e.id === loser && e.edge === "supersedes")).toBe(
+      false,
+    );
   });
 
   it("should not merge semantic nodes below the merge threshold", async () => {

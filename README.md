@@ -142,7 +142,8 @@ unless `history:true`), then optionally expands the graph.
   normalized by degree so a hub can't swallow the diffusion. This is multi-hop by
   construction, and a node backed by several independent hits beats one backed by a
   single strong hit. Only nodes the query did *not* match directly are scored this way,
-  and a graph hit is capped at `0.3 ×` the top direct hit, so it never outranks it.
+  and a graph hit is capped at `MEMORY_GRAPH_BASE ×` the top direct hit (`0.3` by
+  default), so it never outranks it.
   `supersedes` is not traversable (a superseded node never surfaces), and neither is code
   structure (`calls`/`defines`/`imports`) — `documents` keeps the prose↔code join
   reachable. Ignored in `text` mode.
@@ -236,17 +237,22 @@ claude mcp add cerebrium -s user \
 session `/mcp` lists its tools (`session_start`, `search`, `write`, …). The SQLite file
 and its `~/.cerebrium/models` cache are created on first use — no manual DB setup.
 
-**4 — (Recommended) Install the skill** so the agent knows *how* to use the memory
-(session lifecycle, search-before-write, retrieval economy), not just that the tools
-exist:
+**4 — Install the discipline, not just the tools.** An agent handed 17 tools and no
+doctrine calls `write` without searching and fills the store with duplicates. One command
+installs the skill, the always-on retrieval rules and a session-start hook for every agent
+host it finds — Claude Code, Codex CLI and Antigravity:
 
 ```bash
-cp -r skill/cerebrium ~/.claude/skills/cerebrium
+npm run agent:setup            # what each host is missing; writes nothing
+npm run agent:setup -- --apply # install it
 ```
 
-That's it — open Claude Code in any project and the agent can call `session_start`,
-`search`, `write`, `checkpoint`, and the rest. See [Tools](#tools) for the full surface
-and [Skill for consuming agents](#skill-for-consuming-agents) for the usage discipline.
+It links the skill into each host rather than copying it, so the doctrine can never fall
+behind this working tree. See [Agent hosts](#agent-hosts) for what it writes where.
+
+That's it — open your agent in any project and it can call `session_start`, `search`,
+`write`, `checkpoint`, and the rest. See [Tools](#tools) for the full surface and
+[Skill for consuming agents](#skill-for-consuming-agents) for the usage discipline.
 
 **One-time model download.** The default `local` embedding provider runs
 [transformers.js](https://github.com/huggingface/transformers.js) in-process and
@@ -303,15 +309,20 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
-| `MEMORY_MMR_LAMBDA` | `0.7` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. |
+| `MEMORY_MMR_LAMBDA` | `0.85` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. Calibrated against the gold set — see *Calibrating the ranking constants*. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
 | `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
+| `MEMORY_GRAPH_BASE` | `0.3` | Ceiling a graph-surfaced hit may reach, as a fraction of the best direct hit. `0` still surfaces neighbours but never lifts one over a directly matched node. Calibrated — see *Calibrating the ranking constants*. |
 | `MEMORY_PPR_FRONTIER` | `500` | Max nodes pulled into the local subgraph PPR runs over, nearest first. |
 | `MEMORY_CONSOLIDATE` | `manual` | Consolidation generation provider: `manual` (offline — queue clusters for an agent), `off`, `command` (subprocess: task JSON on stdin -> result JSON on stdout), or `http` (Ollama-style `/api/chat` with structured output). |
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
+<<<<<<< ours
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
+=======
+| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
+>>>>>>> theirs
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
@@ -365,15 +376,16 @@ of counting as already done.
 
 ## Tools
 
-Call `session_start` first; pass the returned `session_id` to every other tool
-(an unknown id is auto-created, with a hint).
+Call `session_start` first and copy its returned `session_id` verbatim into every other tool.
+Unknown or malformed ids are rejected; they are never auto-created. Treat every session,
+node, and candidate id as opaque and never invent or transform one.
 
 | Tool | When to use |
 |------|-------------|
 | `session_start` | Begin a work block. Returns `session_id` + a budgeted working set (recent facts, last 2 checkpoints *with content*, open tasks, stats). |
 | `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision; `outline`/`sections` to fetch part of a long node instead of all of it. |
-| `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Optional `links`. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
+| `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Required `parent_node_id` is an exact live id (atomic `relates_to`) or `null` (intentionally isolated); it is never inferred. Optional `links` add more typed edges. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
 | `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
 | `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge, and moves the dead node's authored referrers onto it. |
 | `restore` | The inverse: bring a soft-deleted node back with its id, revision history and edges intact, retiring the `supersedes` edges into it. For a merge that swallowed a living document. |
@@ -407,11 +419,14 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 
 | Command | What it does |
 |---------|--------------|
-| `cerebrium` | The MCP server (stdio). Registered in Claude Code. |
+| `cerebrium` | The MCP server (stdio). Registered in each agent host — see *Agent hosts*. |
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
-| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. See *Evaluating a ranking change*. |
+| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
+| `npm run gold:generate` | Writes labelled queries for the eval by asking the local model what each section of the store answers. Read-only on the store, resumable, appends to a gold JSONL that lives outside the repo. See *The gold file*. |
+| `npm run agent:setup` | Reports what each agent host still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it by booting the server and calling `session_start`. Read-only without `--apply`, and it never touches the store. See *Agent hosts*. |
+| `npm run gold:adjudicate` | Labels real logged queries by judging pooled candidates one by one, giving the multi-label gold a generated question cannot. Read-only, resumable, same gold JSONL. See *The gold file*. |
 
 ## Code indexing
 
@@ -543,6 +558,19 @@ self-contained local runtime (Ollama + a small model) for the `http` provider li
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
 
+<<<<<<< ours
+=======
+The `http` provider asks the backend to answer **without its reasoning mode** (`think:
+false`). This is a latency fix, not a style preference: the adapter reads only
+`message.content`, so hidden reasoning is decode time spent on text nothing consumes.
+Measured 2026-08-04 on a real 6 kB merge cluster against `gemma4:12b-it-qat` — 61.8 s
+with reasoning on versus 24.9 s with it off, for the same 1.1 kB of parsed JSON, plus
+3.2 kB of thinking discarded on arrival. That 2.5× is what used to push calls past the
+old 60 s timeout and make proposals vanish mid-decode. A backend with no reasoning mode
+rejects the field with a 400; the provider retries once without it and stops sending it
+for the rest of the process.
+
+>>>>>>> theirs
 When generation fails, the sweep degrades to a proposal-less suggestion rather than
 blocking or guessing — a weak or absent model must never author durable memory. That
 degradation is deliberately indistinguishable *in the store* from the `manual` posture,
@@ -562,6 +590,7 @@ the only difference between arms is the knob.
 
 ```sh
 npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
+npm run eval:retrieval -- --arm shy:MEMORY_GRAPH_BASE=0.1 --arm bold:MEMORY_GRAPH_BASE=0.6
 ```
 
 `Facet@3` is deliberately read at a tighter cut than the relevance metrics: a diversity
@@ -585,11 +614,84 @@ Note the signal accrues slowly *by design*: envelopes and `best_chunk` are built
 agent can usually answer without calling `get`, and a search nobody follows up on produces
 no label.
 
+### The gold file
+
+`--gold PATH` supplies labels the log cannot: a JSONL file (format in `scripts/gold.ts`)
+whose entries carry a query, the node ids that answer it, and an `origin` — `generated`
+(a question written from one section, which is then the gold), `adjudicated` (a real query
+from the log with each candidate judged), or `mined` (the implicit signal above). File and
+log are merged, the same question from two sources becoming one query with the union of
+its labels, and `--origin` scores a subset — which is how you check whether synthetic
+questions and real ones agree before trusting a constant to the synthetic ones.
+
+Labels pointing at nodes that are no longer live are dropped and counted: an invalidated
+or merged-away node cannot be returned, so scoring it would count a correct ranking as a
+miss. A growing share of dropped labels is the signal to regenerate.
+
+`npm run gold:generate -- --db PATH` builds the `generated` half: for every section of
+every live authored node it asks the local model (the same Ollama sidecar the `http`
+consolidation provider uses) for questions that section answers, and the section becomes
+the label. It appends per section, so an interrupted run resumes; it drops any question
+that shares more than `--max-overlap` of its content words with its own source, because a
+question echoing its section hands BM25 the answer and never exercises the vector side.
+
+`npm run gold:adjudicate -- --db PATH` builds the `adjudicated` half from the queries an
+agent actually ran. For each one it pools candidates across the hybrid, text and vector
+modes and asks the judge which of them genuinely answer it, so a query ends up with every
+node that does — the multi-label form a generated question cannot have, and the reason a
+correct ranking is not scored as a miss for returning a second good answer. Pooling across
+modes keeps today's ranker from writing its own labels; it does not remove that bias
+entirely, since a node no mode retrieves can never be labelled.
+
+**The gold file is deliberately not in this repository.** It is derived from the contents
+of one private store and points at that store's ids, so it lives beside the DB
+(`~/.cerebrium/gold.jsonl`); only the machinery to build and read it is versioned here.
+
 A narrowed fetch labels more finely: it records *which sections* were read, so the run also
 reports query→node→section pairs. Nothing scores them yet — every metric above is
 node-level — but they are the granularity a chunk-level relevance signal needs, and they
 cost nothing to accumulate. An `outline` fetch is excluded: it is how an agent decides
 whether to read, not a read, so counting it would label a node the agent then skipped.
+
+## Calibrating the ranking constants
+
+Measured 2026-08-04 against the author's store (223 live authored nodes) with a gold set
+of **1,888 labels — 1,734 generated, 149 adjudicated, 5 mined**. Two runs, because the
+two label sources answer different questions: 300 sampled queries dominated by generated
+ones, and all 149 adjudicated queries on their own. Percentage points versus the shipped
+default.
+
+| Arm | Generated-heavy (300 q) | Adjudicated only (149 q) |
+|---|---|---|
+| `MEMORY_GRAPH_BASE=0` | nDCG −0.1, Rec −0.1 | nDCG −0.5, **Rec −1.1** |
+| `MEMORY_GRAPH_BASE=0.5` | nDCG −0.2, Rec −0.6 | nDCG +0.2, Rec +0.1 |
+| `MEMORY_GRAPH_BASE=1.0` | **nDCG −10.5**, P@1 38.3→16.0 | **nDCG −14.6**, P@1 60.4→26.2 |
+| `MEMORY_MMR_LAMBDA=0.85` | nDCG +0.1, Rec −0.2 | nDCG +1.1, Rec +1.5 |
+| `MEMORY_MMR_LAMBDA=1.0` | nDCG +0.4, Rec +0.4 | nDCG +1.9, Rec +1.8 |
+| `MEMORY_USE_WEIGHT=0` | nDCG +0.8, P@1 +1.7 | nDCG +0.1, P@1 +0.7 |
+| `MEMORY_USE_WEIGHT=0.5` | nDCG −0.1, Rec +0.3 | nDCG +0.5, P@1 +2.7 |
+
+**`MEMORY_GRAPH_BASE` stays at `0.3`** — measured, no longer guessed. It sits on a plateau:
+0 through 0.5 move nothing much, and at `1.0` a graph hit reaches the top direct hit's
+score and P@1 collapses by more than half. Note the two label sources *disagree about
+whether graph expansion earns its place*: switching it off is free on generated questions
+and costs 1.1 points of recall on real ones. That is the bias the split exists to expose —
+a question written from one section never needs a link followed, and a question an agent
+actually asked often does.
+
+**`MEMORY_MMR_LAMBDA` moves `0.7` → `0.85`.** Both label sources agree in direction, and a
+third run with the reranker on (`MEMORY_RERANK=local`, the deployed configuration, since
+MMR runs after it) agrees again: +0.9 nDCG, +0.8 Rec. On adjudicated queries — which carry
+2.1 relevant nodes each — Recall@10 *is* coverage of the answers a query has, so the old
+default was not buying diversity, it was swapping a relevant hit for a merely different
+one. `1.0` measured better still, but turning a stage off on labels that cannot see
+redundancy is a larger claim than this evidence supports.
+
+**`MEMORY_USE_WEIGHT` stays at `0.25` — unresolved, not confirmed.** The two sources
+disagree in *direction* (one prefers `0`, the other `0.5`), and neither can see what the
+prior is for: labels record which node answers a question, never that a memory earned its
+place by being useful repeatedly. Do not move it on this evidence; it needs a signal about
+use, not about relevance.
 
 ## Measuring a wire encoding before changing one
 
@@ -656,14 +758,51 @@ rather than pretending to reproduce it.
 
 ## Skill for consuming agents
 
-`skill/cerebrium/SKILL.md` teaches a consuming agent (e.g. Claude Code) the
-usage *discipline* — session lifecycle, search-before-write, retrieval economy,
-episodic-vs-semantic — not the API. Install it by copying the folder into a skills
-directory the agent loads:
+`skill/cerebrium/SKILL.md` teaches a consuming agent the usage *discipline* — session
+lifecycle, search-before-write, retrieval economy, episodic-vs-semantic — not the API.
+`skill/cerebrium-setup/SKILL.md` is the other half: it teaches an agent to install
+Cerebrium into whatever host it is running in.
+
+Install both with `npm run agent:setup -- --apply`, or by hand:
 
 ```bash
-cp -r skill/cerebrium ~/.claude/skills/cerebrium
+ln -s "$PWD/skill/cerebrium" ~/.claude/skills/cerebrium   # or ~/.codex/skills/…
 ```
+
+**Link, never copy.** A copy stops tracking the repository the moment it is made, and
+that is not hypothetical: the installed copy once sat four tools behind for three weeks,
+so an agent reading it did not know external mirrors existed. The tradeoff is that a
+symlink follows the *working tree* — whatever branch is checked out is what every host
+reads, so switch back to the main line before relying on it.
+
+## Agent hosts
+
+Cerebrium is a stdio MCP server, so any MCP-capable host can call its tools. What does not
+travel with the transport is the discipline that makes it useful, so setup installs four
+surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, and a
+**session-start hook**.
+
+| Host | MCP | Skill | Rules | Hook |
+|------|-----|-------|-------|------|
+| Claude Code | `claude mcp add -s user` | symlink in `~/.claude/skills/` | block in `~/.claude/CLAUDE.md` | `SessionStart` in `~/.claude/settings.json` |
+| Codex CLI | `codex mcp add` | symlink in `~/.codex/skills/` | block in `~/.codex/AGENTS.md` | `SessionStart` in `~/.codex/hooks.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | block in each project's `AGENTS.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
+
+The rules block is written between `cerebrium:start`/`cerebrium:end` markers and replaced
+in place on later runs, so the rest of a file you maintain is never touched. Two steps are
+deliberately left to you and named in the report: Codex's `hooks = true` under `[features]`
+(appending a second `[features]` table would corrupt the TOML) and its hook trust prompt,
+which is a security gate and not ours to pre-approve.
+
+`npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
+server over stdio against a throwaway store, calls `session_start`, counts the tools and
+runs the hook script. `install/README.md` has the per-host procedure by hand, and
+`install/hosts.md` records what was verified on which host version.
+
+**More than one host at once** means more than one server process on one SQLite file. That
+is allowed — see invariant #1 in `CLAUDE.md` — and measured: two servers doing 120
+interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
+landed and searchable.
 
 ## Backup (Litestream)
 

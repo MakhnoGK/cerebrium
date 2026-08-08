@@ -17,24 +17,23 @@ export class EmbeddingConfig extends SectionOf("embedding", {
   batchSize: int(64).positive().env("MEMORY_EMBED_BATCH"),
 }) {}
 
-@configSection()
-export class RerankConfig extends SectionOf("rerank", {
-  provider: str("off").env("MEMORY_RERANK"),
-  model: str("Xenova/ms-marco-MiniLM-L-6-v2").env("MEMORY_RERANK_MODEL"),
-  cacheDir: str(home("models")).env("MEMORY_MODEL_CACHE"),
-}) {}
-
 // Ranking and write-path policy. These are the knobs that shape what the agent gets back,
 // so they are tuned per deployment rather than baked into the retrieval code.
 // `dedupThreshold` and `lexicalDedupThreshold` are calibrated, not chosen: run
 // `npm run calibrate:report` against a real store and read them off it. They are also
 // scale-specific — an embedding-model swap invalidates both. `mmrLambda` at 1.0 is pure
 // relevance, i.e. the diversity pass off; `useWeight` at 0 disables the usage prior, which
-// is the knob to turn down if retrieval starts feeling stuck on the same nodes.
+// is the knob to turn down if retrieval starts feeling stuck on the same nodes. `graphBase`
+// caps a graph-surfaced hit as a fraction of the best direct hit, so at 0 the graph stage
+// still surfaces neighbours but never lifts one over a directly matched node.
+// `graphBase` and `mmrLambda` were measured against the gold set on 2026-08-04 (see the
+// README): 0.3 sits on a plateau and 1.0 collapses P@1, while diversity below 0.85 costs
+// relevance without buying coverage of the answers a query actually has.
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
-  mmrLambda: num(0.7).range(0, 1).env("MEMORY_MMR_LAMBDA"),
+  graphBase: num(0.3).range(0, 1).env("MEMORY_GRAPH_BASE"),
+  mmrLambda: num(0.85).range(0, 1).env("MEMORY_MMR_LAMBDA"),
   useWeight: num(0.25).range(0, 1).env("MEMORY_USE_WEIGHT"),
   pprAlpha: num(0.5).range(0, 1).env("MEMORY_PPR_ALPHA"),
   pprFrontier: int(500).positive().env("MEMORY_PPR_FRONTIER"),
