@@ -12,7 +12,9 @@ export const metadata = {
     "`derived_from` each source, and stamps the sources consolidated; a `merge` candidate folds the duplicate into the " +
     "canonical survivor — optionally rewriting it from `override`/proposal — re-points authored edges, and supersedes " +
     "the loser; a `prune` candidate soft-invalidates a dead mirror node. Superseded/consolidated/pruned nodes stay " +
-    "queryable via history. Idempotent per candidate — one already applied or dismissed cannot be resolved again.",
+    "queryable via history. Application and candidate resolution are atomic; a stale link/merge whose endpoints are " +
+    "no longer live is dismissed without mutation. Idempotent per candidate — one already applied or dismissed cannot " +
+    "be resolved again.",
 
   schema: {
     session_id: sessionIdSchema,

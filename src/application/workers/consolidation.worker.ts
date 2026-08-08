@@ -219,16 +219,16 @@ export class ConsolidationWorker {
       degrees.set(p.dst, dstDegree + 1);
 
       if (posture === Posture.AUTO) {
-        this.edgesRepo.insertEdge(
+        const inserted = this.edgesRepo.insertSystemSimilarityIfLive(
           p.src,
           p.dst,
-          EdgeType.SIMILAR_TO,
-          "system",
           this.ownerId,
           now,
           p.score,
         );
-        result.links_added++;
+        if (inserted) {
+          result.links_added++;
+        }
       } else {
         const id = this.consolidationRepo.insertCandidate({
           kind: ConsolidationKind.LINK,
@@ -423,7 +423,7 @@ export class ConsolidationWorker {
       }
 
       if (posture === Posture.AUTO && gen) {
-        this.nodesRepo.applyMerge({
+        const merged = this.nodesRepo.applyMerge({
           survivorId: pair.canonical_id,
           loserId: loser,
           session_id: this.ownerId,
@@ -431,7 +431,9 @@ export class ConsolidationWorker {
           merged: { title: gen.title, body: gen.body },
         });
 
-        result.merged++;
+        if (merged) {
+          result.merged++;
+        }
 
         continue;
       }

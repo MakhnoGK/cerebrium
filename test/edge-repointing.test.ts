@@ -74,26 +74,28 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     expect(edges).toEqual([{ src: successor, dst: doomed, type: EdgeType.SUPERSEDES }]);
   });
 
-  it("should leave a system edge where it is, since the sweep recomputes those", async () => {
-    // Given
+  it("should retire incident system similarities without re-pointing them", async () => {
     const env = setup();
     const s = await session();
     const referrer = await writeFact(s, "referrer");
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
+    const other = await writeFact(s, "other");
     env.edges.insertEdge(referrer, doomed, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    env.edges.insertEdge(doomed, other, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    env.edges.insertEdge(referrer, other, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
 
-    // When
     env.nodes.invalidateNode(doomed, {
       ts: env.clock.t,
       superseded_by: successor,
       session_id: s,
     });
 
-    // Then
     const edges = liveEdges(env.db);
-    expect(edges).toContainEqual({ src: referrer, dst: doomed, type: EdgeType.SIMILAR_TO });
+    expect(edges).not.toContainEqual({ src: referrer, dst: doomed, type: EdgeType.SIMILAR_TO });
+    expect(edges).not.toContainEqual({ src: doomed, dst: other, type: EdgeType.SIMILAR_TO });
     expect(edges).not.toContainEqual({ src: referrer, dst: successor, type: EdgeType.SIMILAR_TO });
+    expect(edges).toContainEqual({ src: referrer, dst: other, type: EdgeType.SIMILAR_TO });
   });
 
   it("should leave referrers alone when no successor is named", async () => {

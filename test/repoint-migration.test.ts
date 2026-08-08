@@ -99,8 +99,8 @@ describe("Migration 012: re-point dangling edges", () => {
     const referrer = await writeFact(s, "referrer");
     const dead = await writeFact(s, "dead");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
     strand(env, s, dead, [successor]);
+    env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
 
     // When
     up(env.db);

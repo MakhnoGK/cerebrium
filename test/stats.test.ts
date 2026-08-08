@@ -126,7 +126,7 @@ describe("StatsRepo graph integrity", () => {
     expect(snap.repointable_edges).toBe(1);
   });
 
-  it("should not call a system edge repointable, since the sweep recomputes those", async () => {
+  it("should retire system similarities when a node is invalidated", async () => {
     // Given
     const env = setup();
     const s = await session();
@@ -141,7 +141,7 @@ describe("StatsRepo graph integrity", () => {
 
     // Then
     const snap = env.stats.techStats(env.clock.t).graph;
-    expect(snap.dangling_edges).toBe(1);
+    expect(snap.dangling_edges).toBe(0);
     expect(snap.repointable_edges).toBe(0);
   });
 

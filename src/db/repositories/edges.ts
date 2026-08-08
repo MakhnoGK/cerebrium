@@ -2,7 +2,7 @@ import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
 import { enrichedByIds } from "@/db/repositories/internal";
 import type { Neighbor, NeighborStub } from "@/core/types";
-import type { EdgeType } from "@/core/vocab";
+import { EdgeType } from "@/core/vocab";
 
 // The typed knowledge graph: edge writes and graph reads (1-hop expansion,
 // supersession lookups). Depends only on the shared enriched-row read helper, so it
@@ -28,6 +28,43 @@ export class EdgesRepo extends BaseRepo {
            weight = excluded.weight, provenance = excluded.provenance`,
       )
       .run(src, dst, type, provenance, weight, ts, session_id);
+  }
+
+  insertSystemSimilarityIfLive(
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): boolean {
+    return this.tx(() => {
+      const info = this.db
+        .prepare(
+          `INSERT INTO edges (src, dst, type, provenance, weight, valid_from, session_id)
+           SELECT @src, @dst, @type, 'system', @weight, @ts, @session
+           WHERE EXISTS (SELECT 1 FROM nodes WHERE id = @src AND invalidated_at IS NULL)
+             AND EXISTS (SELECT 1 FROM nodes WHERE id = @dst AND invalidated_at IS NULL)
+           ON CONFLICT(src, dst, type) DO UPDATE SET
+             invalidated_at = NULL, valid_from = excluded.valid_from,
+             weight = excluded.weight, provenance = excluded.provenance`,
+        )
+        .run({ src, dst, type: EdgeType.SIMILAR_TO, weight, ts, session: session_id });
+
+      return info.changes > 0;
+    });
+  }
+
+  invalidateSystemSimilaritiesOf(id: string, ts: string): number {
+    return this.tx(
+      () =>
+        this.db
+          .prepare(
+            `UPDATE edges SET invalidated_at = @ts
+             WHERE invalidated_at IS NULL AND type = @type AND provenance = 'system'
+               AND (src = @id OR dst = @id)`,
+          )
+          .run({ id, ts, type: EdgeType.SIMILAR_TO }).changes,
+    );
   }
 
   // Soft-delete one edge. insertEdge revives an invalidated (src,dst,type) on conflict,
