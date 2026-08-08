@@ -30,7 +30,7 @@ export class GetTool implements McpTool<(typeof metadata)["schema"], GetResponse
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<GetResponse> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     if (args.rev !== undefined && args.ids.length !== 1) {
       // TODO: Domain error

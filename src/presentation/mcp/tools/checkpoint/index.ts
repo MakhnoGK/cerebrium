@@ -25,7 +25,7 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, args.project ?? null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     const existing = await this.filterAsync(args.touched_node_ids ?? [], (id) =>
       this.nodes.exists(id),

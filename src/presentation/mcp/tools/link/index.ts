@@ -20,7 +20,7 @@ export class LinkTool implements McpTool<(typeof metadata)["schema"], unknown> {
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     if ((SYSTEM_EDGE_TYPES as readonly string[]).includes(args.type)) {
       throw new Error(

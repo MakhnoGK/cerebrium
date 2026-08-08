@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { MemoryKind } from "@/core/vocab";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.SEARCH,
@@ -34,7 +34,7 @@ export const metadata = {
     "code, which is what makes a narrow `kinds` filter genuinely worth passing. ALWAYS search before writing.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     query: z
       .string()
       .describe(

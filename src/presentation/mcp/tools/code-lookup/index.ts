@@ -16,7 +16,7 @@ export class CodeLookupTool implements McpTool<(typeof metadata)["schema"], unkn
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     if (!args.name && !args.file) {
       throw new Error("provide `name` (resolve a symbol) or `file` (list a file's symbols).");

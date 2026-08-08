@@ -16,7 +16,7 @@ export class MirrorStatusTool implements McpTool<(typeof metadata)["schema"], un
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
     const sources = this.mirror.sourceStatus(this.clock.now(), args.source_id);
     const out: Record<string, unknown> = { sources };
 

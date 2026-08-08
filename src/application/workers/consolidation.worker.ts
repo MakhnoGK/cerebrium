@@ -121,7 +121,7 @@ export class ConsolidationWorker {
       return result;
     }
 
-    this.sessionService.ensureSession(this.ownerId, null, now);
+    this.sessionService.startSession(this.ownerId, null, now);
 
     this.discoverLinks(now, result);
     this.pruneLinks(now, result);

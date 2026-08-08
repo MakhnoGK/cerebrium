@@ -16,7 +16,7 @@ export class InvalidateTool implements McpTool<(typeof metadata)["schema"], unkn
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     if (!(await this.nodes.exists(args.id))) throw new Error(`node ${args.id} does not exist.`);
     if (args.superseded_by && !(await this.nodes.exists(args.superseded_by))) {

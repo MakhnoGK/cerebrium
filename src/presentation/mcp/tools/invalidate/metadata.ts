@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { nodeIdSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.INVALIDATE,
@@ -10,11 +10,12 @@ export const metadata = {
     "pass `superseded_by` to record the link. Prefer this over leaving stale facts around. Returns the invalidated envelope.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("Id of the node to invalidate (soft-delete)."),
+    session_id: sessionIdSchema,
+    id: nodeIdSchema.describe(
+      "Exact id of the node to invalidate, copied from a Cerebrium result.",
+    ),
     reason: z.string().min(1).describe("Why it's no longer valid — recorded in the activity log."),
-    superseded_by: z
-      .string()
+    superseded_by: nodeIdSchema
       .optional()
       .describe(
         "Id of the node that replaces this one; creates a 'supersedes' edge from the new node to this one.",

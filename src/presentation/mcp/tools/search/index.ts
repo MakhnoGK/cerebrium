@@ -106,7 +106,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<AuditedResponse> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : this.retrieval.symbolWeight;

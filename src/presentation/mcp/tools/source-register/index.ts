@@ -16,7 +16,7 @@ export class SourceRegisterTool implements McpTool<(typeof metadata)["schema"], 
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     const source = this.mirror.registerSource({
       id: args.id,

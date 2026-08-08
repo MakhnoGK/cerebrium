@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { nodeIdSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.UPDATE,
@@ -12,8 +12,8 @@ export const metadata = {
     "Returns the updated envelope.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("Id of the SEMANTIC node to revise."),
+    session_id: sessionIdSchema,
+    id: nodeIdSchema.describe("Exact id of the semantic node to revise."),
     content: z
       .string()
       .optional()

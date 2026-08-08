@@ -36,7 +36,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
     });
 
     const notes = this.embeddings.getEmbeddingNotes();
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
 
     const out: ToolResponse = results.length === 1 ? { ...results[0]! } : { repos: results };
 

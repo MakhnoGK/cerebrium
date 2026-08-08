@@ -22,7 +22,7 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
     const candidate = this.consolidation.getCandidate(args.id);
 
     if (!candidate) throw new Error(`no consolidation candidate ${args.id}.`);
