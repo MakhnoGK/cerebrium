@@ -1,10 +1,12 @@
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyHost, type ApplyOptions } from "@scripts/agent-apply";
 import {
+  ANTIGRAVITY_PERMISSION_GRANTS,
   defaultEnv,
   pending,
   planHost,
@@ -65,7 +68,7 @@ afterEach(() => {
 describe("applyHost", () => {
   it("should leave nothing outstanding for a host it can fully wire up", () => {
     // Given
-    expect(outstanding("antigravity")).toEqual(["mcp", "skill", "hook"]);
+    expect(outstanding("antigravity")).toEqual(["mcp", "skill", "rules", "hook", "permissions"]);
 
     // When
     applyHost("antigravity", input(), options());
@@ -154,6 +157,129 @@ describe("Rules block", () => {
     const after = read(path);
     expect(after.match(/<!-- cerebrium:start/g)).toHaveLength(1);
     expect(after).not.toContain("start_session");
+  });
+
+  it("should preserve personal text in Antigravity's global GEMINI.md", () => {
+    // Given
+    const path = join(home, ".gemini", "GEMINI.md");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "# personal\n\nkeep this byte-for-byte\n");
+    chmodSync(path, 0o600);
+
+    // When
+    applyHost("antigravity", input(), options());
+
+    // Then
+    expect(read(path)).toContain("# personal\n\nkeep this byte-for-byte\n");
+    expect(read(path)).toContain("<!-- cerebrium:start");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it("should leave a malformed managed block untouched", () => {
+    // Given
+    const path = join(home, ".gemini", "GEMINI.md");
+    mkdirSync(dirname(path), { recursive: true });
+    const malformed = "personal\n<!-- cerebrium:start -->\n";
+    writeFileSync(path, malformed);
+
+    // When
+    const applied = applyHost("antigravity", input(), options());
+
+    // Then
+    expect(applied.find((entry) => entry.surface === "rules")?.outcome).toBe("failed");
+    expect(read(path)).toBe(malformed);
+  });
+});
+
+describe("Antigravity permissions", () => {
+  it("should merge all explicit grants into app and CLI configs", () => {
+    // Given
+    const app = join(home, ".gemini", "config", "config.json");
+    const cli = join(home, ".gemini", "antigravity-cli", "settings.json");
+    mkdirSync(dirname(app), { recursive: true });
+    mkdirSync(dirname(cli), { recursive: true });
+    writeFileSync(
+      app,
+      JSON.stringify({ userSettings: { globalPermissionGrants: { allow: ["command(git)"] } } }),
+    );
+    writeFileSync(cli, JSON.stringify({ permissions: { allow: ["command(git)"] } }));
+    chmodSync(app, 0o600);
+    chmodSync(cli, 0o600);
+
+    // When
+    applyHost("antigravity", input(), options());
+
+    // Then
+    for (const path of [app, cli]) {
+      const file = JSON.parse(read(path));
+      const allow =
+        path === app ? file.userSettings.globalPermissionGrants.allow : file.permissions.allow;
+      expect(allow).toContain("command(git)");
+      expect(allow).toEqual(expect.arrayContaining(ANTIGRAVITY_PERMISSION_GRANTS));
+      expect(new Set(allow).size).toBe(allow.length);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("should create new private config files with mode 0600", () => {
+    // Given / When
+    applyHost("antigravity", input(), options());
+
+    // Then
+    for (const path of [
+      join(home, ".gemini", "GEMINI.md"),
+      join(home, ".gemini", "config", "mcp_config.json"),
+      join(home, ".gemini", "config", "skills.json"),
+      join(home, ".gemini", "config", "hooks.json"),
+      join(home, ".gemini", "antigravity-cli", "settings.json"),
+    ]) {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("should explicitly include structural code tools and consolidation retry", () => {
+    // Given / When / Then
+    expect(ANTIGRAVITY_PERMISSION_GRANTS).toEqual(
+      expect.arrayContaining([
+        "mcp(cerebrium/code_lookup)",
+        "mcp(cerebrium/code_index)",
+        "mcp(cerebrium/consolidate_retry)",
+      ]),
+    );
+  });
+
+  it("should refuse malformed JSON without overwriting it", () => {
+    // Given
+    const path = join(home, ".gemini", "config", "config.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "{");
+
+    // When
+    const applied = applyHost("antigravity", input({ hasCommand: () => false }), options());
+
+    // Then
+    expect(applied.find((entry) => entry.surface === "permissions")?.outcome).toBe("failed");
+    expect(read(path)).toBe("{");
+  });
+
+  it("should refuse wrong permission shapes without touching either config", () => {
+    // Given
+    const app = join(home, ".gemini", "config", "config.json");
+    const cli = join(home, ".gemini", "antigravity-cli", "settings.json");
+    mkdirSync(dirname(app), { recursive: true });
+    mkdirSync(dirname(cli), { recursive: true });
+    const bad = JSON.stringify({ userSettings: { globalPermissionGrants: { allow: "all" } } });
+    const good = JSON.stringify({ permissions: { allow: ["command(git)"] } });
+    writeFileSync(app, bad);
+    writeFileSync(cli, good);
+
+    // When
+    const applied = applyHost("antigravity", input(), options());
+
+    // Then
+    expect(applied.find((entry) => entry.surface === "permissions")?.outcome).toBe("failed");
+    expect(read(app)).toBe(bad);
+    expect(read(cli)).toBe(good);
   });
 });
 

@@ -1,9 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   alwaysOnBlock,
+  ANTIGRAVITY_PERMISSION_GRANTS,
   codexEnv,
   defaultEnv,
   discoverEnv,
@@ -87,6 +89,14 @@ describe("planHost", () => {
     // Then
     expect(plan.detected).toBe(true);
   });
+
+  it("should detect a CLI-only Antigravity installation", () => {
+    // Given
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+
+    // When / Then
+    expect(planHost("antigravity", input()).detected).toBe(true);
+  });
 });
 
 describe("Skill surface", () => {
@@ -159,6 +169,14 @@ describe("MCP surface", () => {
     expect(status("antigravity", "mcp")).toBe("missing");
   });
 
+  it("should report malformed host JSON as a conflict", () => {
+    // Given
+    writeText(join(home, ".gemini", "config", "mcp_config.json"), "{");
+
+    // When / Then
+    expect(status("antigravity", "mcp")).toBe("conflict");
+  });
+
   it("should read Codex's registration out of the TOML text", () => {
     // Given
     writeText(
@@ -197,9 +215,89 @@ describe("Rules surface", () => {
     expect(status("codex", "rules")).toBe("missing");
   });
 
-  it("should stay manual for Antigravity, which has no machine-wide rules file", () => {
-    // Given / When / Then
-    expect(status("antigravity", "rules")).toBe("manual");
+  it("should use Antigravity's global GEMINI.md", () => {
+    // Given
+    writeText(join(home, ".gemini", "GEMINI.md"), alwaysOnBlock(REPO));
+
+    // When / Then
+    expect(status("antigravity", "rules")).toBe("ok");
+  });
+
+  it("should reject an unmatched managed-block marker", () => {
+    // Given
+    writeText(join(home, ".gemini", "GEMINI.md"), "mine\n<!-- cerebrium:start -->\n");
+
+    // When / Then
+    expect(status("antigravity", "rules")).toBe("conflict");
+  });
+
+  it.each([
+    "<!-- cerebrium:start -->\na\n<!-- cerebrium:start -->\nb\n<!-- cerebrium:end -->",
+    "<!-- cerebrium:start -->\na\n<!-- cerebrium:end -->\n<!-- cerebrium:end -->",
+    "<!-- cerebrium:start -->\na\n<!-- cerebrium:end -->\n<!-- cerebrium:start -->\nb\n<!-- cerebrium:end -->",
+  ])("should reject duplicate managed markers", (text) => {
+    // Given
+    writeText(join(home, ".gemini", "GEMINI.md"), text);
+
+    // When / Then
+    expect(status("antigravity", "rules")).toBe("conflict");
+  });
+});
+
+describe("Antigravity permissions surface", () => {
+  const appConfig = () => join(home, ".gemini", "config", "config.json");
+  const cliConfig = () => join(home, ".gemini", "antigravity-cli", "settings.json");
+
+  function appPermissions(allow: string[]): unknown {
+    return { userSettings: { globalPermissionGrants: { allow } } };
+  }
+
+  function cliPermissions(allow: string[]): unknown {
+    return { permissions: { allow } };
+  }
+
+  it("should accept an app-only installation", () => {
+    // Given
+    writeJson(appConfig(), appPermissions(ANTIGRAVITY_PERMISSION_GRANTS));
+
+    // When / Then
+    expect(status("antigravity", "permissions")).toBe("ok");
+  });
+
+  it("should accept a CLI-only installation", () => {
+    // Given
+    writeJson(cliConfig(), cliPermissions(ANTIGRAVITY_PERMISSION_GRANTS));
+
+    // When / Then
+    expect(status("antigravity", "permissions")).toBe("ok");
+  });
+
+  it("should require both configs to be complete when both are installed", () => {
+    // Given
+    writeJson(appConfig(), appPermissions(ANTIGRAVITY_PERMISSION_GRANTS));
+    writeJson(cliConfig(), cliPermissions(["mcp(cerebrium/session_start)"]));
+
+    // When / Then
+    expect(status("antigravity", "permissions")).toBe("missing");
+  });
+
+  it("should ignore an absent CLI config when the CLI is not installed", () => {
+    // Given
+    writeJson(appConfig(), appPermissions(ANTIGRAVITY_PERMISSION_GRANTS));
+
+    // When
+    const plan = planHost("antigravity", input({ hasCommand: () => false }));
+
+    // Then
+    expect(plan.surfaces.find((surface) => surface.surface === "permissions")?.status).toBe("ok");
+  });
+
+  it("should report malformed permission shapes as conflicts", () => {
+    // Given
+    writeJson(appConfig(), { userSettings: { globalPermissionGrants: { allow: "all" } } });
+
+    // When / Then
+    expect(status("antigravity", "permissions")).toBe("conflict");
   });
 });
 
@@ -305,6 +403,16 @@ describe("upsertManagedBlock", () => {
     // Given / When / Then
     expect(extractManagedBlock("<!-- cerebrium:start -->\nbody\n")).toBeNull();
   });
+
+  it("should refuse to append around a malformed managed block", () => {
+    // Given / When / Then
+    expect(() =>
+      upsertManagedBlock(
+        "<!-- cerebrium:start -->\nbody\n",
+        "<!-- cerebrium:start -->\nnew\n<!-- cerebrium:end -->",
+      ),
+    ).toThrow("malformed cerebrium managed block");
+  });
 });
 
 describe("discoverEnv", () => {
@@ -358,11 +466,46 @@ env = { MEMORY_DB_PATH = "/db/other.db" }
 });
 
 describe("pending", () => {
-  it("should exclude surfaces that cannot be automated", () => {
+  it("should include Antigravity's global rules and permissions", () => {
     // Given
     const plan = planHost("antigravity", input());
 
     // When / Then
-    expect(pending(plan).some((s) => s.surface === "rules")).toBe(false);
+    expect(pending(plan).map((surface) => surface.surface)).toEqual([
+      "mcp",
+      "skill",
+      "rules",
+      "hook",
+      "permissions",
+    ]);
+  });
+});
+
+describe("agent:setup exit status", () => {
+  it("should exit nonzero when an apply outcome fails", () => {
+    // Given
+    writeText(join(home, ".gemini", "config", "config.json"), "{");
+    const viteNode = join(REPO, "node_modules", "vite-node", "vite-node.mjs");
+
+    // When
+    const result = spawnSync(
+      process.execPath,
+      [
+        viteNode,
+        "--config",
+        join(REPO, "vitest.config.ts"),
+        join(REPO, "scripts", "agent-setup.mts"),
+        "--home",
+        home,
+        "--host",
+        "antigravity",
+        "--apply",
+      ],
+      { cwd: REPO, encoding: "utf8" },
+    );
+
+    // Then
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("config.json");
   });
 });

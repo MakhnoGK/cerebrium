@@ -37,10 +37,9 @@ and files you own are edited only between the `cerebrium:start`/`cerebrium:end` 
 Add `--host codex` to work on one host, and `--force` to move an existing skill *copy*
 aside (kept, never deleted) so it can be replaced by a link.
 
-Two things it deliberately leaves to you, both explained in its own output: Codex's
-`hooks = true` under `[features]` (appending a second `[features]` table would corrupt
-the TOML) and Antigravity's per-project rules block. The rest of this file is the same
-procedure by hand, and the reference for what the script is doing.
+It deliberately leaves Codex's `hooks = true` under `[features]` to you because appending a
+second `[features]` table would corrupt the TOML. The rest of this file is the same procedure
+by hand, and the reference for what the script is doing.
 
 ## 0 — Prerequisites
 
@@ -118,12 +117,17 @@ And to `~/.gemini/config/skills.json`, which takes a path instead of a copy:
 { "entries": [{ "path": "/ABSOLUTE/PATH/TO/cerebrium/skill" }] }
 ```
 
-Then paste `always-on.md` into the `AGENTS.md` of each project you want it in — Antigravity
-walks up from the working directory to the repo root and has no machine-wide rules file — and
-add a `PreInvocation` hook to `~/.gemini/config/hooks.json`.
+Paste `always-on.md` into the global `~/.gemini/GEMINI.md`, add a `PreInvocation` hook to
+`~/.gemini/config/hooks.json`, and explicitly allow the current Cerebrium tools in both active
+permission files: IDE `~/.gemini/config/config.json` and CLI
+`~/.gemini/antigravity-cli/settings.json`. `agent:setup -- --apply` merges these allow entries
+without removing unrelated grants.
 
 Verify: the host lists `cerebrium` under **Additional Options (…) > MCP Servers**, and asking
 it to "use the cerebrium skill" loads `SKILL.md` from the working tree.
+
+After changing rules, permissions, or the MCP bundle, restart Antigravity and start a fresh
+conversation so the host rediscovers the tool catalog and runs the first-invocation hook.
 
 ## 4 — Confirm it actually works
 
@@ -135,6 +139,13 @@ that fails.
 That covers the server. The host's own wiring is worth ten more seconds: in a fresh
 session, ask the agent to call `session_start` and report what came back. A working
 install returns a `session_id` and a working set; a broken one returns a transport error.
+
+`npm run eval:agents` summarizes persisted Antigravity IDE/CLI transcripts without printing
+prompts, arguments, ids, or paths. Historical output is descriptive only. A transcript with
+truncated tool calls is marked partial and all totals become observed lower bounds; controlled
+scenario verdicts require fresh, labeled conversations.
+The command intentionally implements no thresholds or pass/fail mode; run recall, code lookup,
+write/link, and checkpoint scenarios manually in separate fresh conversations after a restart.
 
 ## Running more than one host
 

@@ -237,7 +237,7 @@ claude mcp add cerebrium -s user \
 session `/mcp` lists its tools (`session_start`, `search`, `write`, …). The SQLite file
 and its `~/.cerebrium/models` cache are created on first use — no manual DB setup.
 
-**4 — Install the discipline, not just the tools.** An agent handed 17 tools and no
+**4 — Install the discipline, not just the tools.** An agent handed 18 tools and no
 doctrine calls `write` without searching and fills the store with duplicates. One command
 installs the skill, the always-on retrieval rules and a session-start hook for every agent
 host it finds — Claude Code, Codex CLI and Antigravity:
@@ -786,7 +786,7 @@ surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, a
 |------|-----|-------|-------|------|
 | Claude Code | `claude mcp add -s user` | symlink in `~/.claude/skills/` | block in `~/.claude/CLAUDE.md` | `SessionStart` in `~/.claude/settings.json` |
 | Codex CLI | `codex mcp add` | symlink in `~/.codex/skills/` | block in `~/.codex/AGENTS.md` | `SessionStart` in `~/.codex/hooks.json` |
-| Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | block in each project's `AGENTS.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | global block in `~/.gemini/GEMINI.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
 
 The rules block is written between `cerebrium:start`/`cerebrium:end` markers and replaced
 in place on later runs, so the rest of a file you maintain is never touched. Two steps are
@@ -794,10 +794,20 @@ deliberately left to you and named in the report: Codex's `hooks = true` under `
 (appending a second `[features]` table would corrupt the TOML) and its hook trust prompt,
 which is a security gate and not ours to pre-approve.
 
+Antigravity adds one host-specific surface: explicit Cerebrium permissions in the IDE and CLI
+settings. Setup merges the current tool grants into both active configs, preserves unrelated
+entries, and refuses malformed JSON or permission shapes instead of overwriting them.
+
 `npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
 server over stdio against a throwaway store, calls `session_start`, counts the tools and
 runs the hook script. `install/README.md` has the per-host procedure by hand, and
 `install/hosts.md` records what was verified on which host version.
+
+`npm run eval:agents` audits persisted Antigravity traces. It emits aggregate tool names and
+counts only—never prompts, argument values, ids, or paths—and marks truncated histories as
+partial lower bounds. Organic history gets no compliance verdict; compare fresh labeled
+scenarios after a restart. The command intentionally has no threshold/pass-fail mode; controlled
+scenario evaluation remains a separate manual step.
 
 **More than one host at once** means more than one server process on one SQLite file. That
 is allowed — see invariant #1 in `CLAUDE.md` — and measured: two servers doing 120

@@ -37,9 +37,10 @@ agent-setup — report or install what each agent host needs to use Cerebrium as
   --check      Exit non-zero if a detected host is missing a surface.
   --help       This text.
 
-Surfaces per host: mcp, skill, rules, hook — see install/hosts.md for where each one
-lives, and why all four are needed. --apply never touches the database, deletes nothing,
-and edits files you own only between the cerebrium:start/end markers.
+Core surfaces per host: mcp, skill, rules, hook. Antigravity also has an explicit
+permissions surface for the IDE and CLI configs. See install/hosts.md for locations.
+--apply never touches the database, deletes nothing, and edits rules files you own only
+between the cerebrium:start/end markers.
 `;
 
 const GLYPH: Record<SurfaceStatus, string> = {
@@ -127,12 +128,17 @@ async function main(): Promise<void> {
   const input: PlanInput = { ...base, env };
 
   if (flag("apply")) {
+    let unresolved = false;
     for (const host of hosts) {
       const applied = applyHost(host, input, { force: flag("force"), run });
       process.stdout.write(`\n${host}\n`);
       if (applied.length === 0) process.stdout.write("  nothing to do\n");
-      for (const a of applied) process.stdout.write(`  ${outcomeGlyph(a)} ${a.detail}\n`);
+      for (const a of applied) {
+        process.stdout.write(`  ${outcomeGlyph(a)} ${a.detail}\n`);
+        if (a.outcome === "failed" || a.outcome === "skipped") unresolved = true;
+      }
     }
+    if (unresolved) process.exitCode = 1;
     process.stdout.write("\nRe-checking:\n");
   }
 

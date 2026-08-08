@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   renameSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -10,6 +14,9 @@ import {
 import { dirname, join } from "node:path";
 import {
   alwaysOnBlock,
+  ANTIGRAVITY_PERMISSION_GRANTS,
+  antigravityPermissionAllowList,
+  antigravityPermissionTargets,
   desiredMcp,
   hookCommand,
   hookScript,
@@ -47,17 +54,31 @@ function done(surface: Surface, outcome: Outcome, detail: string): Applied {
 }
 
 function readJson(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  const raw = readFileSync(path, "utf8").trim();
+  if (raw === "") return {};
+  const value: unknown = JSON.parse(raw);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("expected a JSON object");
+  }
+  return value as Record<string, unknown>;
+}
+
+function writeAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.cerebrium-${process.pid}-${randomUUID()}.tmp`;
+  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
   try {
-    const raw = readFileSync(path, "utf8").trim();
-    return raw === "" ? {} : (JSON.parse(raw) as Record<string, unknown>);
-  } catch {
-    return {};
+    writeFileSync(temporary, content, { mode });
+    chmodSync(temporary, mode);
+    renameSync(temporary, path);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
 
 function writeJson(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -102,18 +123,16 @@ function statusOf(link: string): "missing" | "link" | "path" {
 }
 
 function writeRules(path: string, repoRoot: string): Applied {
-  const before = ((): string => {
-    try {
-      return readFileSync(path, "utf8");
-    } catch {
-      return "";
-    }
-  })();
-  const after = upsertManagedBlock(before, alwaysOnBlock(repoRoot));
-  if (after === before) return done("rules", "unchanged", path);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, after);
-  return done("rules", before === "" ? "created" : "updated", path);
+  try {
+    const existed = existsSync(path);
+    const before = existed ? readFileSync(path, "utf8") : "";
+    const after = upsertManagedBlock(before, alwaysOnBlock(repoRoot));
+    if (after === before) return done("rules", "unchanged", path);
+    writeAtomic(path, after);
+    return done("rules", existed ? "updated" : "created", path);
+  } catch (err) {
+    return done("rules", "failed", `${path}: ${String(err)}`);
+  }
 }
 
 /** Drops any group that already points at our hook script, so a re-run cannot stack them. */
@@ -124,41 +143,82 @@ function withoutOurs(groups: unknown, repoRoot: string): unknown[] {
 }
 
 function writeClaudeHook(path: string, repoRoot: string): Applied {
-  const settings = readJson(path);
-  const hooks = record(settings.hooks);
-  hooks.SessionStart = [
-    ...withoutOurs(hooks.SessionStart, repoRoot),
-    {
-      matcher: "",
-      hooks: [{ type: "command", command: hookCommand(repoRoot, "claude"), timeout: 5 }],
-    },
-  ];
-  settings.hooks = hooks;
-  writeJson(path, settings);
-  return done("hook", "updated", path);
+  return updateJson("hook", path, (settings) => {
+    const hooks = record(settings.hooks);
+    hooks.SessionStart = [
+      ...withoutOurs(hooks.SessionStart, repoRoot),
+      {
+        matcher: "",
+        hooks: [{ type: "command", command: hookCommand(repoRoot, "claude"), timeout: 5 }],
+      },
+    ];
+    settings.hooks = hooks;
+  });
 }
 
 function writeCodexHook(path: string, repoRoot: string): Applied {
-  const file = readJson(path);
-  const hooks = record(file.hooks);
-  hooks.SessionStart = [
-    ...withoutOurs(hooks.SessionStart, repoRoot),
-    { hooks: [{ type: "command", command: hookCommand(repoRoot, "codex"), timeout: 5 }] },
-  ];
-  file.hooks = hooks;
-  writeJson(path, file);
-  return done("hook", "updated", path);
+  return updateJson("hook", path, (file) => {
+    const hooks = record(file.hooks);
+    hooks.SessionStart = [
+      ...withoutOurs(hooks.SessionStart, repoRoot),
+      { hooks: [{ type: "command", command: hookCommand(repoRoot, "codex"), timeout: 5 }] },
+    ];
+    file.hooks = hooks;
+  });
 }
 
 function writeAntigravityHook(path: string, repoRoot: string): Applied {
-  const file = readJson(path);
-  file.cerebrium = {
-    PreInvocation: [
-      { type: "command", command: hookCommand(repoRoot, "antigravity"), timeout: 10 },
-    ],
-  };
-  writeJson(path, file);
-  return done("hook", "updated", path);
+  return updateJson("hook", path, (file) => {
+    file.cerebrium = {
+      PreInvocation: [
+        { type: "command", command: hookCommand(repoRoot, "antigravity"), timeout: 10 },
+      ],
+    };
+  });
+}
+
+function updateJson(
+  surface: Surface,
+  path: string,
+  mutate: (file: Record<string, unknown>) => void,
+): Applied {
+  try {
+    const existed = existsSync(path);
+    const file = readJson(path);
+    mutate(file);
+    writeJson(path, file);
+    return done(surface, existed ? "updated" : "created", path);
+  } catch (err) {
+    return done(surface, "failed", `${path}: ${String(err)}`);
+  }
+}
+
+function writeAntigravityPermissions(input: PlanInput): Applied {
+  const targets = antigravityPermissionTargets(input);
+  try {
+    const files = targets.map((target) => {
+      const file = readJson(target.path);
+      const current = antigravityPermissionAllowList(file, target);
+      if (current.state === "conflict") throw new Error(`${target.path} has an invalid shape`);
+      const allow = [...new Set([...current.allow, ...ANTIGRAVITY_PERMISSION_GRANTS])];
+      if (target.kind === "app") {
+        const userSettings = record(file.userSettings);
+        const grants = record(userSettings.globalPermissionGrants);
+        grants.allow = allow;
+        userSettings.globalPermissionGrants = grants;
+        file.userSettings = userSettings;
+      } else {
+        const permissions = record(file.permissions);
+        permissions.allow = allow;
+        file.permissions = permissions;
+      }
+      return { path: target.path, file };
+    });
+    for (const entry of files) writeJson(entry.path, entry.file);
+    return done("permissions", "updated", targets.map((target) => target.path).join(", "));
+  } catch (err) {
+    return done("permissions", "failed", String(err));
+  }
 }
 
 function registerViaCli(
@@ -235,23 +295,27 @@ function applyAntigravity(input: PlanInput, _opts: ApplyOptions, todo: SurfaceSt
 
   if (has("mcp")) {
     const path = join(dir, "mcp_config.json");
-    const file = readJson(path);
-    const servers = record(file.mcpServers);
-    servers.cerebrium = desiredMcp(input.repoRoot, input.env);
-    file.mcpServers = servers;
-    writeJson(path, file);
-    out.push(done("mcp", "updated", path));
+    out.push(
+      updateJson("mcp", path, (file) => {
+        const servers = record(file.mcpServers);
+        servers.cerebrium = desiredMcp(input.repoRoot, input.env);
+        file.mcpServers = servers;
+      }),
+    );
   }
   if (has("skill")) {
     const path = join(dir, "skills.json");
-    const file = readJson(path);
-    const wanted = join(input.repoRoot, "skill");
-    const entries: unknown[] = Array.isArray(file.entries) ? file.entries : [];
-    file.entries = [...entries.filter((e) => record(e).path !== wanted), { path: wanted }];
-    writeJson(path, file);
-    out.push(done("skill", "updated", path));
+    out.push(
+      updateJson("skill", path, (file) => {
+        const wanted = join(input.repoRoot, "skill");
+        const entries: unknown[] = Array.isArray(file.entries) ? file.entries : [];
+        file.entries = [...entries.filter((e) => record(e).path !== wanted), { path: wanted }];
+      }),
+    );
   }
+  if (has("rules")) out.push(writeRules(join(input.home, ".gemini", "GEMINI.md"), input.repoRoot));
   if (has("hook")) out.push(writeAntigravityHook(join(dir, "hooks.json"), input.repoRoot));
+  if (has("permissions")) out.push(writeAntigravityPermissions(input));
   return out;
 }
 
