@@ -61,6 +61,7 @@ describe("Multi-session hand-off", () => {
     await t.checkpoint.invoke({
       session_id: a,
       project: P,
+      title: "wired up JWT auth end to end",
       summary: "wired up JWT auth end to end",
       decisions: ["RS256 over HS256"],
       open_threads: ["add refresh-token revocation"],

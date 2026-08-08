@@ -113,6 +113,7 @@ describe("live node references", () => {
     await expect(
       container.resolve(CheckpointTool).invoke({
         session_id: sessionId,
+        title: "handoff",
         summary: "handoff",
         touched_node_ids: [stale.id],
       }),

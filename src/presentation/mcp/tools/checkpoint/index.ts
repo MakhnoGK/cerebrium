@@ -35,7 +35,7 @@ export class CheckpointTool implements McpTool<(typeof metadata)["schema"], Tool
     const envelope = await this.nodes.createNode({
       memory_kind: MemoryKind.EPISODIC,
       type: "checkpoint",
-      title: args.summary.split("\n")[0]!.slice(0, 120),
+      title: args.title,
       content: buildBody(args.summary, args.decisions, args.open_threads),
       project: args.project ?? null,
       session_id: args.session_id,

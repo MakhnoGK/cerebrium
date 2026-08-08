@@ -12,6 +12,7 @@ export const metadata = {
   schema: {
     session_id: sessionIdSchema,
     project: z.string().optional().describe("Project scope; omit for a global checkpoint."),
+    title: z.string().min(1).describe("Short human-readable title; shown in every envelope."),
     summary: z
       .string()
       .min(1)
