@@ -4,7 +4,7 @@
 base — a stdio MCP server owning one SQLite file (FTS5 + vector search + a typed
 graph). It is where I record and recall everything across sessions: facts and
 how-tos I've learned, decisions I made (with reasons), entities, and where I left
-off. I am the only writer. Source repo: `~/projects/personal/ai/cerebrium`.
+off. I am the only writer. Source repo: `~/projects/ai/cerebrium`.
 
 ## Retrieval precedence — Cerebrium first
 For any recall, **search Cerebrium first.** It holds what I've already learned
@@ -19,9 +19,9 @@ external wiki; they live in Cerebrium.
 The MCP server is registered (user scope) as `cerebrium`; its tools appear as
 `mcp__cerebrium__<tool>`.
 - **`session_start`** — call FIRST, before any other memory tool, at the start of a
-  task. Returns a `session_id` (pass it to every subsequent call) and a budgeted
-  working set (recent facts, last checkpoints *with content*, open tasks, stats). Read
-  it to orient.
+  task. It is the sole source of agent session ids. Copy its returned `session_id`
+  verbatim into every subsequent call; never invent, guess, transform, or reuse one
+  from another task. Read the working set to orient.
 - **`search`** — find memories. Returns compact envelopes + a `best_chunk` snippet,
   often enough to answer without a `get`. Default mode is hybrid (text + vector), good
   even with no shared keywords; `mode:'text'` is cheapest, `mode:'vector'` is pure
@@ -40,6 +40,8 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
   When a generating provider is on, `write` may also return a `reconcile` field with a
   judged action (`update`/`supersede` a named `target_id`, or `noop`) — act on it directly
   rather than re-deriving the duplicate decision. It is advice; the server never applies it.
+  Always pass `parent_node_id`: an exact live node id for an atomic `relates_to`, or `null`
+  for an intentionally isolated node. Never infer or invent it.
 - **`update`** — revise a `semantic` node (episodic is write-once); history is kept.
 - **`invalidate`** — soft-delete; pass `superseded_by` when a newer node replaces it, which
   also moves the retired node's authored referrers onto the successor.
@@ -72,6 +74,10 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
   daemon/lease health, graph integrity (dangling edges, how many are repairable, stranded
   nodes — all three should read 0), reranker usage.
 
+Every session/node/candidate id is opaque. Copy it exactly from a Cerebrium response; never
+synthesize one. Stale node references are rejected with the terminal live successor when
+one can be determined.
+
 **Code is a mirror, not authored knowledge.** `symbol` nodes are derived from source
 and maintained only by `code_index` — never `write`/`update` them by hand. When I learn
 something *about* code (a decision, a gotcha, why it's shaped that way), I write a normal
@@ -102,7 +108,7 @@ Rule of thumb: **the mirror locates and explains; disk is the source of truth fo
 Keeping the index fresh (`code_index` after pulls/edits) is what makes this discipline safe.
 
 Full usage discipline (good vs bad examples) lives in the skill `cerebrium`
-(`~/.claude/skills/cerebrium/SKILL.md`; source in `~/projects/personal/ai/cerebrium`).
+(`~/.claude/skills/cerebrium/SKILL.md`; source in `~/projects/ai/cerebrium`).
 When I distill code / Sentry / GitLab knowledge into something durable, it goes in
 Cerebrium.
 
@@ -156,4 +162,3 @@ glab api projects/:id/...        # raw API when a subcommand is missing
 Pass `-R <group>/<project>` (or run inside the repo) to target a project. The
 `gitlab.com` host entry in `glab` is stale/unauthenticated — ignore it; all work
 goes through `git.obrio.net`.
-

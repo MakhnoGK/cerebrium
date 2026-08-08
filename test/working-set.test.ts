@@ -30,6 +30,7 @@ describe("session_start builds a budgeted working set", () => {
     const s = (await t.sessionStart.invoke({ project: P })).session_id;
     await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "Fact 1",
@@ -38,6 +39,7 @@ describe("session_start builds a budgeted working set", () => {
     });
     await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "task",
       title: "Task 1",
@@ -78,6 +80,7 @@ describe("session_start builds a budgeted working set", () => {
     for (let i = 0; i < 20; i++) {
       await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: `Fact ${i}`,

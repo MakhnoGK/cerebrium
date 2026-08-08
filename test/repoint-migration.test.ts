@@ -18,6 +18,7 @@ async function session(): Promise<string> {
 async function writeFact(s: string, title: string): Promise<string> {
   const out = (await container.resolve(WriteTool).invoke({
     session_id: s,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,
@@ -98,8 +99,8 @@ describe("Migration 012: re-point dangling edges", () => {
     const referrer = await writeFact(s, "referrer");
     const dead = await writeFact(s, "dead");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
     strand(env, s, dead, [successor]);
+    env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
 
     // When
     up(env.db);

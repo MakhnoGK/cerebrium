@@ -17,7 +17,7 @@ export class MirrorUpsertTool implements McpTool<(typeof metadata)["schema"], un
   ) {}
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getUnknownSessionHints(args.session_id, null);
+    const hints = await this.hints.getSessionHints(args.session_id);
     const source = this.mirror.getSource(args.source_id);
 
     if (!source) {

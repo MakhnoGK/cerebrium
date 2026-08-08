@@ -92,6 +92,7 @@ describe("runDaemon loop", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     await container.resolve(WriteTool).invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: "drain me",

@@ -103,6 +103,7 @@ describe("Code indexing end-to-end", () => {
     // 4. write a decision ABOUT the code + link it with a documents edge
     const note = (await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "decision",
       title: "Signing choice",
@@ -167,6 +168,7 @@ describe("Code indexing end-to-end", () => {
     // an equally-matching episodic note that WILL decay
     await t.write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.EPISODIC,
       type: "event_note",
       title: "validate incident",

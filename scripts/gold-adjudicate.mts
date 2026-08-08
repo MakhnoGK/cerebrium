@@ -1,10 +1,10 @@
 import "reflect-metadata";
-import { readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { appendGold, readGoldFile } from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
 import type Database from "better-sqlite3";
 import { container as root } from "tsyringe";
-import { HintsService } from "@/application/services";
+import { HintsService } from "@/application/services/hints.service";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { MemoryKind } from "@/core/vocab";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -48,6 +48,8 @@ gold-adjudicate — label real queries by judging each candidate on its own.
   --db PATH     Store to read. Opened READ-ONLY (cli role); never written.
   --out PATH    Gold JSONL to append to (default ~/.cerebrium/gold.jsonl). Queries already
                 adjudicated there are skipped, so an interrupted run resumes.
+  --unanswered PATH  Optional file to append unanswered queries to (one query per line).
+                     These will also be skipped on subsequent runs.
   --from S      Where the queries come from (default log):
                   log       distinct query strings from the retrieval-outcome log
                   gold      questions already in the gold file (upgrades a generated
@@ -158,6 +160,7 @@ async function main(): Promise<void> {
   }
 
   const out = arg(argv, "--out") ?? `${process.env.HOME ?? "."}/.cerebrium/gold.jsonl`;
+  const unansweredPath = arg(argv, "--unanswered");
   const from = arg(argv, "--from") ?? "log";
   const limit = num(argv, "--limit", Infinity);
   const pool = num(argv, "--pool", 10);
@@ -192,6 +195,13 @@ async function main(): Promise<void> {
       .filter((e) => e.origin === "adjudicated")
       .map((e) => e.query.trim().toLowerCase()),
   );
+
+  if (unansweredPath && existsSync(unansweredPath)) {
+    const lines = readFileSync(unansweredPath, "utf8").split("\n");
+    for (const line of lines) {
+      if (line.trim()) adjudicated.add(line.trim().toLowerCase());
+    }
+  }
 
   let queries: string[];
 
@@ -276,6 +286,9 @@ async function main(): Promise<void> {
 
     if (!gold.length) {
       empty++;
+      if (unansweredPath) {
+        appendFileSync(unansweredPath, query + "\n", "utf8");
+      }
       continue;
     }
 

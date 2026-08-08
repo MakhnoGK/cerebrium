@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EdgeType } from "@/core/vocab";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { nodeIdSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.LINK,
@@ -12,9 +12,9 @@ export const metadata = {
     "related context automatically during search. `similar_to` is reserved for the system and rejected here.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    src: z.string().describe("Source node id (the edge points from here)."),
-    dst: z.string().describe("Destination node id (the edge points to here)."),
+    session_id: sessionIdSchema,
+    src: nodeIdSchema,
+    dst: nodeIdSchema,
     type: z
       .nativeEnum(EdgeType)
       .describe(

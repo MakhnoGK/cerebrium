@@ -37,6 +37,7 @@ describe("Revisions are append-only and history is reconstructable", () => {
     const created = env(
       await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Fact",
@@ -88,6 +89,7 @@ describe("Episodic memories are write-once", () => {
     const note = env(
       await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.EPISODIC,
         type: "event_note",
         title: "E",
@@ -111,6 +113,7 @@ describe("Invalidate is a soft delete with a supersedes edge", () => {
     const oldNode = env(
       await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Old",
@@ -120,6 +123,7 @@ describe("Invalidate is a soft delete with a supersedes edge", () => {
     const newNode = env(
       await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "New",
@@ -157,6 +161,7 @@ describe("FTS stays consistent across write -> update -> invalidate", () => {
     const n = env(
       await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Fruit",
@@ -204,6 +209,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.MIRROR,
         type: "fact",
         title: "M",
@@ -222,6 +228,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "checkpoint",
         title: "X",
@@ -240,6 +247,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "Big",
@@ -258,6 +266,7 @@ describe("Write validation guards the data model", () => {
     await expect(
       t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "L",
@@ -268,24 +277,21 @@ describe("Write validation guards the data model", () => {
   });
 });
 
-describe("Unknown sessions are forgiven", () => {
-  it("should auto-create a session and hint about it when the id is unknown", async () => {
-    // Given
+describe("Unknown sessions are rejected", () => {
+  it("should reject an unknown session before writing", async () => {
     setup();
     const t = tools();
+    const unknown = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
-    // When
-    const res = env(
-      await t.write.invoke({
-        session_id: "GHOST",
+    await expect(
+      t.write.invoke({
+        session_id: unknown,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title: "T",
         content: "x",
       }),
-    );
-
-    // Then
-    expect((res as unknown as { hints: string[] }).hints[0]).toMatch(/Unknown session_id/);
+    ).rejects.toThrow(`Unknown session_id ${unknown}`);
   });
 });

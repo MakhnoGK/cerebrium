@@ -46,6 +46,7 @@ async function writeFact(s: string): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: TITLE,

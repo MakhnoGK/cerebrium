@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { candidateIdSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.CONSOLIDATE_APPLY,
@@ -12,11 +12,13 @@ export const metadata = {
     "`derived_from` each source, and stamps the sources consolidated; a `merge` candidate folds the duplicate into the " +
     "canonical survivor — optionally rewriting it from `override`/proposal — re-points authored edges, and supersedes " +
     "the loser; a `prune` candidate soft-invalidates a dead mirror node. Superseded/consolidated/pruned nodes stay " +
-    "queryable via history. Idempotent per candidate — one already applied or dismissed cannot be resolved again.",
+    "queryable via history. Application and candidate resolution are atomic; a stale link/merge whose endpoints are " +
+    "no longer live is dismissed without mutation. Idempotent per candidate — one already applied or dismissed cannot " +
+    "be resolved again.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    id: z.string().describe("The consolidation candidate id (from consolidate_suggest)."),
+    session_id: sessionIdSchema,
+    id: candidateIdSchema,
     decision: z
       .nativeEnum(ConsolidationRecommendation)
       .describe("apply: carry out the consolidation. reject: dismiss it (never re-proposed)."),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.MIRROR_UPSERT,
@@ -14,7 +14,7 @@ export const metadata = {
     "compact count summary plus the affected node ids (never record content).",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     source_id: z
       .string()
       .describe("A source registered (and enabled) via `source_register`, e.g. 'grafana-prod'."),

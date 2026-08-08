@@ -21,6 +21,7 @@ import {
 import { HintsService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { matchesSection, sectionName } from "@/core/chunk";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -80,6 +81,7 @@ interface Scores {
   p1: number[];
   recall: number[];
   facets: number[];
+  secAcc: number[];
 }
 
 const HELP = `
@@ -113,9 +115,9 @@ Examples
   npm run eval:retrieval -- --arm flat:MEMORY_USE_WEIGHT=0 --arm usage:MEMORY_USE_WEIGHT=0.25
   npm run eval:retrieval -- --db ~/.cerebrium/memory.db --gold ~/.cerebrium/gold.jsonl
 
-Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, and Facet@${FACET_K} —
-the share of distinct gold facets covered by the returned set, which is what a diversity
-stage trades relevance for and what nDCG cannot see.
+Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, Facet@${FACET_K} (the 
+share of distinct gold facets covered by the returned set), and SecAcc@${K} (the share of 
+returned gold nodes whose returned chunk fell into a gold section).
 `;
 
 function parseArms(argv: string[]): Arm[] {
@@ -221,6 +223,38 @@ function facetCoverage(
   return covered.size / wanted.size;
 }
 
+// How often the returned section (best_chunk's heading) matches one of the gold
+// section labels for a returned gold node.
+function sectionAccuracy(
+  ranked: { id: string; section?: string }[],
+  gold: Set<string>,
+  sections: Map<string, Set<string>> | undefined,
+  k: number,
+): number {
+  if (!sections || sections.size === 0) return NaN;
+
+  let possible = 0;
+  let hits = 0;
+
+  for (let i = 0; i < Math.min(k, ranked.length); i++) {
+    const r = ranked[i]!;
+    if (gold.has(r.id)) {
+      const goldSecs = sections.get(r.id);
+      if (goldSecs && goldSecs.size > 0) {
+        possible++;
+        const rSec = sectionName(r.section ?? null);
+        if (
+          [...goldSecs].some((s) => matchesSection(r.section ?? null, s) || matchesSection(s, rSec))
+        ) {
+          hits++;
+        }
+      }
+    }
+  }
+
+  return possible > 0 ? hits / possible : NaN;
+}
+
 // NaN for an empty sample, so a metric nothing was observed for prints as "-" instead of
 // as a confident zero.
 const mean = (xs: number[]): number =>
@@ -244,6 +278,7 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
   for (const d of data.docs) {
     await writeTool.invoke({
       session_id: sid,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "fact",
       title: d.title,
@@ -423,12 +458,13 @@ async function runArm(
   const sid = shared.readonly
     ? "eval-readonly"
     : (await scope.resolve(SessionStartTool).invoke({})).session_id;
-  const scores: Scores = { rr: [], ndcg: [], p1: [], recall: [], facets: [] };
+  const scores: Scores = { rr: [], ndcg: [], p1: [], recall: [], facets: [], secAcc: [] };
 
   for (const q of queries) {
     const res = await tool.invoke({ session_id: sid, query: q.query, limit: K });
     const ranked = res.results.map((r) => r.id);
     const facet = facetCoverage(ranked, q.gold, facetOf, FACET_K);
+    const secAcc = sectionAccuracy(res.results, q.gold, q.sections, K);
 
     scores.rr.push(reciprocalRank(ranked, q.gold));
     scores.ndcg.push(ndcgAtK(ranked, q.gold, K));
@@ -436,6 +472,7 @@ async function runArm(
     scores.recall.push(recallAtK(ranked, q.gold, K));
 
     if (!Number.isNaN(facet)) scores.facets.push(facet);
+    if (!Number.isNaN(secAcc)) scores.secAcc.push(secAcc);
   }
 
   return scores;
@@ -514,9 +551,7 @@ async function main() {
       );
     }
 
-    console.log(
-      `of those, ${sectionLabels} query→node→section labels from the log (nothing scores them yet; the metrics below are node-level)\n`,
-    );
+    console.log(`of those, ${sectionLabels} query→node→section labels from the log\n`);
 
     if (queries.length < floor) {
       console.log(
@@ -554,8 +589,10 @@ async function main() {
     );
   }
 
-  console.log(`arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K}`);
-  console.log("-------------+-------+---------+-------+--------+---------");
+  console.log(
+    `arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K} | SecAcc@${K}`,
+  );
+  console.log("-------------+-------+---------+-------+--------+---------+----------");
 
   const table: { arm: Arm; scores: Scores }[] = [];
 
@@ -564,7 +601,7 @@ async function main() {
 
     table.push({ arm, scores });
     console.log(
-      `${arm.name.padEnd(12)} | ${pct(mean(scores.rr))} | ${pct(mean(scores.ndcg))}   | ${pct(mean(scores.p1))} | ${pct(mean(scores.recall))}  | ${pct(mean(scores.facets))}`,
+      `${arm.name.padEnd(12)} | ${pct(mean(scores.rr))} | ${pct(mean(scores.ndcg))}   | ${pct(mean(scores.p1))} | ${pct(mean(scores.recall))}  | ${pct(mean(scores.facets))}   | ${pct(mean(scores.secAcc))}`,
     );
   }
 
@@ -583,7 +620,7 @@ async function main() {
       };
 
       console.log(
-        `  ${row.arm.name.padEnd(12)} nDCG ${d(first.scores.ndcg, row.scores.ndcg).padStart(6)}   Rec ${d(first.scores.recall, row.scores.recall).padStart(6)}   Facet ${d(first.scores.facets, row.scores.facets).padStart(6)}`,
+        `  ${row.arm.name.padEnd(12)} nDCG ${d(first.scores.ndcg, row.scores.ndcg).padStart(6)}   Rec ${d(first.scores.recall, row.scores.recall).padStart(6)}   Facet ${d(first.scores.facets, row.scores.facets).padStart(6)}   SecAcc ${d(first.scores.secAcc, row.scores.secAcc).padStart(6)}`,
       );
     }
   }

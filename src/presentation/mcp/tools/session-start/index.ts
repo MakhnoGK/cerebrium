@@ -26,7 +26,7 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
     const sessionId = ulid();
     const project = args.project ?? null;
 
-    this.sessionService.ensureSession(sessionId, project, now);
+    this.sessionService.startSession(sessionId, project, now);
 
     const workingSet = this.memoryService.getWorkingSet(project ?? undefined);
     const notes = this.embeddingService.getEmbeddingNotes();

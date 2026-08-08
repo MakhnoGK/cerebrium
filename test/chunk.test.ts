@@ -69,6 +69,7 @@ describe("Embedding diff: only genuinely-new chunks re-embed", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const node = (await write.invoke({
       session_id: s,
+      parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
       type: "howto",
       title: "Retrieval",

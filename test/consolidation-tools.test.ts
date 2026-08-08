@@ -26,6 +26,7 @@ async function twinsWithSuggestedLink(env: TestEnv, t: ReturnType<typeof tools>)
     (
       (await t.write.invoke({
         session_id: s,
+        parent_node_id: null,
         memory_kind: MemoryKind.SEMANTIC,
         type: "fact",
         title,
@@ -109,6 +110,27 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
         decision: ConsolidationRecommendation.APPLY,
       }),
     ).rejects.toThrow(/already dismissed/);
+  });
+
+  it("should dismiss a stale link candidate without reviving an edge", async () => {
+    process.env.MEMORY_CONSOLIDATE_LINKS = "suggest";
+    process.env.MEMORY_CONSOLIDATE_MERGE = "off";
+    const env = setup();
+    const t = tools();
+    const { s, a, b } = await twinsWithSuggestedLink(env, t);
+    await container.resolve(ConsolidationWorker).tick();
+    const cand = candidates(await t.consolidateSuggest.invoke({ session_id: s }))[0]!;
+    env.nodes.invalidateNode(b, { ts: env.clock.t, session_id: s });
+
+    const resolved = (await t.consolidateApply.invoke({
+      session_id: s,
+      id: cand.id,
+      decision: ConsolidationRecommendation.APPLY,
+    })) as { status: string; kind: string };
+
+    expect(resolved).toMatchObject({ status: "dismissed", kind: ConsolidationKind.LINK });
+    expect(env.edges.edgesOf(a).some((e) => e.id === b && e.edge === "similar_to")).toBe(false);
+    expect(env.consolidation.getCandidate(cand.id)!.status).toBe("dismissed");
   });
 
   it("should throw when the candidate id is unknown", async () => {

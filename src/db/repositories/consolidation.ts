@@ -4,7 +4,7 @@ import { BaseRepo } from "@/db/repositories/base";
 import { LATEST_REVISION } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
 import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
-import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
+import { ConsolidationStatus, type ConsolidationKind } from "@/core/vocab";
 
 // The consolidation queue aggregate. Detection (in the daemon's
 // ConsolidationWorker) inserts candidates here; the auto path or the
@@ -604,5 +604,33 @@ export class ConsolidationRepo extends BaseRepo {
         .run(status, ts, resolvedBy, id),
     );
     return info.changes > 0;
+  }
+
+  resolveCandidateAtomically(
+    id: string,
+    resolvedBy: string,
+    ts: string,
+    operation: (
+      candidate: ConsolidationCandidate,
+    ) => Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>,
+  ): {
+    candidate: ConsolidationCandidate;
+    status: Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>;
+  } | null {
+    return this.tx(() => {
+      const candidate = this.getCandidate(id);
+      if (candidate?.status !== ConsolidationStatus.PENDING) return null;
+
+      const status = operation(candidate);
+      const info = this.db
+        .prepare(
+          `UPDATE consolidation_candidates SET status = ?, resolved_at = ?, resolved_by = ?
+           WHERE id = ? AND status = 'pending'`,
+        )
+        .run(status, ts, resolvedBy, id);
+      if (info.changes !== 1) throw new Error(`failed to resolve pending candidate ${id}`);
+
+      return { candidate, status };
+    });
   }
 }

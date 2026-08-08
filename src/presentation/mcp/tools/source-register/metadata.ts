@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.SOURCE_REGISTER,
@@ -12,7 +12,7 @@ export const metadata = {
     "deployment, so a Cerebrium with a different toolset simply registers different sources. Returns the stored source.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     id: z
       .string()
       .min(1)

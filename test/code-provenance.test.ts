@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CodeIndexService } from "@/application/services";
 import { readGitProvenance } from "@/code/git";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { CodeConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
 
@@ -194,15 +195,22 @@ describe("code_index remembers roots for name-based re-index", () => {
     delete process.env.MEMORY_CODE_ROOTS; // nothing configured
     setup();
     const codeIndex = container.resolve(CodeIndexTool);
+    const sessionId = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const root = tmp("mk-remember-");
     writeFileSync(join(root, "y.ts"), "export const answer = 42;\n");
 
     // When — first index by explicit path should remember the root.
-    const first = (await codeIndex.invoke({ session_id: "s", path: root })) as Record<string, any>;
+    const first = (await codeIndex.invoke({ session_id: sessionId, path: root })) as Record<
+      string,
+      any
+    >;
     const name = first.repo as string;
 
     // Then — re-index by NAME alone, still with no MEMORY_CODE_ROOTS — resolves from the store.
-    const again = (await codeIndex.invoke({ session_id: "s", repo: name })) as Record<string, any>;
+    const again = (await codeIndex.invoke({ session_id: sessionId, repo: name })) as Record<
+      string,
+      any
+    >;
     expect(again.repo).toBe(name);
     expect(again.files_scanned).toBe(1);
     expect(again.files_skipped).toBe(1); // hash-gated, unchanged
@@ -213,9 +221,10 @@ describe("code_index remembers roots for name-based re-index", () => {
     delete process.env.MEMORY_CODE_ROOTS;
     setup();
     const codeIndex = container.resolve(CodeIndexTool);
+    const sessionId = (await container.resolve(SessionStartTool).invoke({})).session_id;
 
     // When / Then
-    await expect(codeIndex.invoke({ session_id: "s", repo: "ghost" })).rejects.toThrow(
+    await expect(codeIndex.invoke({ session_id: sessionId, repo: "ghost" })).rejects.toThrow(
       /has not been indexed/,
     );
   });

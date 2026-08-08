@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { nodeIdsSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.GET,
@@ -24,11 +24,12 @@ export const metadata = {
     "`outline` alongside, so you can see what was left behind and ask for it.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
-    ids: z
-      .array(z.string())
+    session_id: sessionIdSchema,
+    ids: nodeIdsSchema
       .min(1)
-      .describe("Node ids to fetch, from search/session_start envelopes."),
+      .describe(
+        "Exact node ids copied from Cerebrium result envelopes; never invent, guess, or transform them.",
+      ),
     include_revisions: z
       .boolean()
       .optional()

@@ -23,6 +23,7 @@ function write(
 ): Promise<Envelope> {
   return container.resolve(WriteTool).invoke({
     session_id: session,
+    parent_node_id: null,
     memory_kind: MemoryKind.SEMANTIC,
     type: "fact",
     title,

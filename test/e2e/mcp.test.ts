@@ -14,6 +14,7 @@ import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { Server } from "@/presentation/mcp/server";
+import { sessionIdDescription } from "@/presentation/mcp/tools/contracts";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
 
@@ -85,6 +86,7 @@ async function writeFact(
       name: "write",
       arguments: {
         session_id: sid,
+        parent_node_id: null,
         memory_kind: "semantic",
         type: "fact",
         title,
@@ -96,6 +98,8 @@ async function writeFact(
 }
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/demo-repo");
+const UNKNOWN_NODE_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
+const UNKNOWN_CANDIDATE_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 
 const ALL_TOOLS = [
   "checkpoint",
@@ -139,6 +143,17 @@ describe("MCP server wiring", () => {
 
     expect(search?.inputSchema.properties).toHaveProperty("query");
   });
+
+  it("should tell every session-bound tool to copy session_start's exact id", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+
+    for (const tool of tools.filter((entry) => entry.name !== "session_start")) {
+      const session = tool.inputSchema.properties?.session_id as { description?: string };
+
+      expect(session.description, tool.name).toBe(sessionIdDescription);
+    }
+  });
 });
 
 describe("session_start tool", () => {
@@ -162,6 +177,49 @@ describe("session_start tool", () => {
     expect(res.working_set).toHaveProperty("stats");
   });
 
+  it("should reject malformed and unknown session ids without creating either", async () => {
+    const client = await connect();
+    const malformed = asError(
+      await client.callTool({
+        name: "search",
+        arguments: { session_id: "invented", query: "anything" },
+      }),
+    );
+    const unknownId = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+    const unknown = asError(
+      await client.callTool({
+        name: "search",
+        arguments: { session_id: unknownId, query: "anything" },
+      }),
+    );
+    const stats = payload<{ content: { sessions: number; nodes_total: number } }>(
+      await client.callTool({ name: "stats", arguments: {} }),
+    );
+
+    expect(malformed.isError).toBe(true);
+    expect(malformed.text).toContain("session_id must be a valid ULID");
+    expect(unknown).toStrictEqual({
+      isError: true,
+      text: expect.stringContaining(`Unknown session_id ${unknownId}`),
+    });
+    expect(stats.content.sessions).toBe(0);
+    expect(stats.content.nodes_total).toBe(0);
+  });
+
+  it("should accept the exact id returned by session_start", async () => {
+    const client = await connect();
+    const sid = await startSession(client);
+    const result = payload<{ results: unknown[] }>(
+      await client.callTool({
+        name: "search",
+        arguments: { session_id: sid, query: "anything" },
+      }),
+    );
+
+    expect(sid).toMatch(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+    expect(result.results).toEqual([]);
+  });
+
   it("should surface prior facts, tasks, and checkpoints when a session resumes", async () => {
     const client = await connect();
     const p = "resume-proj";
@@ -172,6 +230,7 @@ describe("session_start tool", () => {
       name: "write",
       arguments: {
         session_id: sid,
+        parent_node_id: null,
         memory_kind: "semantic",
         type: "task",
         title: "Task 1",
@@ -199,6 +258,26 @@ describe("session_start tool", () => {
 });
 
 describe("write tool", () => {
+  it("should require an explicit nullable parent instead of inferring one", async () => {
+    const client = await connect();
+    const sid = await startSession(client);
+    const res = asError(
+      await client.callTool({
+        name: "write",
+        arguments: {
+          session_id: sid,
+          memory_kind: "semantic",
+          type: "fact",
+          title: "No parent contract",
+          content: "This call intentionally omits parent_node_id.",
+        },
+      }),
+    );
+
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("parent_node_id");
+  });
+
   it("should return an envelope with an id when a semantic fact is written", async () => {
     const client = await connect();
     const sid = await startSession(client);
@@ -249,6 +328,7 @@ describe("write tool", () => {
         name: "write",
         arguments: {
           session_id: sid,
+          parent_node_id: null,
           memory_kind: "mirror",
           type: "symbol",
           title: "x",
@@ -313,6 +393,7 @@ describe("search tool", () => {
       name: "write",
       arguments: {
         session_id: sid,
+        parent_node_id: null,
         memory_kind: "episodic",
         type: "event_note",
         title: "B",
@@ -354,11 +435,14 @@ describe("get tool", () => {
     const client = await connect();
     const sid = await startSession(client);
     const res = payload<{ nodes: unknown[]; not_found: string[] }>(
-      await client.callTool({ name: "get", arguments: { session_id: sid, ids: ["NOPE"] } }),
+      await client.callTool({
+        name: "get",
+        arguments: { session_id: sid, ids: [UNKNOWN_NODE_ID] },
+      }),
     );
 
     expect(res.nodes).toEqual([]);
-    expect(res.not_found).toContain("NOPE");
+    expect(res.not_found).toContain(UNKNOWN_NODE_ID);
   });
 
   it("should include the revision history when include_revisions is set", async () => {
@@ -404,6 +488,7 @@ describe("update tool", () => {
         name: "write",
         arguments: {
           session_id: sid,
+          parent_node_id: null,
           memory_kind: "episodic",
           type: "event_note",
           title: "E",
@@ -440,7 +525,7 @@ describe("update tool", () => {
     const res = asError(
       await client.callTool({
         name: "update",
-        arguments: { session_id: sid, id: "NOPE", content: "y" },
+        arguments: { session_id: sid, id: UNKNOWN_NODE_ID, content: "y" },
       }),
     );
 
@@ -496,7 +581,7 @@ describe("invalidate tool", () => {
     const res = asError(
       await client.callTool({
         name: "invalidate",
-        arguments: { session_id: sid, id: "NOPE", reason: "x" },
+        arguments: { session_id: sid, id: UNKNOWN_NODE_ID, reason: "x" },
       }),
     );
     expect(res.isError).toBe(true);
@@ -541,7 +626,12 @@ describe("link tool", () => {
     const res = asError(
       await client.callTool({
         name: "link",
-        arguments: { session_id: sid, src: a.id, dst: "NOPE", type: EdgeType.REFERENCES },
+        arguments: {
+          session_id: sid,
+          src: a.id,
+          dst: UNKNOWN_NODE_ID,
+          type: EdgeType.REFERENCES,
+        },
       }),
     );
     expect(res.isError).toBe(true);
@@ -593,21 +683,23 @@ describe("checkpoint tool", () => {
     expect(got.nodes[0]!.content).toContain("chose X");
   });
 
-  it("should note ignored ids when touched_node_ids include unknown nodes", async () => {
+  it("should reject unknown touched_node_ids", async () => {
     const client = await connect();
     const sid = await startSession(client, "cp");
-    const res = payload<{ hints?: string[] }>(
+    const res = asError(
       await client.callTool({
         name: "checkpoint",
         arguments: {
           session_id: sid,
           project: "cp",
           summary: "s",
-          touched_node_ids: ["NOPE"],
+          touched_node_ids: [UNKNOWN_NODE_ID],
         },
       }),
     );
-    expect((res.hints ?? []).some((h) => /Ignored .*unknown/.test(h))).toBe(true);
+
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain(`touched node ${UNKNOWN_NODE_ID} does not exist`);
   });
 });
 
@@ -913,7 +1005,11 @@ describe("consolidate_suggest / consolidate_apply tools", () => {
     const res = asError(
       await client.callTool({
         name: "consolidate_apply",
-        arguments: { session_id: sid, id: "nope", decision: ConsolidationRecommendation.APPLY },
+        arguments: {
+          session_id: sid,
+          id: UNKNOWN_CANDIDATE_ID,
+          decision: ConsolidationRecommendation.APPLY,
+        },
       }),
     );
 

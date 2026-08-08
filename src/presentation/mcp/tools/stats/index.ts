@@ -25,9 +25,7 @@ export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> 
 
   async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
     const stats = this.statsRepo.techStats(this.clock.now());
-    const hints = args.session_id
-      ? await this.hints.getUnknownSessionHints(args.session_id, null)
-      : [];
+    const hints = args.session_id ? await this.hints.getSessionHints(args.session_id) : [];
 
     const { ...rest } = stats;
 

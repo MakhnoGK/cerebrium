@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolName } from "@/presentation/mcp/tools/contracts";
+import { nodeIdsSchema, sessionIdSchema, ToolName } from "@/presentation/mcp/tools/contracts";
 
 export const metadata = {
   name: ToolName.CHECKPOINT,
@@ -10,7 +10,7 @@ export const metadata = {
     "the next session's `session_start` can show you exactly where you left off. Returns the checkpoint's envelope.",
 
   schema: {
-    session_id: z.string().describe("The id from session_start (auto-created if unknown)."),
+    session_id: sessionIdSchema,
     project: z.string().optional().describe("Project scope; omit for a global checkpoint."),
     summary: z
       .string()
@@ -21,9 +21,10 @@ export const metadata = {
       .array(z.string())
       .optional()
       .describe("Unfinished work / questions to pick up next time."),
-    touched_node_ids: z
-      .array(z.string())
+    touched_node_ids: nodeIdsSchema
       .optional()
-      .describe("Ids of nodes this session touched; linked via 'references'."),
+      .describe(
+        "Exact live node ids copied from Cerebrium results; never invent, guess, or transform them. The checkpoint links to them via 'references'.",
+      ),
   },
 };

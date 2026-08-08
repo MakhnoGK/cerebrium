@@ -68,6 +68,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
 
   public async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
     const project = args.project ?? null;
+    const hints = await this.hintsService.getSessionHints(args.session_id);
 
     if (
       args.event_from !== undefined &&
@@ -86,6 +87,7 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
       type: args.type,
       memory_kind: args.memory_kind,
       session_id: args.session_id,
+      parent_node_id: args.parent_node_id,
       links: args.links,
       event_from: args.event_from,
       event_to: args.event_to,
@@ -105,7 +107,6 @@ export class WriteTool implements McpTool<(typeof metadata)["schema"], ToolRespo
         })
       : null;
 
-    const hints = await this.hintsService.getUnknownSessionHints(args.session_id, project);
     const notes = [
       ...this.embeddingsService.getEmbeddingNotes(),
       ...this.hintsService.getLongBodyNotes(args.content),
