@@ -330,15 +330,11 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
-<<<<<<< ours
-| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
-=======
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
->>>>>>> theirs
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
-| `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |
+| `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. Applying records `duplicate_of` and destroys nothing, so `auto` here costs a ranking nudge rather than a node — it still ships as `suggest`, and flipping it is a decision to take on its own. |
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
 | `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
@@ -555,8 +551,13 @@ into durable knowledge:
 - **Distillation** — rolls up clusters of decayed episodics into one durable
   semantic fact, linked `derived_from` each source, stamping the sources
   `consolidated_at` (they stay queryable via `history`).
-- **Dedup/merge** — folds near-duplicate semantic nodes into a canonical survivor,
-  re-pointing edges and superseding the loser.
+- **Dedup/merge** — detects near-duplicate semantic nodes and records the relationship:
+  applying one writes a `duplicate_of` edge from the duplicate to the canonical node and
+  **leaves both live**. Retrieval gives the pair one slot (see the fold, above), which was
+  the whole point of merging; nothing is destroyed to get it, and the relationship carries
+  more than a merge did — a merge picks one body and loses the other. Collapsing two nodes
+  into one is still available, as `consolidate_apply` with `collapse:true`, but only by
+  hand: no posture reaches it.
 - **Tier-1 mirror prune** — soft-invalidates dead mirror nodes (orphaned symbols) so
   they leave retrieval.
 
@@ -571,8 +572,6 @@ self-contained local runtime (Ollama + a small model) for the `http` provider li
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
 
-<<<<<<< ours
-=======
 The `http` provider asks the backend to answer **without its reasoning mode** (`think:
 false`). This is a latency fix, not a style preference: the adapter reads only
 `message.content`, so hidden reasoning is decode time spent on text nothing consumes.
@@ -583,7 +582,6 @@ old 60 s timeout and make proposals vanish mid-decode. A backend with no reasoni
 rejects the field with a 400; the provider retries once without it and stops sending it
 for the rest of the process.
 
->>>>>>> theirs
 When generation fails, the sweep degrades to a proposal-less suggestion rather than
 blocking or guessing — a weak or absent model must never author durable memory. That
 degradation is deliberately indistinguishable *in the store* from the `manual` posture,

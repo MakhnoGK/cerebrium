@@ -37,6 +37,37 @@ export class EdgesRepo extends BaseRepo {
     ts: string,
     weight: number,
   ): boolean {
+    return this.insertSystemEdgeIfLive(EdgeType.SIMILAR_TO, src, dst, session_id, ts, weight);
+  }
+
+  // `duplicate_of` points from the duplicate to the node that represents it, so retrieval
+  // knows which one keeps the slot. Both endpoints stay live — this records the
+  // relationship instead of collapsing it.
+  insertDuplicateOfIfLive(
+    duplicate: string,
+    representative: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): boolean {
+    return this.insertSystemEdgeIfLive(
+      EdgeType.DUPLICATE_OF,
+      duplicate,
+      representative,
+      session_id,
+      ts,
+      weight,
+    );
+  }
+
+  private insertSystemEdgeIfLive(
+    type: EdgeType,
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): boolean {
     return this.tx(() => {
       const info = this.db
         .prepare(
@@ -48,7 +79,7 @@ export class EdgesRepo extends BaseRepo {
              invalidated_at = NULL, valid_from = excluded.valid_from,
              weight = excluded.weight, provenance = excluded.provenance`,
         )
-        .run({ src, dst, type: EdgeType.SIMILAR_TO, weight, ts, session: session_id });
+        .run({ src, dst, type, weight, ts, session: session_id });
 
       return info.changes > 0;
     });

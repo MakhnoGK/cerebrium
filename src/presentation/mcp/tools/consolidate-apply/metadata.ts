@@ -9,9 +9,11 @@ export const metadata = {
     "Resolve a pending consolidation candidate from `consolidate_suggest`. reject dismisses it (the exact cluster is " +
     "never re-proposed). apply carries it out: a `link` candidate writes the system similar_to edge between its members; " +
     "a `distill` candidate writes a durable semantic fact from its `override` (or its generated proposal), links it " +
-    "`derived_from` each source, and stamps the sources consolidated; a `merge` candidate folds the duplicate into the " +
-    "canonical survivor — optionally rewriting it from `override`/proposal — re-points authored edges, and supersedes " +
-    "the loser; a `prune` candidate soft-invalidates a dead mirror node. Superseded/consolidated/pruned nodes stay " +
+    "`derived_from` each source, and stamps the sources consolidated; a `merge` candidate records a `duplicate_of` " +
+    "edge from the duplicate to the canonical node and leaves BOTH live, so retrieval shows one of them and nothing " +
+    "is destroyed — pass `collapse:true` to instead rewrite the survivor from `override`/proposal, re-point authored " +
+    "edges and supersede the loser, which is lossy and cannot be undone except through `restore`; " +
+    "a `prune` candidate soft-invalidates a dead mirror node. Superseded/consolidated/pruned nodes stay " +
     "queryable via history. Application and candidate resolution are atomic; a stale link/merge whose endpoints are " +
     "no longer live is dismissed without mutation. Idempotent per candidate — one already applied or dismissed cannot " +
     "be resolved again.",
@@ -30,7 +32,13 @@ export const metadata = {
       })
       .optional()
       .describe(
-        "When applying a distill/merge candidate: the summary/merged body to write, overriding any generated proposal. Required for distill when the candidate has no proposal (e.g. the manual provider); optional for merge.",
+        "When applying a distill/merge candidate: the summary/merged body to write, overriding any generated proposal. Required for distill when the candidate has no proposal (e.g. the manual provider); optional for merge, and only read when `collapse` is set.",
+      ),
+    collapse: z
+      .boolean()
+      .optional()
+      .describe(
+        "Merge candidates only. Default (false) records `duplicate_of` and keeps both nodes. true collapses them into one, invalidating the loser — lossy, so reserve it for when one node genuinely should not exist.",
       ),
   },
 };

@@ -443,16 +443,19 @@ export class ConsolidationWorker {
         continue;
       }
 
-      if (posture === Posture.AUTO && gen) {
-        const merged = this.nodesRepo.applyMerge({
-          survivorId: pair.canonical_id,
-          loserId: loser,
-          session_id: this.ownerId,
-          ts: now,
-          merged: { title: gen.title, body: gen.body },
-        });
+      // AUTO no longer rewrites and invalidates: it records the relationship and leaves
+      // both nodes live, so an 88.3%-precision judge costs a ranking nudge, not a node.
+      // Collapsing two nodes into one is `consolidate_apply` with `collapse`, by hand.
+      if (posture === Posture.AUTO) {
+        const recorded = this.edgesRepo.insertDuplicateOfIfLive(
+          loser,
+          pair.canonical_id,
+          this.ownerId,
+          now,
+          pair.score,
+        );
 
-        if (merged) {
+        if (recorded) {
           result.merged++;
         }
 
