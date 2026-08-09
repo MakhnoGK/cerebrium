@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { injectable } from "tsyringe";
+import type {
+  ConsolidationReporter,
+  ConsolidationTickResult,
+} from "@/domain/ports/consolidation-reporter";
 import { BaseRepo } from "@/db/repositories/base";
 import { LATEST_REVISION } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
@@ -14,7 +18,7 @@ import { ConsolidationStatus, type ConsolidationKind } from "@/core/vocab";
 // those aggregates. No SQL leaks into tools.
 
 const CANDIDATE_COLS =
-  "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by";
+  "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by, attempts, last_error";
 
 interface CandidateRow {
   id: string;
@@ -28,6 +32,8 @@ interface CandidateRow {
   detected_at: string;
   resolved_at: string | null;
   resolved_by: string | null;
+  attempts: number;
+  last_error: string | null;
 }
 
 // Idempotency key: a cluster is the same regardless of member order, so hash the
@@ -57,11 +63,13 @@ function toCandidate(r: CandidateRow): ConsolidationCandidate {
     detected_at: r.detected_at,
     resolved_at: r.resolved_at,
     resolved_by: r.resolved_by,
+    attempts: r.attempts,
+    last_error: r.last_error,
   };
 }
 
 @injectable()
-export class ConsolidationRepo extends BaseRepo {
+export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter {
   // Enqueue a detected candidate. Idempotent by (kind, members): a duplicate hash is
   // ignored and returns null (no new row); otherwise returns the new candidate's id.
   insertCandidate(input: NewCandidate): string | null {
@@ -632,5 +640,77 @@ export class ConsolidationRepo extends BaseRepo {
 
       return { candidate, status };
     });
+  }
+  reportTick(runId: string, result: ConsolidationTickResult): void {
+    this.db
+      .prepare(
+        `INSERT INTO consolidation_runs (
+          id, started_at, updated_at, ended_at, stage,
+          links_added, links_suggested, links_pruned,
+          distilled, distill_suggested, merged, merge_suggested,
+          pruned, prune_suggested, proposals_backfilled, rejected, annotated,
+          generation_failures, last_error
+        ) VALUES (
+          @id, @started_at, @updated_at, @ended_at, @stage,
+          @links_added, @links_suggested, @links_pruned,
+          @distilled, @distill_suggested, @merged, @merge_suggested,
+          @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
+          @generation_failures, @last_error
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          updated_at = excluded.updated_at,
+          ended_at = excluded.ended_at,
+          stage = excluded.stage,
+          links_added = excluded.links_added,
+          links_suggested = excluded.links_suggested,
+          links_pruned = excluded.links_pruned,
+          distilled = excluded.distilled,
+          distill_suggested = excluded.distill_suggested,
+          merged = excluded.merged,
+          merge_suggested = excluded.merge_suggested,
+          pruned = excluded.pruned,
+          prune_suggested = excluded.prune_suggested,
+          proposals_backfilled = excluded.proposals_backfilled,
+          rejected = excluded.rejected,
+          annotated = excluded.annotated,
+          generation_failures = excluded.generation_failures,
+          last_error = excluded.last_error
+        `,
+      )
+      .run({
+        id: runId,
+        started_at: result.started_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        ended_at: result.ended_at || null,
+        stage: result.stage || "unknown",
+        links_added: result.links_added,
+        links_suggested: result.links_suggested,
+        links_pruned: result.links_pruned,
+        distilled: result.distilled,
+        distill_suggested: result.distill_suggested,
+        merged: result.merged,
+        merge_suggested: result.merge_suggested,
+        pruned: result.pruned,
+        prune_suggested: result.prune_suggested,
+        proposals_backfilled: result.proposals_backfilled,
+        rejected: result.rejected,
+        annotated: result.annotated,
+        generation_failures: result.generation_failures,
+        last_error: result.last_error,
+      });
+  }
+
+  clearCandidateProposal(id: string, error: string | null): void {
+    this.db
+      .prepare("UPDATE consolidation_candidates SET proposal = NULL, last_error = ? WHERE id = ?")
+      .run(error, id);
+  }
+
+  reopenCandidate(id: string): void {
+    this.db
+      .prepare(
+        "UPDATE consolidation_candidates SET status = 'pending', attempts = attempts + 1 WHERE id = ?",
+      )
+      .run(id);
   }
 }

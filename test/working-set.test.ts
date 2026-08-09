@@ -49,6 +49,7 @@ describe("session_start builds a budgeted working set", () => {
     await t.checkpoint.invoke({
       session_id: s,
       project: P,
+      title: "left off mid-refactor",
       summary: "left off mid-refactor",
       decisions: ["use RRF"],
     });

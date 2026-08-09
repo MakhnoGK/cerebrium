@@ -37,10 +37,9 @@ and files you own are edited only between the `cerebrium:start`/`cerebrium:end` 
 Add `--host codex` to work on one host, and `--force` to move an existing skill *copy*
 aside (kept, never deleted) so it can be replaced by a link.
 
-Two things it deliberately leaves to you, both explained in its own output: Codex's
-`hooks = true` under `[features]` (appending a second `[features]` table would corrupt
-the TOML) and Antigravity's per-project rules block. The rest of this file is the same
-procedure by hand, and the reference for what the script is doing.
+It deliberately leaves Codex's `hooks = true` under `[features]` to you because appending a
+second `[features]` table would corrupt the TOML. The rest of this file is the same procedure
+by hand, and the reference for what the script is doing.
 
 ## 0 — Prerequisites
 
@@ -49,7 +48,8 @@ npm install
 npm run build
 ```
 
-Node ≥ 22. One store per machine, not per repo: every host points at the same
+Node ≥ 22. Run `nvm use` first; `.nvmrc` is the runtime source of truth. One store per machine,
+not per repo: every host points at the same
 `MEMORY_DB_PATH`. If a host is already registered, copy its environment rather than inventing
 a second one — two stores means two memories, which is the failure this system exists to
 prevent.
@@ -71,7 +71,8 @@ working directory, not yours.
 ```bash
 claude mcp add cerebrium -s user \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- node /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ln -s /ABSOLUTE/PATH/TO/cerebrium/skill/cerebrium ~/.claude/skills/cerebrium
 ```
 
@@ -85,7 +86,8 @@ Verify: `claude mcp list` shows `cerebrium`; `/mcp` in a session lists its tools
 ```bash
 codex mcp add cerebrium \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- node /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ln -s /ABSOLUTE/PATH/TO/cerebrium/skill/cerebrium ~/.codex/skills/cerebrium
 ```
 
@@ -104,7 +106,7 @@ Add to `~/.gemini/config/mcp_config.json`:
 {
   "mcpServers": {
     "cerebrium": {
-      "command": "node",
+      "command": "/ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node",
       "args": ["/ABSOLUTE/PATH/TO/cerebrium/dist/server.js"],
       "env": { "MEMORY_DB_PATH": "/ABSOLUTE/PATH/TO/HOME/.cerebrium/memory.db" }
     }
@@ -118,12 +120,23 @@ And to `~/.gemini/config/skills.json`, which takes a path instead of a copy:
 { "entries": [{ "path": "/ABSOLUTE/PATH/TO/cerebrium/skill" }] }
 ```
 
-Then paste `always-on.md` into the `AGENTS.md` of each project you want it in — Antigravity
-walks up from the working directory to the repo root and has no machine-wide rules file — and
-add a `PreInvocation` hook to `~/.gemini/config/hooks.json`.
+Paste `always-on.md` into the global `~/.gemini/GEMINI.md`, add a `PreInvocation` hook to
+`~/.gemini/config/hooks.json`, and explicitly allow the current Cerebrium tools in both active
+permission files: IDE `~/.gemini/config/config.json` and CLI
+`~/.gemini/antigravity-cli/settings.json`. `agent:setup -- --apply` merges these allow entries
+without removing unrelated grants.
 
 Verify: the host lists `cerebrium` under **Additional Options (…) > MCP Servers**, and asking
 it to "use the cerebrium skill" loads `SKILL.md` from the working tree.
+
+After changing rules, permissions, or the MCP bundle, restart Antigravity and start a fresh
+conversation so the host rediscovers the tool catalog and runs the first-invocation hook.
+
+The Node command must be the canonical absolute executable selected by `.nvmrc`, because
+`better-sqlite3` is a native addon and a GUI may resolve bare `node` to another ABI. The setup
+command validates `.nvmrc`, opens an in-memory SQLite database before writing config, and pins
+that executable automatically. After an NVM upgrade/removal, rerun `nvm use && npm install`
+and then rerun setup.
 
 ## 4 — Confirm it actually works
 
@@ -135,6 +148,13 @@ that fails.
 That covers the server. The host's own wiring is worth ten more seconds: in a fresh
 session, ask the agent to call `session_start` and report what came back. A working
 install returns a `session_id` and a working set; a broken one returns a transport error.
+
+`npm run eval:agents` summarizes persisted Antigravity IDE/CLI transcripts without printing
+prompts, arguments, ids, or paths. Historical output is descriptive only. A transcript with
+truncated tool calls is marked partial and all totals become observed lower bounds; controlled
+scenario verdicts require fresh, labeled conversations.
+The command intentionally implements no thresholds or pass/fail mode; run recall, code lookup,
+write/link, and checkpoint scenarios manually in separate fresh conversations after a restart.
 
 ## Running more than one host
 

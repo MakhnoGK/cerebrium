@@ -64,8 +64,8 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
   credentials**: I fetch with the source's own MCP tools, then upsert. `session_start`
   lists stale sources. Curate — decision-worthy records only, never a bulk dump, which
   poisons retrieval. The payoff is the `link` from a semantic note to the record.
-- **`consolidate_suggest` / `consolidate_apply`** — review what the background sweep queued
-  (`distill`/`merge`/`link`/`prune`) and resolve it with `apply` or `reject`. Review
+- **`consolidate_suggest` / `consolidate_apply` / `consolidate_retry`** — review what the background sweep queued
+  (`distill`/`merge`/`link`/`prune`) and resolve it with `apply` or `reject`. If a candidate fails, `retry` bumps it for another attempt. Review
   destructive applies on index nodes with care; one has already eaten a hand-maintained
   index, which is what `restore` exists for.
 - **`stats`** — operational snapshot, no content: embedding queue, content totals, storage,

@@ -1,8 +1,8 @@
 # Host surfaces
 
 What each supported agent host exposes, and which of its surfaces Cerebrium's setup uses.
-Everything here was verified against a live installation on 2026-08-07 — Claude Code, Codex
-CLI 0.142.5, and Antigravity 2.0 (IDE build; see the caveat below). Re-verify before trusting
+Everything here was verified against a live installation on 2026-08-09 — Claude Code, Codex,
+Antigravity IDE 2.5.0, and Antigravity CLI 1.1.11. Re-verify before trusting
 it against a newer host release: these are product surfaces, not standards.
 
 ## The four surfaces
@@ -11,7 +11,7 @@ Every host needs the same four things, and all three expose all four:
 
 | Surface | What it does | Why it is not optional |
 |---|---|---|
-| MCP server | makes the 17 tools callable | without it there is no memory |
+| MCP server | makes the 18 tools callable | without it there is no memory |
 | Skill | the deep usage discipline, loaded on demand | a tool schema alone teaches nothing |
 | Always-on rules | retrieval precedence, in context every turn | skills are progressively disclosed, so something must say "search memory first" |
 | Session-start hook | nudges the agent to call `session_start` | a fresh session otherwise starts blind |
@@ -49,23 +49,25 @@ and the IDE.
 |---|---|---|
 | MCP | `~/.gemini/config/mcp_config.json` | `mcpServers.cerebrium` entry (stdio: `command`/`args`/`env`) |
 | Skill | `~/.gemini/config/skills.json` | an `entries[].path` pointing straight at this repo's `skill/` — no copy, no symlink |
-| Rules | `AGENTS.md` / `GEMINI.md`, walked up from cwd to repo root | managed block from [always-on.md](./always-on.md) |
+| Rules | `~/.gemini/GEMINI.md` | global managed block from [always-on.md](./always-on.md) |
 | Hook | `~/.gemini/config/hooks.json` | `PreInvocation` with `injectSteps[].ephemeralMessage` |
+| Permissions | IDE: `~/.gemini/config/config.json`; CLI: `~/.gemini/antigravity-cli/settings.json` | explicit allow entry for each current Cerebrium tool; unrelated grants are preserved |
+
+Every MCP registration uses the canonical absolute Node executable selected by this repo's
+`.nvmrc`, never bare `node`. `better-sqlite3` is ABI-bound: setup checks the current Node against
+`.nvmrc` and opens `:memory:` with the addon before it mutates any host config. Rerun setup after
+changing/removing the NVM version or rebuilding native dependencies.
 
 Antigravity discovers skills from `skills/<name>/SKILL.md` under a customization root **or**
 from any path declared in `skills.json`. The declared path is what setup uses: it points at the
 working tree, so the skill can never fall behind the repo.
 
-⚠️ **Rules are hierarchical, not global.** Antigravity loads `AGENTS.md`/`GEMINI.md` by walking
-up from the working directory to the repo root; there is no documented machine-wide rules file.
-The always-on block therefore lands per project rather than once per machine, which is the one
-place where Antigravity's setup is not a single global action.
+The global rules file is shared across workspaces. Per-project `AGENTS.md`/`GEMINI.md` files can
+still add narrower instructions, but they are no longer needed just to activate Cerebrium.
 
-⚠️ **Only the IDE build was verified here.** Antigravity also ships a CLI front-end (its hook
-docs name an `antigravity-cli/` transcript directory next to the IDE's `antigravity-ide/`). The
-CLI shares `~/.gemini/config/`, so the same artifacts apply — but the CLI was not installed on
-the machine where this was written, so its end-to-end behavior is inferred from the host's own
-documentation, not observed.
+Antigravity's IDE and CLI use different permission files, so setup treats permission parity as
+an Antigravity-only fifth surface. The allowlist is explicit and exhaustive: adding a new MCP
+tool breaks type-checking until its permission policy is consciously classified.
 
 ## What is deliberately not used
 

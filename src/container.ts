@@ -2,10 +2,12 @@ import { container, instanceCachingFactory, type DependencyContainer } from "tsy
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
 import { CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
+import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { ConsolidationRepo } from "@/db/repositories/consolidation";
 import {
   ConsolidationConfig,
   DatabaseConfig,
@@ -42,6 +44,7 @@ export const KERNEL_TOKENS = {
   workerOptions: WORKER_OPTIONS_TOKEN,
   embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
   consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
+  consolidationReporter: CONSOLIDATION_REPORTER_TOKEN,
 } as const;
 
 export function buildContainer({ role, source, into }: ContainerOptions): DependencyContainer {
@@ -99,5 +102,9 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
         timeoutMs: config.timeoutMs,
       });
     }),
+  });
+
+  target.register(CONSOLIDATION_REPORTER_TOKEN, {
+    useToken: ConsolidationRepo,
   });
 }

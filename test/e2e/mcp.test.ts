@@ -106,6 +106,7 @@ const ALL_TOOLS = [
   "code_index",
   "code_lookup",
   "consolidate_apply",
+  "consolidate_retry",
   "consolidate_suggest",
   "get",
   "invalidate",
@@ -122,7 +123,7 @@ const ALL_TOOLS = [
 ];
 
 describe("MCP server wiring", () => {
-  it("should expose all seventeen tools when a client connects", async () => {
+  it("should expose all eighteen tools when a client connects", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
 
@@ -240,7 +241,12 @@ describe("session_start tool", () => {
     });
     await client.callTool({
       name: "checkpoint",
-      arguments: { session_id: sid, project: p, summary: "left off mid-refactor" },
+      arguments: {
+        session_id: sid,
+        project: p,
+        title: "left off mid-refactor",
+        summary: "left off mid-refactor",
+      },
     });
 
     const res = payload<{
@@ -649,6 +655,7 @@ describe("checkpoint tool", () => {
         arguments: {
           session_id: sid,
           project: "cp",
+          title: "wrapped up the parser",
           summary: "wrapped up the parser",
           decisions: ["use RRF"],
           open_threads: ["wire the reranker"],
@@ -669,6 +676,7 @@ describe("checkpoint tool", () => {
         arguments: {
           session_id: sid,
           project: "cp",
+          title: "did things",
           summary: "did things",
           decisions: ["chose X"],
         },
@@ -692,6 +700,7 @@ describe("checkpoint tool", () => {
         arguments: {
           session_id: sid,
           project: "cp",
+          title: "s",
           summary: "s",
           touched_node_ids: [UNKNOWN_NODE_ID],
         },

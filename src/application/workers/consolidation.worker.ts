@@ -7,6 +7,11 @@ import {
   type ConsolidationResult,
   type ConsolidationTask,
 } from "@/domain/ports/consolidation-provider";
+import {
+  CONSOLIDATION_REPORTER_TOKEN,
+  type ConsolidationReporter,
+  type ConsolidationTickResult,
+} from "@/domain/ports/consolidation-reporter";
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
@@ -31,23 +36,6 @@ function errorText(err: unknown): string {
   return (message || "unknown generation error").slice(0, MAX_ERROR_CHARS);
 }
 
-export interface ConsolidationTickResult {
-  links_added: number;
-  links_suggested: number;
-  links_pruned: number;
-  distilled: number;
-  distill_suggested: number;
-  merged: number;
-  merge_suggested: number;
-  pruned: number;
-  prune_suggested: number;
-  proposals_backfilled: number;
-  rejected: number;
-  annotated: number;
-  generation_failures: number;
-  last_error: string | null;
-}
-
 // How a generation attempt ended. A failure and "no generating provider" both yield no
 // draft, but they are not the same event — one is a broken sweep, the other is the
 // configured posture — so a bare `error: null` marks the second. Collapsing the two into
@@ -68,6 +56,8 @@ export class ConsolidationWorker {
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
     private readonly consolidator: ConsolidationProvider,
+    @inject(CONSOLIDATION_REPORTER_TOKEN)
+    private readonly reporter: ConsolidationReporter,
 
     private readonly queueRepo: EmbeddingQueueRepo,
     private readonly consolidationRepo: ConsolidationRepo,
@@ -98,9 +88,16 @@ export class ConsolidationWorker {
   // Only the leaseholder does work — a non-holder returns zeros. The lease is re-checked
   // between clusters, so losing it (or being stopped) ends the sweep where it stands and
   // returns what was already done.
+  private async report(runId: string, stage: string, result: ConsolidationTickResult) {
+    result.stage = stage;
+    this.reporter.reportTick(runId, result);
+  }
+
   async tick(): Promise<ConsolidationTickResult> {
     const now = this.now();
+    const runId = newId();
     const result: ConsolidationTickResult = {
+      started_at: now,
       links_added: 0,
       links_suggested: 0,
       links_pruned: 0,
@@ -123,13 +120,33 @@ export class ConsolidationWorker {
 
     this.sessionService.startSession(this.ownerId, null, now);
 
-    this.discoverLinks(now, result);
-    this.pruneLinks(now, result);
-    await this.distill(now, result);
-    await this.mergeDuplicates(now, result);
-    this.pruneMirrors(now, result);
-    await this.backfillProposals(now, result);
-    await this.annotate(now, result);
+    try {
+      await this.report(runId, "links", result);
+      this.discoverLinks(now, result);
+      this.pruneLinks(now, result);
+
+      await this.report(runId, "distill", result);
+      await this.distill(now, result);
+
+      await this.report(runId, "merge", result);
+      await this.mergeDuplicates(now, result);
+
+      await this.report(runId, "mirrors", result);
+      this.pruneMirrors(now, result);
+
+      await this.report(runId, "backfill", result);
+      await this.backfillProposals(now, result);
+
+      await this.report(runId, "annotate", result);
+      await this.annotate(now, result);
+
+      result.ended_at = this.now();
+      await this.report(runId, "idle", result);
+    } catch (err) {
+      result.last_error = errorText(err);
+      result.ended_at = this.now();
+      await this.report(runId, "failed", result);
+    }
 
     return result;
   }

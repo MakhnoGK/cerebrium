@@ -93,6 +93,7 @@ describe("CheckpointTool.describeEvent", () => {
     // When
     const envelope = await callTool(container.resolve(CheckpointTool), {
       session_id,
+      title: "Where we left off.",
       summary: "Where we left off.",
       touched_node_ids: [first.id],
     });

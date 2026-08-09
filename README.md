@@ -212,7 +212,7 @@ quietly accumulated several unrelated facts — but the agent writing it can.
 
 ## Quick start
 
-Requires Node ≥ 22 (developed on Node 26; see `.nvmrc`/`engines`). `better-sqlite3`
+Requires Node ≥ 22 (developed on Node 22; run `nvm use` from this repo). `better-sqlite3`
 and `sqlite-vec` are native modules that build/download on install.
 
 **1 — Clone and build.**
@@ -230,14 +230,15 @@ the point. Point it at the built `dist/server.js` by absolute path:
 ```bash
 claude mcp add cerebrium -s user \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- node /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ```
 
 **3 — Verify.** `claude mcp list` should show `cerebrium`, and inside a Claude Code
 session `/mcp` lists its tools (`session_start`, `search`, `write`, …). The SQLite file
 and its `~/.cerebrium/models` cache are created on first use — no manual DB setup.
 
-**4 — Install the discipline, not just the tools.** An agent handed 17 tools and no
+**4 — Install the discipline, not just the tools.** An agent handed 18 tools and no
 doctrine calls `write` without searching and fills the store with duplicates. One command
 installs the skill, the always-on retrieval rules and a session-start hook for every agent
 host it finds — Claude Code, Codex CLI and Antigravity:
@@ -318,7 +319,11 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
+<<<<<<< ours
+| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
+=======
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
+>>>>>>> theirs
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
@@ -554,6 +559,8 @@ self-contained local runtime (Ollama + a small model) for the `http` provider li
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
 
+<<<<<<< ours
+=======
 The `http` provider asks the backend to answer **without its reasoning mode** (`think:
 false`). This is a latency fix, not a style preference: the adapter reads only
 `message.content`, so hidden reasoning is decode time spent on text nothing consumes.
@@ -564,6 +571,7 @@ old 60 s timeout and make proposals vanish mid-decode. A backend with no reasoni
 rejects the field with a 400; the provider retries once without it and stops sending it
 for the rest of the process.
 
+>>>>>>> theirs
 When generation fails, the sweep degrades to a proposal-less suggestion rather than
 blocking or guessing — a weak or absent model must never author durable memory. That
 degradation is deliberately indistinguishable *in the store* from the `manual` posture,
@@ -779,7 +787,7 @@ surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, a
 |------|-----|-------|-------|------|
 | Claude Code | `claude mcp add -s user` | symlink in `~/.claude/skills/` | block in `~/.claude/CLAUDE.md` | `SessionStart` in `~/.claude/settings.json` |
 | Codex CLI | `codex mcp add` | symlink in `~/.codex/skills/` | block in `~/.codex/AGENTS.md` | `SessionStart` in `~/.codex/hooks.json` |
-| Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | block in each project's `AGENTS.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | global block in `~/.gemini/GEMINI.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
 
 The rules block is written between `cerebrium:start`/`cerebrium:end` markers and replaced
 in place on later runs, so the rest of a file you maintain is never touched. Two steps are
@@ -787,10 +795,26 @@ deliberately left to you and named in the report: Codex's `hooks = true` under `
 (appending a second `[features]` table would corrupt the TOML) and its hook trust prompt,
 which is a security gate and not ours to pre-approve.
 
+Antigravity adds one host-specific surface: explicit Cerebrium permissions in the IDE and CLI
+settings. Setup merges the current tool grants into both active configs, preserves unrelated
+entries, and refuses malformed JSON or permission shapes instead of overwriting them.
+
+Setup reads the numeric version in `.nvmrc`, verifies that it is running under that Node, opens
+an in-memory `better-sqlite3` database as a native-addon preflight, and registers the canonical
+absolute Node executable in every MCP host. This avoids GUI and terminal `PATH` differences
+silently selecting incompatible Node ABIs. After changing or removing the NVM version, run
+`nvm use && npm install`, then rerun agent setup to migrate the registrations.
+
 `npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
 server over stdio against a throwaway store, calls `session_start`, counts the tools and
 runs the hook script. `install/README.md` has the per-host procedure by hand, and
 `install/hosts.md` records what was verified on which host version.
+
+`npm run eval:agents` audits persisted Antigravity traces. It emits aggregate tool names and
+counts only—never prompts, argument values, ids, or paths—and marks truncated histories as
+partial lower bounds. Organic history gets no compliance verdict; compare fresh labeled
+scenarios after a restart. The command intentionally has no threshold/pass-fail mode; controlled
+scenario evaluation remains a separate manual step.
 
 **More than one host at once** means more than one server process on one SQLite file. That
 is allowed — see invariant #1 in `CLAUDE.md` — and measured: two servers doing 120

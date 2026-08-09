@@ -15,4 +15,5 @@ import "./mirror-upsert";
 import "./mirror-status";
 import "./consolidate-suggest";
 import "./consolidate-apply";
+import "./consolidate-retry";
 import "./stats";

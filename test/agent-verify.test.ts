@@ -1,10 +1,13 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parseRpcResponses, storeWritable } from "@scripts/agent-verify";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseRpcResponses, storeWritable, verify } from "@scripts/agent-verify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 let dir: string;
+const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "agent-verify-"));
@@ -61,5 +64,50 @@ describe("storeWritable", () => {
   it("should reject a store under a path that cannot be reached", () => {
     // Given / When / Then
     expect(storeWritable("/proc/nonexistent/memory.db")).toBe(false);
+  });
+});
+
+describe("Antigravity session reminder", () => {
+  function invoke(invocationNum: number): Record<string, unknown> {
+    const output = execFileSync(
+      "node",
+      [join(REPO, "install", "hooks", "session-start.mjs"), "--host", "antigravity"],
+      { input: JSON.stringify({ invocationNum }), encoding: "utf8" },
+    );
+    return JSON.parse(output) as Record<string, unknown>;
+  }
+
+  it("should inject the expanded reminder on zero-indexed invocation 0", () => {
+    // Given / When
+    const first = JSON.stringify(invoke(0));
+
+    // Then
+    expect(first).toContain("session_start");
+    expect(first).toContain("code_lookup");
+    expect(first).toContain("parent_node_id");
+  });
+
+  it("should emit an empty payload on invocation 1", () => {
+    // Given / When / Then
+    expect(invoke(1)).toEqual({});
+  });
+});
+
+describe("verify runtime", () => {
+  it("should boot the server with the planned absolute Node executable", async () => {
+    // Given / When
+    const results = await verify(
+      {
+        home: dir,
+        repoRoot: REPO,
+        nodePath: join(dir, "missing-node"),
+        env: { MEMORY_DB_PATH: join(dir, "memory.db") },
+        hasCommand: () => false,
+      },
+      [],
+    );
+
+    // Then
+    expect(results.find((result) => result.name === "server")).toMatchObject({ ok: false });
   });
 });

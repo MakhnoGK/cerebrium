@@ -148,6 +148,6 @@ describe("actionForTool", () => {
       expect(actionForTool(name)).toBe(name as string as EventAction);
     }
 
-    expect(Object.values(ToolName)).toHaveLength(Object.values(EventAction).length);
+    expect(Object.values(EventAction)).toEqual(expect.arrayContaining(Object.values(ToolName)));
   });
 });

@@ -99,6 +99,26 @@ export class StatsRepo extends BaseRepo {
       .prepare("SELECT owner, expires_at FROM worker_lease WHERE role = 'embedding'")
       .get() as { owner: string; expires_at: string } | undefined;
 
+    const candStats = this.db
+      .prepare(
+        `SELECT
+           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+           SUM(CASE WHEN status = 'applied' THEN 1 ELSE 0 END) AS applied,
+           SUM(CASE WHEN status = 'dismissed' THEN 1 ELSE 0 END) AS dismissed
+         FROM consolidation_candidates`,
+      )
+      .get() as { pending: number | null; applied: number | null; dismissed: number | null };
+
+    const runCount = this.db.prepare(`SELECT COUNT(*) AS total FROM consolidation_runs`).get() as {
+      total: number;
+    };
+
+    const lastRun = this.db
+      .prepare(
+        `SELECT started_at, stage, last_error FROM consolidation_runs ORDER BY started_at DESC LIMIT 1`,
+      )
+      .get() as { started_at: string; stage: string | null; last_error: string | null } | undefined;
+
     return {
       queue: {
         backlog,
@@ -136,6 +156,15 @@ export class StatsRepo extends BaseRepo {
         lease_active: !!lease && lease.expires_at > now,
       },
       graph,
+      consolidation: {
+        pending: candStats.pending ?? 0,
+        applied: candStats.applied ?? 0,
+        dismissed: candStats.dismissed ?? 0,
+        runs_total: runCount.total,
+        last_run_at: lastRun?.started_at ?? null,
+        last_error: lastRun?.last_error ?? null,
+        last_stage: lastRun?.stage ?? null,
+      },
       code_repos: this.code.allRepoProvenance(),
       last_activity: one<{ t: string | null }>("SELECT MAX(ts) AS t FROM events").t,
     };

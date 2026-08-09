@@ -102,6 +102,8 @@ export interface ConsolidationCandidate {
   detected_at: string;
   resolved_at: string | null;
   resolved_by: string | null;
+  attempts: number;
+  last_error: string | null;
 }
 
 export interface NewCandidate {
@@ -158,6 +160,15 @@ export interface TechStats {
     dangling_edges: number; // live edges from a live node into an invalidated one
     repointable_edges: number; // of those, the authored ones whose target has a live successor
     detached_nodes: number; // live nodes no longer reachable from the graph's densest hub
+  };
+  consolidation: {
+    pending: number;
+    applied: number;
+    dismissed: number;
+    runs_total: number;
+    last_run_at: string | null;
+    last_error: string | null;
+    last_stage: string | null;
   };
   code_repos: RepoProvenance[];
   last_activity: string | null;
