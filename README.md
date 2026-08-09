@@ -750,6 +750,16 @@ store. It has two arms, because only one gate has ground truth:
   target *volume* instead: how often a write would surface a candidate, and how many
   edges link discovery would propose per node. A gate that flags most writes is noise
   whatever its precision.
+- **Fold** — where the read-time fold gate should sit, in two arms of its own. The
+  labelled one reuses the merge verdicts (a pair worth merging is a pair worth showing
+  once); the impact one replays the fold pass over the result sets real logged searches
+  returned. Both are reported twice, on cosine alone and with the burst rule excluding a
+  pair one writer produced in one moment.
+
+The fold gate lives on **its own similarity scale** and must never be read off
+`mergeSim`: `search` compares one vector per node (the lowest-seq chunk, what
+`SearchRepo.vectorsFor` hands MMR), while the merge detector compares a node's seed chunk
+against the other node's *nearest* chunk. The same pair scores differently under the two.
 
 Two properties of the measurement are worth knowing before quoting it. Candidates were
 only ever detected above the gate in force at the time, so recall *below* that gate is
