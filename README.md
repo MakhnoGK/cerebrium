@@ -425,6 +425,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
+| `npm run report:readloop` | Read-only read-loop report against a real store: which nodes retrieval surfaced, which of those a later `get` actually read, and therefore what "never fetched" means. `--json`, `--since <ISO instant>`. See *Reading the read loop*. |
 | `npm run gold:generate` | Writes labelled queries for the eval by asking the local model what each section of the store answers. Read-only on the store, resumable, appends to a gold JSONL that lives outside the repo. See *The gold file*. |
 | `npm run agent:setup` | Reports what each agent host still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it by booting the server and calling `session_start`. Read-only without `--apply`, and it never touches the store. See *Agent hosts*. |
 | `npm run gold:adjudicate` | Labels real logged queries by judging pooled candidates one by one, giving the multi-label gold a generated question cannot. Read-only, resumable, same gold JSONL. See *The gold file*. |
@@ -756,6 +757,37 @@ unmeasurable — the recall column is recall among proposed pairs. And a stored 
 cannot be recomputed from today's vectors (content gets revised, and the detector's
 similarity is asymmetric), so the report reads the recorded score and reports the drift
 rather than pretending to reproduce it.
+
+## Reading the read loop
+
+A store can always count what it holds and how often each node was fetched. That is
+half a loop, and the missing half changes what the numbers mean: a node that is never
+fetched is either dead weight, or it is being *surfaced* and answering the question
+from its envelope and `best_chunk` without ever costing a `get` — the documented
+normal path. Counting fetches alone cannot tell those apart, so every claim about
+retrieval noise built on a fetch count is unfalsifiable.
+
+Both halves are now in `events`. A surfacing row — `search`, `session_start`,
+`code_lookup` — lists the node ids put in front of the agent, in rank order; a `get`
+row lists the ids it spent tokens on. `npm run report:readloop` joins them, read-only,
+and cuts the join three ways:
+
+- **Follow-through** — how many searches led to a fetch of something they surfaced,
+  and how many were answered from the envelope alone. The second number is the share
+  that must be subtracted from any "never fetched" figure before calling it waste.
+- **Rank and path** — fetch rate by rank, which is whether ranking works at all, and
+  fetch rate by `matched` (`text` / `vector` / `both` / `graph`), which says whether a
+  retrieval branch earns its results.
+- **Per node** — "never fetched" split into *never surfaced* (unreachable by the
+  queries actually asked) and *surfaced but not fetched* (envelope-answered, or
+  genuinely irrelevant). Only the first is a ranking failure.
+
+The report opens with an instrumentation-coverage table for a reason: ids were not
+always logged, and each action started on its own date. An action with no instrumented
+rows contributes nothing, and its zero means *not recorded*, never *not surfaced*.
+Mirror nodes are excluded from the per-node split — the code index dwarfs the authored
+store, and including it would turn every share into a statement about how much code is
+indexed.
 
 ## Skill for consuming agents
 
