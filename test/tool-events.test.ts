@@ -307,6 +307,7 @@ describe("SearchTool.describeEvent", () => {
       query: "release pipeline",
       results: 1,
       ids: [fact.id],
+      matched: ["text"],
     });
   });
 
@@ -320,7 +321,41 @@ describe("SearchTool.describeEvent", () => {
 
     // Then
     const [row] = eventsFor(db, EventAction.SEARCH);
-    expect(detailOf(row)).toEqual({ mode: "hybrid", query: "***", results: 0, ids: [] });
+    expect(detailOf(row)).toEqual({
+      mode: "hybrid",
+      query: "***",
+      results: 0,
+      ids: [],
+      matched: [],
+    });
+  });
+
+  it("should log the retrieval path each result surfaced through, parallel to the ids", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const fact = await callTool(container.resolve(WriteTool), {
+      session_id,
+      parent_node_id: null,
+      title: "Deploy pipeline",
+      content: "The release pipeline deploys on merge.",
+      type: "fact",
+      memory_kind: MemoryKind.SEMANTIC,
+    });
+
+    // When
+    await callTool(container.resolve(SearchTool), {
+      session_id,
+      query: "release pipeline",
+      limit: 10,
+    });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.SEARCH);
+    const detail = detailOf(row) as { ids: string[]; matched: string[] };
+    expect(detail.ids).toEqual([fact.id]);
+    expect(detail.matched).toHaveLength(detail.ids.length);
+    expect(detail.matched[0]).toMatch(/^(text|vector|both|graph)$/);
   });
 });
 
