@@ -212,7 +212,7 @@ quietly accumulated several unrelated facts — but the agent writing it can.
 
 ## Quick start
 
-Requires Node ≥ 22 (developed on Node 22; run `nvm use` from this repo). `better-sqlite3`
+Requires Node ≥ 22 (developed on Node 25; run `nvm use` from this repo). `better-sqlite3`
 and `sqlite-vec` are native modules that build/download on install.
 
 **1 — Clone and build.**
@@ -230,7 +230,7 @@ the point. Point it at the built `dist/server.js` by absolute path:
 ```bash
 claude mcp add cerebrium -s user \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v25.x/bin/node \
   /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ```
 
