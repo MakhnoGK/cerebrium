@@ -29,6 +29,9 @@ export class EmbeddingConfig extends SectionOf("embedding", {
 // `graphBase` and `mmrLambda` were measured against the gold set on 2026-08-04 (see the
 // README): 0.3 sits on a plateau and 1.0 collapses P@1, while diversity below 0.85 costs
 // relevance without buying coverage of the answers a query actually has.
+// `foldSim` sits on a different similarity scale from every other gate here — first-chunk
+// cosine, what MMR compares — so it is not comparable to `dedupThreshold` or `mergeSim`.
+// At 1.0 folding is off (a plain gate would still fire there — identical vectors score 1).
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
@@ -37,6 +40,7 @@ export class RetrievalConfig extends SectionOf("retrieval", {
   useWeight: num(0.25).range(0, 1).env("MEMORY_USE_WEIGHT"),
   pprAlpha: num(0.5).range(0, 1).env("MEMORY_PPR_ALPHA"),
   pprFrontier: int(500).positive().env("MEMORY_PPR_FRONTIER"),
+  foldSim: num(0.93).range(0, 1).env("MEMORY_FOLD_SIM"),
   dedupThreshold: num(0.92).range(0, 1).env("MEMORY_DEDUP_THRESHOLD"),
   lexicalDedupThreshold: num(0.2).range(0, 1).env("MEMORY_DEDUP_LEXICAL_THRESHOLD"),
   workingSetTokens: int(1500).positive().env("MEMORY_WORKING_SET_TOKENS"),

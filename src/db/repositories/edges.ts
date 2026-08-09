@@ -241,6 +241,30 @@ export class EdgesRepo extends BaseRepo {
     return map;
   }
 
+  // Unordered `a|b` keys for every pair among `ids` joined by a live `supersedes` edge.
+  // Unlike `supersededInfo` this does not require the superseded node to be invalidated —
+  // a normal search never shows those, and the pairs that matter here are both live.
+  supersedesPairs(ids: string[]): Set<string> {
+    const out = new Set<string>();
+
+    if (ids.length < 2) return out;
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT src, dst FROM edges
+         WHERE type = 'supersedes' AND invalidated_at IS NULL
+           AND src IN (${ph}) AND dst IN (${ph})`,
+      )
+      .all(...ids, ...ids) as { src: string; dst: string }[];
+
+    for (const r of rows) {
+      out.add(r.src < r.dst ? `${r.src}|${r.dst}` : `${r.dst}|${r.src}`);
+    }
+
+    return out;
+  }
+
   liveSuccessorsOf(id: string): string[] {
     return (
       this.db

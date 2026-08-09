@@ -153,6 +153,16 @@ unless `history:true`), then optionally expands the graph.
   min-max normalized within the candidate set — raw RRF and raw cosine are not on
   comparable scales. The top hit is always the most relevant one; candidates with no
   stored vector are never demoted; `text` mode is untouched.
+- In the same pass, a candidate that is a **near-duplicate of a result already kept**
+  gives up its slot (`MEMORY_FOLD_SIM`, `1.0` = off) and is listed under that result as
+  `duplicates:[{id,title,score}]`; the freed slot goes to the next distinct hit. Nothing
+  is hidden — a folded node is still named and still `get`-able — so the cost of a fold
+  the reader disagrees with is one line further down, not a missing node. Folding
+  compares **raw** cosine, unlike MMR's normalized redundancy, because a gate needs an
+  absolute scale: the top pair of any set normalizes to 1.0 however unalike it is. It
+  always folds against a result already selected, never transitively, which is what
+  keeps a fold from chaining the way single-linkage clustering does. Two nodes joined by
+  `supersedes` never fold together.
 - `as_of` (ISO-8601): run the search against the store **as it stood then** — only nodes
   already written and not yet invalidated at that instant, graph expansion included. It
   supersedes `history`, because it carries its own liveness rule: something invalidated
@@ -311,6 +321,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_MMR_LAMBDA` | `0.85` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. Calibrated against the gold set — see *Calibrating the ranking constants*. |
+| `MEMORY_FOLD_SIM` | `0.93` | Raw first-chunk cosine at which a result folds under one already kept instead of taking its own slot; `1.0` is off. **Its own scale** — not comparable to `MEMORY_DEDUP_THRESHOLD` or `MEMORY_CONSOLIDATE_MERGE_SIM`, which score a seed chunk against the nearest one. Measured by the fold arm of `calibrate:report`. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
 | `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
 | `MEMORY_GRAPH_BASE` | `0.3` | Ceiling a graph-surfaced hit may reach, as a fraction of the best direct hit. `0` still surfaces neighbours but never lifts one over a directly matched node. Calibrated — see *Calibrating the ranking constants*. |

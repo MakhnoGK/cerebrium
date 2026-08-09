@@ -2,7 +2,8 @@ import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { VECTOR_DIM, type EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import type { Envelope } from "@/db/repo";
-import { MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind } from "@/core/vocab";
+import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -34,8 +35,10 @@ function angleProvider(angles: Record<string, number>): EmbeddingProvider {
   };
 }
 
-function lambdaOf(value: string): RetrievalConfig {
-  return new RetrievalConfig(new StaticConfigSource({ MEMORY_MMR_LAMBDA: value }));
+function config(env: Record<string, string>): RetrievalConfig {
+  // The twins sit at cosine 1.0, so any diversity test here has to say whether the fold
+  // is in play; MEMORY_FOLD_SIM defaults to off unless the case is about folding.
+  return new RetrievalConfig(new StaticConfigSource({ MEMORY_FOLD_SIM: "1", ...env }));
 }
 
 const SHARED = "retrieval";
@@ -85,7 +88,7 @@ describe("MMR diversity at the cut", () => {
   it("should return the distinct hit instead of the near-duplicate when lambda favours diversity", async () => {
     // Given
     const env = setup({ provider: provider() });
-    container.register(RetrievalConfig, { useValue: lambdaOf("0.3") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "0.3" }) });
     const { s, twin, nearDuplicate, outlier } = await twinsAndOutlier(env);
 
     // When
@@ -97,10 +100,10 @@ describe("MMR diversity at the cut", () => {
     expect(top).not.toContain(nearDuplicate);
   });
 
-  it("should keep the near-duplicate when lambda is 1", async () => {
+  it("should keep the near-duplicate when lambda is 1 and folding is off", async () => {
     // Given
     const env = setup({ provider: provider() });
-    container.register(RetrievalConfig, { useValue: lambdaOf("1") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "1" }) });
     const { s, twin, nearDuplicate, outlier } = await twinsAndOutlier(env);
 
     // When
@@ -114,12 +117,12 @@ describe("MMR diversity at the cut", () => {
   it("should keep the most relevant hit first when diversity is on", async () => {
     // Given
     const env = setup({ provider: provider() });
-    container.register(RetrievalConfig, { useValue: lambdaOf("0.3") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "0.3" }) });
     const { s } = await twinsAndOutlier(env);
     const relevanceOrder = ids(await search(s, 10));
 
     // When
-    container.register(RetrievalConfig, { useValue: lambdaOf("0.3") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "0.3" }) });
     const diverse = ids(await search(s, 2));
 
     // Then
@@ -129,7 +132,7 @@ describe("MMR diversity at the cut", () => {
   it("should return the same order when an identical search is repeated", async () => {
     // Given
     const env = setup({ provider: provider() });
-    container.register(RetrievalConfig, { useValue: lambdaOf("0.3") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "0.3" }) });
     const { s } = await twinsAndOutlier(env);
 
     // When
@@ -141,11 +144,82 @@ describe("MMR diversity at the cut", () => {
   });
 });
 
+describe("Read-time fold", () => {
+  const provider = () => angleProvider({ alpha: 0, beta: Math.PI / 2 });
+
+  it("should give a near-duplicate no slot of its own and attach it to the result that kept one", async () => {
+    // Given
+    const env = setup({ provider: provider() });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "0.93" }) });
+    const { s, twin, nearDuplicate } = await twinsAndOutlier(env);
+
+    // When
+    const res = (await search(s, 10)) as {
+      results: (Envelope & { duplicates?: { id: string; score: number }[] })[];
+    };
+
+    // Then
+    const slots = res.results.map((r) => r.id);
+    expect(slots).toContain(twin);
+    expect(slots).not.toContain(nearDuplicate);
+    expect(res.results.find((r) => r.id === twin)?.duplicates).toEqual([
+      { id: nearDuplicate, title: "Alpha two", score: 1 },
+    ]);
+  });
+
+  it("should spend the freed slot on the next distinct result", async () => {
+    // Given
+    const env = setup({ provider: provider() });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "0.93" }) });
+    const { s, twin, outlier } = await twinsAndOutlier(env);
+
+    // When
+    const top = ids(await search(s, 2));
+
+    // Then
+    expect(top).toEqual([twin, outlier]);
+  });
+
+  it("should never fold a pair joined by supersedes, however alike they score", async () => {
+    // Given
+    const env = setup({ provider: provider() });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "0.93" }) });
+    const { s, twin, nearDuplicate } = await twinsAndOutlier(env);
+    await container.resolve(LinkTool).invoke({
+      session_id: s,
+      src: twin,
+      dst: nearDuplicate,
+      type: EdgeType.SUPERSEDES,
+    });
+
+    // When
+    const slots = ids(await search(s, 10));
+
+    // Then
+    expect(slots).toContain(twin);
+    expect(slots).toContain(nearDuplicate);
+  });
+
+  it("should not fold a pair the fold gate excludes", async () => {
+    // Given
+    const env = setup({ provider: provider() });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "1" }) });
+    const { s, twin, nearDuplicate } = await twinsAndOutlier(env);
+
+    // When
+    const slots = ids(await search(s, 10));
+
+    // Then
+    expect(slots).toContain(twin);
+    expect(slots).toContain(nearDuplicate);
+  });
+});
+
 describe("MMR with missing vectors", () => {
   it("should still return a candidate that has no stored vector", async () => {
     // Given
     const env = setup({ provider: angleProvider({ alpha: 0, beta: Math.PI / 2 }) });
-    container.register(RetrievalConfig, { useValue: lambdaOf("0.3") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "0.3" }) });
     const { s } = await twinsAndOutlier(env);
     // Written after the drain, so it is FTS-findable and vector-invisible.
     const pending = await write(s, "Alpha three", "alpha");
@@ -166,9 +240,9 @@ describe("MMR with missing vectors", () => {
     await write(s, "Beta", "beta");
 
     // When
-    container.register(RetrievalConfig, { useValue: lambdaOf("1") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "1" }) });
     const relevanceOrder = ids(await search(s, 2));
-    container.register(RetrievalConfig, { useValue: lambdaOf("0.3") });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_MMR_LAMBDA: "0.3" }) });
     const diverse = ids(await search(s, 2));
 
     // Then

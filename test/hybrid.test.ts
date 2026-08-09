@@ -1,5 +1,5 @@
 import { container } from "tsyringe";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Envelope } from "@/db/repo";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
@@ -7,7 +7,21 @@ import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
+import { RetrievalConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
+
+// Several fixtures here are byte-identical on purpose, so that only the factor under
+// test differs. That is exactly what the read-time fold collapses, so tests about
+// ranking turn it off rather than work around it.
+function foldOff(): RetrievalConfig {
+  return new RetrievalConfig(new StaticConfigSource({ MEMORY_FOLD_SIM: "1" }));
+}
+
+afterEach(() => {
+  container.register(RetrievalConfig, {
+    useValue: new RetrievalConfig(new StaticConfigSource({})),
+  });
+});
 
 async function session(project?: string): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({ project })).session_id;
@@ -77,6 +91,7 @@ describe("Memory-model factors hold in hybrid mode", () => {
     // Given
     const env = setup();
     const s = await session();
+    container.register(RetrievalConfig, { useValue: foldOff() });
     const content = "deploy the release pipeline";
     const old = await w(s, MemoryKind.EPISODIC, "event_note", "Deploy", content);
     env.clock.advanceDays(59);

@@ -308,6 +308,7 @@ describe("SearchTool.describeEvent", () => {
       results: 1,
       ids: [fact.id],
       matched: ["text"],
+      folded: [],
     });
   });
 
@@ -327,6 +328,7 @@ describe("SearchTool.describeEvent", () => {
       results: 0,
       ids: [],
       matched: [],
+      folded: [],
     });
   });
 
