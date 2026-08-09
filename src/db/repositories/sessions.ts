@@ -1,18 +1,20 @@
 import { injectable } from "tsyringe";
 import { BaseRepo } from "@/db/repositories/base";
+import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 import type { EventAction } from "@/core/vocab";
 
 // Sessions and the events audit log — provenance for every tool call.
 @injectable()
 export class SessionsRepo extends BaseRepo {
-  create(id: string, project: string | null, ts: string): void {
+  create(id: string, project: string | null, ts: string, writer: Writer): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project, started_at, last_seen) VALUES (?, ?, ?, ?)
+        `INSERT INTO sessions (id, project, started_at, last_seen, client, client_version)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen`,
       )
-      .run(id, project, ts, ts);
+      .run(id, project, ts, ts, writer.client, writer.version);
   }
 
   touchExisting(id: string, ts: string): boolean {

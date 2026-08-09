@@ -168,6 +168,27 @@ describe("session_start tool", () => {
     expect(res.hints.length).toBeGreaterThan(0);
   });
 
+  it("should attribute the session to the client named in the initialize handshake", async () => {
+    const scope = container.createChildContainer();
+    const db = openDatabase(":memory:");
+    scope.register(DB_TOKEN, { useValue: db });
+    scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
+    scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await scope.resolve(Server).connect(serverTransport);
+    const client = new Client({ name: "codex-cli", version: "4.5.6" });
+    await client.connect(clientTransport);
+
+    const { session_id } = payload<{ session_id: string }>(
+      await client.callTool({ name: "session_start", arguments: {} }),
+    );
+
+    expect(
+      db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
+    ).toStrictEqual({ client: "codex-cli", client_version: "4.5.6" });
+  });
+
   it("should scope the working set to the project when a project is given", async () => {
     const client = await connect();
     const res = payload<{ project: string; working_set: { stats: unknown } }>(

@@ -15,6 +15,7 @@ import {
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
+import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
 import {
@@ -42,6 +43,9 @@ function errorText(err: unknown): string {
 // one `null` return is what hid a 28% timeout rate for weeks.
 type GenerationOutcome =
   { generated: true; result: ConsolidationResult } | { generated: false; error: string | null };
+
+// The sweep runs behind no MCP handshake, so it names itself.
+const CONSOLIDATION_WRITER: Writer = { client: "cerebrium-consolidation", version: null };
 
 // The background consolidation sweep. Runs in the daemon (the one sanctioned writer)
 // under its own worker_lease role, so exactly one process consolidates — never
@@ -118,7 +122,7 @@ export class ConsolidationWorker {
       return result;
     }
 
-    this.sessionService.startSession(this.ownerId, null, now);
+    this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
     try {
       await this.report(runId, "links", result);

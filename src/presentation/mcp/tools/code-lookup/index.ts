@@ -38,8 +38,7 @@ export class CodeLookupTool implements McpTool<(typeof metadata)["schema"], Tool
     return out;
   }
 
-  // Same retrieval-outcome log as `search`: the lookup key stands in for the query, and the
-  // symbol ids are the surfacing a later `get` either fetched or did not.
+  // Same retrieval-outcome log as `search`: the lookup key stands in for the query.
   public describeEvent(args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
     const detail: Record<string, unknown> = {
       results: result.symbols.length,

@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
   project    TEXT,
   started_at TEXT NOT NULL,
-  last_seen  TEXT NOT NULL
+  last_seen  TEXT NOT NULL,
+  client         TEXT,      -- who wrote: MCP initialize clientInfo, or an internal writer
+  client_version TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (

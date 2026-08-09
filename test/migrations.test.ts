@@ -31,6 +31,7 @@ const MIGRATION_IDS = [
   "017_retire_stale_similarities.cjs",
   "018_consolidation_runs.sql",
   "019_candidate_attempt.cjs",
+  "020_session_writer.cjs",
 ];
 
 const dirs: string[] = [];

@@ -20,6 +20,7 @@ const SURFACING_ACTIONS = ["search", "session_start", "code_lookup"] as const;
 const AUTHORED_KINDS = ["semantic", "episodic"] as const;
 const TOP_N = 10;
 const RANK_MIN_SHOWN = 5;
+const UNNAMED_WRITER = "(unnamed)";
 
 type SurfacingAction = (typeof SURFACING_ACTIONS)[number];
 
@@ -69,6 +70,14 @@ export interface Split {
   neverSurfaced: number;
   surfacedNotFetched: number;
   fetched: number;
+}
+
+export interface WriterRow {
+  writer: string;
+  sessions: number;
+  searches: number;
+  ownResultFetched: number;
+  writes: number;
 }
 
 interface NodeCount {
@@ -129,6 +138,7 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
   const titles = titleIndex(db);
   const mostSurfaced = topBy(surfacedCount, fetchedCount, titles, () => true);
   const ignored = topBy(surfacedCount, fetchedCount, titles, (id) => !fetchedCount.get(id));
+  const writers = writerCurve(searches, fetchedAfter, writerIndex(db), writeCounts(db, since));
 
   if (asJson) {
     process.stdout.write(
@@ -141,6 +151,7 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
           rank_curve: ranks,
           path_curve: paths,
           node_splits: splits,
+          writers,
           most_surfaced: mostSurfaced,
           most_surfaced_never_fetched: ignored,
         },
@@ -220,6 +231,18 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
   }
   L.push("  Mirror nodes are excluded: the code index dwarfs the authored store and would");
   L.push("  turn every share into a statement about how much code is indexed.");
+  L.push("");
+
+  L.push("── By writer ──");
+  L.push("  writer                   sessions   searches   own result fetched   writes");
+  for (const w of writers) {
+    L.push(
+      `  ${w.writer.padEnd(22)} ${String(w.sessions).padStart(8)}   ${String(w.searches).padStart(8)}   ` +
+        `${pct(w.ownResultFetched, w.searches).padStart(18)}   ${String(w.writes).padStart(6)}`,
+    );
+  }
+  L.push("  `sessions.client` comes from the MCP initialize handshake and only exists from");
+  L.push("  2026-08-09 on; every session older than that reads as (unnamed).");
   L.push("");
 
   L.push("── Most surfaced ──");
@@ -308,6 +331,42 @@ function liveNodes(db: Database.Database, kind?: string): string[] {
   const rows = (kind ? db.prepare(sql).all(kind) : db.prepare(sql).all()) as { id: string }[];
 
   return rows.map((r) => r.id);
+}
+
+// This report opens the store read-only and so cannot migrate it. A store whose server
+// has not restarted since migration 020 still has no `client`, and a crash there would
+// take the whole report with it — every writer simply reads as unnamed instead.
+function hasWriterColumn(db: Database.Database): boolean {
+  const columns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+
+  return columns.some((c) => c.name === "client");
+}
+
+function writerIndex(db: Database.Database): Map<string, string> {
+  if (!hasWriterColumn(db)) {
+    return new Map();
+  }
+
+  const rows = db.prepare(`SELECT id, client FROM sessions`).all() as {
+    id: string;
+    client: string | null;
+  }[];
+
+  return new Map(rows.map((r) => [r.id, r.client ?? UNNAMED_WRITER]));
+}
+
+function writeCounts(db: Database.Database, since: string): Map<string, number> {
+  const writer = hasWriterColumn(db) ? "COALESCE(s.client, ?)" : "?";
+  const rows = db
+    .prepare(
+      `SELECT ${writer} AS writer, COUNT(*) AS writes
+       FROM events e JOIN sessions s ON s.id = e.session_id
+       WHERE e.ts >= ? AND e.action IN ('write','update','invalidate','checkpoint','link')
+       GROUP BY writer`,
+    )
+    .all(UNNAMED_WRITER, since) as { writer: string; writes: number }[];
+
+  return new Map(rows.map((r) => [r.writer, r.writes]));
 }
 
 function titleIndex(db: Database.Database): Map<string, string> {
@@ -411,6 +470,52 @@ export function pathCurve(searches: Surfacing[], index: Map<string, Fetch[]>): P
   return [...shown.entries()]
     .sort(([, a], [, b]) => b - a)
     .map(([matched, count]) => ({ matched, shown: count, fetched: fetched.get(matched) ?? 0 }));
+}
+
+export function writerCurve(
+  searches: Surfacing[],
+  index: Map<string, Fetch[]>,
+  writerOf: Map<string, string>,
+  writes: Map<string, number>,
+): WriterRow[] {
+  const rows = new Map<string, WriterRow & { seen: Set<string> }>();
+
+  const rowFor = (writer: string) => {
+    const existing = rows.get(writer);
+
+    if (existing) {
+      return existing;
+    }
+
+    const fresh = {
+      writer,
+      sessions: 0,
+      searches: 0,
+      ownResultFetched: 0,
+      writes: writes.get(writer) ?? 0,
+      seen: new Set<string>(),
+    };
+    rows.set(writer, fresh);
+
+    return fresh;
+  };
+
+  for (const writer of writes.keys()) rowFor(writer);
+
+  for (const search of searches) {
+    const row = rowFor(writerOf.get(search.session) ?? UNNAMED_WRITER);
+
+    row.seen.add(search.session);
+    row.sessions = row.seen.size;
+    row.searches++;
+
+    const later = fetchedAfterOf(search, index);
+    if (search.ids.some((id) => later.has(id))) row.ownResultFetched++;
+  }
+
+  return [...rows.values()]
+    .sort((a, b) => b.searches - a.searches || b.writes - a.writes)
+    .map(({ seen: _seen, ...row }) => row);
 }
 
 export function tally(events: { ids: string[] }[]): Map<string, number> {

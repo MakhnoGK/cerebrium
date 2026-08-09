@@ -781,6 +781,14 @@ and cuts the join three ways:
 - **Per node** — "never fetched" split into *never surfaced* (unreachable by the
   queries actually asked) and *surfaced but not fetched* (envelope-answered, or
   genuinely irrelevant). Only the first is a ranking failure.
+- **By writer** — the same follow-through, per client, beside how much each one writes.
+
+`sessions.client` / `sessions.client_version` are taken from the MCP `initialize`
+handshake, not from a tool argument and not from an env var: several agent hosts share
+one store, and an identity the model has to remember to pass is the field a noisy writer
+gets wrong. Internal writers name themselves — the consolidation sweep's sessions are
+recorded as `cerebrium-consolidation`, which is what makes an auto-applied merge
+attributable. Sessions predating the column read as `(unnamed)`.
 
 The report opens with an instrumentation-coverage table for a reason: ids were not
 always logged, and each action started on its own date. An action with no instrumented

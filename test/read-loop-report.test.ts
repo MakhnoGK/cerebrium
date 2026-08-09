@@ -5,6 +5,7 @@ import {
   rankCurve,
   splitOf,
   tally,
+  writerCurve,
   type Fetch,
   type Surfacing,
 } from "@scripts/read-loop-report";
@@ -139,6 +140,66 @@ describe("pathCurve", () => {
 
     // Then
     expect(curve).toEqual([]);
+  });
+});
+
+describe("writerCurve", () => {
+  it("should attribute searches and writes to the client that made them", () => {
+    // Given
+    const searches = [search({ session: "S1" }), search({ session: "S2" })];
+    const index = fetchIndex([fetch({ session: "S1", ids: ["a"] })]);
+    const writerOf = new Map([
+      ["S1", "claude-code"],
+      ["S2", "codex-cli"],
+    ]);
+
+    // When
+    const rows = writerCurve(searches, index, writerOf, new Map([["claude-code", 12]]));
+
+    // Then
+    expect(rows).toContainEqual({
+      writer: "claude-code",
+      sessions: 1,
+      searches: 1,
+      ownResultFetched: 1,
+      writes: 12,
+    });
+    expect(rows).toContainEqual({
+      writer: "codex-cli",
+      sessions: 1,
+      searches: 1,
+      ownResultFetched: 0,
+      writes: 0,
+    });
+  });
+
+  it("should keep a writer that only wrote and never searched", () => {
+    // Given / When
+    const rows = writerCurve([], new Map(), new Map(), new Map([["cerebrium-consolidation", 40]]));
+
+    // Then
+    expect(rows).toEqual([
+      {
+        writer: "cerebrium-consolidation",
+        sessions: 0,
+        searches: 0,
+        ownResultFetched: 0,
+        writes: 40,
+      },
+    ]);
+  });
+
+  it("should pool sessions no client named into one unnamed writer", () => {
+    // Given
+    const searches = [search({ session: "S1" }), search({ session: "S2" })];
+
+    // When
+    const rows = writerCurve(searches, new Map(), new Map(), new Map());
+
+    // Then
+    expect(rows).toEqual([
+      { writer: "(unnamed)", sessions: 2, searches: 2, ownResultFetched: 0, writes: 0 },
+    ]);
   });
 });
 

@@ -25,6 +25,7 @@ import {
 } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
+import { ClientIdentity, UNKNOWN_WRITER } from "@/runtime/client-identity";
 import { AuditedTool } from "@/presentation/mcp/adapters";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
@@ -84,6 +85,10 @@ export function setup(opts?: {
   container.register(CLOCK_TOKEN, { useValue: clock });
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
   container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: consolidator });
+
+  // The identity holder outlives a container re-registration; without this a client named
+  // by one test is still named in the next.
+  container.resolve(ClientIdentity).set(UNKNOWN_WRITER);
 
   return {
     db,

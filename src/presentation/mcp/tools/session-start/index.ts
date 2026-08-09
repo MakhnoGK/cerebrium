@@ -1,5 +1,6 @@
 import { ulid } from "ulid";
 import { EmbeddingService, MemoryService, SessionService } from "@/application/services";
+import { ClientIdentity } from "@/runtime/client-identity";
 import { McpTool, tool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { metadata } from "@/presentation/mcp/tools/session-start/metadata";
 
@@ -17,6 +18,7 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
     private readonly sessionService: SessionService,
     private readonly memoryService: MemoryService,
     private readonly embeddingService: EmbeddingService,
+    private readonly identity: ClientIdentity,
   ) {}
 
   public getMetadata = () => metadata;
@@ -26,7 +28,7 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
     const sessionId = ulid();
     const project = args.project ?? null;
 
-    this.sessionService.startSession(sessionId, project, now);
+    this.sessionService.startSession(sessionId, project, now, this.identity.get());
 
     const workingSet = this.memoryService.getWorkingSet(project ?? undefined);
     const notes = this.embeddingService.getEmbeddingNotes();
@@ -40,9 +42,8 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
     };
   }
 
-  // The working set is a surfacing like any other: its ids join against the ids a later
-  // `get` fetched, the same way a `search` row does. Without this a node the agent only
-  // ever met here counts as never surfaced.
+  // The working set is a surfacing: its ids join against a later `get` like a `search`
+  // row's do.
   public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
     return {
       session_id: result.session_id,
