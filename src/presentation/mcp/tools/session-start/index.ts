@@ -40,7 +40,34 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
     };
   }
 
+  // The working set is a surfacing like any other: its ids join against the ids a later
+  // `get` fetched, the same way a `search` row does. Without this a node the agent only
+  // ever met here counts as never surfaced.
   public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
-    return { session_id: result.session_id, detail: { project: result.project ?? null } };
+    return {
+      session_id: result.session_id,
+      detail: { project: result.project ?? null, ids: surfacedNodeIds(result.working_set) },
+    };
   }
+}
+
+// An allowlist, not a scan: `stale_sources` also carries an `id`, but a source id is not
+// a node id.
+const NODE_SECTIONS = ["tasks", "checkpoints", "semantic", "recent"];
+
+function surfacedNodeIds(workingSet: Record<string, unknown>): string[] {
+  return NODE_SECTIONS.flatMap((section) => {
+    const entries = workingSet[section];
+
+    return (Array.isArray(entries) ? entries : [])
+      .map(nodeIdOf)
+      .filter((id): id is string => id !== null);
+  });
+}
+
+function nodeIdOf(entry: unknown): string | null {
+  const record = entry as { id?: unknown; envelope?: { id?: unknown } };
+  const id = record.envelope?.id ?? record.id;
+
+  return typeof id === "string" ? id : null;
 }

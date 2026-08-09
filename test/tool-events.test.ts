@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { EventAction, MemoryKind } from "@/core/vocab";
 import { CheckpointTool } from "@/presentation/mcp/tools/checkpoint";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
+import { CodeLookupTool } from "@/presentation/mcp/tools/code-lookup";
 import { GetTool } from "@/presentation/mcp/tools/get";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
@@ -48,7 +49,36 @@ describe("SessionStartTool.describeEvent", () => {
     // Then
     const [row] = eventsFor(db, EventAction.SESSION_START);
     expect(row?.session_id).toBe(result.session_id);
-    expect(detailOf(row)).toEqual({ project: "cerebrium" });
+    expect(detailOf(row)).toEqual({ project: "cerebrium", ids: [] });
+  });
+
+  it("should log the node ids the working set surfaced", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    const task = await callTool(container.resolve(WriteTool), {
+      session_id,
+      parent_node_id: null,
+      title: "An open task",
+      content: "Close the read loop.",
+      type: "task",
+      memory_kind: MemoryKind.SEMANTIC,
+      project: "cerebrium",
+    });
+    const checkpoint = await callTool(container.resolve(CheckpointTool), {
+      session_id,
+      title: "Where we left off.",
+      summary: "Where we left off.",
+      project: "cerebrium",
+    });
+
+    // When
+    await callTool(container.resolve(SessionStartTool), { project: "cerebrium" });
+
+    // Then
+    const rows = eventsFor(db, EventAction.SESSION_START);
+    const detail = detailOf(rows.at(-1)) as { ids: string[] };
+    expect(detail.ids).toEqual(expect.arrayContaining([task.id, checkpoint.id]));
   });
 });
 
@@ -291,6 +321,31 @@ describe("SearchTool.describeEvent", () => {
     // Then
     const [row] = eventsFor(db, EventAction.SEARCH);
     expect(detailOf(row)).toEqual({ mode: "hybrid", query: "***", results: 0, ids: [] });
+  });
+});
+
+describe("CodeLookupTool.describeEvent", () => {
+  it("should log the lookup key and the symbol ids it surfaced", async () => {
+    // Given
+    const { db } = setup();
+    const session_id = await session();
+    await callTool(container.resolve(CodeIndexTool), { session_id, path: FIXTURE });
+
+    // When
+    const result = await callTool(container.resolve(CodeLookupTool), {
+      session_id,
+      file: "util/crypto.ts",
+      limit: 10,
+    });
+
+    // Then
+    const [row] = eventsFor(db, EventAction.CODE_LOOKUP);
+    expect(result.symbols.length).toBeGreaterThan(0);
+    expect(detailOf(row)).toEqual({
+      file: "util/crypto.ts",
+      results: result.symbols.length,
+      ids: result.symbols.map((s) => s.id),
+    });
   });
 });
 
