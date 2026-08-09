@@ -1,5 +1,6 @@
 import {
   fetchIndex,
+  foldOutcome,
   followThroughOf,
   pathCurve,
   rankCurve,
@@ -18,6 +19,7 @@ function search(over: Partial<Surfacing> = {}): Surfacing {
     ts: "2026-08-09T10:00:00.000Z",
     ids: ["a", "b", "c"],
     matched: ["both", "vector", "graph"],
+    folded: [],
     ...over,
   };
 }
@@ -200,6 +202,42 @@ describe("writerCurve", () => {
     expect(rows).toEqual([
       { writer: "(unnamed)", sessions: 2, searches: 2, ownResultFetched: 0, writes: 0 },
     ]);
+  });
+});
+
+describe("foldOutcome", () => {
+  it("should separate a fold the reader worked around from one nobody wanted", () => {
+    // Given
+    const searches = [
+      search({
+        folded: [
+          { id: "wanted", into: "a", score: 0.95 },
+          { id: "ignored", into: "a", score: 0.94, recorded: true },
+        ],
+      }),
+    ];
+    const index = fetchIndex([fetch({ ids: ["wanted"] })]);
+
+    // When
+    const outcome = foldOutcome(searches, index, tally([fetch({ ids: ["wanted"] })]));
+
+    // Then
+    expect(outcome).toEqual({
+      searchesWithFold: 1,
+      folds: 2,
+      recorded: 1,
+      fetchedAfterwards: 1,
+      neverFetched: 1,
+    });
+  });
+
+  it("should ignore a search that folded nothing", () => {
+    // Given / When
+    const outcome = foldOutcome([search()], new Map(), new Map());
+
+    // Then
+    expect(outcome.searchesWithFold).toBe(0);
+    expect(outcome.folds).toBe(0);
   });
 });
 

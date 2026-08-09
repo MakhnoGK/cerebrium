@@ -810,7 +810,13 @@ and cuts the join three ways:
   retrieval branch earns its results.
 - **Per node** — "never fetched" split into *never surfaced* (unreachable by the
   queries actually asked) and *surfaced but not fetched* (envelope-answered, or
-  genuinely irrelevant). Only the first is a ranking failure.
+  genuinely irrelevant). Only the first is a ranking failure. A folded result counts as
+  surfaced: it is shown, with its title, under the result that kept the slot.
+- **Fold** — how often the read-time fold fired, and whether the reader then fetched the
+  folded result anyway. That last number is the fold's **own label**, and the only honest
+  input to re-calibrating `MEMORY_FOLD_SIM`: the gate had to be set against merge verdicts
+  because nothing better existed yet, and a merge verdict answers a stricter question than
+  a fold asks.
 - **By writer** — the same follow-through, per client, beside how much each one writes.
 
 `sessions.client` / `sessions.client_version` are taken from the MCP `initialize`

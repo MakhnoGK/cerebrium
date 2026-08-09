@@ -37,6 +37,24 @@ export interface Surfacing {
   ts: string;
   ids: string[];
   matched: string[];
+  folded: Fold[];
+}
+
+// A result that gave up its slot to `into`. It is still shown, with its title, so it
+// counts as surfaced — but the reader has to ask for it by id.
+export interface Fold {
+  id: string;
+  into: string;
+  score: number;
+  recorded?: boolean;
+}
+
+export interface FoldOutcome {
+  searchesWithFold: number;
+  folds: number;
+  recorded: number;
+  fetchedAfterwards: number;
+  neverFetched: number;
 }
 
 export interface Fetch {
@@ -126,7 +144,10 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
   const ranks = rankCurve(searches, fetchedAfter);
   const paths = pathCurve(searches, fetchedAfter);
 
-  const surfacedCount = tally(surfacings);
+  // A folded result is shown, so it counts as surfaced for the per-node split.
+  const surfacedCount = tally(
+    surfacings.map((s) => ({ ids: [...s.ids, ...s.folded.map((f) => f.id)] })),
+  );
   const fetchedCount = tally(fetches.filter((f) => !f.outline));
   const splits = AUTHORED_KINDS.map((kind) =>
     splitOf(`live ${kind}`, liveNodes(db, kind), surfacedCount, fetchedCount),
@@ -139,6 +160,7 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
   const mostSurfaced = topBy(surfacedCount, fetchedCount, titles, () => true);
   const ignored = topBy(surfacedCount, fetchedCount, titles, (id) => !fetchedCount.get(id));
   const writers = writerCurve(searches, fetchedAfter, writerIndex(db), writeCounts(db, since));
+  const folds = foldOutcome(searches, fetchedAfter, fetchedCount);
 
   if (asJson) {
     process.stdout.write(
@@ -151,6 +173,7 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
           rank_curve: ranks,
           path_curve: paths,
           node_splits: splits,
+          folds,
           writers,
           most_surfaced: mostSurfaced,
           most_surfaced_never_fetched: ignored,
@@ -233,6 +256,20 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
   L.push("  turn every share into a statement about how much code is indexed.");
   L.push("");
 
+  L.push("── Read-time fold: did anyone want what it folded? ──");
+  L.push(
+    `  searches with a fold        ${folds.searchesWithFold}   ${pct(folds.searchesWithFold, followThrough.searches)}`,
+  );
+  L.push(
+    `  results folded              ${folds.folds}   of which ${folds.recorded} on a reviewed duplicate_of`,
+  );
+  L.push(`  fetched anyway, same session ${folds.fetchedAfterwards}   <- the fold cost a step`);
+  L.push(`  never fetched at all        ${folds.neverFetched}   <- the fold cost nothing`);
+  L.push("  Folding starts 2026-08-09; earlier searches contribute nothing here. This is the");
+  L.push("  fold's own label, and the only honest input to re-calibrating MEMORY_FOLD_SIM —");
+  L.push("  the gate was set against merge verdicts because nothing better existed yet.");
+  L.push("");
+
   L.push("── By writer ──");
   L.push("  writer                   sessions   searches   own result fetched   writes");
   for (const w of writers) {
@@ -302,6 +339,7 @@ function load(
       ts: row.ts,
       ids,
       matched: stringArray(detail.matched),
+      folded: foldsOf(detail.folded),
     });
   }
 
@@ -518,6 +556,37 @@ export function writerCurve(
     .map(({ seen: _seen, ...row }) => row);
 }
 
+// The question the fold gate could not answer at calibration time: when a result was
+// folded, did the reader go and fetch it anyway? That is a real fold label, unlike the
+// merge verdicts the gate had to borrow.
+export function foldOutcome(
+  searches: Surfacing[],
+  index: Map<string, Fetch[]>,
+  fetchedAnywhere: Map<string, number>,
+): FoldOutcome {
+  let searchesWithFold = 0;
+  let folds = 0;
+  let recorded = 0;
+  let fetchedAfterwards = 0;
+  let neverFetched = 0;
+
+  for (const search of searches) {
+    if (!search.folded.length) continue;
+
+    searchesWithFold++;
+    const later = fetchedAfterOf(search, index);
+
+    for (const fold of search.folded) {
+      folds++;
+      if (fold.recorded) recorded++;
+      if (later.has(fold.id)) fetchedAfterwards++;
+      if (!fetchedAnywhere.get(fold.id)) neverFetched++;
+    }
+  }
+
+  return { searchesWithFold, folds, recorded, fetchedAfterwards, neverFetched };
+}
+
 export function tally(events: { ids: string[] }[]): Map<string, number> {
   const out = new Map<string, number>();
 
@@ -577,6 +646,25 @@ function parse(detail: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function foldsOf(value: unknown): Fold[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry) => {
+    const fold = entry as { id?: unknown; into?: unknown; score?: unknown; recorded?: unknown };
+
+    if (typeof fold.id !== "string" || typeof fold.into !== "string") return [];
+
+    return [
+      {
+        id: fold.id,
+        into: fold.into,
+        score: typeof fold.score === "number" ? fold.score : 0,
+        recorded: fold.recorded === true,
+      },
+    ];
+  });
 }
 
 function stringArray(value: unknown): string[] {
