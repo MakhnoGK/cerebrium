@@ -272,5 +272,6 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
   rejected INTEGER NOT NULL DEFAULT 0,
   annotated INTEGER NOT NULL DEFAULT 0,
   generation_failures INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT
+  last_error TEXT,
+  merge_delayed INTEGER NOT NULL DEFAULT 0
 ) STRICT;

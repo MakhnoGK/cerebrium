@@ -344,6 +344,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
+| `MEMORY_CONSOLIDATE_MERGE_BURST_MS` | `3600000` | Burst window for merge detection: a near-duplicate pair one session wrote within it is treated as a series and left to age, not proposed. `0` disables the rule. |
 | `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
@@ -558,6 +559,12 @@ into durable knowledge:
   more than a merge did — a merge picks one body and loses the other. Collapsing two nodes
   into one is still available, as `consolidate_apply` with `collapse:true`, but only by
   hand: no posture reaches it.
+  Detection skips a pair **one session wrote inside `MEMORY_CONSOLIDATE_MERGE_BURST_MS`**
+  and lets it age instead. A writer who held both notes in context and still wrote two
+  meant a series, not a duplication — measured 2026-08-09 at 7 of 7 wrong merges blocked
+  for 19% of correct ones delayed by a sweep. It delays rather than loses: the pair stays
+  detectable and returns once it is older than the window, and the skip is counted as
+  `merge_delayed` on the run rather than passing silently.
 - **Tier-1 mirror prune** — soft-invalidates dead mirror nodes (orphaned symbols) so
   they leave retrieval.
 

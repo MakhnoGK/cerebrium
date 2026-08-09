@@ -15,6 +15,7 @@ import {
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
+import type { DuplicatePair } from "@/db/repositories/consolidation";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
@@ -109,6 +110,7 @@ export class ConsolidationWorker {
       distill_suggested: 0,
       merged: 0,
       merge_suggested: 0,
+      merge_delayed: 0,
       pruned: 0,
       prune_suggested: 0,
       proposals_backfilled: 0,
@@ -382,6 +384,16 @@ export class ConsolidationWorker {
   // Semantic dedup/merge. auto merges only with a generating provider (to author
   // the merged body safely); under manual, or on generation failure, it degrades to a
   // suggestion. Never auto-merges authored knowledge without a mind or a model.
+  private inBurst(pair: DuplicatePair, now: string): boolean {
+    const window = this.thresholds.mergeBurstMs;
+
+    if (!window || !pair.same_session) {
+      return false;
+    }
+
+    return Date.parse(now) - Date.parse(pair.youngest_created_at) < window;
+  }
+
   private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = this.posture.merge;
 
@@ -400,6 +412,14 @@ export class ConsolidationWorker {
       }
 
       if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
+        continue;
+      }
+
+      // A pair one session wrote minutes apart is a series, not a duplication: the writer
+      // held both in context and still wrote two. Let it age instead of proposing it —
+      // the pair stays detectable and returns on a later sweep.
+      if (this.inBurst(pair, now)) {
+        result.merge_delayed++;
         continue;
       }
 
