@@ -180,6 +180,40 @@ describe("Read-time fold", () => {
     expect(top).toEqual([twin, outlier]);
   });
 
+  it("should fold a recorded duplicate that the similarity gate would have kept apart", async () => {
+    // Given — orthogonal vectors, so only the recorded verdict can fold them.
+    const env = setup({ provider: provider() });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "0.93" }) });
+    const { s, twin, outlier } = await twinsAndOutlier(env);
+    env.edges.insertDuplicateOfIfLive(outlier, twin, s, env.clock.now(), 0.5);
+
+    // When
+    const res = (await search(s, 10)) as {
+      results: (Envelope & { duplicates?: { id: string; recorded?: boolean }[] })[];
+    };
+
+    // Then
+    expect(res.results.map((r) => r.id)).not.toContain(outlier);
+    expect(res.results.find((r) => r.id === twin)?.duplicates).toContainEqual(
+      expect.objectContaining({ id: outlier, recorded: true }),
+    );
+  });
+
+  it("should fold nothing at all, recorded duplicates included, when the gate is off", async () => {
+    // Given
+    const env = setup({ provider: provider() });
+    container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "1" }) });
+    const { s, twin, outlier } = await twinsAndOutlier(env);
+    env.edges.insertDuplicateOfIfLive(outlier, twin, s, env.clock.now(), 0.5);
+
+    // When
+    const slots = ids(await search(s, 10));
+
+    // Then
+    expect(slots).toContain(twin);
+    expect(slots).toContain(outlier);
+  });
+
   it("should never fold a pair joined by supersedes, however alike they score", async () => {
     // Given
     const env = setup({ provider: provider() });

@@ -63,6 +63,8 @@ export interface Duplicate {
   id: string;
   title: string;
   score: number;
+  // Set when a reviewed `duplicate_of` edge decided this, not the similarity gate.
+  recorded?: true;
 }
 
 interface Selection {
@@ -103,7 +105,7 @@ interface SearchAudit {
   results: number;
   ids: string[];
   matched: Entry["matched"][];
-  folded: { id: string; into: string; score: number }[];
+  folded: { id: string; into: string; score: number; recorded?: true }[];
 }
 
 type AuditedResponse = ToolResponse & { [AUDIT]?: SearchAudit };
@@ -318,7 +320,12 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     audit.ids = results.map((r) => r.id);
     audit.matched = ranked.map((entry) => entry.matched);
     audit.folded = selections.flatMap(({ entry, duplicates }) =>
-      duplicates.map((d) => ({ id: d.id, into: entry.row.id, score: d.score })),
+      duplicates.map((d) => ({
+        id: d.id,
+        into: entry.row.id,
+        score: d.score,
+        ...(d.recorded ? { recorded: true as const } : {}),
+      })),
     );
     out[AUDIT] = audit;
 
@@ -492,16 +499,30 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     const lambda = this.retrieval.mmrLambda;
     const vectors = this.searchRepo.vectorsFor(ordered.map((e) => e.row.id));
     const raw = rawSimilarity(ordered, vectors);
-    const protectedPairs = this.edges.supersedesPairs(ordered.map((e) => e.row.id));
+    const ids = ordered.map((e) => e.row.id);
+    const protectedPairs = this.edges.supersedesPairs(ids);
+    const recordedPairs = this.edges.duplicatePairs(ids);
     // `>= 1` is off, matching `mmrLambda`: a plain `>=` gate would still fire at 1.0,
-    // since two identical vectors score exactly 1.
+    // since two identical vectors score exactly 1. It turns the whole fold off, recorded
+    // duplicates included.
     const folding = this.retrieval.foldSim < 1;
+    const keyOf = (a: number, b: number) => {
+      const [x, y] = [ids[a]!, ids[b]!];
+
+      return x < y ? `${x}|${y}` : `${y}|${x}`;
+    };
+    // A `duplicate_of` edge is a reviewed verdict, so it folds whatever the vectors now
+    // say — content drifts, and re-deciding a settled pair on every query would let a
+    // revision quietly undo the review. Direction is not honoured: the edge names the
+    // pair, the query names which of them is worth the slot.
     const foldable = (a: number, b: number) => {
-      if (!folding || raw(a, b) < this.retrieval.foldSim) return false;
+      if (!folding) return false;
 
-      const [x, y] = [ordered[a]!.row.id, ordered[b]!.row.id];
+      const key = keyOf(a, b);
 
-      return !protectedPairs.has(x < y ? `${x}|${y}` : `${y}|${x}`);
+      if (protectedPairs.has(key)) return false;
+
+      return recordedPairs.has(key) || raw(a, b) >= this.retrieval.foldSim;
     };
 
     const useMmr = lambda < 1 && vectors.size > 0;
@@ -539,11 +560,17 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
         if (!foldable(picked, index)) continue;
 
-        duplicates.unshift({
+        const duplicate: Duplicate = {
           id: ordered[index]!.row.id,
           title: ordered[index]!.row.title,
           score: round3(raw(picked, index)),
-        });
+        };
+
+        if (recordedPairs.has(keyOf(picked, index))) {
+          duplicate.recorded = true;
+        }
+
+        duplicates.unshift(duplicate);
         pool.splice(slot, 1);
       }
 

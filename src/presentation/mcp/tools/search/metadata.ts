@@ -27,7 +27,8 @@ export const metadata = {
     "A result that is a near-duplicate of one already returned gets no slot of its own (`MEMORY_FOLD_SIM`): it is " +
     "listed under the kept result as `duplicates:[{id,title,score}]` and the freed slot goes to the next distinct " +
     "hit, so `limit` buys more. Nothing is hidden — a folded node is `get`-able by the id shown there — and two " +
-    "nodes joined by `supersedes` never fold into one another.Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
+    "nodes joined by `supersedes` never fold into one another. A pair carrying a reviewed `duplicate_of` edge folds " +
+    "regardless of the gate, marked `recorded:true`.Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
     "`MEMORY_RERANK` reranker is enabled, a local cross-encoder rescoring sharpens the " +
     "fused hits' precision before graph expansion — it is off by default, never applies " +
     "to graph neighbors, and never changes which fields a result returns. Code `symbol` mirrors are " +

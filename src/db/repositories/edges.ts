@@ -276,6 +276,14 @@ export class EdgesRepo extends BaseRepo {
   // Unlike `supersededInfo` this does not require the superseded node to be invalidated —
   // a normal search never shows those, and the pairs that matter here are both live.
   supersedesPairs(ids: string[]): Set<string> {
+    return this.pairsOfType(EdgeType.SUPERSEDES, ids);
+  }
+
+  duplicatePairs(ids: string[]): Set<string> {
+    return this.pairsOfType(EdgeType.DUPLICATE_OF, ids);
+  }
+
+  private pairsOfType(type: EdgeType, ids: string[]): Set<string> {
     const out = new Set<string>();
 
     if (ids.length < 2) return out;
@@ -284,10 +292,10 @@ export class EdgesRepo extends BaseRepo {
     const rows = this.db
       .prepare(
         `SELECT src, dst FROM edges
-         WHERE type = 'supersedes' AND invalidated_at IS NULL
+         WHERE type = ? AND invalidated_at IS NULL
            AND src IN (${ph}) AND dst IN (${ph})`,
       )
-      .all(...ids, ...ids) as { src: string; dst: string }[];
+      .all(type, ...ids, ...ids) as { src: string; dst: string }[];
 
     for (const r of rows) {
       out.add(r.src < r.dst ? `${r.src}|${r.dst}` : `${r.dst}|${r.src}`);

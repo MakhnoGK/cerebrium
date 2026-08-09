@@ -162,7 +162,11 @@ unless `history:true`), then optionally expands the graph.
   absolute scale: the top pair of any set normalizes to 1.0 however unalike it is. It
   always folds against a result already selected, never transitively, which is what
   keeps a fold from chaining the way single-linkage clustering does. Two nodes joined by
-  `supersedes` never fold together.
+  `supersedes` never fold together. A pair carrying a reviewed `duplicate_of` edge folds
+  whatever the vectors currently say — that verdict was reviewed once, and re-deciding it
+  per query would let a later revision quietly undo the review; such a fold is marked
+  `recorded: true`. The edge names the pair, not the winner: the query decides which of
+  the two is worth the slot.
 - `as_of` (ISO-8601): run the search against the store **as it stood then** — only nodes
   already written and not yet invalidated at that instant, graph expansion included. It
   supersedes `history`, because it carries its own liveness rule: something invalidated
