@@ -77,6 +77,18 @@ export class ConsolidateApplyTool implements McpTool<(typeof metadata)["schema"]
           const survivor = candidate.canonical_id;
           const loser = candidate.member_ids.find((mid) => mid !== survivor);
           if (!survivor || !loser) throw new Error(`merge candidate ${args.id} is malformed.`);
+
+          if (!args.collapse) {
+            const recorded = this.edges.insertDuplicateOfIfLive(
+              loser,
+              survivor,
+              args.session_id,
+              now,
+              candidate.score,
+            );
+            return recorded ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+          }
+
           const merged = args.override ?? candidate.proposal;
           const applied = this.nodes.applyMerge({
             survivorId: survivor,

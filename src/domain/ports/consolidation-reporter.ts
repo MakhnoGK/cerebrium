@@ -6,6 +6,7 @@ export interface ConsolidationTickResult {
   distill_suggested: number;
   merged: number;
   merge_suggested: number;
+  merge_delayed: number;
   pruned: number;
   prune_suggested: number;
   proposals_backfilled: number;

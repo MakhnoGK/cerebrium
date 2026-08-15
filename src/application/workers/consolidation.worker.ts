@@ -15,6 +15,8 @@ import {
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
+import type { DuplicatePair } from "@/db/repositories/consolidation";
+import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
 import {
@@ -42,6 +44,9 @@ function errorText(err: unknown): string {
 // one `null` return is what hid a 28% timeout rate for weeks.
 type GenerationOutcome =
   { generated: true; result: ConsolidationResult } | { generated: false; error: string | null };
+
+// The sweep runs behind no MCP handshake, so it names itself.
+const CONSOLIDATION_WRITER: Writer = { client: "cerebrium-consolidation", version: null };
 
 // The background consolidation sweep. Runs in the daemon (the one sanctioned writer)
 // under its own worker_lease role, so exactly one process consolidates — never
@@ -105,6 +110,7 @@ export class ConsolidationWorker {
       distill_suggested: 0,
       merged: 0,
       merge_suggested: 0,
+      merge_delayed: 0,
       pruned: 0,
       prune_suggested: 0,
       proposals_backfilled: 0,
@@ -118,7 +124,7 @@ export class ConsolidationWorker {
       return result;
     }
 
-    this.sessionService.startSession(this.ownerId, null, now);
+    this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
     try {
       await this.report(runId, "links", result);
@@ -378,6 +384,16 @@ export class ConsolidationWorker {
   // Semantic dedup/merge. auto merges only with a generating provider (to author
   // the merged body safely); under manual, or on generation failure, it degrades to a
   // suggestion. Never auto-merges authored knowledge without a mind or a model.
+  private inBurst(pair: DuplicatePair, now: string): boolean {
+    const window = this.thresholds.mergeBurstMs;
+
+    if (!window || !pair.same_session) {
+      return false;
+    }
+
+    return Date.parse(now) - Date.parse(pair.youngest_created_at) < window;
+  }
+
   private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = this.posture.merge;
 
@@ -396,6 +412,14 @@ export class ConsolidationWorker {
       }
 
       if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
+        continue;
+      }
+
+      // A pair one session wrote minutes apart is a series, not a duplication: the writer
+      // held both in context and still wrote two. Let it age instead of proposing it —
+      // the pair stays detectable and returns on a later sweep.
+      if (this.inBurst(pair, now)) {
+        result.merge_delayed++;
         continue;
       }
 
@@ -439,16 +463,19 @@ export class ConsolidationWorker {
         continue;
       }
 
-      if (posture === Posture.AUTO && gen) {
-        const merged = this.nodesRepo.applyMerge({
-          survivorId: pair.canonical_id,
-          loserId: loser,
-          session_id: this.ownerId,
-          ts: now,
-          merged: { title: gen.title, body: gen.body },
-        });
+      // AUTO no longer rewrites and invalidates: it records the relationship and leaves
+      // both nodes live, so an 88.3%-precision judge costs a ranking nudge, not a node.
+      // Collapsing two nodes into one is `consolidate_apply` with `collapse`, by hand.
+      if (posture === Posture.AUTO) {
+        const recorded = this.edgesRepo.insertDuplicateOfIfLive(
+          loser,
+          pair.canonical_id,
+          this.ownerId,
+          now,
+          pair.score,
+        );
 
-        if (merged) {
+        if (recorded) {
           result.merged++;
         }
 

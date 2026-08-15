@@ -37,6 +37,37 @@ export class EdgesRepo extends BaseRepo {
     ts: string,
     weight: number,
   ): boolean {
+    return this.insertSystemEdgeIfLive(EdgeType.SIMILAR_TO, src, dst, session_id, ts, weight);
+  }
+
+  // `duplicate_of` points from the duplicate to the node that represents it, so retrieval
+  // knows which one keeps the slot. Both endpoints stay live — this records the
+  // relationship instead of collapsing it.
+  insertDuplicateOfIfLive(
+    duplicate: string,
+    representative: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): boolean {
+    return this.insertSystemEdgeIfLive(
+      EdgeType.DUPLICATE_OF,
+      duplicate,
+      representative,
+      session_id,
+      ts,
+      weight,
+    );
+  }
+
+  private insertSystemEdgeIfLive(
+    type: EdgeType,
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): boolean {
     return this.tx(() => {
       const info = this.db
         .prepare(
@@ -48,7 +79,7 @@ export class EdgesRepo extends BaseRepo {
              invalidated_at = NULL, valid_from = excluded.valid_from,
              weight = excluded.weight, provenance = excluded.provenance`,
         )
-        .run({ src, dst, type: EdgeType.SIMILAR_TO, weight, ts, session: session_id });
+        .run({ src, dst, type, weight, ts, session: session_id });
 
       return info.changes > 0;
     });
@@ -239,6 +270,38 @@ export class EdgesRepo extends BaseRepo {
       .all(...ids) as { id: string; by: string; at: string }[];
     for (const r of rows) map.set(r.id, { by: r.by, at: r.at });
     return map;
+  }
+
+  // Unordered `a|b` keys for every pair among `ids` joined by a live `supersedes` edge.
+  // Unlike `supersededInfo` this does not require the superseded node to be invalidated —
+  // a normal search never shows those, and the pairs that matter here are both live.
+  supersedesPairs(ids: string[]): Set<string> {
+    return this.pairsOfType(EdgeType.SUPERSEDES, ids);
+  }
+
+  duplicatePairs(ids: string[]): Set<string> {
+    return this.pairsOfType(EdgeType.DUPLICATE_OF, ids);
+  }
+
+  private pairsOfType(type: EdgeType, ids: string[]): Set<string> {
+    const out = new Set<string>();
+
+    if (ids.length < 2) return out;
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT src, dst FROM edges
+         WHERE type = ? AND invalidated_at IS NULL
+           AND src IN (${ph}) AND dst IN (${ph})`,
+      )
+      .all(type, ...ids, ...ids) as { src: string; dst: string }[];
+
+    for (const r of rows) {
+      out.add(r.src < r.dst ? `${r.src}|${r.dst}` : `${r.dst}|${r.src}`);
+    }
+
+    return out;
   }
 
   liveSuccessorsOf(id: string): string[] {

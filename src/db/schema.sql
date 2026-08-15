@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
   project    TEXT,
   started_at TEXT NOT NULL,
-  last_seen  TEXT NOT NULL
+  last_seen  TEXT NOT NULL,
+  client         TEXT,      -- who wrote: MCP initialize clientInfo, or an internal writer
+  client_version TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -270,5 +272,6 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
   rejected INTEGER NOT NULL DEFAULT 0,
   annotated INTEGER NOT NULL DEFAULT 0,
   generation_failures INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT
+  last_error TEXT,
+  merge_delayed INTEGER NOT NULL DEFAULT 0
 ) STRICT;

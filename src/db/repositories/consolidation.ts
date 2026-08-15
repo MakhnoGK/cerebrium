@@ -20,6 +20,20 @@ import { ConsolidationStatus, type ConsolidationKind } from "@/core/vocab";
 const CANDIDATE_COLS =
   "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by, attempts, last_error";
 
+export interface DuplicatePair {
+  member_ids: string[];
+  canonical_id: string;
+  project: string | null;
+  score: number;
+  same_session: boolean;
+  youngest_created_at: string;
+}
+
+interface Provenance {
+  session: string;
+  created_at: string;
+}
+
 interface CandidateRow {
   id: string;
   kind: ConsolidationKind;
@@ -512,22 +526,23 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     return { survivor, loser: survivor === a ? b : a };
   }
 
+  // `same_session` and `youngest_created_at` carry the burst signature: who wrote the pair
+  // and when. Provenance is what separates a real duplicate from a series; content
+  // similarity does not.
   duplicateSemanticPairs(opts: {
     minScore: number;
     limit: number;
     k?: number;
     capPerNode?: number;
-  }): { member_ids: string[]; canonical_id: string; project: string | null; score: number }[] {
+  }): DuplicatePair[] {
     const k = opts.k ?? 20;
     const cap = opts.capPerNode ?? 10;
     const projectOf = this.db.prepare("SELECT project FROM nodes WHERE id = ?");
+    const provenanceOf = this.db.prepare(
+      "SELECT created_by_session AS session, created_at FROM nodes WHERE id = ?",
+    );
     const seen = new Set<string>();
-    const out: {
-      member_ids: string[];
-      canonical_id: string;
-      project: string | null;
-      score: number;
-    }[] = [];
+    const out: DuplicatePair[] = [];
     for (const id of this.linkableNodes(opts.limit)) {
       for (const nb of this.nearestSemantic(id, k, cap)) {
         const score = 1 - nb.distance;
@@ -539,7 +554,16 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         const { survivor } = this.chooseSurvivor(id, nb.id);
         const project = (projectOf.get(survivor) as { project: string | null }).project;
         const [a, b] = id < nb.id ? [id, nb.id] : [nb.id, id];
-        out.push({ member_ids: [a, b], canonical_id: survivor, project, score });
+        const pa = provenanceOf.get(a) as Provenance;
+        const pb = provenanceOf.get(b) as Provenance;
+        out.push({
+          member_ids: [a, b],
+          canonical_id: survivor,
+          project,
+          score,
+          same_session: pa.session === pb.session,
+          youngest_created_at: pa.created_at > pb.created_at ? pa.created_at : pb.created_at,
+        });
       }
     }
     return out;
@@ -647,13 +671,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         `INSERT INTO consolidation_runs (
           id, started_at, updated_at, ended_at, stage,
           links_added, links_suggested, links_pruned,
-          distilled, distill_suggested, merged, merge_suggested,
+          distilled, distill_suggested, merged, merge_suggested, merge_delayed,
           pruned, prune_suggested, proposals_backfilled, rejected, annotated,
           generation_failures, last_error
         ) VALUES (
           @id, @started_at, @updated_at, @ended_at, @stage,
           @links_added, @links_suggested, @links_pruned,
-          @distilled, @distill_suggested, @merged, @merge_suggested,
+          @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
           @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
           @generation_failures, @last_error
         )
@@ -668,6 +692,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           distill_suggested = excluded.distill_suggested,
           merged = excluded.merged,
           merge_suggested = excluded.merge_suggested,
+          merge_delayed = excluded.merge_delayed,
           pruned = excluded.pruned,
           prune_suggested = excluded.prune_suggested,
           proposals_backfilled = excluded.proposals_backfilled,
@@ -690,6 +715,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         distill_suggested: result.distill_suggested,
         merged: result.merged,
         merge_suggested: result.merge_suggested,
+        merge_delayed: result.merge_delayed,
         pruned: result.pruned,
         prune_suggested: result.prune_suggested,
         proposals_backfilled: result.proposals_backfilled,

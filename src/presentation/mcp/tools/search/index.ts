@@ -57,6 +57,21 @@ interface Entry {
   via?: { node: string; edge: string };
 }
 
+// A near-duplicate that gave up its slot to the result carrying it. Still addressable —
+// `get` it by id like any other node.
+export interface Duplicate {
+  id: string;
+  title: string;
+  score: number;
+  // Set when a reviewed `duplicate_of` edge decided this, not the similarity gate.
+  recorded?: true;
+}
+
+interface Selection {
+  entry: Entry;
+  duplicates: Duplicate[];
+}
+
 // A result is an envelope plus why it surfaced. `summary` is optional because it is dropped
 // when `best_chunk` already carries the same text (see `summaryIsRedundant`).
 export type SearchResult = Omit<Envelope, "summary"> & {
@@ -65,6 +80,7 @@ export type SearchResult = Omit<Envelope, "summary"> & {
   best_chunk?: string;
   section?: string;
   via?: { node: string; edge: string };
+  duplicates?: Duplicate[];
 };
 
 interface ToolResponse {
@@ -77,8 +93,10 @@ interface ToolResponse {
 // Telemetry for the `events` row, carried out of `invoke` on a symbol key: symbols are
 // invisible to JSON.stringify, so this never reaches the agent or costs it tokens.
 // `query` + `ids` make the row the retrieval-outcome log: joined against the ids a later
-// `get` fetched, they are the implicit relevance signal. `reranked` is present only on the
-// rerank-eligible path — StatsRepo reads a present key as "eligible" and a 1 as "reranked".
+// `get` fetched, they are the implicit relevance signal. `matched` runs parallel to `ids`,
+// so an ignored result can be attributed to the retrieval path that produced it.
+// `reranked` is present only on the rerank-eligible path — StatsRepo reads a present key as
+// "eligible" and a 1 as "reranked".
 const AUDIT = Symbol("search.audit");
 
 interface SearchAudit {
@@ -86,6 +104,8 @@ interface SearchAudit {
   query: string;
   results: number;
   ids: string[];
+  matched: Entry["matched"][];
+  folded: { id: string; into: string; score: number; recorded?: true }[];
 }
 
 type AuditedResponse = ToolResponse & { [AUDIT]?: SearchAudit };
@@ -115,7 +135,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     if (!match) {
       const empty: AuditedResponse = { results: [], total_matches: 0 };
       if (hints.length) empty.hints = hints;
-      empty[AUDIT] = { mode, query: args.query, results: 0, ids: [] };
+      empty[AUDIT] = { mode, query: args.query, results: 0, ids: [], matched: [], folded: [] };
       return empty;
     }
 
@@ -231,7 +251,14 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       });
     }
 
-    const audit: SearchAudit = { mode, query: args.query, results: 0, ids: [] };
+    const audit: SearchAudit = {
+      mode,
+      query: args.query,
+      results: 0,
+      ids: [],
+      matched: [],
+      folded: [],
+    };
 
     // ---- graph expansion: personalized PageRank (after fusion + rerank) -------
     // Diffusion seeded by the query-matched nodes in proportion to their relevance, over the
@@ -247,13 +274,18 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
     // ---- cut + envelopes -----------------------------------------------------
     const ordered = [...entries.values()].sort(byScore);
-    const ranked = this.selectDiverse(ordered, args.limit);
+    const selections = this.selectDiverse(ordered, args.limit);
+    const ranked = selections.map((s) => s.entry);
 
-    const results = ranked.map((entry) => {
+    const results = selections.map(({ entry, duplicates }) => {
       const envelope: SearchResult = {
         ...toEnvelope(entry.row),
         matched: entry.matched,
       };
+
+      if (duplicates.length) {
+        envelope.duplicates = duplicates;
+      }
 
       if (entry.best_chunk && (entry.matched === "vector" || entry.matched === "both")) {
         envelope.best_chunk = entry.best_chunk;
@@ -286,6 +318,15 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
 
     audit.results = results.length;
     audit.ids = results.map((r) => r.id);
+    audit.matched = ranked.map((entry) => entry.matched);
+    audit.folded = selections.flatMap(({ entry, duplicates }) =>
+      duplicates.map((d) => ({
+        id: d.id,
+        into: entry.row.id,
+        score: d.score,
+        ...(d.recorded ? { recorded: true as const } : {}),
+      })),
+    );
     out[AUDIT] = audit;
 
     return out;
@@ -375,6 +416,8 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       query: args.query,
       results: ranked.length,
       ids: ranked.map((r) => r.id),
+      matched: ranked.map(() => "text" as const),
+      folded: [],
     };
 
     return out;
@@ -447,47 +490,96 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
   // gate, nothing here crosses an absolute threshold, and the raw scales (RRF ~0.016 vs
   // cosine confined to 0.85-1.00 by anisotropy) are not comparable. Candidates with no
   // stored vector carry no redundancy, so a not-yet-embedded node is never demoted.
-  private selectDiverse(ordered: Entry[], limit: number): Entry[] {
+  // Picks the slots and folds near-duplicates into them in one pass. A folded result is
+  // still returned — under its representative, with its id — so the cost of a wrong fold
+  // is one line further down, not a missing node. Folding is always against a result
+  // already selected, never transitive: single-linkage clustering on this corpus chains a
+  // third of the store into one component, and this is what stops that.
+  private selectDiverse(ordered: Entry[], limit: number): Selection[] {
     const lambda = this.retrieval.mmrLambda;
-
-    if (lambda >= 1 || ordered.length <= limit) {
-      return ordered.slice(0, limit);
-    }
-
     const vectors = this.searchRepo.vectorsFor(ordered.map((e) => e.row.id));
+    const raw = rawSimilarity(ordered, vectors);
+    const ids = ordered.map((e) => e.row.id);
+    const protectedPairs = this.edges.supersedesPairs(ids);
+    const recordedPairs = this.edges.duplicatePairs(ids);
+    // `>= 1` is off, matching `mmrLambda`: a plain `>=` gate would still fire at 1.0,
+    // since two identical vectors score exactly 1. It turns the whole fold off, recorded
+    // duplicates included.
+    const folding = this.retrieval.foldSim < 1;
+    const keyOf = (a: number, b: number) => {
+      const [x, y] = [ids[a]!, ids[b]!];
 
-    if (!vectors.size) {
-      return ordered.slice(0, limit);
-    }
+      return x < y ? `${x}|${y}` : `${y}|${x}`;
+    };
+    // A `duplicate_of` edge is a reviewed verdict, so it folds whatever the vectors now
+    // say — content drifts, and re-deciding a settled pair on every query would let a
+    // revision quietly undo the review. Direction is not honoured: the edge names the
+    // pair, the query names which of them is worth the slot.
+    const foldable = (a: number, b: number) => {
+      if (!folding) return false;
 
+      const key = keyOf(a, b);
+
+      if (protectedPairs.has(key)) return false;
+
+      return recordedPairs.has(key) || raw(a, b) >= this.retrieval.foldSim;
+    };
+
+    const useMmr = lambda < 1 && vectors.size > 0;
     const relevance = normalize(ordered.map((e) => e.score));
     const similarity = pairwise(ordered, vectors);
+    const redundancy = ordered.map(() => 0);
 
     const pool = ordered.map((_, index) => index);
-    const selected: Entry[] = [];
-    const redundancy = ordered.map(() => 0);
+    const selected: Selection[] = [];
 
     while (selected.length < limit && pool.length) {
       let bestSlot = 0;
-      let bestScore = -Infinity;
 
-      pool.forEach((index, slot) => {
-        const marginal = lambda * relevance[index]! - (1 - lambda) * redundancy[index]!;
+      if (useMmr) {
+        let bestScore = -Infinity;
 
-        if (marginal > bestScore) {
-          bestScore = marginal;
-          bestSlot = slot;
-        }
-      });
+        pool.forEach((index, slot) => {
+          const marginal = lambda * relevance[index]! - (1 - lambda) * redundancy[index]!;
+
+          if (marginal > bestScore) {
+            bestScore = marginal;
+            bestSlot = slot;
+          }
+        });
+      }
 
       const [picked] = pool.splice(bestSlot, 1);
 
       if (picked === undefined) break;
 
-      selected.push(ordered[picked]!);
+      const duplicates: Duplicate[] = [];
 
-      for (const index of pool) {
-        redundancy[index] = Math.max(redundancy[index]!, similarity(picked, index));
+      for (let slot = pool.length - 1; slot >= 0; slot--) {
+        const index = pool[slot]!;
+
+        if (!foldable(picked, index)) continue;
+
+        const duplicate: Duplicate = {
+          id: ordered[index]!.row.id,
+          title: ordered[index]!.row.title,
+          score: round3(raw(picked, index)),
+        };
+
+        if (recordedPairs.has(keyOf(picked, index))) {
+          duplicate.recorded = true;
+        }
+
+        duplicates.unshift(duplicate);
+        pool.splice(slot, 1);
+      }
+
+      selected.push({ entry: ordered[picked]!, duplicates });
+
+      if (useMmr) {
+        for (const index of pool) {
+          redundancy[index] = Math.max(redundancy[index]!, similarity(picked, index));
+        }
       }
     }
 
@@ -643,6 +735,27 @@ function pairwise(
 
     return spread > 0 ? (sims[a * n + b]! - min) / spread : 0;
   };
+}
+
+// Raw cosine, in contrast to `pairwise`, which min-max normalizes within the result set.
+// A normalized score is fine for MMR's relative penalty and meaningless against an
+// absolute gate — the top pair of any set normalizes to 1.0 however unalike it is.
+function rawSimilarity(
+  entries: Entry[],
+  vectors: Map<string, Float32Array>,
+): (a: number, b: number) => number {
+  const slots = entries.map((e) => vectors.get(e.row.id));
+
+  return (a, b) => {
+    const left = slots[a];
+    const right = slots[b];
+
+    return left && right ? cosine(left, right) : 0;
+  };
+}
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function cosine(a: Float32Array, b: Float32Array): number {

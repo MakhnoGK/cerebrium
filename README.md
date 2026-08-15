@@ -153,6 +153,20 @@ unless `history:true`), then optionally expands the graph.
   min-max normalized within the candidate set — raw RRF and raw cosine are not on
   comparable scales. The top hit is always the most relevant one; candidates with no
   stored vector are never demoted; `text` mode is untouched.
+- In the same pass, a candidate that is a **near-duplicate of a result already kept**
+  gives up its slot (`MEMORY_FOLD_SIM`, `1.0` = off) and is listed under that result as
+  `duplicates:[{id,title,score}]`; the freed slot goes to the next distinct hit. Nothing
+  is hidden — a folded node is still named and still `get`-able — so the cost of a fold
+  the reader disagrees with is one line further down, not a missing node. Folding
+  compares **raw** cosine, unlike MMR's normalized redundancy, because a gate needs an
+  absolute scale: the top pair of any set normalizes to 1.0 however unalike it is. It
+  always folds against a result already selected, never transitively, which is what
+  keeps a fold from chaining the way single-linkage clustering does. Two nodes joined by
+  `supersedes` never fold together. A pair carrying a reviewed `duplicate_of` edge folds
+  whatever the vectors currently say — that verdict was reviewed once, and re-deciding it
+  per query would let a later revision quietly undo the review; such a fold is marked
+  `recorded: true`. The edge names the pair, not the winner: the query decides which of
+  the two is worth the slot.
 - `as_of` (ISO-8601): run the search against the store **as it stood then** — only nodes
   already written and not yet invalidated at that instant, graph expansion included. It
   supersedes `history`, because it carries its own liveness rule: something invalidated
@@ -212,7 +226,7 @@ quietly accumulated several unrelated facts — but the agent writing it can.
 
 ## Quick start
 
-Requires Node ≥ 22 (developed on Node 22; run `nvm use` from this repo). `better-sqlite3`
+Requires Node ≥ 22 (developed on Node 25; run `nvm use` from this repo). `better-sqlite3`
 and `sqlite-vec` are native modules that build/download on install.
 
 **1 — Clone and build.**
@@ -230,7 +244,7 @@ the point. Point it at the built `dist/server.js` by absolute path:
 ```bash
 claude mcp add cerebrium -s user \
   --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
+  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v25.x/bin/node \
   /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
 ```
 
@@ -311,6 +325,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
 | `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_MMR_LAMBDA` | `0.85` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. Calibrated against the gold set — see *Calibrating the ranking constants*. |
+| `MEMORY_FOLD_SIM` | `0.93` | Raw first-chunk cosine at which a result folds under one already kept instead of taking its own slot; `1.0` is off. **Its own scale** — not comparable to `MEMORY_DEDUP_THRESHOLD` or `MEMORY_CONSOLIDATE_MERGE_SIM`, which score a seed chunk against the nearest one. Measured by the fold arm of `calibrate:report`. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
 | `MEMORY_PPR_ALPHA` | `0.5` | Damping for graph expansion's personalized PageRank: higher diffuses further from the matched nodes, lower keeps rank near them. |
 | `MEMORY_GRAPH_BASE` | `0.3` | Ceiling a graph-surfaced hit may reach, as a fraction of the best direct hit. `0` still surfaces neighbours but never lifts one over a directly matched node. Calibrated — see *Calibrating the ranking constants*. |
@@ -319,15 +334,11 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_URL` | `http://127.0.0.1:11434/api/chat` | Endpoint for the `http` provider. |
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
-<<<<<<< ours
-| `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. |
-=======
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
->>>>>>> theirs
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
-| `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. |
+| `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. Applying records `duplicate_of` and destroys nothing, so `auto` here costs a ranking nudge rather than a node — it still ships as `suggest`, and flipping it is a decision to take on its own. |
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
 | `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
@@ -337,6 +348,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
+| `MEMORY_CONSOLIDATE_MERGE_BURST_MS` | `3600000` | Burst window for merge detection: a near-duplicate pair one session wrote within it is treated as a series and left to age, not proposed. `0` disables the rule. |
 | `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
@@ -425,6 +437,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 | `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
+| `npm run report:readloop` | Read-only read-loop report against a real store: which nodes retrieval surfaced, which of those a later `get` actually read, and therefore what "never fetched" means. `--json`, `--since <ISO instant>`. See *Reading the read loop*. |
 | `npm run gold:generate` | Writes labelled queries for the eval by asking the local model what each section of the store answers. Read-only on the store, resumable, appends to a gold JSONL that lives outside the repo. See *The gold file*. |
 | `npm run agent:setup` | Reports what each agent host still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it by booting the server and calling `session_start`. Read-only without `--apply`, and it never touches the store. See *Agent hosts*. |
 | `npm run gold:adjudicate` | Labels real logged queries by judging pooled candidates one by one, giving the multi-label gold a generated question cannot. Read-only, resumable, same gold JSONL. See *The gold file*. |
@@ -543,8 +556,19 @@ into durable knowledge:
 - **Distillation** — rolls up clusters of decayed episodics into one durable
   semantic fact, linked `derived_from` each source, stamping the sources
   `consolidated_at` (they stay queryable via `history`).
-- **Dedup/merge** — folds near-duplicate semantic nodes into a canonical survivor,
-  re-pointing edges and superseding the loser.
+- **Dedup/merge** — detects near-duplicate semantic nodes and records the relationship:
+  applying one writes a `duplicate_of` edge from the duplicate to the canonical node and
+  **leaves both live**. Retrieval gives the pair one slot (see the fold, above), which was
+  the whole point of merging; nothing is destroyed to get it, and the relationship carries
+  more than a merge did — a merge picks one body and loses the other. Collapsing two nodes
+  into one is still available, as `consolidate_apply` with `collapse:true`, but only by
+  hand: no posture reaches it.
+  Detection skips a pair **one session wrote inside `MEMORY_CONSOLIDATE_MERGE_BURST_MS`**
+  and lets it age instead. A writer who held both notes in context and still wrote two
+  meant a series, not a duplication — measured 2026-08-09 at 7 of 7 wrong merges blocked
+  for 19% of correct ones delayed by a sweep. It delays rather than loses: the pair stays
+  detectable and returns once it is older than the window, and the skip is counted as
+  `merge_delayed` on the run rather than passing silently.
 - **Tier-1 mirror prune** — soft-invalidates dead mirror nodes (orphaned symbols) so
   they leave retrieval.
 
@@ -559,8 +583,6 @@ self-contained local runtime (Ollama + a small model) for the `http` provider li
 in the sibling `cerebrium-models/` directory. Generation never runs in the tests
 (the `manual` provider keeps the suite offline).
 
-<<<<<<< ours
-=======
 The `http` provider asks the backend to answer **without its reasoning mode** (`think:
 false`). This is a latency fix, not a style preference: the adapter reads only
 `message.content`, so hidden reasoning is decode time spent on text nothing consumes.
@@ -571,7 +593,6 @@ old 60 s timeout and make proposals vanish mid-decode. A backend with no reasoni
 rejects the field with a 400; the provider retries once without it and stops sending it
 for the rest of the process.
 
->>>>>>> theirs
 When generation fails, the sweep degrades to a proposal-less suggestion rather than
 blocking or guessing — a weak or absent model must never author durable memory. That
 degradation is deliberately indistinguishable *in the store* from the `manual` posture,
@@ -749,6 +770,16 @@ store. It has two arms, because only one gate has ground truth:
   target *volume* instead: how often a write would surface a candidate, and how many
   edges link discovery would propose per node. A gate that flags most writes is noise
   whatever its precision.
+- **Fold** — where the read-time fold gate should sit, in two arms of its own. The
+  labelled one reuses the merge verdicts (a pair worth merging is a pair worth showing
+  once); the impact one replays the fold pass over the result sets real logged searches
+  returned. Both are reported twice, on cosine alone and with the burst rule excluding a
+  pair one writer produced in one moment.
+
+The fold gate lives on **its own similarity scale** and must never be read off
+`mergeSim`: `search` compares one vector per node (the lowest-seq chunk, what
+`SearchRepo.vectorsFor` hands MMR), while the merge detector compares a node's seed chunk
+against the other node's *nearest* chunk. The same pair scores differently under the two.
 
 Two properties of the measurement are worth knowing before quoting it. Candidates were
 only ever detected above the gate in force at the time, so recall *below* that gate is
@@ -756,6 +787,51 @@ unmeasurable — the recall column is recall among proposed pairs. And a stored 
 cannot be recomputed from today's vectors (content gets revised, and the detector's
 similarity is asymmetric), so the report reads the recorded score and reports the drift
 rather than pretending to reproduce it.
+
+## Reading the read loop
+
+A store can always count what it holds and how often each node was fetched. That is
+half a loop, and the missing half changes what the numbers mean: a node that is never
+fetched is either dead weight, or it is being *surfaced* and answering the question
+from its envelope and `best_chunk` without ever costing a `get` — the documented
+normal path. Counting fetches alone cannot tell those apart, so every claim about
+retrieval noise built on a fetch count is unfalsifiable.
+
+Both halves are now in `events`. A surfacing row — `search`, `session_start`,
+`code_lookup` — lists the node ids put in front of the agent, in rank order; a `get`
+row lists the ids it spent tokens on. `npm run report:readloop` joins them, read-only,
+and cuts the join three ways:
+
+- **Follow-through** — how many searches led to a fetch of something they surfaced,
+  and how many were answered from the envelope alone. The second number is the share
+  that must be subtracted from any "never fetched" figure before calling it waste.
+- **Rank and path** — fetch rate by rank, which is whether ranking works at all, and
+  fetch rate by `matched` (`text` / `vector` / `both` / `graph`), which says whether a
+  retrieval branch earns its results.
+- **Per node** — "never fetched" split into *never surfaced* (unreachable by the
+  queries actually asked) and *surfaced but not fetched* (envelope-answered, or
+  genuinely irrelevant). Only the first is a ranking failure. A folded result counts as
+  surfaced: it is shown, with its title, under the result that kept the slot.
+- **Fold** — how often the read-time fold fired, and whether the reader then fetched the
+  folded result anyway. That last number is the fold's **own label**, and the only honest
+  input to re-calibrating `MEMORY_FOLD_SIM`: the gate had to be set against merge verdicts
+  because nothing better existed yet, and a merge verdict answers a stricter question than
+  a fold asks.
+- **By writer** — the same follow-through, per client, beside how much each one writes.
+
+`sessions.client` / `sessions.client_version` are taken from the MCP `initialize`
+handshake, not from a tool argument and not from an env var: several agent hosts share
+one store, and an identity the model has to remember to pass is the field a noisy writer
+gets wrong. Internal writers name themselves — the consolidation sweep's sessions are
+recorded as `cerebrium-consolidation`, which is what makes an auto-applied merge
+attributable. Sessions predating the column read as `(unnamed)`.
+
+The report opens with an instrumentation-coverage table for a reason: ids were not
+always logged, and each action started on its own date. An action with no instrumented
+rows contributes nothing, and its zero means *not recorded*, never *not surfaced*.
+Mirror nodes are excluded from the per-node split — the code index dwarfs the authored
+store, and including it would turn every share into a statement about how much code is
+indexed.
 
 ## Skill for consuming agents
 

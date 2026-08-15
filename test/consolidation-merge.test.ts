@@ -31,12 +31,15 @@ async function mk(s: string, title: string, content: string): Promise<string> {
   ).id;
 }
 
-// Two near-identical semantic facts (cosine > 0.92) -> a merge candidate.
+// Two near-identical semantic facts (cosine > 0.92) -> a merge candidate. The clock jumps
+// past the burst window afterwards: written back to back by one session they would read as
+// a series, which is a different test.
 async function seedDupes(env: TestEnv) {
   const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
   const a = await mk(s, "Payments A", SHARED);
   const b = await mk(s, "Payments B", `${SHARED} duplicate`);
   await env.worker.tick();
+  env.clock.advanceDays(1);
   return { s, a, b };
 }
 
@@ -77,7 +80,32 @@ describe("Semantic dedup / merge", () => {
     expect([a, b]).toContain(cand!.canonical_id);
   });
 
-  it("should supersede the loser (kept in history) and re-point its authored edges when accepted", async () => {
+  it("should record duplicate_of and keep both nodes live when accepted", async () => {
+    // Given
+    const env = setup();
+    const { s, a, b } = await seedDupes(env);
+    await container.resolve(ConsolidationWorker).tick();
+    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
+    const survivor = cand!.canonical_id!;
+    const loser = [a, b].find((id) => id !== survivor)!;
+
+    // When
+    const applied = (await container.resolve(ConsolidateApplyTool).invoke({
+      session_id: s,
+      id: cand!.id,
+      decision: ConsolidationRecommendation.APPLY,
+    })) as { status: string };
+
+    // Then
+    expect(applied.status).toBe("applied");
+    expect(env.nodes.envelope(survivor)!.invalidated).toBe(false);
+    expect(env.nodes.envelope(loser)!.invalidated).toBe(false);
+    expect(
+      env.edges.edgesOf(loser).some((e) => e.id === survivor && e.edge === "duplicate_of"),
+    ).toBe(true);
+  });
+
+  it("should supersede the loser (kept in history) and re-point its authored edges when collapsed", async () => {
     // Given
     const env = setup();
     const { s, a, b } = await seedDupes(env);
@@ -97,6 +125,7 @@ describe("Semantic dedup / merge", () => {
       session_id: s,
       id: cand!.id,
       decision: ConsolidationRecommendation.APPLY,
+      collapse: true,
     })) as { status: string; kind: string };
 
     // Then
@@ -121,7 +150,7 @@ describe("Semantic dedup / merge", () => {
     );
   });
 
-  it("should merge directly and rewrite the survivor when auto with a generating provider", async () => {
+  it("should record duplicate_of without destroying either node when auto", async () => {
     // Given
     process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
     const env = setup({ consolidator: stubProvider });
@@ -133,13 +162,15 @@ describe("Semantic dedup / merge", () => {
     // Then
     expect(r.merged).toBe(1);
     expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
-    const survivor = [a, b].find((id) => !env.nodes.envelope(id)!.invalidated)!;
-    const loser = [a, b].find((id) => env.nodes.envelope(id)!.invalidated)!;
-    expect(loser).toBeDefined();
-    expect((await env.nodes.fullNode(survivor))!.content).toBe("merged body");
+    expect(env.nodes.envelope(a)!.invalidated).toBe(false);
+    expect(env.nodes.envelope(b)!.invalidated).toBe(false);
+    const recorded = [a, b].filter((id) =>
+      env.edges.edgesOf(id).some((e) => e.edge === "duplicate_of"),
+    );
+    expect(recorded).toHaveLength(2);
   });
 
-  it("should dismiss an overlapping merge after its shared loser was already retired", async () => {
+  it("should dismiss an overlapping collapse after its shared loser was already retired", async () => {
     const env = setup();
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const loser = await mk(s, "Shared loser", SHARED);
@@ -165,11 +196,13 @@ describe("Semantic dedup / merge", () => {
       session_id: s,
       id: firstCandidate,
       decision: ConsolidationRecommendation.APPLY,
+      collapse: true,
     })) as { status: string };
     const secondResult = (await apply.invoke({
       session_id: s,
       id: secondCandidate,
       decision: ConsolidationRecommendation.APPLY,
+      collapse: true,
     })) as { status: string };
 
     expect(firstResult.status).toBe("applied");
@@ -181,6 +214,58 @@ describe("Semantic dedup / merge", () => {
     expect(env.edges.edgesOf(second).some((e) => e.id === loser && e.edge === "supersedes")).toBe(
       false,
     );
+  });
+
+  it("should delay a pair one session wrote inside the burst window rather than proposing it", async () => {
+    // Given
+    const env = setup();
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    await mk(s, "TI&H Module 1", SHARED);
+    await mk(s, "TI&H Module 2", `${SHARED} duplicate`);
+    await env.worker.tick();
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merge_delayed).toBe(1);
+    expect(r.merge_suggested).toBe(0);
+    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
+  });
+
+  it("should propose the same pair on a later sweep once it has aged out of the burst", async () => {
+    // Given
+    const env = setup();
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    await mk(s, "TI&H Module 1", SHARED);
+    await mk(s, "TI&H Module 2", `${SHARED} duplicate`);
+    await env.worker.tick();
+    await container.resolve(ConsolidationWorker).tick();
+
+    // When
+    env.clock.advanceDays(1);
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merge_delayed).toBe(0);
+    expect(r.merge_suggested).toBe(1);
+  });
+
+  it("should not delay a pair two different sessions wrote at the same moment", async () => {
+    // Given
+    const env = setup();
+    const first = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const second = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    await mk(first, "Payments A", SHARED);
+    await mk(second, "Payments B", `${SHARED} duplicate`);
+    await env.worker.tick();
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merge_delayed).toBe(0);
+    expect(r.merge_suggested).toBe(1);
   });
 
   it("should not merge semantic nodes below the merge threshold", async () => {

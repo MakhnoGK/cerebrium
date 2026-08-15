@@ -23,8 +23,12 @@ const migration = join(
 let env: TestEnv;
 let session: string;
 
+// The usage fixtures are byte-identical apart from the counter under test, which is what
+// the read-time fold collapses. These tests are about rank order, so folding stays off.
 function weightOf(value: string): RetrievalConfig {
-  return new RetrievalConfig(new StaticConfigSource({ MEMORY_USE_WEIGHT: value }));
+  return new RetrievalConfig(
+    new StaticConfigSource({ MEMORY_USE_WEIGHT: value, MEMORY_FOLD_SIM: "1" }),
+  );
 }
 
 function write(title: string, content: string, kind = MemoryKind.SEMANTIC): Promise<Envelope> {
@@ -61,6 +65,9 @@ async function rank(query: string): Promise<string[]> {
 
 beforeEach(async () => {
   env = setup();
+  container.register(RetrievalConfig, {
+    useValue: new RetrievalConfig(new StaticConfigSource({ MEMORY_FOLD_SIM: "1" })),
+  });
   session = (await container.resolve(SessionStartTool).invoke({})).session_id;
 });
 

@@ -36,6 +36,22 @@ const DENSITY_SWEEP = [0.85, 0.87, 0.89, 0.9, 0.91, 0.92, 0.925, 0.93, 0.94];
 // Jaccard overlap, not cosine: the lexical fallback lives on its own scale.
 const LEXICAL_SWEEP = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.7, 0.9];
 
+// The read-time fold gate (L2.2). Its own scale: `search` compares one vector per node —
+// the lowest-seq chunk, what `SearchRepo.vectorsFor` returns — while the merge detector
+// scores a node's seed chunk against the other node's NEAREST chunk. The two disagree, so
+// a fold gate must never be read off `mergeSim`.
+const FOLD_SWEEP = [0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98];
+
+// A fold hides one result behind another, so the pair it fires on had better be one the
+// operator would have merged.
+const TARGET_FOLD_PRECISION = 0.95;
+
+// The burst rule, measured at 7/7 against 19% delay: one writer, one moment. At detection
+// time it compares node age to the detection instant; there is no such instant at read
+// time, so the read-time reading is "written by the same session, within an hour of each
+// other". A burst is a series, and a series must not fold.
+const BURST_WINDOW_MS = 60 * 60 * 1000;
+
 // Mirrors the per-node neighbour ceiling in ConsolidationRepo.duplicateSemanticPairs.
 const CAP_PER_NODE = 10;
 
@@ -93,6 +109,34 @@ interface LexicalRow {
   threshold: number;
   hitRate: number;
   meanShown: number;
+}
+
+// Each arm is reported twice: on cosine alone, and with the burst rule excluding a pair
+// one writer produced in one moment. The second is what L2.2 would actually run.
+interface FoldLabelledRow {
+  gate: number;
+  folded: number;
+  precision: number;
+  recall: number;
+  wrongFolds: number;
+  guardedFolded: number;
+  guardedPrecision: number;
+  guardedRecall: number;
+  guardedWrongFolds: number;
+}
+
+interface FoldImpactRow {
+  gate: number;
+  searchesWithFold: number;
+  folds: number;
+  burstFolds: number;
+  guardedSearchesWithFold: number;
+  guardedFolds: number;
+}
+
+interface Provenance {
+  session: string;
+  createdAt: number;
 }
 
 interface LinkRow {
@@ -153,6 +197,12 @@ async function report(opts: {
   const link = linkDensity(db, vectors, DENSITY_SWEEP);
   const lexical = lexicalDensity(db, opts.searchRepo, LEXICAL_SWEEP);
 
+  const firstChunk = loadFirstChunkVectors(db);
+  const prov = loadProvenance(db);
+  const foldLabelledRows = foldLabelled(pairs, firstChunk, prov, FOLD_SWEEP);
+  const foldImpactArm = foldImpact(db, firstChunk, prov, FOLD_SWEEP);
+  const foldGate = foldRecommendation(foldLabelledRows);
+
   if (opts.asJson) {
     process.stdout.write(
       JSON.stringify(
@@ -166,7 +216,9 @@ async function report(opts: {
           dedup_density: dedup,
           lexical_density: lexical,
           link_density: link,
-          recommendation: recommendation(sweep, dedup, link, lexical),
+          fold_labelled: foldLabelledRows,
+          fold_impact: { searches: foldImpactArm.searches, sweep: foldImpactArm.rows },
+          recommendation: { ...recommendation(sweep, dedup, link, lexical), foldSim: foldGate },
         },
         null,
         2,
@@ -257,8 +309,47 @@ async function report(opts: {
   L.push("  KNN, so these counts are an upper bound — the safe direction for a density gate.");
   L.push("");
 
+  L.push("── Fold gate, labelled arm: would folding this pair have hidden a note? ──");
+  L.push("                cosine alone                      with the burst rule");
+  L.push("  gate    folds  precision  recall  wrong   folds  precision  recall  wrong");
+  for (const r of foldLabelledRows) {
+    L.push(
+      `  ${r.gate.toFixed(3)}  ${String(r.folded).padStart(5)}  ${r.precision.toFixed(3)}      ` +
+        `${r.recall.toFixed(3)}  ${String(r.wrongFolds).padStart(5)}   ` +
+        `${String(r.guardedFolded).padStart(5)}  ${r.guardedPrecision.toFixed(3)}      ` +
+        `${r.guardedRecall.toFixed(3)}  ${String(r.guardedWrongFolds).padStart(5)}`,
+    );
+  }
+  L.push("  Labels are the operator's own merge verdicts: applied = one slot was enough,");
+  L.push("  dismissed = two notes that each deserved one. Nothing below `mergeSim` was ever");
+  L.push("  proposed, so this arm cannot see pairs the detector never surfaced — the same");
+  L.push("  blind spot the merge sweep has, and the reason recall here is recall among");
+  L.push("  proposed pairs. Scored on first-chunk cosine, NOT on the detector's stored");
+  L.push("  score: `search` compares one vector per node, the detector compares a seed");
+  L.push("  chunk against the nearest one. Do not read a fold gate off `mergeSim`.");
+  L.push("");
+
+  L.push("── Fold gate, impact arm: replayed over the result sets real searches returned ──");
+  L.push(`  ${foldImpactArm.searches} logged searches returned more than one result`);
+  L.push("               cosine alone                with the burst rule");
+  L.push("  gate    searches with a fold  folds   searches with a fold  folds");
+  for (const r of foldImpactArm.rows) {
+    L.push(
+      `  ${r.gate.toFixed(3)}   ${String(r.searchesWithFold).padStart(7)} ` +
+        `${pctOf(r.searchesWithFold, foldImpactArm.searches)}  ${String(r.folds).padStart(5)}   ` +
+        `${String(r.guardedSearchesWithFold).padStart(13)} ` +
+        `${pctOf(r.guardedSearchesWithFold, foldImpactArm.searches)}  ${String(r.guardedFolds).padStart(5)}`,
+    );
+  }
+  L.push("  A result folds only against one already kept, never transitively — the rule that");
+  L.push("  stops a fold chaining the way single-linkage clustering does on this corpus.");
+  L.push("");
+
   const rec = recommendation(sweep, dedup, link, lexical);
   L.push("── Suggested thresholds ──");
+  L.push(
+    `  fold    ${foldGate ?? "—"}   (lowest gate at >=${TARGET_FOLD_PRECISION} labelled precision with no series folded)`,
+  );
   L.push(
     `  merge   ${rec.mergeSim ?? "—"}   (highest precision at >=0.95, preferring recall on ties)`,
   );
@@ -629,6 +720,178 @@ function dedupDensity(
   });
 }
 
+// ---- fold gate (L2.1) --------------------------------------------------------
+
+// One vector per node, the lowest-seq chunk of an authored node — exactly what
+// `SearchRepo.vectorsFor` hands MMR, so the gate this arm recommends is on the scale the
+// fold will actually be computed on.
+function loadFirstChunkVectors(db: Database.Database): Map<string, Float64Array> {
+  const rows = db
+    .prepare(
+      `SELECT c.node_id AS node_id, vec_to_json(v.embedding) AS embedding
+       FROM chunks c
+       JOIN chunk_vec v ON v.chunk_id = c.id
+       JOIN nodes n ON n.id = c.node_id
+       WHERE c.stale = 0 AND n.memory_kind IN ('semantic','episodic')
+       ORDER BY c.node_id, c.seq`,
+    )
+    .all() as { node_id: string; embedding: string }[];
+
+  const out = new Map<string, Float64Array>();
+  for (const row of rows) {
+    if (out.has(row.node_id)) continue;
+    out.set(row.node_id, Float64Array.from(JSON.parse(row.embedding) as number[]));
+  }
+  return out;
+}
+
+function loadProvenance(db: Database.Database): Map<string, Provenance> {
+  const rows = db.prepare(`SELECT id, created_by_session, created_at FROM nodes`).all() as {
+    id: string;
+    created_by_session: string;
+    created_at: string;
+  }[];
+
+  return new Map(
+    rows.map((r) => [r.id, { session: r.created_by_session, createdAt: Date.parse(r.created_at) }]),
+  );
+}
+
+function isBurst(prov: Map<string, Provenance>, a: string, b: string): boolean {
+  const pa = prov.get(a);
+  const pb = prov.get(b);
+  if (!pa || !pb) return false;
+
+  return pa.session === pb.session && Math.abs(pa.createdAt - pb.createdAt) <= BURST_WINDOW_MS;
+}
+
+function foldSim(vectors: Map<string, Float64Array>, a: string, b: string): number | null {
+  const va = vectors.get(a);
+  const vb = vectors.get(b);
+
+  return va && vb ? cosine(va, vb) : null;
+}
+
+// Labelled arm. The operator's own applied/dismissed merge verdicts answer the fold
+// question directly: a pair worth merging is a pair worth showing once, and a dismissed
+// pair is two notes that each deserve a slot.
+function foldLabelled(
+  pairs: Pair[],
+  vectors: Map<string, Float64Array>,
+  prov: Map<string, Provenance>,
+  sweep: number[],
+): FoldLabelledRow[] {
+  const scored = pairs
+    .map((p) => ({ ...p, sim: foldSim(vectors, p.a, p.b), burst: isBurst(prov, p.a, p.b) }))
+    .filter((p): p is Pair & { sim: number; burst: boolean } => p.sim !== null);
+  const positives = scored.filter((p) => p.positive).length;
+
+  return sweep.map((gate) => {
+    const folded = scored.filter((p) => p.sim >= gate);
+    const right = folded.filter((p) => p.positive).length;
+    const guarded = folded.filter((p) => !p.burst);
+    const guardedRight = guarded.filter((p) => p.positive).length;
+
+    return {
+      gate,
+      folded: folded.length,
+      precision: folded.length ? right / folded.length : 0,
+      recall: positives ? right / positives : 0,
+      wrongFolds: folded.length - right,
+      guardedFolded: guarded.length,
+      guardedPrecision: guarded.length ? guardedRight / guarded.length : 0,
+      guardedRecall: positives ? guardedRight / positives : 0,
+      guardedWrongFolds: guarded.length - guardedRight,
+    };
+  });
+}
+
+// Impact arm. Replays the fold pass over the result sets real searches actually returned:
+// walk the ranked ids, and fold a result only against one already kept — the same
+// representative-only rule L2.2 will use, which is what stops a fold chaining.
+function foldImpact(
+  db: Database.Database,
+  vectors: Map<string, Float64Array>,
+  prov: Map<string, Provenance>,
+  sweep: number[],
+): { searches: number; rows: FoldImpactRow[] } {
+  const rows = db
+    .prepare(`SELECT detail FROM events WHERE action = 'search' AND detail LIKE '%"ids"%'`)
+    .all() as { detail: string | null }[];
+
+  const results: string[][] = [];
+  for (const row of rows) {
+    const ids = idsOf(row.detail);
+    if (ids.length > 1) results.push(ids);
+  }
+
+  const pass = (ids: string[], gate: number, guard: boolean) => {
+    const kept: string[] = [];
+    let folded = 0;
+    let burst = 0;
+
+    for (const id of ids) {
+      const into = kept.find((k) => {
+        if ((foldSim(vectors, k, id) ?? 0) < gate) return false;
+
+        return !(guard && isBurst(prov, k, id));
+      });
+
+      if (into === undefined) {
+        kept.push(id);
+        continue;
+      }
+
+      folded++;
+      if (isBurst(prov, into, id)) burst++;
+    }
+
+    return { folded, burst };
+  };
+
+  const swept = sweep.map((gate) => {
+    let searchesWithFold = 0;
+    let folds = 0;
+    let burstFolds = 0;
+    let guardedSearchesWithFold = 0;
+    let guardedFolds = 0;
+
+    for (const ids of results) {
+      const raw = pass(ids, gate, false);
+      const guarded = pass(ids, gate, true);
+
+      if (raw.folded) searchesWithFold++;
+      folds += raw.folded;
+      burstFolds += raw.burst;
+
+      if (guarded.folded) guardedSearchesWithFold++;
+      guardedFolds += guarded.folded;
+    }
+
+    return { gate, searchesWithFold, folds, burstFolds, guardedSearchesWithFold, guardedFolds };
+  });
+
+  return { searches: results.length, rows: swept };
+}
+
+function idsOf(detail: string | null): string[] {
+  if (!detail) return [];
+
+  try {
+    const ids = (JSON.parse(detail) as { ids?: unknown }).ids;
+    return Array.isArray(ids) ? ids.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function foldRecommendation(labelled: FoldLabelledRow[]): number | null {
+  return (
+    labelled.find((r) => r.guardedFolded > 0 && r.guardedPrecision >= TARGET_FOLD_PRECISION)
+      ?.gate ?? null
+  );
+}
+
 function linkDensity(
   db: Database.Database,
   vectors: Map<string, NodeVectors>,
@@ -749,6 +1012,10 @@ function sd(values: number[]): number {
   if (!values.length) return 0;
   const m = mean(values);
   return Math.sqrt(values.reduce((t, x) => t + (x - m) ** 2, 0) / values.length);
+}
+
+function pctOf(part: number, whole: number): string {
+  return whole ? `(${((100 * part) / whole).toFixed(1).padStart(5)}%)` : "(    —)";
 }
 
 function percentile(values: number[], p: number): number {

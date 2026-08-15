@@ -41,6 +41,7 @@ export enum EdgeType {
   SUPERSEDES = "supersedes",
   RELATES_TO = "relates_to",
   SIMILAR_TO = "similar_to",
+  DUPLICATE_OF = "duplicate_of",
   IMPORTS = "imports",
   CALLS = "calls",
   DEFINES = "defines",
@@ -49,8 +50,11 @@ export enum EdgeType {
 // System-only edge types: agents may not create these via the `link` tool. The
 // code edges (imports/calls/defines) are drawn only by the indexer; `documents`
 // stays agent-creatable — that is the note->code link the agent draws by hand.
+// `duplicate_of` suppresses a node at read time, so it is resolved through a
+// reviewable consolidation candidate rather than written by hand.
 export const SYSTEM_EDGE_TYPES = [
   EdgeType.SIMILAR_TO,
+  EdgeType.DUPLICATE_OF,
   EdgeType.IMPORTS,
   EdgeType.CALLS,
   EdgeType.DEFINES,
