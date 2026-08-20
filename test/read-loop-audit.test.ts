@@ -139,6 +139,39 @@ describe("Retrieval-outcome log", () => {
     expect(rows("get")[0]!.detail.sections).toEqual(["H2: Policy"]);
   });
 
+  it("should record the working set a session was handed", async () => {
+    // Given — the working set is a surfacing too: its ids join against a later `get`,
+    // which is what makes "did the agent use what it was handed" answerable.
+    await seed("Retry budget", "the http client retries with exponential backoff");
+    const started = (await pipeline.invoke(container, "start_session", {})) as {
+      session_id: string;
+    };
+
+    // When / Then
+    const row = env.db
+      .prepare("SELECT detail FROM events WHERE action = 'session_start' AND session_id = ?")
+      .get(started.session_id) as { detail: string | null };
+
+    expect(JSON.parse(row.detail!)).toMatchObject({ project: null });
+    expect(Array.isArray((JSON.parse(row.detail!) as { ids: unknown }).ids)).toBe(true);
+  });
+
+  it("should record which symbols a code lookup surfaced", async () => {
+    // Given / When
+    await pipeline.invoke(container, "lookup_code", {
+      session_id: session,
+      name: "AuthService",
+      limit: 5,
+    });
+
+    // Then
+    const row = env.db
+      .prepare("SELECT detail FROM events WHERE action = 'code_lookup' AND session_id = ?")
+      .get(session) as { detail: string | null };
+
+    expect(JSON.parse(row.detail!)).toMatchObject({ results: 0, ids: [], name: "AuthService" });
+  });
+
   it("should still record the node a write produced", async () => {
     // Given / When
     const id = await seed("Retry budget", "the http client retries with exponential backoff");
