@@ -125,6 +125,20 @@ class EnumField<E extends Record<string, string>> extends Field<E[keyof E]> {
   }
 }
 
+class BooleanField extends Field<boolean> {
+  // Accepts the spellings a plist, a shell export and a JSON config all produce. Anything
+  // else is unparseable rather than falsy: `MEMORY_DAEMON_RESIDENT=maybe` must fall back
+  // and be reported, not silently mean "off".
+  coerce(raw: string): boolean | undefined {
+    const v = raw.trim().toLowerCase();
+
+    if (["1", "true", "yes", "on"].includes(v)) return true;
+    if (["0", "false", "no", "off"].includes(v)) return false;
+
+    return undefined;
+  }
+}
+
 class CustomField<T> extends Field<T> {
   constructor(
     fallback: T,
@@ -141,6 +155,7 @@ class CustomField<T> extends Field<T> {
 export const num = (fallback: number): NumberField => new NumberField(fallback);
 export const int = (fallback: number): NumberField => new NumberField(fallback).int();
 export const str = (fallback: string): StringField => new StringField(fallback);
+export const bool = (fallback: boolean): BooleanField => new BooleanField(fallback);
 export const nullableStr = (fallback: string | null): NullableStringField =>
   new NullableStringField(fallback);
 export const enumOf = <E extends Record<string, string>>(

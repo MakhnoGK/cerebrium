@@ -14,11 +14,16 @@ import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastruct
 // worth releasing the ~120MB model. Then it exits and the next session respawns
 // it. It is the canonical writer for embeddings; the worker_lease still guards
 // against any overlap with a fallback in-process worker.
+//
+// Under `daemon.resident` it never exits on its own and a supervisor (launchd) owns
+// the lifetime instead. Without a supervisor, resident mode strands a process that
+// nothing will ever restart or reap — `cerebrium-service install` sets both together.
 
 export interface DaemonOptions {
   activeIntervalMs?: number; // poll cadence while there is a backlog
   idleIntervalMs?: number; // poll cadence once the queue is empty
   idleExitMs?: number; // exit after this long with an empty queue
+  resident?: boolean; // never idle-exit; a supervisor owns the lifetime
 }
 
 // The model sustains hundreds of chunks/sec; a dedicated daemon should feed it in
@@ -70,6 +75,7 @@ export async function runDaemon(
   const active = opts.activeIntervalMs ?? ACTIVE_MS;
   const idle = opts.idleIntervalMs ?? IDLE_MS;
   const idleExit = opts.idleExitMs ?? IDLE_EXIT_MS;
+  const resident = opts.resident ?? false;
   const stopped = opts.stopped ?? (() => false);
   const nap = opts.sleepMs ?? sleep;
   const now = opts.nowMs ?? Date.now;
@@ -105,7 +111,7 @@ export async function runDaemon(
     const { state, shouldExit } = nextIdleState(idleState, backlog, now(), idleExit);
     idleState = state;
 
-    if (shouldExit) {
+    if (shouldExit && !resident) {
       return;
     }
 
@@ -168,6 +174,7 @@ async function main(): Promise<void> {
       activeIntervalMs: daemonConfig.activeIntervalMs,
       idleIntervalMs: daemonConfig.idleIntervalMs,
       idleExitMs: daemonConfig.idleExitMs,
+      resident: daemonConfig.resident,
       consolidateIntervalMs: container.resolve(ConsolidationConfig).intervalMs,
     });
   } finally {

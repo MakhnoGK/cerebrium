@@ -112,6 +112,32 @@ describe("runDaemon loop", () => {
     expect(env.queue.embeddingStats().backlog).toBe(0);
   });
 
+  it("should keep running past the idle threshold when resident", async () => {
+    // Given
+    const env = setup();
+    let stop = false;
+    let ticks = 0;
+    let clock = 0;
+
+    // When — the same advancing clock that makes the non-resident loop exit on its
+    // second idle check; only `stopped` ends this one.
+    const p = runDaemon(env.queue, env.worker, {
+      resident: true,
+      stopped: () => stop,
+      idleExitMs: 50,
+      nowMs: () => (clock += 100),
+      sleepMs: () => {
+        if (++ticks >= 3) stop = true;
+
+        return Promise.resolve();
+      },
+    });
+
+    // Then
+    await expect(p).resolves.toBeUndefined();
+    expect(ticks).toBe(3);
+  });
+
   it("should honor an external stop signal", async () => {
     // Given
     const env = setup();
