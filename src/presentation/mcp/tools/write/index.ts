@@ -1,6 +1,11 @@
 import { inject } from "tsyringe";
-import { HintsService } from "@/application/services";
-import { WRITE_MEMORY, type SimilarExisting, type WriteMemory } from "@/application/use-cases";
+import {
+  SESSION_HINTS,
+  WRITE_MEMORY,
+  type SessionHints,
+  type SimilarExisting,
+  type WriteMemory,
+} from "@/application/use-cases";
 import { Envelope } from "@/core/types";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
@@ -18,14 +23,14 @@ type ToolResponse = Envelope & {
 @tool()
 export class WriteTool implements McpTool<Schema, ToolResponse> {
   constructor(
-    private readonly hints: HintsService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
     @inject(WRITE_MEMORY) private readonly write: WriteMemory,
   ) {}
 
   public getMetadata = () => metadata;
 
   public async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { envelope, similar_existing, reconcile, notes } = await this.write.invoke({
       session_id: args.session_id,
       memory_kind: args.memory_kind,

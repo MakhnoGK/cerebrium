@@ -1,6 +1,10 @@
 import { inject } from "tsyringe";
-import { HintsService } from "@/application/services";
-import { LINK_NODES, type LinkNodes } from "@/application/use-cases";
+import {
+  LINK_NODES,
+  SESSION_HINTS,
+  type LinkNodes,
+  type SessionHints,
+} from "@/application/use-cases";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { metadata } from "@/presentation/mcp/tools/link/metadata";
@@ -12,12 +16,12 @@ export class LinkTool implements McpTool<Schema, unknown> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
     @inject(LINK_NODES) private readonly link: LinkNodes,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<unknown> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { notes, ...edge } = await this.link.invoke({
       session_id: args.session_id,
       src: args.src,

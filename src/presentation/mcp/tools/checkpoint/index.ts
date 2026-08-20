@@ -1,6 +1,10 @@
 import { inject } from "tsyringe";
-import { HintsService } from "@/application/services";
-import { RECORD_CHECKPOINT, type RecordCheckpoint } from "@/application/use-cases";
+import {
+  RECORD_CHECKPOINT,
+  SESSION_HINTS,
+  type RecordCheckpoint,
+  type SessionHints,
+} from "@/application/use-cases";
 import { Envelope } from "@/core/types";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
@@ -15,12 +19,12 @@ export class CheckpointTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
     @inject(RECORD_CHECKPOINT) private readonly checkpoint: RecordCheckpoint,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { envelope } = await this.checkpoint.invoke({
       session_id: args.session_id,
       title: args.title,

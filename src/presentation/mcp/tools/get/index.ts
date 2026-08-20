@@ -1,6 +1,10 @@
 import { inject } from "tsyringe";
-import { HintsService } from "@/application/services";
-import { FETCH_NODES, type FetchNodes } from "@/application/use-cases";
+import {
+  FETCH_NODES,
+  SESSION_HINTS,
+  type FetchNodes,
+  type SessionHints,
+} from "@/application/use-cases";
 import { McpTool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { metadata } from "@/presentation/mcp/tools/get/metadata";
@@ -18,12 +22,12 @@ export class GetTool implements McpTool<Schema, GetResponse> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
     @inject(FETCH_NODES) private readonly fetch: FetchNodes,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<GetResponse> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { nodes, not_found } = await this.fetch.invoke({
       ids: args.ids,
       rev: args.rev,

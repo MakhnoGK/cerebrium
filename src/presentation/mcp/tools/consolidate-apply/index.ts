@@ -1,6 +1,10 @@
 import { inject } from "tsyringe";
-import { HintsService } from "@/application/services";
-import { APPLY_CANDIDATE, type ApplyCandidate } from "@/application/use-cases";
+import {
+  APPLY_CANDIDATE,
+  SESSION_HINTS,
+  type ApplyCandidate,
+  type SessionHints,
+} from "@/application/use-cases";
 import { metadata } from "@/presentation/mcp/tools/consolidate-apply/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
@@ -13,12 +17,12 @@ export class ConsolidateApplyTool implements McpTool<Schema, unknown> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
     @inject(APPLY_CANDIDATE) private readonly apply: ApplyCandidate,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<unknown> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const resolved = await this.apply.invoke({
       session_id: args.session_id,
       id: args.id,

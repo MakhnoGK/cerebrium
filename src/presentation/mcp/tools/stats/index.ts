@@ -1,57 +1,32 @@
 import { inject } from "tsyringe";
-import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
-  EMBEDDING_PROVIDER_TOKEN,
-  type EmbeddingProvider,
-} from "@/domain/ports/embedding-provider";
-import { DaemonService, HintsService, ProcessRegistryService } from "@/application/services";
-import { StatsRepo } from "@/db/repositories";
+  SESSION_HINTS,
+  STATS_SNAPSHOT,
+  type SessionHints,
+  type StatsSnapshot,
+} from "@/application/use-cases";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { metadata } from "@/presentation/mcp/tools/stats/metadata";
-import { ConfigRegistry } from "@/infrastructure/config";
+
+type Schema = (typeof metadata)["schema"];
 
 @tool()
-export class StatsTool implements McpTool<(typeof metadata)["schema"], unknown> {
+export class StatsTool implements McpTool<Schema, unknown> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
-    private readonly daemon: DaemonService,
-    private readonly statsRepo: StatsRepo,
-    private readonly processes: ProcessRegistryService,
-    private readonly config: ConfigRegistry,
-    @inject(CLOCK_TOKEN) private readonly clock: Clock,
-    @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
+    @inject(STATS_SNAPSHOT) private readonly snapshot: StatsSnapshot,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const stats = this.statsRepo.techStats(this.clock.now());
-    const hints = args.session_id ? await this.hints.getSessionHints(args.session_id) : [];
+  async invoke(args: ToolArgs<Schema>): Promise<unknown> {
+    const stats = await this.snapshot.invoke({});
+    const { hints } = args.session_id
+      ? await this.sessionHints.invoke({ session_id: args.session_id })
+      : { hints: [] };
 
-    const { ...rest } = stats;
-
-    return {
-      ...rest,
-      drain: {
-        ...stats.drain,
-        provider: `${this.provider.name}@${this.provider.version}`,
-        daemon_alive: this.daemon.isDaemonAlive(),
-        daemon_pid: this.daemon.readDaemonPid(),
-      },
-      // The registry and the ignored-config channel, compact: which processes are up and
-      // whether any variable was set but unusable. Values themselves stay out — an agent
-      // should not pay tokens for the whole config table (`cerebrium-stats` prints it).
-      processes: this.processes.list().map((row) => ({
-        role: row.role,
-        pid: row.pid,
-        alive: row.alive,
-        started_at: row.started_at,
-        config_state: row.config_state,
-      })),
-      config: { ignored: this.config.ignored().map((entry) => entry.envName) },
-      ...(hints.length ? { hints } : {}),
-    };
+    return { ...stats, ...(hints.length ? { hints } : {}) };
   }
 }

@@ -1,6 +1,10 @@
 import { inject } from "tsyringe";
-import { HintsService } from "@/application/services";
-import { LOOKUP_CODE, type LookupCode } from "@/application/use-cases";
+import {
+  LOOKUP_CODE,
+  SESSION_HINTS,
+  type LookupCode,
+  type SessionHints,
+} from "@/application/use-cases";
 import type { SymbolLookup } from "@/core/types";
 import { metadata } from "@/presentation/mcp/tools/code-lookup/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
@@ -19,12 +23,12 @@ export class CodeLookupTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
     @inject(LOOKUP_CODE) private readonly lookup: LookupCode,
   ) {}
 
   async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { symbols } = await this.lookup.invoke({
       name: args.name,
       file: args.file,
