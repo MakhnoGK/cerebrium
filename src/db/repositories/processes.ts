@@ -43,10 +43,23 @@ export class ProcessesRepo extends BaseRepo {
     });
   }
 
+  // A read-only handle never runs migrations, so the inspection CLI can reach a store
+  // whose writer has not started since this table was added. An empty registry is the
+  // honest answer there; failing would break a command documented as safe to run anytime.
   list(): ProcessRow[] {
+    if (!this.exists()) return [];
+
     return this.db
       .prepare("SELECT * FROM processes ORDER BY started_at")
       .all() as unknown as ProcessRow[];
+  }
+
+  private exists(): boolean {
+    return (
+      this.db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'processes'")
+        .get() !== undefined
+    );
   }
 
   retire(ids: string[]): void {
