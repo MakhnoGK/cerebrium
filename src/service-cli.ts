@@ -54,6 +54,22 @@ function domain(): string {
   return `gui/${String(process.getuid?.() ?? 0)}`;
 }
 
+function isLabelRegistered(): boolean {
+  return launchctl(["print", `${domain()}/${LAUNCH_AGENT_LABEL}`]).ok;
+}
+
+function waitForLabelGone(attempts = 50, pauseMs = 100): boolean {
+  for (let i = 0; i < attempts; i++) {
+    if (!isLabelRegistered()) return true;
+
+    // Deliberately synchronous: this is a short-lived CLI doing one thing in order, and
+    // an async pause here would only make the sequencing harder to read.
+    execFileSync("/bin/sleep", [String(pauseMs / 1000)], { stdio: "ignore" });
+  }
+
+  return !isLabelRegistered();
+}
+
 function install(): number {
   if (process.platform !== "darwin") {
     process.stderr.write(`launchd is macOS-only; this platform is ${process.platform}\n`);
@@ -80,13 +96,20 @@ function install(): number {
   writeFileSync(plistPath, renderLaunchAgent(spec), "utf8");
 
   // Idempotent: an existing agent must be booted out before the new plist can load,
-  // and a first install has nothing to remove.
+  // and a first install has nothing to remove. `bootout` returns before launchd has
+  // finished tearing the job down, and bootstrapping into that window fails with
+  // "Bootstrap failed: 5: Input/output error" — so wait for the label to disappear.
   launchctl(["bootout", `${domain()}/${LAUNCH_AGENT_LABEL}`]);
+  waitForLabelGone();
 
   const loaded = launchctl(["bootstrap", domain(), plistPath]);
 
   if (!loaded.ok) {
-    process.stderr.write(`wrote ${plistPath} but launchctl bootstrap failed: ${loaded.output}\n`);
+    process.stderr.write(
+      `wrote ${plistPath} but launchctl bootstrap failed: ${loaded.output}\n` +
+        `the plist and link are in place, so \`launchctl bootstrap ${domain()} ${plistPath}\` ` +
+        `will load it once launchd settles\n`,
+    );
 
     return 1;
   }

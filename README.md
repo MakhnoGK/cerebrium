@@ -444,6 +444,13 @@ falls back to an in-process worker; the lease guarantees the two never double-wr
 **Always-on mode.** `cerebrium-service install` writes a launchd user agent that runs
 the daemon in resident mode (`MEMORY_DAEMON_RESIDENT=1`), so it starts at login, is
 restarted on crash, and holds the model instead of reloading it once per burst of work.
+The plist runs `$CEREBRIUM_HOME/bin/daemon.js`, a link to the built bundle, so the agent
+carries no working-tree path — re-point that link to move the agent to another build.
+`cerebrium-service status` flags a link whose target no longer resolves, since launchd
+will otherwise keep retrying a dangling path silently. A resident daemon that finds the
+database owned by another one waits for it to exit and then takes over, rather than
+exiting: with `KeepAlive` set, exiting would mean being respawned every few seconds
+forever.
 The two settings go together: `KeepAlive` plus idle-exit would respawn the daemon every
 five minutes forever. Without a supervisor the auto-spawn posture above is the right one,
 which is why resident mode defaults to off. It also closes a real gap — `ensureDaemon`
