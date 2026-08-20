@@ -470,6 +470,17 @@ reads stay in-process. Measured on an 868MB store: a trivial call made while a h
 is in flight went from 639ms to 2ms, and three heavy reads run 2.4x faster across three
 workers than in sequence. A single call is no faster — the pool buys concurrency, not speed.
 
+**Pagination.** Paged reads use a keyset cursor, never an offset. The daemon writes while
+clients read, so an offset skips a row whenever something is inserted ahead of the page
+boundary and repeats one when something is removed. A cursor is opaque base64url carrying
+the protocol version and the ordering it was issued against, validated on the way back in;
+one this build did not issue is refused rather than silently restarting from the top, which
+would make a client loop forever. Loop until `next_cursor` is absent rather than until a
+page comes back short — a full page can still be the last one. This requires the underlying
+order to be **total**: the review queue sorts by `score DESC, detected_at ASC, id ASC`, and
+without that last tiebreaker a walk of nine candidates sharing a score and a timestamp
+returns six.
+
 **Local socket.** The daemon listens on `$CEREBRIUM_HOME/daemon.sock` (mode `0600`;
 owner-only permissions are the whole auth model on a single-user desktop) and speaks
 newline-delimited JSON carrying JSON-RPC 2.0 — the same framing as MCP stdio. Two methods
@@ -513,7 +524,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `source_register` | Register/update an external mirror source for this deployment (`id`, `kind`, optional `project`/`freshness_hours`/`recipe`). Stores no credentials; the registry is empty by default. |
 | `mirror_upsert` | Upsert curated external records into `mirror` nodes for a registered source. Idempotent by `(source, native_id)`; supply decision-worthy records only, never bulk. Compact count envelope + affected node ids. |
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
-| `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. |
+| `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. Paged: pass `page_size` and feed `next_cursor` back until it is absent (`limit` alone still returns one unpaged batch). |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
 | `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), reranker usage (eligible vs actually reranked searches, candidates scored), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
 
