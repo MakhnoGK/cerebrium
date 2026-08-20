@@ -1,5 +1,5 @@
 import type { DependencyContainer } from "tsyringe";
-import { STATS_SNAPSHOT, type StatsSnapshot } from "@/application/use-cases";
+import { OPERATOR_SNAPSHOT, type OperatorSnapshot } from "@/application/use-cases";
 import { PROTOCOL_VERSION } from "@/core/rpc";
 import type { RpcMethod } from "@/presentation/rpc/server";
 
@@ -20,8 +20,10 @@ export function createDaemonMethods(
     // reports the mismatch instead of failing later as an unknown method.
     initialize: () => Promise.resolve({ protocol: PROTOCOL_VERSION, pid: identity.pid }),
 
+    // The operator payload, not the compact one the agent-facing `stats` tool returns:
+    // this is the surface the CLI and the GUI render.
     status: async () => {
-      const snapshot = await container.resolve<StatsSnapshot>(STATS_SNAPSHOT).invoke({});
+      const snapshot = await container.resolve<OperatorSnapshot>(OPERATOR_SNAPSHOT).invoke({});
 
       return { ...snapshot, daemon: { ...identity.model(), pid: identity.pid } };
     },
