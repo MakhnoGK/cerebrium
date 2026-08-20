@@ -470,6 +470,21 @@ reads stay in-process. Measured on an 868MB store: a trivial call made while a h
 is in flight went from 639ms to 2ms, and three heavy reads run 2.4x faster across three
 workers than in sequence. A single call is no faster — the pool buys concurrency, not speed.
 
+**Proxy mode.** On startup the MCP server tries the daemon's socket with a short handshake
+(750 ms; a stdio host that is slow to start is as bad as one that fails). If the daemon
+answers, the server holds **no database at all** — the same use-case tokens resolve to
+socket calls — and it does **not** apply its own session guard or audit row, because the
+daemon's pipeline already did both and doing it twice would validate twice and log every
+call twice. If the daemon does not answer, or speaks a protocol this build does not, the
+server degrades to resolving everything in-process exactly as it did before a transport
+existed; the two reasons are reported differently, because an absent daemon is ordinary
+while a version mismatch means a resident daemon needs restarting.
+
+A daemon that dies mid-session fails the in-flight call and reconnects on the next one —
+it does not silently degrade. The error says whether repeating the call is safe: a read may
+be retried, while a write may already have been applied and repeating it could duplicate
+the change.
+
 **Pagination.** Paged reads use a keyset cursor, never an offset. The daemon writes while
 clients read, so an offset skips a row whenever something is inserted ahead of the page
 boundary and repeats one when something is removed. A cursor is opaque base64url carrying

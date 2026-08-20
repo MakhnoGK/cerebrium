@@ -9,7 +9,7 @@ import {
   type SearchMemory,
   type WriteMemory,
 } from "@/application/use-cases";
-import { RpcUnavailableError } from "@/runtime/rpc-client";
+import { DaemonUnreachableError } from "@/runtime/remote-kernel";
 import { RpcServer, surfaceMethods } from "@/presentation/rpc";
 import { buildContainer, KERNEL_TOKENS } from "@/container";
 import { StaticConfigSource } from "@/infrastructure/config";
@@ -128,14 +128,24 @@ describe("Remote kernel", () => {
     expect(seen).toEqual(["write_memory"]);
   });
 
-  it("should surface an absent daemon as unavailable, so a caller can fall back", async () => {
+  it("should tell a read caller it is safe to retry when the daemon vanishes", async () => {
     // Given — nothing listening.
     const search = remote().resolve<SearchMemory>(SEARCH_MEMORY);
 
-    // When / Then
-    await expect(search.invoke({ query: "x", limit: 1 })).rejects.toBeInstanceOf(
-      RpcUnavailableError,
+    // When / Then — a raw `connect ENOENT` is not something an agent can act on.
+    await expect(search.invoke({ query: "x", limit: 1 })).rejects.toThrow(
+      /This is a read: retry it/,
     );
+  });
+
+  it("should warn a write caller that repeating the call could duplicate the change", async () => {
+    // Given — nothing listening, and a write that may or may not have landed.
+    const write = remote().resolve<WriteMemory>(WRITE_MEMORY);
+
+    // When / Then
+    await expect(
+      write.invoke({ session_id: "01JJJJJJJJJJJJJJJJJJJJJJJJ" } as never),
+    ).rejects.toThrow(/may or may not have been applied/);
   });
 
   it("should pass an error the daemon reported back to the caller", async () => {
@@ -149,6 +159,6 @@ describe("Remote kernel", () => {
     const failure = search.invoke({ query: "x", limit: 1 });
 
     await expect(failure).rejects.toThrow(/Unknown session_id/);
-    await expect(failure).rejects.not.toBeInstanceOf(RpcUnavailableError);
+    await expect(failure).rejects.not.toBeInstanceOf(DaemonUnreachableError);
   });
 });
