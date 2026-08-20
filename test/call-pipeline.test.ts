@@ -25,6 +25,14 @@ function events(): { action: string; session_id: string; node_id: string | null 
   }[];
 }
 
+function useCount(id: string): number {
+  const row = env.db.prepare("SELECT use_count FROM nodes WHERE id = ?").get(id) as {
+    use_count: number;
+  };
+
+  return row.use_count;
+}
+
 const write = (title: string): Record<string, unknown> => ({
   session_id: session,
   parent_node_id: null,
@@ -175,6 +183,38 @@ describe("Call pipeline invariants", () => {
 
     // Then — provenance must not depend on which thread served the call.
     expect(events().filter((e) => e.action === "search")).toHaveLength(1);
+  });
+
+  it("should record the use a dispatched `get` could not write itself", async () => {
+    // Given — a read worker holds a read-only handle, so the bump that `get` owes its
+    // nodes has to happen on this side of the dispatch or not at all.
+    const written = (await pipeline.invoke(container, "write_memory", write("Fetched later"))) as {
+      envelope: { id: string };
+    };
+    const id = written.envelope.id;
+    pipeline.useReadDispatcher((_name, args) =>
+      Promise.resolve({ nodes: [{ id }], not_found: [], used: (args as { ids: string[] }).ids }),
+    );
+
+    // When
+    await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id] });
+
+    // Then
+    expect(useCount(id)).toBe(1);
+  });
+
+  it("should not double-count a `get` that ran in-process", async () => {
+    // Given — no dispatcher, so the use case runs here and records the use itself.
+    const written = (await pipeline.invoke(container, "write_memory", write("Fetched here"))) as {
+      envelope: { id: string };
+    };
+    const id = written.envelope.id;
+
+    // When
+    await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id] });
+
+    // Then
+    expect(useCount(id)).toBe(1);
   });
 
   it("should log nothing for a call that carries no session to attribute it to", async () => {

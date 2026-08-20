@@ -15,6 +15,9 @@ export interface FetchNodesArgs {
 export interface FetchNodesResult {
   nodes: unknown[];
   not_found: string[];
+  // The ids that resolved, for a caller that has to record the use itself because this
+  // ran somewhere that cannot write.
+  used: string[];
 }
 
 export type FetchNodes = UseCase<FetchNodesArgs, FetchNodesResult>;

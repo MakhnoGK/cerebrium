@@ -1,4 +1,6 @@
 import { inject, injectable, type DependencyContainer } from "tsyringe";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
 import { ActivityMonitor } from "@/application/services";
 import {
   CALL_SURFACE,
@@ -42,6 +44,8 @@ export class CallPipeline {
   constructor(
     @inject(TOUCH_SESSION) private readonly sessions: TouchSession,
     @inject(RECORD_EVENTS) private readonly events: RecordEvents,
+    @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly activity: ActivityMonitor,
   ) {}
 
@@ -79,14 +83,28 @@ export class CallPipeline {
     }
   }
 
-  private run(container: DependencyContainer, name: CallName, args: unknown): Promise<unknown> {
+  private async run(
+    container: DependencyContainer,
+    name: CallName,
+    args: unknown,
+  ): Promise<unknown> {
     const read = readNameOf(name);
 
-    if (read !== null && this.reads !== undefined) {
-      return this.reads(read, args);
+    if (read === null || this.reads === undefined) {
+      return await container
+        .resolve<UseCase<unknown, unknown>>(CALL_SURFACE[name].token)
+        .invoke(args);
     }
 
-    return container.resolve<UseCase<unknown, unknown>>(CALL_SURFACE[name].token).invoke(args);
+    const result = await this.reads(read, args);
+
+    // A pooled read runs on a read-only handle, so the use accounting `get` owes its
+    // nodes is settled here instead.
+    if (read === "fetch_nodes") {
+      this.uses.recordUse(usedIds(result), this.clock.now());
+    }
+
+    return result;
   }
 
   // `events.session_id` is NOT NULL, so a call that cannot be attributed logs nothing —
@@ -112,6 +130,14 @@ export class CallPipeline {
       ],
     });
   }
+}
+
+function usedIds(result: unknown): string[] {
+  if (typeof result !== "object" || result === null) return [];
+
+  const used = (result as { used?: unknown }).used;
+
+  return Array.isArray(used) ? used.filter((id): id is string => typeof id === "string") : [];
 }
 
 function sessionOf(args: unknown): string | null {

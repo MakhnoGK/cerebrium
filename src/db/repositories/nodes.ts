@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { inject, injectable } from "tsyringe";
+import type { UseRecorder } from "@/domain/ports/use-recorder";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
@@ -13,7 +14,7 @@ import { EdgeType } from "@/core/vocab";
 // live here, explicit in SQL. Edge writes are delegated to EdgesRepo so the graph
 // stays a single owner.
 @injectable()
-export class NodesRepo extends BaseRepo {
+export class NodesRepo extends BaseRepo implements UseRecorder {
   constructor(
     @inject(DB_TOKEN) db: Database.Database,
     private readonly edges: EdgesRepo,
@@ -421,5 +422,13 @@ export class NodesRepo extends BaseRepo {
         e.weight,
       );
     }
+  }
+}
+
+// What a host with a read-only handle gets. A read-pool worker cannot perform the one
+// write a read makes, so the call that dispatched the read makes it on the writer.
+export class NoUseRecorder implements UseRecorder {
+  recordUse(): void {
+    return;
   }
 }

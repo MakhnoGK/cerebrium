@@ -5,11 +5,13 @@ import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provi
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
+import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { ConsolidationRepo } from "@/db/repositories/consolidation";
+import { NodesRepo, NoUseRecorder } from "@/db/repositories/nodes";
 import {
   ConsolidationConfig,
   DaemonConfig,
@@ -62,6 +64,7 @@ export const KERNEL_TOKENS = {
   embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
   consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
   consolidationReporter: CONSOLIDATION_REPORTER_TOKEN,
+  useRecorder: USE_RECORDER_TOKEN,
 } as const;
 
 export function buildContainer({
@@ -165,5 +168,13 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
 
   target.register(CONSOLIDATION_REPORTER_TOKEN, {
     useToken: ConsolidationRepo,
+  });
+
+  target.register(USE_RECORDER_TOKEN, {
+    useFactory: instanceCachingFactory((c) =>
+      // `get` bumps use_count, which the read-only roles cannot do. They record nothing
+      // and the caller that dispatched the read writes it — see CallPipeline.
+      role === "cli" || role === "reader" ? new NoUseRecorder() : c.resolve(NodesRepo),
+    ),
   });
 }
