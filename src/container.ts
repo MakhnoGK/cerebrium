@@ -29,7 +29,7 @@ import { createProvider } from "@/embeddings";
 // process drains the queue in large batches, whether it may write at all — never which
 // tokens exist. Every role registers the same set, so a token cannot go missing in one
 // host and be present in another.
-export type HostRole = "server" | "daemon" | "cli";
+export type HostRole = "server" | "daemon" | "cli" | "reader";
 
 export interface ContainerOptions {
   role: HostRole;
@@ -98,7 +98,9 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
     useFactory: instanceCachingFactory((c) => {
       const { path } = c.resolve(DatabaseConfig);
 
-      return role === "cli" ? openDatabaseReadonly(path) : openDatabase(path);
+      // `reader` is a read pool worker: read-only so a use case that writes fails here
+      // rather than racing the one writer.
+      return role === "cli" || role === "reader" ? openDatabaseReadonly(path) : openDatabase(path);
     }),
   });
 
