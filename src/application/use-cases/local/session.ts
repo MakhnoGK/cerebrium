@@ -1,20 +1,27 @@
 import { ulid } from "ulid";
 import {
   EmbeddingService,
+  EventLogService,
   HintsService,
   MemoryService,
   SessionService,
 } from "@/application/services";
 import {
+  RECORD_EVENTS,
   SESSION_HINTS,
   START_SESSION,
+  TOUCH_SESSION,
   useCase,
+  type RecordEvents,
+  type RecordEventsArgs,
   type SessionHints,
   type SessionHintsArgs,
   type SessionHintsResult,
   type StartSession,
   type StartSessionArgs,
   type StartSessionResult,
+  type TouchSession,
+  type TouchSessionArgs,
 } from "@/application/use-cases/contracts";
 
 @useCase(SESSION_HINTS)
@@ -45,5 +52,27 @@ export class LocalStartSession implements StartSession {
       working_set: this.memory.getWorkingSet(args.project ?? undefined),
       notes: this.embeddings.getEmbeddingNotes(),
     });
+  }
+}
+
+@useCase(TOUCH_SESSION)
+export class LocalTouchSession implements TouchSession {
+  constructor(private readonly sessions: SessionService) {}
+
+  invoke(args: TouchSessionArgs): Promise<Record<string, never>> {
+    this.sessions.requireSession(args.session_id, new Date().toISOString());
+
+    return Promise.resolve({});
+  }
+}
+
+@useCase(RECORD_EVENTS)
+export class LocalRecordEvents implements RecordEvents {
+  constructor(private readonly eventLog: EventLogService) {}
+
+  invoke(args: RecordEventsArgs): Promise<Record<string, never>> {
+    this.eventLog.record(args.events);
+
+    return Promise.resolve({});
   }
 }

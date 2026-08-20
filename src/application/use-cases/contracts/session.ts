@@ -31,3 +31,13 @@ export interface StartSessionResult {
 export type StartSession = UseCase<StartSessionArgs, StartSessionResult>;
 
 export const START_SESSION = useCaseToken<StartSessionArgs, StartSessionResult>("StartSession");
+
+export interface TouchSessionArgs {
+  session_id: string;
+}
+
+// The guard every tool call passes through: it fails an unknown session id and stamps a
+// known one as still active.
+export type TouchSession = UseCase<TouchSessionArgs, Record<string, never>>;
+
+export const TOUCH_SESSION = useCaseToken<TouchSessionArgs, Record<string, never>>("TouchSession");

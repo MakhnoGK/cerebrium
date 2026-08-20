@@ -1,5 +1,5 @@
 import { ZodRawShape } from "zod";
-import { EventLogService } from "@/application/services";
+import type { RecordEvents } from "@/application/use-cases";
 import type { EventDraft } from "@/core/types";
 import type { EventAction } from "@/core/vocab";
 import { actionForTool } from "@/presentation/mcp/adapters/tool-action";
@@ -14,7 +14,7 @@ export class AuditedTool<Schema extends ZodRawShape, Response> implements McpToo
 > {
   constructor(
     private readonly tool: McpTool<Schema, Response>,
-    private readonly eventLog: EventLogService,
+    private readonly eventLog: RecordEvents,
   ) {}
 
   public getMetadata() {
@@ -27,13 +27,13 @@ export class AuditedTool<Schema extends ZodRawShape, Response> implements McpToo
     try {
       const result = await this.tool.invoke(args);
 
-      this.eventLog.record(this.draftsFor(action, args, result));
+      await this.eventLog.invoke({ events: this.draftsFor(action, args, result) });
 
       return result;
     } catch (error) {
-      this.eventLog.record(
-        this.toDrafts(action, args, [{ detail: { error: (error as Error).message } }]),
-      );
+      await this.eventLog.invoke({
+        events: this.toDrafts(action, args, [{ detail: { error: (error as Error).message } }]),
+      });
 
       throw error;
     }

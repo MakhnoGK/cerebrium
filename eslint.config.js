@@ -143,5 +143,31 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["src/presentation/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@/db/*",
+                "@/application/services/*",
+                "@/application/services",
+                "@/application/retrieval",
+                "@/application/retrieval/*",
+                "@/code/*",
+                "@/embeddings/*",
+                "@/consolidation/*",
+              ],
+              message:
+                "delivery may not reach the kernel directly — resolve a use-case token from @/application/use-cases instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettierRecommended,
 );

@@ -2,9 +2,14 @@ import "@/presentation/mcp/tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport";
-import { injectable, injectAll } from "tsyringe";
+import { inject, injectable, injectAll } from "tsyringe";
 import { ZodRawShape } from "zod";
-import { EventLogService, SessionService } from "@/application/services";
+import {
+  RECORD_EVENTS,
+  TOUCH_SESSION,
+  type RecordEvents,
+  type TouchSession,
+} from "@/application/use-cases";
 import { ClientIdentity } from "@/runtime/client-identity";
 import { AuditedTool, SessionGuardedTool, ToolOutputAdapter } from "@/presentation/mcp/adapters";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
@@ -17,8 +22,8 @@ export class Server {
 
   constructor(
     @injectAll(TOOL_TOKEN) tools: McpTool<ZodRawShape, unknown>[],
-    eventLog: EventLogService,
-    sessions: SessionService,
+    @inject(RECORD_EVENTS) eventLog: RecordEvents,
+    @inject(TOUCH_SESSION) sessions: TouchSession,
     identity: ClientIdentity,
   ) {
     this._server = new McpServer({ name: "cerebrium", version: "0.1.0" });
