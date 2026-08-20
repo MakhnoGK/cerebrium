@@ -1024,7 +1024,7 @@ scenarios after a restart. The command intentionally has no threshold/pass-fail 
 scenario evaluation remains a separate manual step.
 
 **More than one host at once** means more than one server process on one SQLite file. That
-is allowed — see invariant #1 in `CLAUDE.md` — and measured: two servers doing 120
+is allowed — see invariant #1 in `CODEX.md` — and measured: two servers doing 120
 interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
 landed and searchable.
 
