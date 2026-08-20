@@ -1,10 +1,12 @@
 import { inject, injectable, type DependencyContainer } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
-import { ActivityMonitor } from "@/application/services";
+import { CapabilityDeniedError } from "@/application/errors";
+import { ActivityMonitor, PrincipalPolicyService } from "@/application/services";
 import {
   CALL_SURFACE,
   callAction,
+  callCapability,
   isAudited,
   isCallName,
   readNameOf,
@@ -17,6 +19,7 @@ import {
   type UseCase,
 } from "@/application/use-cases";
 import { UNKNOWN_WRITER, type Writer } from "@/runtime/client-identity";
+import { Posture } from "@/core/vocab";
 
 // Two invariants used to live only in the MCP adapters: a call carrying a session_id
 // validates it first, and every call appends an `events` row (invariant #7). A second
@@ -48,6 +51,7 @@ export class CallPipeline {
     @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly activity: ActivityMonitor,
+    private readonly policy: PrincipalPolicyService,
   ) {}
 
   useReadDispatcher(dispatch: ReadDispatcher | undefined): void {
@@ -76,17 +80,33 @@ export class CallPipeline {
       await this.sessions.invoke({ session_id: session });
     }
 
+    const principal = this.policy.principalOf(writer.client);
+
     try {
+      const review = this.authorize(name, principal);
       const result = await this.run(container, name, args, writer);
 
-      await this.record(name, session, result, null);
+      await this.record(name, session, result, null, review);
 
       return result;
     } catch (error) {
-      await this.record(name, session, null, error as Error);
+      await this.record(name, session, null, error as Error, false);
 
       throw error;
     }
+  }
+
+  // `off` refuses before the call runs. `suggest` lets it through and says so, which is
+  // what marks a writer as suspect without dropping what it had to say.
+  private authorize(name: CallName, principal: string): boolean {
+    const capability = callCapability(name);
+    const posture = this.policy.postureFor(principal, capability);
+
+    if (posture === Posture.OFF) {
+      throw new CapabilityDeniedError(principal, capability, name);
+    }
+
+    return posture === Posture.SUGGEST;
   }
 
   private async run(
@@ -121,6 +141,7 @@ export class CallPipeline {
     session: string | null,
     result: unknown,
     error: Error | null,
+    review: boolean,
   ): Promise<void> {
     // `start_session` mints the very session it is attributed to, so its id is in the
     // result rather than the arguments.
@@ -136,7 +157,7 @@ export class CallPipeline {
           action: callAction(name),
           session_id: attributed,
           ...(error === null ? nodeOf(result) : {}),
-          detail: error === null ? null : { error: error.message },
+          detail: detailOf(error, review),
         },
       ],
     });
@@ -150,6 +171,15 @@ function stamped(name: CallName, args: unknown, writer: Writer): unknown {
   if (name !== "start_session") return args;
 
   return { ...(typeof args === "object" && args !== null ? args : {}), client: writer };
+}
+
+function detailOf(error: Error | null, review: boolean): Record<string, unknown> | null {
+  const detail = {
+    ...(error === null ? {} : { error: error.message }),
+    ...(review ? { review: true } : {}),
+  };
+
+  return Object.keys(detail).length ? detail : null;
 }
 
 function usedIds(result: unknown): string[] {

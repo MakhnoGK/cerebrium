@@ -115,6 +115,22 @@ export function typeAllowedForKind(kind: WritableKind, type: string): boolean {
 // collide with a real client name from an MCP handshake.
 export const UNATTRIBUTED_PRINCIPAL = "(unattributed)";
 
+// What a call needs permission to do. Orthogonal to read/write, which says where a call
+// runs; this says what it is allowed to touch.
+export enum Capability {
+  READ = "read",
+  WRITE = "write",
+  CONSOLIDATE = "consolidate",
+  ADMIN = "admin",
+}
+
+// The principal a writer resolves to. Takes the client name rather than the writer object
+// so both the repository and the policy layer share one rule without core depending
+// outward.
+export function principalIdOf(client: string | null): string {
+  return client ?? UNATTRIBUTED_PRINCIPAL;
+}
+
 export enum PrincipalKind {
   AGENT = "agent",
   SYSTEM = "system",

@@ -1,3 +1,4 @@
+export { CapabilityDeniedError } from "@/application/errors/capability";
 export {
   CodeRootsNotConfiguredError,
   RepositoryNotConfiguredError,
