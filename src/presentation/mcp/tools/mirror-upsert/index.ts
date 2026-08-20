@@ -1,39 +1,28 @@
 import { inject } from "tsyringe";
-import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
-import { EmbeddingService, HintsService } from "@/application/services";
-import { MirrorRepo } from "@/db/repositories";
+import { HintsService } from "@/application/services";
+import { UPSERT_MIRRORS, type UpsertMirrors } from "@/application/use-cases";
 import { McpTool, tool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { metadata } from "@/presentation/mcp/tools/mirror-upsert/metadata";
 
+type Schema = (typeof metadata)["schema"];
+
 @tool()
-export class MirrorUpsertTool implements McpTool<(typeof metadata)["schema"], unknown> {
+export class MirrorUpsertTool implements McpTool<Schema, unknown> {
   public getMetadata = () => metadata;
 
   constructor(
     private readonly hints: HintsService,
-    private readonly embeddings: EmbeddingService,
-    private readonly mirror: MirrorRepo,
-    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(UPSERT_MIRRORS) private readonly upsert: UpsertMirrors,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
+  async invoke(args: ToolArgs<Schema>): Promise<unknown> {
     const hints = await this.hints.getSessionHints(args.session_id);
-    const source = this.mirror.getSource(args.source_id);
+    const { result, notes } = await this.upsert.invoke({
+      session_id: args.session_id,
+      source_id: args.source_id,
+      items: args.items,
+    });
 
-    if (!source) {
-      throw new Error(
-        `source '${args.source_id}' is not registered. Register it first with \`source_register\`.`,
-      );
-    }
-
-    if (!source.enabled) {
-      throw new Error(
-        `source '${args.source_id}' is disabled. Re-enable it with \`source_register\` (enabled:true) before mirroring.`,
-      );
-    }
-
-    const result = this.mirror.upsertMirrors(source, args.items, args.session_id, this.clock.now());
-    const notes = this.embeddings.getEmbeddingNotes();
     const out: Record<string, unknown> = { ...result };
 
     if (hints.length) out.hints = hints;
