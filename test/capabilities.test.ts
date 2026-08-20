@@ -5,6 +5,7 @@ import { CapabilityDeniedError } from "@/application/errors";
 import { CALL_SURFACE, callCapability, type CallName } from "@/application/use-cases";
 import { Capability, MemoryKind, Posture, UNATTRIBUTED_PRINCIPAL } from "@/core/vocab";
 import {
+  NEUTRAL_WEIGHT,
   OPEN_PROFILE,
   PrincipalsConfig,
   StaticConfigSource,
@@ -19,7 +20,7 @@ function profile(
   capabilities: PrincipalProfile["capabilities"],
   quota: PrincipalQuota = {},
 ): PrincipalProfile {
-  return { capabilities, quota };
+  return { capabilities, quota, weight: NEUTRAL_WEIGHT };
 }
 
 // The pipeline reads policy through PrincipalsConfig, so a test states the policy by
@@ -227,6 +228,7 @@ describe("Principal policy config", () => {
     expect(config.profiles["codex-mcp-client"]).toEqual({
       capabilities: { write: Posture.OFF },
       quota: {},
+      weight: NEUTRAL_WEIGHT,
     });
   });
 

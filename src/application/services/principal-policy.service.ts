@@ -1,6 +1,7 @@
 import { injectable } from "tsyringe";
 import { Capability, Posture, principalIdOf } from "@/core/vocab";
 import {
+  NEUTRAL_WEIGHT,
   PrincipalsConfig,
   type PrincipalProfile,
   type PrincipalQuota,
@@ -31,5 +32,18 @@ export class PrincipalPolicyService {
   // default, so raising one limit for a writer does not silently inherit the other.
   quotaFor(principal: string): PrincipalQuota {
     return this.config.profiles[principal]?.quota ?? this.config.default.quota;
+  }
+
+  weightFor(principal: string): number {
+    return this.config.profiles[principal]?.weight ?? this.config.default.weight;
+  }
+
+  // False for a deployment that weights nobody, which is what lets retrieval skip the
+  // node-to-principal lookup entirely instead of paying for a no-op on every search.
+  hasWeights(): boolean {
+    return (
+      this.config.default.weight !== NEUTRAL_WEIGHT ||
+      Object.values(this.config.profiles).some((profile) => profile.weight !== NEUTRAL_WEIGHT)
+    );
   }
 }

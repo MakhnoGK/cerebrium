@@ -19,6 +19,7 @@ export {
   RetrievalConfig,
 } from "@/infrastructure/config/sections/runtime.config";
 export {
+  NEUTRAL_WEIGHT,
   OPEN_PROFILE,
   PrincipalsConfig,
   type PrincipalProfile,

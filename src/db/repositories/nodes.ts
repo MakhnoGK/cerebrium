@@ -330,6 +330,25 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // The retrieval-outcome signal: an agent spent tokens fetching these nodes. Deliberately
   // does not touch the latest revision — usage is not an edit, and `updated` orders the
   // working set and breaks search ties.
+  // Authored nodes only. A code mirror's session is whichever run indexed it, so
+  // attributing it to that run's principal would weight derived rows by who happened to
+  // refresh the index.
+  principalsOf(ids: string[]): Map<string, string> {
+    if (!ids.length) return new Map();
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT n.id AS id, s.principal_id AS principal
+           FROM nodes n JOIN sessions s ON s.id = n.created_by_session
+          WHERE n.id IN (${ph}) AND n.memory_kind IN ('semantic','episodic')
+            AND s.principal_id IS NOT NULL`,
+      )
+      .all(...ids) as { id: string; principal: string }[];
+
+    return new Map(rows.map((row) => [row.id, row.principal]));
+  }
+
   recordUse(ids: string[], ts: string): void {
     if (!ids.length) return;
 

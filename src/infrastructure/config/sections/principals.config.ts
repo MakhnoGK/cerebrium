@@ -7,6 +7,9 @@ export interface PrincipalProfile {
   capabilities: Partial<Record<Capability, Posture>>;
   // Sliding-window ceilings. An absent limit is no limit; `windowMs` applies to both.
   quota: PrincipalQuota;
+  // Multiplies this principal's authored nodes at read time. 1 is neutral; 0 revokes,
+  // which hides them from retrieval without deleting or invalidating anything.
+  weight: number;
 }
 
 export interface PrincipalQuota {
@@ -15,7 +18,13 @@ export interface PrincipalQuota {
   writes?: number;
 }
 
-export const OPEN_PROFILE: PrincipalProfile = { capabilities: {}, quota: {} };
+export const NEUTRAL_WEIGHT = 1;
+
+export const OPEN_PROFILE: PrincipalProfile = {
+  capabilities: {},
+  quota: {},
+  weight: NEUTRAL_WEIGHT,
+};
 
 // Per-principal policy, keyed by the client name the MCP handshake reports. It lives in
 // config rather than in the store on purpose: the call surface is what principals reach,
@@ -73,9 +82,13 @@ function coerce(value: unknown): PrincipalProfile | undefined {
 
   if (quota === undefined) return undefined;
 
+  const weight = coerceWeight((value as { weight?: unknown }).weight);
+
+  if (weight === undefined) return undefined;
+
   const raw = (value as { capabilities?: unknown }).capabilities;
 
-  if (raw === undefined) return { capabilities: {}, quota };
+  if (raw === undefined) return { capabilities: {}, quota, weight };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
 
   const capabilities: Partial<Record<Capability, Posture>> = {};
@@ -86,7 +99,17 @@ function coerce(value: unknown): PrincipalProfile | undefined {
     capabilities[name] = posture;
   }
 
-  return { capabilities, quota };
+  return { capabilities, quota, weight };
+}
+
+function coerceWeight(value: unknown): number | undefined {
+  if (value === undefined) return NEUTRAL_WEIGHT;
+
+  // An upper bound because a mistyped 100 would not down-weight anything, it would bury
+  // every other writer in the store.
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10
+    ? value
+    : undefined;
 }
 
 function coerceQuota(value: unknown): PrincipalQuota | undefined {

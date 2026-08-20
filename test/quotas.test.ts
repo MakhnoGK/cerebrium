@@ -5,6 +5,7 @@ import { QuotaExceededError } from "@/application/errors";
 import { PrincipalQuotaService } from "@/application/services";
 import { Capability, MemoryKind, Posture } from "@/core/vocab";
 import {
+  NEUTRAL_WEIGHT,
   OPEN_PROFILE,
   PrincipalsConfig,
   StaticConfigSource,
@@ -16,7 +17,7 @@ import { setup, type TestEnv } from "@test/helpers";
 let env: TestEnv;
 
 function quotaProfile(quota: PrincipalQuota): PrincipalProfile {
-  return { capabilities: {}, quota };
+  return { capabilities: {}, quota, weight: NEUTRAL_WEIGHT };
 }
 
 function pipelineWith(profiles: Record<string, PrincipalProfile>, fallback = OPEN_PROFILE) {
@@ -193,6 +194,7 @@ describe("Quota config", () => {
     expect(config.profiles["codex-mcp-client"]).toEqual({
       capabilities: { write: Posture.SUGGEST },
       quota: { writes: 20 },
+      weight: NEUTRAL_WEIGHT,
     });
   });
 
