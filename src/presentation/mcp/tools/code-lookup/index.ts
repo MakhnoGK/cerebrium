@@ -30,6 +30,7 @@ export class CodeLookupTool implements McpTool<Schema, ToolResponse> {
   async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
     const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { symbols } = await this.lookup.invoke({
+      session_id: args.session_id,
       name: args.name,
       file: args.file,
       repo: args.repo,

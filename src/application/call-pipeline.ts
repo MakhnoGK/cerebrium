@@ -1,6 +1,7 @@
 import { inject, injectable, type DependencyContainer } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
+import { auditDetail } from "@/application/audit-detail";
 import { CapabilityDeniedError } from "@/application/errors";
 import {
   ActivityMonitor,
@@ -91,11 +92,11 @@ export class CallPipeline {
       const review = this.authorize(name, principal);
       const result = await this.run(container, name, args, writer);
 
-      await this.record(name, session, result, null, review);
+      await this.record(name, session, result, null, review, args);
 
       return result;
     } catch (error) {
-      await this.record(name, session, null, error as Error, false);
+      await this.record(name, session, null, error as Error, false, args);
 
       throw error;
     }
@@ -154,6 +155,7 @@ export class CallPipeline {
     result: unknown,
     error: Error | null,
     review: boolean,
+    args: unknown,
   ): Promise<void> {
     // `start_session` mints the very session it is attributed to, so its id is in the
     // result rather than the arguments.
@@ -169,7 +171,7 @@ export class CallPipeline {
           action: callAction(name),
           session_id: attributed,
           ...(error === null ? nodeOf(result) : {}),
-          detail: detailOf(error, review),
+          detail: detailOf(error, review, error === null ? auditDetail(name, args, result) : null),
         },
       ],
     });
@@ -185,8 +187,13 @@ function stamped(name: CallName, args: unknown, writer: Writer): unknown {
   return { ...(typeof args === "object" && args !== null ? args : {}), client: writer };
 }
 
-function detailOf(error: Error | null, review: boolean): Record<string, unknown> | null {
+function detailOf(
+  error: Error | null,
+  review: boolean,
+  surfaced: Record<string, unknown> | null,
+): Record<string, unknown> | null {
   const detail = {
+    ...surfaced,
     ...(error === null ? {} : { error: error.message }),
     ...(review ? { review: true } : {}),
   };

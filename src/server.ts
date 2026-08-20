@@ -3,8 +3,9 @@ import "reflect-metadata";
 import type { DependencyContainer } from "tsyringe";
 import { ProcessRegistryService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
+import { isDaemonAlive } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
-import { chooseKernel } from "@/runtime/kernel-choice";
+import { chooseKernel, HANDSHAKE_BUDGET_MS } from "@/runtime/kernel-choice";
 import {
   GuardedToolWrapper,
   PassThroughToolWrapper,
@@ -70,7 +71,8 @@ async function main(): Promise<void> {
   // either way, and nothing that touches the database has been resolved yet.
   const probe = buildContainer({ role: "server" });
   const socketPath = probe.resolve(DaemonConfig).socketPath;
-  const choice = await chooseKernel(socketPath);
+  const dbPath = probe.resolve(DatabaseConfig).path;
+  const choice = await chooseKernel(socketPath, HANDSHAKE_BUDGET_MS, () => isDaemonAlive(dbPath));
 
   if (choice.kernel === "remote") {
     process.stderr.write(`kernel: daemon at ${socketPath} (protocol ${String(choice.protocol)})\n`);

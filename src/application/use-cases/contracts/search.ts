@@ -6,6 +6,7 @@ export type SearchMode = "hybrid" | "text" | "vector";
 export type MatchedBy = "text" | "vector" | "both" | "graph";
 
 export interface SearchQuery {
+  session_id?: string;
   query: string;
   limit: number;
   project?: string;
