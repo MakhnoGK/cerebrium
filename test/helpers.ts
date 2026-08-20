@@ -11,6 +11,7 @@ import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embe
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import { RECORD_EVENTS, type RecordEvents } from "@/application/use-cases";
 import "@/application/use-cases/local";
+import { PrincipalQuotaService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import {
@@ -92,6 +93,7 @@ export function setup(opts?: {
   // The identity holder outlives a container re-registration; without this a client named
   // by one test is still named in the next.
   container.resolve(ClientIdentity).set(UNKNOWN_WRITER);
+  container.resolve(PrincipalQuotaService).reset();
 
   return {
     db,

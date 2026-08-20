@@ -22,4 +22,5 @@ export {
   OPEN_PROFILE,
   PrincipalsConfig,
   type PrincipalProfile,
+  type PrincipalQuota,
 } from "@/infrastructure/config/sections/principals.config";

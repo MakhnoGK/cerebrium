@@ -2,7 +2,11 @@ import { inject, injectable, type DependencyContainer } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
 import { CapabilityDeniedError } from "@/application/errors";
-import { ActivityMonitor, PrincipalPolicyService } from "@/application/services";
+import {
+  ActivityMonitor,
+  PrincipalPolicyService,
+  PrincipalQuotaService,
+} from "@/application/services";
 import {
   CALL_SURFACE,
   callAction,
@@ -52,6 +56,7 @@ export class CallPipeline {
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly activity: ActivityMonitor,
     private readonly policy: PrincipalPolicyService,
+    private readonly quotas: PrincipalQuotaService,
   ) {}
 
   useReadDispatcher(dispatch: ReadDispatcher | undefined): void {
@@ -105,6 +110,13 @@ export class CallPipeline {
     if (posture === Posture.OFF) {
       throw new CapabilityDeniedError(principal, capability, name);
     }
+
+    this.quotas.consume(
+      principal,
+      capability,
+      this.policy.quotaFor(principal),
+      Date.parse(this.clock.now()),
+    );
 
     return posture === Posture.SUGGEST;
   }

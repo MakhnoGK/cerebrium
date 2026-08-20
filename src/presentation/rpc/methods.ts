@@ -8,6 +8,7 @@ import {
 } from "@/application/use-cases";
 import { UNKNOWN_WRITER, type Writer } from "@/runtime/client-identity";
 import { PROTOCOL_VERSION, type RpcMeta } from "@/core/rpc";
+import type { PrincipalUsage } from "@/core/types";
 import { validateCall } from "@/presentation/rpc/schemas";
 import type { RpcMethod } from "@/presentation/rpc/server";
 
@@ -17,6 +18,9 @@ export type ReadDispatch = (name: ReadName, args: unknown) => Promise<unknown>;
 
 export interface DaemonIdentity {
   pid: number;
+  // What each principal has spent in the current quota window. In-memory state the
+  // snapshot use case cannot see, so it is reported from here alongside the queue depth.
+  principals?: () => PrincipalUsage[];
   // Reads waiting for a worker. Part of `status` because a client that is being made to
   // wait should be able to see why.
   queueDepth?: () => number;
@@ -77,6 +81,7 @@ export function createDaemonMethods(
           pid: identity.pid,
           ...(identity.queueDepth === undefined ? {} : { queue_depth: identity.queueDepth() }),
         },
+        ...(identity.principals === undefined ? {} : { principals: identity.principals() }),
       };
     },
   };

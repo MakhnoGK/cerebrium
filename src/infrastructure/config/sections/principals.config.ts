@@ -5,9 +5,17 @@ import { Capability, Posture } from "@/core/vocab";
 // profile, so a config naming one principal does not have to restate the rest.
 export interface PrincipalProfile {
   capabilities: Partial<Record<Capability, Posture>>;
+  // Sliding-window ceilings. An absent limit is no limit; `windowMs` applies to both.
+  quota: PrincipalQuota;
 }
 
-export const OPEN_PROFILE: PrincipalProfile = { capabilities: {} };
+export interface PrincipalQuota {
+  windowMs?: number;
+  calls?: number;
+  writes?: number;
+}
+
+export const OPEN_PROFILE: PrincipalProfile = { capabilities: {}, quota: {} };
 
 // Per-principal policy, keyed by the client name the MCP handshake reports. It lives in
 // config rather than in the store on purpose: the call surface is what principals reach,
@@ -61,9 +69,13 @@ function json(raw: string): Record<string, unknown> | undefined {
 function coerce(value: unknown): PrincipalProfile | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 
+  const quota = coerceQuota((value as { quota?: unknown }).quota);
+
+  if (quota === undefined) return undefined;
+
   const raw = (value as { capabilities?: unknown }).capabilities;
 
-  if (raw === undefined) return { capabilities: {} };
+  if (raw === undefined) return { capabilities: {}, quota };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
 
   const capabilities: Partial<Record<Capability, Posture>> = {};
@@ -74,7 +86,23 @@ function coerce(value: unknown): PrincipalProfile | undefined {
     capabilities[name] = posture;
   }
 
-  return { capabilities };
+  return { capabilities, quota };
+}
+
+function coerceQuota(value: unknown): PrincipalQuota | undefined {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+
+  const quota: PrincipalQuota = {};
+
+  for (const [name, limit] of Object.entries(value)) {
+    if (name !== "windowMs" && name !== "calls" && name !== "writes") return undefined;
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 0) return undefined;
+
+    quota[name] = limit;
+  }
+
+  return quota;
 }
 
 function isCapability(name: string): name is Capability {

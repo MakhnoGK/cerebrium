@@ -9,10 +9,18 @@ import {
   PrincipalsConfig,
   StaticConfigSource,
   type PrincipalProfile,
+  type PrincipalQuota,
 } from "@/infrastructure/config";
 import { setup, type TestEnv } from "@test/helpers";
 
 let env: TestEnv;
+
+function profile(
+  capabilities: PrincipalProfile["capabilities"],
+  quota: PrincipalQuota = {},
+): PrincipalProfile {
+  return { capabilities, quota };
+}
 
 // The pipeline reads policy through PrincipalsConfig, so a test states the policy by
 // registering the section rather than by writing a config file.
@@ -49,11 +57,12 @@ function write(session_id: string): Record<string, unknown> {
   };
 }
 
-function events(): { action: string; detail: string | null }[] {
-  return env.db.prepare("SELECT action, detail FROM events ORDER BY ts, id").all() as {
-    action: string;
-    detail: string | null;
-  }[];
+// The test clock is frozen, so every row shares a timestamp and "the last event" is a
+// ULID tie-break rather than an ordering. Ask whether the row is there instead.
+function logged(fragment: string): boolean {
+  return (env.db.prepare("SELECT detail FROM events").all() as { detail: string | null }[]).some(
+    (row) => row.detail?.includes(fragment) === true,
+  );
 }
 
 beforeEach(() => {
@@ -91,7 +100,7 @@ describe("Capability enforcement", () => {
   it("should refuse a call the principal has no capability for", async () => {
     // Given
     const pipeline = pipelineWith({
-      "codex-mcp-client": { capabilities: { [Capability.WRITE]: Posture.OFF } },
+      "codex-mcp-client": profile({ [Capability.WRITE]: Posture.OFF }),
     });
     const id = await session(pipeline, "codex-mcp-client");
 
@@ -107,7 +116,7 @@ describe("Capability enforcement", () => {
   it("should leave the capabilities it did not revoke alone", async () => {
     // Given — revocation has to be selective or it is just an off switch.
     const pipeline = pipelineWith({
-      "codex-mcp-client": { capabilities: { [Capability.WRITE]: Posture.OFF } },
+      "codex-mcp-client": profile({ [Capability.WRITE]: Posture.OFF }),
     });
     const id = await session(pipeline, "codex-mcp-client");
 
@@ -128,7 +137,7 @@ describe("Capability enforcement", () => {
   it("should refuse before the call runs, and say so in the audit log", async () => {
     // Given
     const pipeline = pipelineWith({
-      "codex-mcp-client": { capabilities: { [Capability.WRITE]: Posture.OFF } },
+      "codex-mcp-client": profile({ [Capability.WRITE]: Posture.OFF }),
     });
     const id = await session(pipeline, "codex-mcp-client");
     const before = env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get() as { n: number };
@@ -143,13 +152,13 @@ describe("Capability enforcement", () => {
 
     // Then — nothing written, and the refusal is on the record.
     expect(env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get()).toEqual(before);
-    expect(events().at(-1)?.detail).toContain("not permitted to write");
+    expect(logged("not permitted to write")).toBe(true);
   });
 
   it("should let a suggested capability through and mark it for review", async () => {
     // Given — the point of `suggest` is to keep what a suspect writer had to say.
     const pipeline = pipelineWith({
-      "codex-mcp-client": { capabilities: { [Capability.WRITE]: Posture.SUGGEST } },
+      "codex-mcp-client": profile({ [Capability.WRITE]: Posture.SUGGEST }),
     });
     const id = await session(pipeline, "codex-mcp-client");
 
@@ -161,14 +170,14 @@ describe("Capability enforcement", () => {
 
     // Then
     expect(written).toBeDefined();
-    expect(events().at(-1)?.detail).toContain('"review":true');
+    expect(logged('"review":true')).toBe(true);
   });
 
   it("should fall back to the default profile for a principal it does not name", async () => {
     // Given
     const pipeline = pipelineWith(
-      { "claude-code": { capabilities: { [Capability.WRITE]: Posture.AUTO } } },
-      { capabilities: { [Capability.WRITE]: Posture.OFF } },
+      { "claude-code": profile({ [Capability.WRITE]: Posture.AUTO }) },
+      profile({ [Capability.WRITE]: Posture.OFF }),
     );
 
     // When / Then — the named one keeps its grant, everyone else takes the default.
@@ -192,7 +201,7 @@ describe("Capability enforcement", () => {
   it("should govern a writer that never named itself", async () => {
     // Given — the pre-identity majority of a store has to be addressable by policy.
     const pipeline = pipelineWith({
-      [UNATTRIBUTED_PRINCIPAL]: { capabilities: { [Capability.WRITE]: Posture.OFF } },
+      [UNATTRIBUTED_PRINCIPAL]: profile({ [Capability.WRITE]: Posture.OFF }),
     });
     const id = await session(pipeline, null);
 
@@ -215,7 +224,10 @@ describe("Principal policy config", () => {
     });
 
     // Then
-    expect(config.profiles["codex-mcp-client"]).toEqual({ capabilities: { write: Posture.OFF } });
+    expect(config.profiles["codex-mcp-client"]).toEqual({
+      capabilities: { write: Posture.OFF },
+      quota: {},
+    });
   });
 
   it("should permit everything when nothing is configured", () => {
