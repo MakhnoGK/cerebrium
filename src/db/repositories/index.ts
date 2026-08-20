@@ -11,4 +11,5 @@ export { ChunksRepo } from "@/db/repositories/chunks";
 export { CodeRepo } from "@/db/repositories/code";
 export { MirrorRepo } from "@/db/repositories/mirror";
 export { ConsolidationRepo } from "@/db/repositories/consolidation";
+export { ProcessesRepo, type ProcessRow } from "@/db/repositories/processes";
 export { StatsRepo } from "@/db/repositories/stats";

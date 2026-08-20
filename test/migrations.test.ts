@@ -33,6 +33,7 @@ const MIGRATION_IDS = [
   "019_candidate_attempt.cjs",
   "020_session_writer.cjs",
   "021_merge_delayed.cjs",
+  "022_process_registry.sql",
 ];
 
 const dirs: string[] = [];

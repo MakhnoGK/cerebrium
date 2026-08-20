@@ -275,3 +275,15 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
   last_error TEXT,
   merge_delayed INTEGER NOT NULL DEFAULT 0
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS processes (
+  id TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  pid INTEGER NOT NULL UNIQUE,
+  started_at TEXT NOT NULL,
+  node_version TEXT NOT NULL,
+  db_path TEXT NOT NULL,
+  config_file TEXT,
+  config_state TEXT NOT NULL,
+  config_json TEXT NOT NULL
+) STRICT;
