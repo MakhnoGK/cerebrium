@@ -1,7 +1,14 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
-import { RETRY_CANDIDATE, type RetryCandidate } from "@/application/use-cases";
+import {
+  RETRY_CANDIDATE,
+  SEARCH_MEMORY,
+  type RetryCandidate,
+  type SearchOutcome,
+} from "@/application/use-cases";
 import { ConsolidateRetryTool } from "@/presentation/mcp/tools/consolidate-retry";
+import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { setup, type TestEnv } from "@test/helpers";
 
 const ID = "01JJJJJJJJJJJJJJJJJJJJJJJJ";
@@ -72,5 +79,36 @@ describe("The use-case seam", () => {
       )
       .get(ID);
     expect(row).toEqual({ status: "pending", attempts: 2, proposal: null, last_error: null });
+  });
+
+  it("should route the search tool through the use case rather than the ranking model", async () => {
+    // Given
+    const calls: unknown[] = [];
+    const outcome: SearchOutcome = {
+      results: [],
+      total_matches: 7,
+      notes: ["a note"],
+      audit: { mode: "hybrid", query: "q", results: 0, ids: [], matched: [], folded: [] },
+    };
+    const scope = container.createChildContainer();
+    scope.register(SEARCH_MEMORY, {
+      useValue: {
+        invoke(args: unknown) {
+          calls.push(args);
+
+          return Promise.resolve(outcome);
+        },
+      },
+    });
+
+    // When
+    const { session_id } = await container.resolve(SessionStartTool).invoke({});
+    const result = await scope
+      .resolve(SearchTool)
+      .invoke({ session_id, query: "anything", limit: 3 });
+
+    // Then
+    expect(calls).toEqual([{ query: "anything", limit: 3 }]);
+    expect(result).toMatchObject({ total_matches: 7, context_notes: ["a note"] });
   });
 });

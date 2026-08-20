@@ -1,10 +1,11 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { SearchResult } from "@/application/use-cases";
 import type { Envelope, NodeSection } from "@/db/repo";
 import { PREAMBLE_SECTION } from "@/core/chunk";
 import { MemoryKind } from "@/core/vocab";
 import { GetTool } from "@/presentation/mcp/tools/get";
-import { SearchTool, type SearchResult } from "@/presentation/mcp/tools/search";
+import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { UpdateTool } from "@/presentation/mcp/tools/update";
 import { WriteTool } from "@/presentation/mcp/tools/write";
