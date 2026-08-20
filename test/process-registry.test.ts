@@ -1,5 +1,8 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
+import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
+import { PROCESS_PROBE_TOKEN, type ProcessProbe } from "@/domain/ports/process-probe";
+import { ProcessRegistryService } from "@/application/services";
 import { ProcessesRepo, type ProcessRow } from "@/db/repositories";
 import { setup } from "@test/helpers";
 
@@ -76,5 +79,118 @@ describe("ProcessesRepo", () => {
 
     // Then
     expect(repo.list()).toHaveLength(1);
+  });
+});
+
+function probe(self: number, live: number[]): ProcessProbe {
+  return { self: () => self, alive: (pid) => live.includes(pid) };
+}
+
+function registry(opts: {
+  self: number;
+  live?: number[];
+  file?: ConfigFileReport | null;
+}): ProcessRegistryService {
+  container.register(PROCESS_PROBE_TOKEN, {
+    useValue: probe(opts.self, opts.live ?? []),
+  });
+  container.register(CONFIG_FILE_TOKEN, { useFactory: () => opts.file ?? null });
+
+  return container.resolve(ProcessRegistryService);
+}
+
+describe("ProcessRegistryService", () => {
+  let repo: ProcessesRepo;
+
+  beforeEach(() => {
+    setup();
+    repo = container.resolve(ProcessesRepo);
+  });
+
+  it("should publish this process with the config file it loaded", () => {
+    // Given
+    const service = registry({
+      self: 900,
+      file: { path: "/opt/brain/config.json", state: "loaded", keys: 3 },
+    });
+
+    // When
+    service.publish("server");
+
+    // Then
+    expect(repo.list()[0]).toMatchObject({
+      role: "server",
+      pid: 900,
+      config_file: "/opt/brain/config.json",
+      config_state: "loaded",
+    });
+  });
+
+  it("should record a pinned source as such rather than inventing a file", () => {
+    // Given / When
+    registry({ self: 900, file: null }).publish("cli");
+
+    // Then
+    expect(repo.list()[0]).toMatchObject({ config_file: null, config_state: "pinned" });
+  });
+
+  it("should publish the resolved config values, not just the paths", () => {
+    // Given / When
+    registry({ self: 900 }).publish("server");
+
+    // Then
+    const published = JSON.parse(repo.list()[0]!.config_json);
+    expect(published.database.path).toBe(":memory:");
+    expect(published.retrieval).toBeDefined();
+  });
+
+  it("should mark a row whose process is gone as not alive", () => {
+    // Given
+    repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111 }));
+
+    // When
+    const listed = registry({ self: 900, live: [] }).list();
+
+    // Then
+    expect(listed[0]).toMatchObject({ pid: 111, alive: false });
+  });
+
+  it("should sweep dead rows when a new process publishes, so a crash leaves no ghost", () => {
+    // Given
+    repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111, role: "daemon" }));
+
+    // When
+    registry({ self: 900, live: [900] }).publish("server");
+
+    // Then
+    expect(repo.list().map((p) => p.pid)).toEqual([900]);
+  });
+
+  it("should keep a live foreign process while sweeping", () => {
+    // Given
+    repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111, role: "daemon" }));
+
+    // When
+    registry({ self: 900, live: [111] }).publish("server");
+
+    // Then
+    expect(
+      repo
+        .list()
+        .map((p) => p.pid)
+        .sort(),
+    ).toEqual([111, 900]);
+  });
+
+  it("should retire the row it published", () => {
+    // Given
+    const service = registry({ self: 900, live: [900] });
+    const id = service.publish("server");
+
+    // When
+    service.retire(id);
+
+    // Then
+    expect(repo.list()).toEqual([]);
   });
 });

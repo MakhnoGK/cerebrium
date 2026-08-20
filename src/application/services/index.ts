@@ -7,4 +7,8 @@ export { HintsService } from "@/application/services/hints.service";
 export { MemoryService } from "@/application/services/memory.service";
 export { NodeService } from "@/application/services/node.service";
 export { NodeReferenceService } from "@/application/services/node-reference.service";
+export {
+  type LiveProcess,
+  ProcessRegistryService,
+} from "@/application/services/process-registry.service";
 export { SessionService } from "@/application/services/session.service";

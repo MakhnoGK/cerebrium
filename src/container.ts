@@ -4,6 +4,7 @@ import { CONFIG_FILE_TOKEN, CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/dom
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
@@ -19,6 +20,7 @@ import {
 import "@/infrastructure/config/sections";
 import { configFilePath } from "@/runtime/paths";
 import { SystemClock } from "@/runtime/system-clock";
+import { SystemProcessProbe } from "@/runtime/system-process-probe";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
 
@@ -45,6 +47,7 @@ export const KERNEL_TOKENS = {
   configFile: CONFIG_FILE_TOKEN,
   database: DB_TOKEN,
   clock: CLOCK_TOKEN,
+  processProbe: PROCESS_PROBE_TOKEN,
   workerOptions: WORKER_OPTIONS_TOKEN,
   embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
   consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
@@ -99,6 +102,7 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
   });
 
   target.registerSingleton(CLOCK_TOKEN, SystemClock);
+  target.registerSingleton(PROCESS_PROBE_TOKEN, SystemProcessProbe);
 
   target.register(WORKER_OPTIONS_TOKEN, {
     // The daemon feeds the model in large batches; the server's in-process fallback
