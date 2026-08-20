@@ -98,7 +98,11 @@ export class ConsolidationWorker {
     this.reporter.reportTick(runId, result);
   }
 
-  async tick(): Promise<ConsolidationTickResult> {
+  // `shouldYield` is checked between stages, which is where the sweep already pauses to
+  // report progress. Consolidation is background work sharing a process with the reads, so
+  // when a client starts waiting it stops after the current stage and resumes next tick
+  // rather than holding the CPU for the rest of a sweep.
+  async tick(opts: { shouldYield?: () => boolean } = {}): Promise<ConsolidationTickResult> {
     const now = this.now();
     const runId = newId();
     const result: ConsolidationTickResult = {
@@ -131,28 +135,47 @@ export class ConsolidationWorker {
       this.discoverLinks(now, result);
       this.pruneLinks(now, result);
 
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
       await this.report(runId, "distill", result);
       await this.distill(now, result);
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "merge", result);
       await this.mergeDuplicates(now, result);
 
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
       await this.report(runId, "mirrors", result);
       this.pruneMirrors(now, result);
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "backfill", result);
       await this.backfillProposals(now, result);
 
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
       await this.report(runId, "annotate", result);
       await this.annotate(now, result);
 
-      result.ended_at = this.now();
-      await this.report(runId, "idle", result);
+      return await this.finish(runId, result);
     } catch (err) {
       result.last_error = errorText(err);
       result.ended_at = this.now();
       await this.report(runId, "failed", result);
     }
+
+    return result;
+  }
+
+  private async finish(
+    runId: string,
+    result: ConsolidationTickResult,
+  ): Promise<ConsolidationTickResult> {
+    result.ended_at = this.now();
+    await this.report(runId, "idle", result);
 
     return result;
   }
@@ -621,4 +644,15 @@ export class ConsolidationWorker {
       }
     }
   }
+}
+
+// A yielded sweep is not a failure: the stages it completed stand, and the rest happens on
+// the next tick. Recorded on the result so an operator can see it happened rather than
+// wondering why a sweep did less than usual.
+function yielded(opts: { shouldYield?: () => boolean }, result: ConsolidationTickResult): boolean {
+  if (opts.shouldYield?.() !== true) return false;
+
+  result.yielded = true;
+
+  return true;
 }

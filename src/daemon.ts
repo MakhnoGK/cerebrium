@@ -1,15 +1,21 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingRole } from "@/domain/ports/embedding-provider";
+import { CallPipeline } from "@/application/call-pipeline";
 import {
+  ActivityMonitor,
   ModelWarmupService,
   ProcessRegistryService,
   type WarmupOutcome,
 } from "@/application/services";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
+import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
-import { createDaemonMethods, RpcServer } from "@/presentation/rpc";
+import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker";
+import { ReadPool } from "@/runtime/read-pool";
+import { createDaemonMethods, RpcServer, surfaceMethods } from "@/presentation/rpc";
 import { buildContainer } from "@/container";
 import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
 
@@ -29,6 +35,9 @@ export interface DaemonOptions {
   idleIntervalMs?: number; // poll cadence once the queue is empty
   idleExitMs?: number; // exit after this long with an empty queue
   resident?: boolean; // never idle-exit; a supervisor owns the lifetime
+  // True while a client is waiting. Consolidation shares this process with the reads, so
+  // it neither starts nor continues while one is.
+  busy?: () => boolean;
 }
 
 // The model sustains hundreds of chunks/sec; a dedicated daemon should feed it in
@@ -104,6 +113,7 @@ export async function runDaemon(
   const idle = opts.idleIntervalMs ?? IDLE_MS;
   const idleExit = opts.idleExitMs ?? IDLE_EXIT_MS;
   const resident = opts.resident ?? false;
+  const busy = opts.busy ?? (() => false);
   const stopped = opts.stopped ?? (() => false);
   const nap = opts.sleepMs ?? sleep;
   const now = opts.nowMs ?? Date.now;
@@ -121,17 +131,29 @@ export async function runDaemon(
     // Consolidate only when caught up on embeddings (kNN over half-embedded content is
     // noise) and no more than once per interval. Runs promptly on reaching idle, before
     // the idle-exit countdown can retire the process.
-    if (consolidation && backlog === 0 && now() - lastConsolidateMs >= consolidateInterval) {
+    // An empty embedding backlog is not the same idle as "nobody is waiting": the first is
+    // about this process's own queue, the second about the clients it serves.
+    if (
+      consolidation &&
+      backlog === 0 &&
+      !busy() &&
+      now() - lastConsolidateMs >= consolidateInterval
+    ) {
       lastConsolidateMs = now();
 
-      const swept = await consolidation.tick();
+      const swept = await consolidation.tick({ shouldYield: busy });
 
       const total =
         swept.distilled + swept.merged + swept.pruned + swept.links_added + swept.annotated;
       const failures = swept.generation_failures;
-      if (total > 0 || failures > 0) {
+      if (total > 0 || failures > 0 || swept.yielded) {
         process.stderr.write(
-          `consolidation: ${total} actions${failures > 0 ? `, ${String(failures)} failure(s) (last: ${swept.last_error ?? "unknown"})` : ""}\n`,
+          `consolidation: ${total} actions` +
+            (swept.yielded === true ? " (yielded to a client)" : "") +
+            (failures > 0
+              ? `, ${String(failures)} failure(s) (last: ${swept.last_error ?? "unknown"})`
+              : "") +
+            "\n",
         );
       }
     }
@@ -152,6 +174,17 @@ async function main(): Promise<void> {
   const dbPath = container.resolve(DatabaseConfig).path;
 
   const daemonConfig = container.resolve(DaemonConfig);
+
+  // The model goes in its own thread when there is a bundle to spawn. Loading it blocks for
+  // over a second, and this is the thread that answers the socket — with the model here,
+  // every call during startup timed out, `status` included.
+  const embedEntry = resolveEmbedWorker();
+
+  if (embedEntry !== null) {
+    container.register(EMBEDDING_PROVIDER_TOKEN, {
+      useValue: new WorkerEmbeddingProvider(embedEntry),
+    });
+  }
 
   // Registrations are lazy, so this decides before the DB is ever opened.
   if (isDaemonAlive(dbPath)) {
@@ -182,14 +215,74 @@ async function main(): Promise<void> {
   let stopping = false;
   let model: WarmupOutcome | null = null;
 
+  // Reads run off this thread when there is a built worker to spawn. From source there is
+  // none, and reads stay in-process exactly as before.
+  const workerEntry = resolveReadWorker();
+  const pool =
+    workerEntry === null
+      ? null
+      : new ReadPool({
+          size: daemonConfig.readWorkers,
+          spawn: nodeWorkerFactory(workerEntry, dbPath),
+        });
+
+  if (pool === null) {
+    process.stderr.write("no read worker bundle; serving reads in-process\n");
+  }
+
   // Listening starts before the model is loaded, and the handler reads whatever state
   // warming has reached. That ordering is the whole point of `status`: a daemon that is
   // still loading, or whose load failed, must still be able to say so.
+  // Reads that arrive over the socket go to the pool; the pipeline attaches the session
+  // check and the audit row either way.
+  const pipeline = container.resolve(CallPipeline);
+  const activity = container.resolve(ActivityMonitor);
+
+  // A read worker holds no model, so a semantic search needs its vector computed here — on
+  // this thread, where the model worker answers in a few milliseconds — before the query
+  // goes to the pool.
+  const embedForRead = async (name: string, args: unknown): Promise<unknown> => {
+    if (name !== "search_memory" || typeof args !== "object" || args === null) return args;
+
+    const query = args as { query?: unknown; mode?: unknown; query_vector?: unknown };
+
+    if (query.mode === "text" || query.query_vector !== undefined) return args;
+
+    if (typeof query.query !== "string" || !query.query.length) return args;
+
+    try {
+      const [vector] = await container
+        .resolve<{ embed: (t: string[], r: EmbeddingRole) => Promise<number[][]> }>(
+          EMBEDDING_PROVIDER_TOKEN,
+        )
+        .embed([query.query], EmbeddingRole.QUERY);
+
+      return vector === undefined ? args : { ...args, query_vector: vector };
+    } catch {
+      // No vector means the text half still answers, which beats failing the search.
+      return args;
+    }
+  };
+
+  pipeline.useReadDispatcher(
+    pool === null
+      ? undefined
+      : async (name, args) => pool.invoke(name, await embedForRead(name, args)),
+  );
+
   const rpc = new RpcServer(
-    createDaemonMethods(container, {
-      pid: process.pid,
-      model: () => model,
-    }),
+    {
+      ...surfaceMethods((name, args) => pipeline.invoke(container, name, args)),
+      ...createDaemonMethods(
+        container,
+        {
+          pid: process.pid,
+          model: () => model,
+          ...(pool === null ? {} : { queueDepth: () => pool.depth }),
+        },
+        pool === null ? undefined : (name, args) => pool.invoke(name, args),
+      ),
+    },
     {
       isOwnedByLiveDaemon: () => isDaemonAlive(dbPath),
       onError: (message) => process.stderr.write(`rpc: ${message}\n`),
@@ -199,7 +292,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     stopping = true;
 
-    await Promise.all([worker.stop(), consolidation.stop(), rpc.close()]);
+    await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
     registry.retire(registered);
     clearDaemonPid(dbPath);
     process.exit(0);
@@ -239,6 +332,7 @@ async function main(): Promise<void> {
       idleIntervalMs: daemonConfig.idleIntervalMs,
       idleExitMs: daemonConfig.idleExitMs,
       resident: daemonConfig.resident,
+      busy: () => !activity.isQuiet(daemonConfig.quietMs) || (pool?.depth ?? 0) > 0,
       consolidateIntervalMs: container.resolve(ConsolidationConfig).intervalMs,
     });
   } finally {
@@ -246,7 +340,7 @@ async function main(): Promise<void> {
     // analysis can't see that closure mutation and reads it as always-false.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!stopping) {
-      await Promise.all([worker.stop(), consolidation.stop(), rpc.close()]);
+      await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
       registry.retire(registered);
       clearDaemonPid(dbPath);
     }

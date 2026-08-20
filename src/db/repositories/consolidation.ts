@@ -158,21 +158,67 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     return r ? toCandidate(r) : undefined;
   }
 
+  // `id ASC` is not decoration: score and detected_at are not unique together, and a
+  // keyset cursor over a non-total order skips or repeats rows at every page boundary.
+  private static readonly PENDING_ORDER = "ORDER BY score DESC, detected_at ASC, id ASC";
+
   pendingCandidates(opts?: { kind?: ConsolidationKind; limit?: number }): ConsolidationCandidate[] {
     const limit = opts?.limit ?? 50;
     const rows = opts?.kind
       ? (this.db
           .prepare(
             `SELECT ${CANDIDATE_COLS} FROM consolidation_candidates
-             WHERE status = 'pending' AND kind = ? ORDER BY score DESC, detected_at ASC LIMIT ?`,
+             WHERE status = 'pending' AND kind = ? ${ConsolidationRepo.PENDING_ORDER} LIMIT ?`,
           )
           .all(opts.kind, limit) as CandidateRow[])
       : (this.db
           .prepare(
             `SELECT ${CANDIDATE_COLS} FROM consolidation_candidates
-             WHERE status = 'pending' ORDER BY score DESC, detected_at ASC LIMIT ?`,
+             WHERE status = 'pending' ${ConsolidationRepo.PENDING_ORDER} LIMIT ?`,
           )
           .all(limit) as CandidateRow[]);
+    return rows.map(toCandidate);
+  }
+
+  // One page of the pending queue in that same total order, starting strictly after
+  // `after` when given. The comparison is spelled out rather than done with a row value
+  // because the sort mixes directions: score descends while the tiebreakers ascend.
+  pendingCandidatePage(opts: {
+    kind?: ConsolidationKind;
+    limit: number;
+    after?: { score: number; detected_at: string; id: string };
+  }): ConsolidationCandidate[] {
+    const where = ["status = 'pending'"];
+    const params: unknown[] = [];
+
+    if (opts.kind !== undefined) {
+      where.push("kind = ?");
+      params.push(opts.kind);
+    }
+
+    if (opts.after !== undefined) {
+      where.push(
+        `(score < ?
+          OR (score = ? AND detected_at > ?)
+          OR (score = ? AND detected_at = ? AND id > ?))`,
+      );
+      params.push(
+        opts.after.score,
+        opts.after.score,
+        opts.after.detected_at,
+        opts.after.score,
+        opts.after.detected_at,
+        opts.after.id,
+      );
+    }
+
+    const rows = this.db
+      .prepare(
+        `SELECT ${CANDIDATE_COLS} FROM consolidation_candidates
+         WHERE ${where.join(" AND ")} ${ConsolidationRepo.PENDING_ORDER} LIMIT ?`,
+      )
+      .all(...params, opts.limit) as CandidateRow[];
+
     return rows.map(toCandidate);
   }
 

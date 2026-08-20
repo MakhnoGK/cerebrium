@@ -12,6 +12,7 @@ import { DB_TOKEN } from "@/db/repositories/base";
 import { ConsolidationRepo } from "@/db/repositories/consolidation";
 import {
   ConsolidationConfig,
+  DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
   EnvConfigSource,
@@ -19,7 +20,9 @@ import {
   LayeredConfigSource,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
+import { NoEmbeddingProvider } from "@/embeddings/worker-provider";
 import { configFilePath } from "@/runtime/paths";
+import { registerRemoteKernel } from "@/runtime/remote-kernel";
 import { SystemClock } from "@/runtime/system-clock";
 import { SystemProcessProbe } from "@/runtime/system-process-probe";
 import { createConsolidator } from "@/consolidation";
@@ -29,10 +32,16 @@ import { createProvider } from "@/embeddings";
 // process drains the queue in large batches, whether it may write at all — never which
 // tokens exist. Every role registers the same set, so a token cannot go missing in one
 // host and be present in another.
-export type HostRole = "server" | "daemon" | "cli";
+export type HostRole = "server" | "daemon" | "cli" | "reader";
+
+// Which kernel backs the tokens. `local` resolves everything in-process against SQLite;
+// `remote` resolves the same tokens against the daemon's socket and registers no database
+// at all, so a host in that mode cannot reach the file even by accident.
+export type KernelMode = "local" | "remote";
 
 export interface ContainerOptions {
   role: HostRole;
+  kernel?: KernelMode;
   // Pin configuration instead of resolving the tiers below (tests, eval scripts).
   source?: ConfigSource;
   // Where to register. Defaults to the global container the `@tool()` and `@configSection()`
@@ -55,10 +64,23 @@ export const KERNEL_TOKENS = {
   consolidationReporter: CONSOLIDATION_REPORTER_TOKEN,
 } as const;
 
-export function buildContainer({ role, source, into }: ContainerOptions): DependencyContainer {
+export function buildContainer({
+  role,
+  source,
+  into,
+  kernel = "local",
+}: ContainerOptions): DependencyContainer {
   const target = into ?? container;
 
   registerConfigSource(target, source);
+
+  if (kernel === "remote") {
+    // Registered after the config source, because the socket path comes from it. Nothing
+    // else is registered: see registerRemoteKernel.
+    registerRemoteKernel(target, { socketPath: target.resolve(DaemonConfig).socketPath });
+
+    return target;
+  }
 
   registerLocalKernel(role, target);
 
@@ -98,7 +120,9 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
     useFactory: instanceCachingFactory((c) => {
       const { path } = c.resolve(DatabaseConfig);
 
-      return role === "cli" ? openDatabaseReadonly(path) : openDatabase(path);
+      // `reader` is a read pool worker: read-only so a use case that writes fails here
+      // rather than racing the one writer.
+      return role === "cli" || role === "reader" ? openDatabaseReadonly(path) : openDatabase(path);
     }),
   });
 
@@ -115,6 +139,11 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
 
   target.register(EMBEDDING_PROVIDER_TOKEN, {
     useFactory: instanceCachingFactory((c) => {
+      // A read-pool worker must never load a model: three of them each loading one cost a
+      // measured +224MB for a single hybrid search. Whoever dispatches the read supplies
+      // the query vector, so an embed call here is a bug and says so.
+      if (role === "reader") return new NoEmbeddingProvider();
+
       const config = c.resolve(EmbeddingConfig);
 
       return createProvider(config.provider, config.model, config.cacheDir);

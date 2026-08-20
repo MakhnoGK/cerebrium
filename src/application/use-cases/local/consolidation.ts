@@ -1,6 +1,7 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
+import { InvalidCursorError } from "@/application/errors";
 import {
   APPLY_CANDIDATE,
   RETRY_CANDIDATE,
@@ -17,16 +18,50 @@ import {
   type SuggestCandidatesResult,
 } from "@/application/use-cases/contracts";
 import { ConsolidationRepo, EdgesRepo, NodesRepo } from "@/db/repositories";
+import { decodeCursor, encodeCursor, pageSizeOf, splitOverfetch } from "@/core/page";
 import { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 
 @useCase(SUGGEST_CANDIDATES)
 export class LocalSuggestCandidates implements SuggestCandidates {
   constructor(private readonly consolidation: ConsolidationRepo) {}
 
-  invoke(args: SuggestCandidatesArgs): Promise<SuggestCandidatesResult> {
-    return Promise.resolve({
-      candidates: this.consolidation.pendingCandidates({ kind: args.kind, limit: args.limit }),
+  async invoke(args: SuggestCandidatesArgs): Promise<SuggestCandidatesResult> {
+    // Without a cursor and without page_size this is the pre-pagination call, answered
+    // exactly as before so existing callers see no change.
+    if (args.cursor === undefined && args.page_size === undefined) {
+      return {
+        candidates: this.consolidation.pendingCandidates({ kind: args.kind, limit: args.limit }),
+      };
+    }
+
+    const pageSize = pageSizeOf(args.page_size ?? args.limit);
+    const position = args.cursor === undefined ? null : decodeCursor(args.cursor, "candidates");
+
+    if (args.cursor !== undefined && position === null) {
+      throw new InvalidCursorError();
+    }
+
+    const rows = this.consolidation.pendingCandidatePage({
+      ...(args.kind === undefined ? {} : { kind: args.kind }),
+      // One extra row answers "is there more" without a second query.
+      limit: pageSize + 1,
+      ...(position === null ? {} : { after: positionToAfter(position.after) }),
     });
+
+    const { items, hasMore } = splitOverfetch(rows, pageSize);
+    const last = items.at(-1);
+
+    return {
+      candidates: items,
+      ...(hasMore && last
+        ? {
+            next_cursor: encodeCursor({
+              key: "candidates",
+              after: [last.score, last.detected_at, last.id],
+            }),
+          }
+        : {}),
+    };
   }
 }
 
@@ -147,4 +182,20 @@ export class LocalRetryCandidate implements RetryCandidate {
 
     return Promise.resolve({ status: "reopened", id });
   }
+}
+
+// A decoded cursor is untrusted data: its shape is checked here rather than being spread
+// into a query and trusted to have the columns the ordering expects.
+function positionToAfter(after: (string | number)[]): {
+  score: number;
+  detected_at: string;
+  id: string;
+} {
+  const [score, detectedAt, id] = after;
+
+  if (typeof score !== "number" || typeof detectedAt !== "string" || typeof id !== "string") {
+    throw new InvalidCursorError();
+  }
+
+  return { score, detected_at: detectedAt, id };
 }

@@ -3,7 +3,7 @@ import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rpcCall, rpcHandshake, RpcUnavailableError } from "@/runtime/rpc-client";
 import { parseRequest, PROTOCOL_VERSION, RPC_ERROR, socketPathProblem } from "@/core/rpc";
-import { createDaemonMethods, RpcServer, type RpcMethod } from "@/presentation/rpc";
+import { createDaemonMethods, RpcServer, surfaceMethods, type RpcMethod } from "@/presentation/rpc";
 import { setup } from "@test/helpers";
 
 // Kept short deliberately: the macOS sun_path limit is 103 bytes and the system temp
@@ -142,6 +142,70 @@ describe("RPC server over a real socket", () => {
   });
 });
 
+const VALID_WRITE = {
+  session_id: "01M0FP4NF24EWXR6V93NYDPHX8",
+  memory_kind: "semantic",
+  type: "fact",
+  title: "t",
+  content: "c",
+  project: null,
+  parent_node_id: null,
+};
+
+describe("Method surface over the socket", () => {
+  it("should expose one method per call on the surface", async () => {
+    // Given
+    const calls: string[] = [];
+    await serve(
+      surfaceMethods((name, args) => {
+        calls.push(name);
+
+        return Promise.resolve({ name, args });
+      }),
+    );
+
+    // When
+    await rpcCall({ socketPath: SOCKET }, "write_memory", VALID_WRITE);
+    await rpcCall({ socketPath: SOCKET }, "search_memory", { query: "y" });
+
+    // Then
+    expect(calls).toEqual(["write_memory", "search_memory"]);
+  });
+
+  it("should not expose a name that is not on the surface", async () => {
+    // Given
+    await serve(surfaceMethods(() => Promise.resolve(null)));
+
+    // When / Then
+    await expect(rpcCall({ socketPath: SOCKET }, "touch_session", {})).rejects.toThrow(
+      /unknown method: touch_session/,
+    );
+    await expect(rpcCall({ socketPath: SOCKET }, "start_session", {})).rejects.toThrow(
+      /unknown method: start_session/,
+    );
+  });
+
+  it("should attempt a failing write exactly once", async () => {
+    // Given — writes are not idempotent, so a retry after a timeout would duplicate work.
+    let attempts = 0;
+    await serve(
+      surfaceMethods(() => {
+        attempts++;
+
+        return Promise.reject(new Error("write blew up"));
+      }),
+    );
+
+    // When — valid arguments, so the failure comes from the handler and not from validation.
+    await expect(rpcCall({ socketPath: SOCKET }, "write_memory", VALID_WRITE)).rejects.toThrow(
+      /write blew up/,
+    );
+
+    // Then
+    expect(attempts).toBe(1);
+  });
+});
+
 describe("RPC client failure modes", () => {
   it("should report an absent daemon as unavailable, distinctly from a daemon-side error", async () => {
     // Given / When / Then
@@ -204,6 +268,46 @@ describe("Daemon methods", () => {
     // Then
     expect(status.daemon.state).toBe("failed");
     expect(status.daemon.error).toBe("no such file");
+  });
+
+  it("should answer status from the dispatcher instead of this thread when one is given", async () => {
+    // Given
+    const seen: string[] = [];
+    await serve(
+      createDaemonMethods(
+        container,
+        { pid: 9, model: () => null, queueDepth: () => 4 },
+        (name, args) => {
+          seen.push(name);
+
+          return Promise.resolve({ content: { nodes_total: 7 }, args });
+        },
+      ),
+    );
+
+    // When
+    const status = (await rpcCall({ socketPath: SOCKET }, "status")) as {
+      content: { nodes_total: number };
+      daemon: { queue_depth: number };
+    };
+
+    // Then
+    expect(seen).toEqual(["operator_snapshot"]);
+    expect(status.content.nodes_total).toBe(7);
+    expect(status.daemon.queue_depth).toBe(4);
+  });
+
+  it("should omit the queue depth when there is no pool to report one", async () => {
+    // Given
+    await serve(createDaemonMethods(container, { pid: 9, model: () => null }));
+
+    // When
+    const status = (await rpcCall({ socketPath: SOCKET }, "status")) as {
+      daemon: Record<string, unknown>;
+    };
+
+    // Then
+    expect(status.daemon).not.toHaveProperty("queue_depth");
   });
 
   it("should report the protocol version on initialize", async () => {

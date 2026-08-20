@@ -1,15 +1,33 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import type { DependencyContainer } from "tsyringe";
 import { ProcessRegistryService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { isMainModule } from "@/runtime/is-main";
+import { chooseKernel } from "@/runtime/kernel-choice";
+import {
+  GuardedToolWrapper,
+  PassThroughToolWrapper,
+  TOOL_WRAPPER,
+} from "@/presentation/mcp/adapters";
 import { Server } from "@/presentation/mcp/server";
 import { buildContainer } from "@/container";
-import { DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";
+import { DaemonConfig, DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";
 import { ensureDaemon } from "./runtime/ensure-daemon";
 
-async function main(): Promise<void> {
-  const container = buildContainer({ role: "server" });
+// Talking to the daemon: the host holds no database at all. It also does not guard or audit
+// — the daemon's pipeline does both, and doing it here too would check the session twice and
+// write two `events` rows per call.
+async function serveRemote(container: DependencyContainer): Promise<void> {
+  container.register(TOOL_WRAPPER, { useValue: new PassThroughToolWrapper() });
+
+  await container.resolve(Server).connect();
+}
+
+// No daemon reachable: the host degrades to resolving everything in-process, which is what
+// it did before a transport existed. It guards and audits itself, because nothing else will.
+async function serveLocal(container: DependencyContainer): Promise<void> {
+  container.register(TOOL_WRAPPER, { useToken: GuardedToolWrapper });
 
   const worker = container.resolve(EmbeddingWorker);
   const server = container.resolve(Server);
@@ -45,6 +63,26 @@ async function main(): Promise<void> {
   } catch {
     worker.start();
   }
+}
+
+async function main(): Promise<void> {
+  // Built local first only to read the resolved socket path; the config tiers are the same
+  // either way, and nothing that touches the database has been resolved yet.
+  const probe = buildContainer({ role: "server" });
+  const socketPath = probe.resolve(DaemonConfig).socketPath;
+  const choice = await chooseKernel(socketPath);
+
+  if (choice.kernel === "remote") {
+    process.stderr.write(`kernel: daemon at ${socketPath} (protocol ${String(choice.protocol)})\n`);
+
+    await serveRemote(buildContainer({ role: "server", kernel: "remote" }));
+
+    return;
+  }
+
+  process.stderr.write(`kernel: local (${choice.reason})\n`);
+
+  await serveLocal(probe);
 }
 
 if (isMainModule(import.meta.url)) {

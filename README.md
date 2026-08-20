@@ -46,6 +46,7 @@ src/
   presentation/    delivery — mcp/ (stdio server, audit + output adapters, one dir per
                    tool) and rpc/ (the daemon's local socket server and its methods)
   server.ts        stdio MCP server      daemon.ts      embedding drain + socket
+  read-worker.ts   one read pool worker (read-only connection, no model)
   stats-cli.ts     operational snapshot  service-cli.ts launchd agent management
 ```
 
@@ -386,6 +387,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
 | `MEMORY_DAEMON_RESIDENT` | `false` | Skip idle-exit entirely and let a supervisor own the daemon's lifetime. Set by the launchd agent `cerebrium-service install` writes; off by default because resident mode with no supervisor strands a process nothing restarts. |
+| `MEMORY_DAEMON_READ_WORKERS` | `3` | Worker threads serving reads, each with its own read-only connection. One is reserved for `status` so it cannot queue behind a search; a pool of 1 shares its single worker rather than starving data reads. |
 | `MEMORY_DAEMON_SOCKET` | `$CEREBRIUM_HOME/daemon.sock` | Where the daemon listens. Rejected at startup if over the platform's 103-byte `sun_path` limit — set a shorter `CEREBRIUM_HOME` rather than working around it here. |
 | `MEMORY_DEDUP_THRESHOLD` | `0.92` | Cosine similarity above which a write reports `similar_existing`. Calibrated, not chosen — see below. |
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
@@ -457,6 +459,43 @@ which is why resident mode defaults to off. It also closes a real gap — `ensur
 runs once at server startup, so before this a daemon that died mid-session was never
 replaced and the backlog simply waited for the next session.
 
+**Read pool.** Reads are served by worker threads (`MEMORY_DAEMON_READ_WORKERS`, default
+3), each holding its own read-only connection to the same file — WAL allows any number of
+readers, and better-sqlite3 is synchronous only per connection, so separate connections buy
+real concurrency. One worker is held back for `status`, so asking the daemon how it is
+cannot queue behind a search. No embedding model lives in a worker: a query vector travels
+in the arguments instead, because embedding is ~3ms of a ~200ms search and a model per
+worker would cost ~150MB each. Running from source there is no worker bundle to spawn and
+reads stay in-process. Measured on an 868MB store: a trivial call made while a heavy read
+is in flight went from 639ms to 2ms, and three heavy reads run 2.4x faster across three
+workers than in sequence. A single call is no faster — the pool buys concurrency, not speed.
+
+**Proxy mode.** On startup the MCP server tries the daemon's socket with a short handshake
+(750 ms; a stdio host that is slow to start is as bad as one that fails). If the daemon
+answers, the server holds **no database at all** — the same use-case tokens resolve to
+socket calls — and it does **not** apply its own session guard or audit row, because the
+daemon's pipeline already did both and doing it twice would validate twice and log every
+call twice. If the daemon does not answer, or speaks a protocol this build does not, the
+server degrades to resolving everything in-process exactly as it did before a transport
+existed; the two reasons are reported differently, because an absent daemon is ordinary
+while a version mismatch means a resident daemon needs restarting.
+
+A daemon that dies mid-session fails the in-flight call and reconnects on the next one —
+it does not silently degrade. The error says whether repeating the call is safe: a read may
+be retried, while a write may already have been applied and repeating it could duplicate
+the change.
+
+**Pagination.** Paged reads use a keyset cursor, never an offset. The daemon writes while
+clients read, so an offset skips a row whenever something is inserted ahead of the page
+boundary and repeats one when something is removed. A cursor is opaque base64url carrying
+the protocol version and the ordering it was issued against, validated on the way back in;
+one this build did not issue is refused rather than silently restarting from the top, which
+would make a client loop forever. Loop until `next_cursor` is absent rather than until a
+page comes back short — a full page can still be the last one. This requires the underlying
+order to be **total**: the review queue sorts by `score DESC, detected_at ASC, id ASC`, and
+without that last tiebreaker a walk of nine candidates sharing a score and a timestamp
+returns six.
+
 **Local socket.** The daemon listens on `$CEREBRIUM_HOME/daemon.sock` (mode `0600`;
 owner-only permissions are the whole auth model on a single-user desktop) and speaks
 newline-delimited JSON carrying JSON-RPC 2.0 — the same framing as MCP stdio. Two methods
@@ -500,7 +539,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `source_register` | Register/update an external mirror source for this deployment (`id`, `kind`, optional `project`/`freshness_hours`/`recipe`). Stores no credentials; the registry is empty by default. |
 | `mirror_upsert` | Upsert curated external records into `mirror` nodes for a registered source. Idempotent by `(source, native_id)`; supply decision-worthy records only, never bulk. Compact count envelope + affected node ids. |
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
-| `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. |
+| `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. Paged: pass `page_size` and feed `next_cursor` back until it is absent (`limit` alone still returns one unpaged batch). |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
 | `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), reranker usage (eligible vs actually reranked searches, candidates scored), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
 
@@ -985,7 +1024,7 @@ scenarios after a restart. The command intentionally has no threshold/pass-fail 
 scenario evaluation remains a separate manual step.
 
 **More than one host at once** means more than one server process on one SQLite file. That
-is allowed — see invariant #1 in `CLAUDE.md` — and measured: two servers doing 120
+is allowed — see invariant #1 in `CODEX.md` — and measured: two servers doing 120
 interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
 landed and searchable.
 

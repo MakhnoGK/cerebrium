@@ -189,7 +189,8 @@ export class LocalSearchMemory implements SearchMemory {
 
   private async vectorCandidates(args: SearchQuery, history: boolean): Promise<VectorRow[]> {
     try {
-      const [qvec] = await this.provider.embed([args.query], EmbeddingRole.QUERY);
+      const qvec =
+        args.query_vector ?? (await this.provider.embed([args.query], EmbeddingRole.QUERY))[0];
 
       if (!qvec) return [];
 
