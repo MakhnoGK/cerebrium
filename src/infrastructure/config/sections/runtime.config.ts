@@ -58,6 +58,7 @@ export class DaemonConfig extends SectionOf("daemon", {
   idleExitMs: int(300_000).positive().env("MEMORY_DAEMON_IDLE_MS"),
   resident: bool(false).env("MEMORY_DAEMON_RESIDENT"),
   socketPath: str(home("daemon.sock")).env("MEMORY_DAEMON_SOCKET"),
+  readWorkers: int(3).positive().env("MEMORY_DAEMON_READ_WORKERS"),
 }) {}
 
 export interface CodeRoot {

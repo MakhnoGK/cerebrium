@@ -206,6 +206,46 @@ describe("Daemon methods", () => {
     expect(status.daemon.error).toBe("no such file");
   });
 
+  it("should answer status from the dispatcher instead of this thread when one is given", async () => {
+    // Given
+    const seen: string[] = [];
+    await serve(
+      createDaemonMethods(
+        container,
+        { pid: 9, model: () => null, queueDepth: () => 4 },
+        (name, args) => {
+          seen.push(name);
+
+          return Promise.resolve({ content: { nodes_total: 7 }, args });
+        },
+      ),
+    );
+
+    // When
+    const status = (await rpcCall({ socketPath: SOCKET }, "status")) as {
+      content: { nodes_total: number };
+      daemon: { queue_depth: number };
+    };
+
+    // Then
+    expect(seen).toEqual(["operator_snapshot"]);
+    expect(status.content.nodes_total).toBe(7);
+    expect(status.daemon.queue_depth).toBe(4);
+  });
+
+  it("should omit the queue depth when there is no pool to report one", async () => {
+    // Given
+    await serve(createDaemonMethods(container, { pid: 9, model: () => null }));
+
+    // When
+    const status = (await rpcCall({ socketPath: SOCKET }, "status")) as {
+      daemon: Record<string, unknown>;
+    };
+
+    // Then
+    expect(status.daemon).not.toHaveProperty("queue_depth");
+  });
+
   it("should report the protocol version on initialize", async () => {
     // Given
     await serve(createDaemonMethods(container, { pid: 1, model: () => null }));

@@ -9,6 +9,8 @@ import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
+import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker";
+import { ReadPool } from "@/runtime/read-pool";
 import { createDaemonMethods, RpcServer } from "@/presentation/rpc";
 import { buildContainer } from "@/container";
 import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
@@ -182,14 +184,34 @@ async function main(): Promise<void> {
   let stopping = false;
   let model: WarmupOutcome | null = null;
 
+  // Reads run off this thread when there is a built worker to spawn. From source there is
+  // none, and reads stay in-process exactly as before.
+  const workerEntry = resolveReadWorker();
+  const pool =
+    workerEntry === null
+      ? null
+      : new ReadPool({
+          size: daemonConfig.readWorkers,
+          spawn: nodeWorkerFactory(workerEntry, dbPath),
+        });
+
+  if (pool === null) {
+    process.stderr.write("no read worker bundle; serving reads in-process\n");
+  }
+
   // Listening starts before the model is loaded, and the handler reads whatever state
   // warming has reached. That ordering is the whole point of `status`: a daemon that is
   // still loading, or whose load failed, must still be able to say so.
   const rpc = new RpcServer(
-    createDaemonMethods(container, {
-      pid: process.pid,
-      model: () => model,
-    }),
+    createDaemonMethods(
+      container,
+      {
+        pid: process.pid,
+        model: () => model,
+        ...(pool === null ? {} : { queueDepth: () => pool.depth }),
+      },
+      pool === null ? undefined : (name, args) => pool.invoke(name, args),
+    ),
     {
       isOwnedByLiveDaemon: () => isDaemonAlive(dbPath),
       onError: (message) => process.stderr.write(`rpc: ${message}\n`),
@@ -199,7 +221,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     stopping = true;
 
-    await Promise.all([worker.stop(), consolidation.stop(), rpc.close()]);
+    await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
     registry.retire(registered);
     clearDaemonPid(dbPath);
     process.exit(0);
@@ -246,7 +268,7 @@ async function main(): Promise<void> {
     // analysis can't see that closure mutation and reads it as always-false.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!stopping) {
-      await Promise.all([worker.stop(), consolidation.stop(), rpc.close()]);
+      await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
       registry.retire(registered);
       clearDaemonPid(dbPath);
     }

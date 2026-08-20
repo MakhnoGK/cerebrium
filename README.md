@@ -46,6 +46,7 @@ src/
   presentation/    delivery — mcp/ (stdio server, audit + output adapters, one dir per
                    tool) and rpc/ (the daemon's local socket server and its methods)
   server.ts        stdio MCP server      daemon.ts      embedding drain + socket
+  read-worker.ts   one read pool worker (read-only connection, no model)
   stats-cli.ts     operational snapshot  service-cli.ts launchd agent management
 ```
 
@@ -386,6 +387,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
 | `MEMORY_DAEMON_RESIDENT` | `false` | Skip idle-exit entirely and let a supervisor own the daemon's lifetime. Set by the launchd agent `cerebrium-service install` writes; off by default because resident mode with no supervisor strands a process nothing restarts. |
+| `MEMORY_DAEMON_READ_WORKERS` | `3` | Worker threads serving reads, each with its own read-only connection. One is reserved for `status` so it cannot queue behind a search; a pool of 1 shares its single worker rather than starving data reads. |
 | `MEMORY_DAEMON_SOCKET` | `$CEREBRIUM_HOME/daemon.sock` | Where the daemon listens. Rejected at startup if over the platform's 103-byte `sun_path` limit — set a shorter `CEREBRIUM_HOME` rather than working around it here. |
 | `MEMORY_DEDUP_THRESHOLD` | `0.92` | Cosine similarity above which a write reports `similar_existing`. Calibrated, not chosen — see below. |
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
@@ -456,6 +458,17 @@ five minutes forever. Without a supervisor the auto-spawn posture above is the r
 which is why resident mode defaults to off. It also closes a real gap — `ensureDaemon`
 runs once at server startup, so before this a daemon that died mid-session was never
 replaced and the backlog simply waited for the next session.
+
+**Read pool.** Reads are served by worker threads (`MEMORY_DAEMON_READ_WORKERS`, default
+3), each holding its own read-only connection to the same file — WAL allows any number of
+readers, and better-sqlite3 is synchronous only per connection, so separate connections buy
+real concurrency. One worker is held back for `status`, so asking the daemon how it is
+cannot queue behind a search. No embedding model lives in a worker: a query vector travels
+in the arguments instead, because embedding is ~3ms of a ~200ms search and a model per
+worker would cost ~150MB each. Running from source there is no worker bundle to spawn and
+reads stay in-process. Measured on an 868MB store: a trivial call made while a heavy read
+is in flight went from 639ms to 2ms, and three heavy reads run 2.4x faster across three
+workers than in sequence. A single call is no faster — the pool buys concurrency, not speed.
 
 **Local socket.** The daemon listens on `$CEREBRIUM_HOME/daemon.sock` (mode `0600`;
 owner-only permissions are the whole auth model on a single-user desktop) and speaks
