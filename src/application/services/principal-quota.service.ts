@@ -25,11 +25,12 @@ export class PrincipalQuotaService {
     this.calls.clear();
   }
 
-  // Records the call and throws if it puts the principal over. Consumption happens before
-  // the call runs, so a call that then fails still counts against the limit.
+  // Records the call and throws if it puts the principal over. Every principal is counted
+  // whether or not it has a ceiling — a limit is what makes a call fail, not what makes it
+  // observable — and a call refused here is not counted, since it never ran.
+  //
+  // Consumption happens before the call runs, so a call that then fails still counts.
   consume(principal: string, capability: Capability, quota: PrincipalQuota, now: number): void {
-    if (quota.calls === undefined && quota.writes === undefined) return;
-
     const windowMs = quota.windowMs ?? DEFAULT_WINDOW_MS;
     const write = capability === Capability.WRITE;
     const recent = this.recent(principal, now - windowMs);

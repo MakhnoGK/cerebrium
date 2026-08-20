@@ -162,6 +162,31 @@ describe("Per-principal quotas", () => {
     expect(refusal?.message).toMatch(/Retry in about 40s/);
   });
 
+  it("should count a principal that has no ceiling configured", () => {
+    // Given — a limit is what makes a call fail, not what makes it observable.
+    const quotas = new PrincipalQuotaService();
+
+    // When
+    quotas.consume("claude-code", Capability.WRITE, {}, 1_000);
+
+    // Then
+    expect(quotas.usage(2_000)).toEqual([{ principal: "claude-code", calls: 1, writes: 1 }]);
+  });
+
+  it("should not charge a principal for the call it was refused", () => {
+    // Given
+    const quotas = new PrincipalQuotaService();
+    quotas.consume("codex-mcp-client", Capability.WRITE, { writes: 1 }, 1_000);
+
+    // When
+    expect(() => {
+      quotas.consume("codex-mcp-client", Capability.WRITE, { writes: 1 }, 1_100);
+    }).toThrow(QuotaExceededError);
+
+    // Then — the refused call never ran, so it does not count against the window.
+    expect(quotas.usage(2_000)).toEqual([{ principal: "codex-mcp-client", calls: 1, writes: 1 }]);
+  });
+
   it("should report what each principal has spent in the window", () => {
     // Given
     const quotas = new PrincipalQuotaService();
