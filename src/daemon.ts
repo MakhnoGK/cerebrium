@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import { EMBEDDING_PROVIDER_TOKEN, EmbeddingRole } from "@/domain/ports/embedding-provider";
 import { CallPipeline } from "@/application/call-pipeline";
 import {
   ModelWarmupService,
@@ -8,6 +9,7 @@ import {
 } from "@/application/services";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
+import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker";
@@ -156,6 +158,17 @@ async function main(): Promise<void> {
 
   const daemonConfig = container.resolve(DaemonConfig);
 
+  // The model goes in its own thread when there is a bundle to spawn. Loading it blocks for
+  // over a second, and this is the thread that answers the socket — with the model here,
+  // every call during startup timed out, `status` included.
+  const embedEntry = resolveEmbedWorker();
+
+  if (embedEntry !== null) {
+    container.register(EMBEDDING_PROVIDER_TOKEN, {
+      useValue: new WorkerEmbeddingProvider(embedEntry),
+    });
+  }
+
   // Registrations are lazy, so this decides before the DB is ever opened.
   if (isDaemonAlive(dbPath)) {
     if (!daemonConfig.resident) {
@@ -207,7 +220,37 @@ async function main(): Promise<void> {
   // check and the audit row either way.
   const pipeline = container.resolve(CallPipeline);
 
-  pipeline.useReadDispatcher(pool === null ? undefined : (name, args) => pool.invoke(name, args));
+  // A read worker holds no model, so a semantic search needs its vector computed here — on
+  // this thread, where the model worker answers in a few milliseconds — before the query
+  // goes to the pool.
+  const embedForRead = async (name: string, args: unknown): Promise<unknown> => {
+    if (name !== "search_memory" || typeof args !== "object" || args === null) return args;
+
+    const query = args as { query?: unknown; mode?: unknown; query_vector?: unknown };
+
+    if (query.mode === "text" || query.query_vector !== undefined) return args;
+
+    if (typeof query.query !== "string" || !query.query.length) return args;
+
+    try {
+      const [vector] = await container
+        .resolve<{ embed: (t: string[], r: EmbeddingRole) => Promise<number[][]> }>(
+          EMBEDDING_PROVIDER_TOKEN,
+        )
+        .embed([query.query], EmbeddingRole.QUERY);
+
+      return vector === undefined ? args : { ...args, query_vector: vector };
+    } catch {
+      // No vector means the text half still answers, which beats failing the search.
+      return args;
+    }
+  };
+
+  pipeline.useReadDispatcher(
+    pool === null
+      ? undefined
+      : async (name, args) => pool.invoke(name, await embedForRead(name, args)),
+  );
 
   const rpc = new RpcServer(
     {

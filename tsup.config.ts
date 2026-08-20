@@ -18,6 +18,7 @@ export default defineConfig({
     "src/stats-cli.ts",
     "src/service-cli.ts",
     "src/read-worker.ts",
+    "src/embed-worker.ts",
   ],
   format: ["esm"],
   platform: "node",

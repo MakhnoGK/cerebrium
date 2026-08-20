@@ -20,6 +20,7 @@ import {
   LayeredConfigSource,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
+import { NoEmbeddingProvider } from "@/embeddings/worker-provider";
 import { configFilePath } from "@/runtime/paths";
 import { registerRemoteKernel } from "@/runtime/remote-kernel";
 import { SystemClock } from "@/runtime/system-clock";
@@ -138,6 +139,11 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
 
   target.register(EMBEDDING_PROVIDER_TOKEN, {
     useFactory: instanceCachingFactory((c) => {
+      // A read-pool worker must never load a model: three of them each loading one cost a
+      // measured +224MB for a single hybrid search. Whoever dispatches the read supplies
+      // the query vector, so an embed call here is a bug and says so.
+      if (role === "reader") return new NoEmbeddingProvider();
+
       const config = c.resolve(EmbeddingConfig);
 
       return createProvider(config.provider, config.model, config.cacheDir);
