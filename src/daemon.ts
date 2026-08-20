@@ -64,6 +64,29 @@ export function nextIdleState(
   return { state: { idleSinceMs: since }, shouldExit: nowMs - since >= idleExitMs };
 }
 
+// Under a supervisor, "another daemon owns this DB" must not be an exit. Exiting 0 with
+// launchd's KeepAlive set means being respawned forever — a ~10s loop that never converges
+// while a session-spawned daemon holds the pidfile. Waiting keeps the supervised process
+// up and lets it take over the moment the other one goes away.
+export async function waitForOwnership(opts: {
+  owned: () => boolean;
+  sleepMs: (ms: number) => Promise<void>;
+  intervalMs: number;
+  stopped?: () => boolean;
+  maxWaits?: number;
+}): Promise<"acquired" | "stopped"> {
+  const stopped = opts.stopped ?? (() => false);
+
+  for (let waits = 0; opts.maxWaits === undefined || waits < opts.maxWaits; waits++) {
+    if (stopped()) return "stopped";
+    if (!opts.owned()) return "acquired";
+
+    await opts.sleepMs(opts.intervalMs);
+  }
+
+  return "stopped";
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export async function runDaemon(
@@ -128,12 +151,24 @@ async function main(): Promise<void> {
   const container = buildContainer({ role: "daemon" });
   const dbPath = container.resolve(DatabaseConfig).path;
 
-  // Registrations are lazy, so this bails out before the DB is ever opened.
-  if (isDaemonAlive(dbPath)) {
-    return; // another daemon owns this DB
-  }
-
   const daemonConfig = container.resolve(DaemonConfig);
+
+  // Registrations are lazy, so this decides before the DB is ever opened.
+  if (isDaemonAlive(dbPath)) {
+    if (!daemonConfig.resident) {
+      return; // a session-spawned daemon steps aside; the owner is already draining
+    }
+
+    process.stderr.write("another daemon owns this database; waiting for it to exit\n");
+
+    await waitForOwnership({
+      owned: () => isDaemonAlive(dbPath),
+      sleepMs: sleep,
+      intervalMs: daemonConfig.idleIntervalMs,
+    });
+
+    process.stderr.write("took over the database\n");
+  }
   const queue = container.resolve(EmbeddingQueueRepo);
   const worker = container.resolve(EmbeddingWorker);
   const consolidation = container.resolve(ConsolidationWorker);
