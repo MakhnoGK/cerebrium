@@ -8,10 +8,11 @@ import {
   RPC_ERROR,
   socketPathProblem,
   successResponse,
+  type RpcMeta,
 } from "@/core/rpc";
 import { InvalidArgsError } from "@/presentation/rpc/schemas";
 
-export type RpcMethod = (params: Record<string, unknown>) => Promise<unknown>;
+export type RpcMethod = (params: Record<string, unknown>, meta: RpcMeta) => Promise<unknown>;
 
 // A single request line is bounded so a stuck or hostile writer cannot grow the buffer
 // without limit; the daemon has to stay answerable.
@@ -147,7 +148,7 @@ export class RpcServer {
     }
 
     try {
-      const result = await method(request.params ?? {});
+      const result = await method(request.params ?? {}, request.meta ?? {});
 
       if (!isNotification(request)) this.reply(socket, successResponse(id, result));
     } catch (err) {

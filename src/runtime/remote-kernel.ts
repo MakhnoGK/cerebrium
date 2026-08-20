@@ -1,6 +1,8 @@
 import type { DependencyContainer, InjectionToken } from "tsyringe";
 import { CALL_SURFACE, isRetryable, type CallName, type UseCase } from "@/application/use-cases";
+import { ClientIdentity } from "@/runtime/client-identity";
 import { rpcCall, RpcUnavailableError } from "@/runtime/rpc-client";
+import type { RpcMeta } from "@/core/rpc";
 
 // The remote kernel. It registers the same use-case tokens as the local one, against a
 // socket client instead of a database — which is the whole payoff of addressing use cases
@@ -40,6 +42,9 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
   constructor(
     private readonly name: CallName,
     private readonly options: RemoteKernelOptions,
+    // Read per call, not per registration: the MCP handshake that names the client happens
+    // after the container is built.
+    private readonly identity: () => RpcMeta,
   ) {}
 
   async invoke(args: unknown): Promise<unknown> {
@@ -53,6 +58,7 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
         // Arguments cross as JSON, so they must already be plain data. They are: the seam
         // was defined that way precisely so a remote implementation could substitute here.
         (args ?? {}) as Record<string, unknown>,
+        this.identity(),
       );
     } catch (err) {
       if (err instanceof RpcUnavailableError) {
@@ -68,12 +74,20 @@ export function registerRemoteKernel(
   target: DependencyContainer,
   options: RemoteKernelOptions,
 ): void {
+  // Who this host is, as the daemon will record it. Resolved through the container so the
+  // value follows the MCP handshake rather than a snapshot taken at wiring time.
+  const identity = (): RpcMeta => {
+    const writer = target.resolve(ClientIdentity).get();
+
+    return { client: writer.client, version: writer.version };
+  };
+
   for (const name of Object.keys(CALL_SURFACE) as CallName[]) {
     // Each entry's token has its own Args/Result pair, and the loop needs one type. The
     // registered value satisfies every one of them: a remote use case is uniform by
     // construction, since it only forwards plain data.
     const token = CALL_SURFACE[name].token as InjectionToken<UseCase<unknown, unknown>>;
 
-    target.register(token, { useValue: new RemoteUseCase(name, options) });
+    target.register(token, { useValue: new RemoteUseCase(name, options, identity) });
   }
 }

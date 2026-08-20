@@ -272,7 +272,7 @@ async function main(): Promise<void> {
 
   const rpc = new RpcServer(
     {
-      ...surfaceMethods((name, args) => pipeline.invoke(container, name, args)),
+      ...surfaceMethods((name, args, writer) => pipeline.invoke(container, name, args, writer)),
       ...createDaemonMethods(
         container,
         {

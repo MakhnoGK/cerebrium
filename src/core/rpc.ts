@@ -10,7 +10,7 @@
 // daemon outlives a rebuild, so a new client talking to an old daemon is the normal
 // case, not an edge one — the mismatch has to name itself rather than surface as an
 // unknown method.
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // macOS caps sockaddr_un.sun_path at 104 bytes including the terminator, and bind()
 // fails with a message that does not mention the length.
@@ -24,11 +24,21 @@ export const RPC_ERROR = {
   internal: -32603,
 } as const;
 
+// Who is calling, carried beside `params` rather than inside them. The distinction is the
+// whole point: `params` is what the caller asked for and a tool schema validates it, while
+// `meta` is what the transport knows about the caller. A model driving a tool can put
+// anything in `params`; it cannot reach this.
+export interface RpcMeta {
+  client?: string | null;
+  version?: string | null;
+}
+
 export interface RpcRequest {
   jsonrpc: "2.0";
   id?: string | number | null;
   method: string;
   params?: Record<string, unknown>;
+  meta?: RpcMeta;
 }
 
 export interface RpcError {
@@ -96,7 +106,26 @@ export function parseRequest(line: string): ParsedRequest {
 
   return {
     ok: true,
-    request: { jsonrpc: "2.0", id, method: candidate.method, params: candidate.params },
+    request: {
+      jsonrpc: "2.0",
+      id,
+      method: candidate.method,
+      params: candidate.params,
+      meta: parseMeta(candidate.meta),
+    },
+  };
+}
+
+// Anything that is not a string becomes null rather than travelling on as a claim: this
+// value ends up attributed to writes, so a malformed one must not read as an identity.
+function parseMeta(raw: unknown): RpcMeta {
+  if (typeof raw !== "object" || raw === null) return {};
+
+  const { client, version } = raw as RpcMeta;
+
+  return {
+    client: typeof client === "string" ? client : null,
+    version: typeof version === "string" ? version : null,
   };
 }
 

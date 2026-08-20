@@ -10,7 +10,7 @@ import {
 import { REGISTER_SOURCE, UPSERT_MIRRORS } from "@/application/use-cases/contracts/mirror";
 import { INDEX_CODE } from "@/application/use-cases/contracts/operations";
 import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/read-surface";
-import { SESSION_HINTS } from "@/application/use-cases/contracts/session";
+import { SESSION_HINTS, START_SESSION } from "@/application/use-cases/contracts/session";
 import { EventAction } from "@/core/vocab";
 
 // Everything a client outside this process may call, by name. Extends the read surface with
@@ -47,10 +47,9 @@ export const CALL_SURFACE = {
   // Writes — NEVER retried. None of these is idempotent: a retried `write_memory` after a
   // timeout creates a second node, and a retried `apply_candidate` resolves twice.
   //
-  // `start_session` is deliberately NOT here. Its `client` is a writer identity the host
-  // supplies from the connection, not something the caller states about itself — accepting
-  // it off the wire would let any client claim to be any writer. It goes on the surface
-  // when the proxy that knows who connected can stamp it.
+  // `start_session` is here, and its `client` is NOT in its argument schema. The identity
+  // rides in the transport's `meta`, which the proxy fills from the MCP initialize
+  // handshake — so a caller cannot state who it is, only the host process can.
   // Classified a write, and it is one: `getSessionHints` calls `requireSession`, which
   // touches `sessions.last_seen`. It reads like a lookup and would have gone to a
   // read-only worker, where it would fail. `audit: false` because it accompanies another
@@ -67,6 +66,7 @@ export const CALL_SURFACE = {
   apply_candidate: { token: APPLY_CANDIDATE, kind: "write", action: EventAction.CONSOLIDATE_APPLY },
   retry_candidate: { token: RETRY_CANDIDATE, kind: "write", action: EventAction.CONSOLIDATE_RETRY },
   index_code: { token: INDEX_CODE, kind: "write", action: EventAction.CODE_INDEX },
+  start_session: { token: START_SESSION, kind: "write", action: EventAction.SESSION_START },
 } as const;
 
 export type CallName = keyof typeof CALL_SURFACE;

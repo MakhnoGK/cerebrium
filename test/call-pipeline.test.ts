@@ -229,12 +229,33 @@ describe("Call pipeline invariants", () => {
     expect(events()).toHaveLength(before);
   });
 
-  it("should keep session minting off the wire", async () => {
-    // Given / When / Then — start_session's `client` is a writer identity the host stamps
-    // from the connection; accepting it from a caller would let anyone claim any writer.
-    expect(isCallName("start_session")).toBe(false);
-    await expect(pipeline.invoke(container, "start_session", {})).rejects.toBeInstanceOf(
-      UnknownCallError,
-    );
+  it("should stamp the writer from the transport over anything the caller claims", async () => {
+    // Given — the caller names itself in its arguments, which is what a model driving the
+    // tool could reach.
+    const forged = { project: null, client: { client: "totally-trusted", version: "9" } };
+
+    // When
+    const { session_id } = (await pipeline.invoke(container, "start_session", forged, {
+      client: "claude-code",
+      version: "2.1.224",
+    })) as { session_id: string };
+
+    // Then
+    expect(
+      env.db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
+    ).toEqual({ client: "claude-code", client_version: "2.1.224" });
+  });
+
+  it("should attribute the session-start row to the session it just minted", async () => {
+    // Given / When — the id is in the result, not the arguments, so the audit row would
+    // otherwise have nothing to attach to.
+    const { session_id } = (await pipeline.invoke(container, "start_session", {})) as {
+      session_id: string;
+    };
+
+    // Then
+    expect(
+      events().filter((e) => e.action === "session_start" && e.session_id === session_id),
+    ).toHaveLength(1);
   });
 });

@@ -16,6 +16,7 @@ import {
   type TouchSession,
   type UseCase,
 } from "@/application/use-cases";
+import { UNKNOWN_WRITER, type Writer } from "@/runtime/client-identity";
 
 // Two invariants used to live only in the MCP adapters: a call carrying a session_id
 // validates it first, and every call appends an `events` row (invariant #7). A second
@@ -53,7 +54,12 @@ export class CallPipeline {
     this.reads = dispatch;
   }
 
-  async invoke(container: DependencyContainer, name: string, args: unknown): Promise<unknown> {
+  async invoke(
+    container: DependencyContainer,
+    name: string,
+    args: unknown,
+    writer: Writer = UNKNOWN_WRITER,
+  ): Promise<unknown> {
     if (!isCallName(name)) {
       throw new UnknownCallError(name);
     }
@@ -71,7 +77,7 @@ export class CallPipeline {
     }
 
     try {
-      const result = await this.run(container, name, args);
+      const result = await this.run(container, name, args, writer);
 
       await this.record(name, session, result, null);
 
@@ -87,13 +93,14 @@ export class CallPipeline {
     container: DependencyContainer,
     name: CallName,
     args: unknown,
+    writer: Writer,
   ): Promise<unknown> {
     const read = readNameOf(name);
 
     if (read === null || this.reads === undefined) {
       return await container
         .resolve<UseCase<unknown, unknown>>(CALL_SURFACE[name].token)
-        .invoke(args);
+        .invoke(stamped(name, args, writer));
     }
 
     const result = await this.reads(read, args);
@@ -115,7 +122,11 @@ export class CallPipeline {
     result: unknown,
     error: Error | null,
   ): Promise<void> {
-    if (session === null || !isAudited(name)) {
+    // `start_session` mints the very session it is attributed to, so its id is in the
+    // result rather than the arguments.
+    const attributed = session ?? sessionOf(result);
+
+    if (attributed === null || !isAudited(name)) {
       return;
     }
 
@@ -123,13 +134,22 @@ export class CallPipeline {
       events: [
         {
           action: callAction(name),
-          session_id: session,
+          session_id: attributed,
           ...(error === null ? nodeOf(result) : {}),
           detail: error === null ? null : { error: error.message },
         },
       ],
     });
   }
+}
+
+// The writer identity is transport knowledge, not an argument: it is attached here rather
+// than accepted from whatever the caller sent, and only the one call that persists it takes
+// it at all.
+function stamped(name: CallName, args: unknown, writer: Writer): unknown {
+  if (name !== "start_session") return args;
+
+  return { ...(typeof args === "object" && args !== null ? args : {}), client: writer };
 }
 
 function usedIds(result: unknown): string[] {
