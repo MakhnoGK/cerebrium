@@ -59,6 +59,9 @@ export class DaemonConfig extends SectionOf("daemon", {
   resident: bool(false).env("MEMORY_DAEMON_RESIDENT"),
   socketPath: str(home("daemon.sock")).env("MEMORY_DAEMON_SOCKET"),
   readWorkers: int(3).positive().env("MEMORY_DAEMON_READ_WORKERS"),
+  // How long since the last client call before background work may run. Consolidation
+  // shares this process with the reads, so it yields to them.
+  quietMs: int(2_000).nonNegative().env("MEMORY_DAEMON_QUIET_MS"),
 }) {}
 
 export interface CodeRoot {

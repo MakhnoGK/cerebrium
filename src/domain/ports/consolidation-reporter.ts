@@ -1,4 +1,7 @@
 export interface ConsolidationTickResult {
+  // Set when the sweep stopped between stages because a client was waiting. Not a failure:
+  // the completed stages stand and the rest happens on the next tick.
+  yielded?: true;
   links_added: number;
   links_suggested: number;
   links_pruned: number;

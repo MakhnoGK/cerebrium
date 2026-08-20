@@ -1,4 +1,5 @@
 import { inject, injectable, type DependencyContainer } from "tsyringe";
+import { ActivityMonitor } from "@/application/services";
 import {
   CALL_SURFACE,
   callAction,
@@ -41,6 +42,7 @@ export class CallPipeline {
   constructor(
     @inject(TOUCH_SESSION) private readonly sessions: TouchSession,
     @inject(RECORD_EVENTS) private readonly events: RecordEvents,
+    private readonly activity: ActivityMonitor,
   ) {}
 
   useReadDispatcher(dispatch: ReadDispatcher | undefined): void {
@@ -51,6 +53,10 @@ export class CallPipeline {
     if (!isCallName(name)) {
       throw new UnknownCallError(name);
     }
+
+    // Marked before the work, not after: a long call must count as activity for its whole
+    // duration, not only once it finishes.
+    this.activity.note();
 
     const session = sessionOf(args);
 
