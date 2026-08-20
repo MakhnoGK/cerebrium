@@ -1,11 +1,22 @@
 import type { InjectionToken } from "tsyringe";
 
-// Where raw config values come from. The env implementation lives in infrastructure;
-// tests pass a plain object, so nothing in the config layer ever touches process.env.
+// Which tier answered a lookup. Ordering is the caller's business (see
+// LayeredConfigSource); a source only reports which one it is.
+export type ConfigOrigin = "env" | "file";
+
+export interface ConfigValue {
+  raw: string;
+  origin: ConfigOrigin;
+}
+
+// Where raw config values come from. The env and file implementations live in
+// infrastructure; tests pass a plain object, so nothing in the config layer ever touches
+// process.env. A value arrives with its origin attached rather than being looked up
+// separately, so provenance cannot disagree with the value it describes.
 export interface ConfigSource {
-  // Raw value for a config path, or undefined when unset. `envName` is the resolved
-  // variable name — the source decides whether it consults it.
-  read(path: string, envName: string): string | undefined;
+  // Raw value for a config path, or undefined when unset. `path` is the dotted config
+  // path and `envName` the resolved variable name; a source consults whichever it keys on.
+  read(path: string, envName: string): ConfigValue | undefined;
 }
 
 export const CONFIG_SOURCE_TOKEN: InjectionToken<ConfigSource> = Symbol("ConfigSource");
@@ -16,6 +27,6 @@ export const CONFIG_SOURCE_TOKEN: InjectionToken<ConfigSource> = Symbol("ConfigS
 export interface FieldProvenance {
   path: string;
   envName: string;
-  source: "default" | "env";
+  source: "default" | ConfigOrigin;
   ignored?: { raw: string; reason: string };
 }

@@ -19,6 +19,8 @@ export {
 } from "@/domain/ports/config/section";
 export {
   CONFIG_SOURCE_TOKEN,
+  type ConfigOrigin,
   type ConfigSource,
+  type ConfigValue,
   type FieldProvenance,
 } from "@/domain/ports/config/source";

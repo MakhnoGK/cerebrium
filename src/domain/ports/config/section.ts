@@ -39,7 +39,8 @@ export function SectionOf<S extends SectionSpec>(
       for (const [key, field] of Object.entries(spec)) {
         const fieldPath = `${path}.${key}`;
         const envName = field.envName(fieldPath);
-        const raw = source.read(fieldPath, envName);
+        const hit = source.read(fieldPath, envName);
+        const raw = hit?.raw;
         const coerced = raw === undefined ? undefined : field.coerce(raw);
 
         if (coerced === undefined) {
@@ -62,7 +63,7 @@ export function SectionOf<S extends SectionSpec>(
         }
 
         values[key] = coerced;
-        provenance.push({ path: fieldPath, envName, source: "env" });
+        provenance.push({ path: fieldPath, envName, source: hit!.origin });
       }
 
       Object.assign(this, values);
