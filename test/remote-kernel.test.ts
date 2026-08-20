@@ -10,6 +10,7 @@ import {
   type WriteMemory,
 } from "@/application/use-cases";
 import { DaemonUnreachableError } from "@/runtime/remote-kernel";
+import { closeRpcConnections } from "@/runtime/rpc-client";
 import { RpcServer, surfaceMethods } from "@/presentation/rpc";
 import { buildContainer, KERNEL_TOKENS } from "@/container";
 import { StaticConfigSource } from "@/infrastructure/config";
@@ -32,6 +33,7 @@ function remote() {
 }
 
 afterEach(async () => {
+  closeRpcConnections();
   await server?.close();
   server = null;
   rmSync(SOCKET, { force: true });

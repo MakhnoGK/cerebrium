@@ -152,3 +152,47 @@ export function parseResponseLine(line: string): RpcResponse | null {
     return null;
   }
 }
+
+// A server -> client message. It carries a method like a request but no id, so the
+// receiver must not reply to it. This is the direction the envelope always allowed and
+// nothing used: one request per connection left nowhere to push to.
+export interface RpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params: Record<string, unknown>;
+}
+
+export function notificationFrame(
+  method: string,
+  params: Record<string, unknown> = {},
+): RpcNotification {
+  return { jsonrpc: "2.0", method, params };
+}
+
+export type Inbound =
+  | { kind: "response"; response: RpcResponse }
+  | { kind: "notification"; method: string; params: Record<string, unknown> };
+
+// One parse for both shapes a client can receive on a connection it is holding open. A
+// line with a method is a push; a line with an id is the answer to something it asked.
+export function parseInbound(line: string): Inbound | null {
+  let raw: unknown;
+
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+
+  const message = raw as Partial<RpcResponse & RpcNotification>;
+
+  if (message.jsonrpc !== "2.0") return null;
+
+  if (typeof message.method === "string") {
+    return { kind: "notification", method: message.method, params: message.params ?? {} };
+  }
+
+  return message.id === undefined ? null : { kind: "response", response: message as RpcResponse };
+}

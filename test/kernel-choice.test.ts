@@ -1,6 +1,7 @@
 import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { chooseKernel } from "@/runtime/kernel-choice";
+import { closeRpcConnections } from "@/runtime/rpc-client";
 import { PROTOCOL_VERSION } from "@/core/rpc";
 import { GuardedToolWrapper, PassThroughToolWrapper } from "@/presentation/mcp/adapters";
 import type { McpTool } from "@/presentation/mcp/tools/contracts";
@@ -11,6 +12,7 @@ const SOCKET = `/tmp/cb-choice-${String(process.pid)}.sock`;
 let server: RpcServer | null = null;
 
 afterEach(async () => {
+  closeRpcConnections();
   await server?.close();
   server = null;
   rmSync(SOCKET, { force: true });

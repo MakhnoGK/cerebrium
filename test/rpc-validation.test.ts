@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { rpcCall } from "@/runtime/rpc-client";
+import { closeRpcConnections, rpcCall } from "@/runtime/rpc-client";
 import { RPC_ERROR } from "@/core/rpc";
 import { MemoryKind } from "@/core/vocab";
 import {
@@ -18,6 +18,7 @@ const ID = "01M0FP4NF24EWXR6V93NYDPHX8";
 let server: RpcServer | null = null;
 
 afterEach(async () => {
+  closeRpcConnections();
   await server?.close();
   server = null;
   rmSync(SOCKET, { force: true });
