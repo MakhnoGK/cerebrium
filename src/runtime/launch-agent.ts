@@ -6,10 +6,15 @@ import { cerebriumHome } from "@/runtime/paths";
 export const LAUNCH_AGENT_LABEL = "net.obrio.cerebrium.daemon";
 
 export interface LaunchAgentSpec {
-  // Absolute path to the node binary and to the daemon bundle. Both are captured at
+  // Absolute path to the node binary and to the daemon entry point. Both are captured at
   // install time: launchd runs with a minimal PATH and cannot find either by name.
   nodePath: string;
+  // What the plist runs: the stable link under $CEREBRIUM_HOME/bin, never the build output
+  // directly, so the agent does not carry a working-tree path.
   daemonPath: string;
+  // What that link points at. Node resolves an entry point to its realpath, so the bundle
+  // still finds its own migrations and its unbundled native dependencies.
+  daemonTarget: string;
   home: string;
   logPath: string;
 }
@@ -55,10 +60,22 @@ export function launchAgentPlistPath(home = homedir()): string {
   return join(home, "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
 }
 
-export function defaultLaunchAgentSpec(daemonPath: string): LaunchAgentSpec {
+// The one indirection the installed agent depends on. Re-pointing this link moves the
+// agent to a different build without touching the plist or reloading it.
+export function daemonLinkPath(home = cerebriumHome()): string {
+  return join(home, "bin", "daemon.js");
+}
+
+export function defaultLaunchAgentSpec(daemonTarget: string): LaunchAgentSpec {
   const home = cerebriumHome();
 
-  return { nodePath: stableNodePath(), daemonPath, home, logPath: join(home, "daemon.log") };
+  return {
+    nodePath: stableNodePath(),
+    daemonPath: daemonLinkPath(home),
+    daemonTarget,
+    home,
+    logPath: join(home, "daemon.log"),
+  };
 }
 
 // launchd runs the bare node binary, which cannot execute TypeScript. Run from source

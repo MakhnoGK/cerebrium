@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { resolveDaemonPath } from "@/runtime/ensure-daemon";
 import { isMainModule } from "@/runtime/is-main";
 import {
+  daemonLinkPath,
   defaultLaunchAgentSpec,
   isInstallableDaemonPath,
   LAUNCH_AGENT_LABEL,
@@ -55,9 +64,9 @@ function install(): number {
   const plistPath = launchAgentPlistPath();
   const spec = defaultLaunchAgentSpec(resolveDaemonPath());
 
-  if (!isInstallableDaemonPath(spec.daemonPath) || !existsSync(spec.daemonPath)) {
+  if (!isInstallableDaemonPath(spec.daemonTarget) || !existsSync(spec.daemonTarget)) {
     process.stderr.write(
-      `no built daemon bundle to install (resolved ${spec.daemonPath}) — run \`npm run build\` ` +
+      `no built daemon bundle to install (resolved ${spec.daemonTarget}) — run \`npm run build\` ` +
         `and install with the built \`cerebrium-service\` bin\n`,
     );
 
@@ -65,7 +74,9 @@ function install(): number {
   }
 
   mkdirSync(dirname(plistPath), { recursive: true });
-  mkdirSync(spec.home, { recursive: true });
+  mkdirSync(dirname(spec.daemonPath), { recursive: true });
+  rmSync(spec.daemonPath, { force: true });
+  symlinkSync(spec.daemonTarget, spec.daemonPath);
   writeFileSync(plistPath, renderLaunchAgent(spec), "utf8");
 
   // Idempotent: an existing agent must be booted out before the new plist can load,
@@ -85,6 +96,7 @@ function install(): number {
       `  plist  ${plistPath}\n` +
       `  node   ${spec.nodePath}\n` +
       `  daemon ${spec.daemonPath}\n` +
+      `  target ${spec.daemonTarget}\n` +
       `  home   ${spec.home}\n` +
       `  log    ${spec.logPath}\n`,
   );
@@ -95,15 +107,32 @@ function install(): number {
 function uninstall(): number {
   const plistPath = launchAgentPlistPath();
   const removed = launchctl(["bootout", `${domain()}/${LAUNCH_AGENT_LABEL}`]);
+  const link = daemonLinkPath();
 
   rmSync(plistPath, { force: true });
+  rmSync(link, { force: true });
 
   process.stdout.write(
     `uninstalled ${LAUNCH_AGENT_LABEL}${removed.ok ? "" : " (was not loaded)"}\n` +
-      `  removed ${plistPath}\n`,
+      `  removed ${plistPath}\n` +
+      `  removed ${link}\n`,
   );
 
   return 0;
+}
+
+// A dangling link is the failure this reports: launchd keeps trying to run a path that no
+// longer resolves, and the plist says nothing about why.
+function describeLink(link: string): string {
+  try {
+    if (!lstatSync(link).isSymbolicLink()) return `${link} (not a link)`;
+  } catch {
+    return "not installed";
+  }
+
+  const target = readlinkSync(link);
+
+  return existsSync(link) ? `${link} -> ${target}` : `${link} -> ${target} (TARGET MISSING)`;
 }
 
 function status(): number {
@@ -114,6 +143,7 @@ function status(): number {
   process.stdout.write(
     `agent   ${LAUNCH_AGENT_LABEL}\n` +
       `  plist  ${existsSync(plistPath) ? plistPath : "not installed"}\n` +
+      `  daemon ${describeLink(daemonLinkPath())}\n` +
       `  loaded ${printed.ok ? "yes" : "no"}\n` +
       `  pid    ${pid ?? "—"}\n`,
   );

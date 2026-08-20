@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  daemonLinkPath,
   isInstallableDaemonPath,
   LAUNCH_AGENT_LABEL,
   launchAgentPlistPath,
@@ -11,7 +12,8 @@ import {
 
 const spec: LaunchAgentSpec = {
   nodePath: "/opt/homebrew/bin/node",
-  daemonPath: "/Users/x/projects/cerebrium/dist/daemon.js",
+  daemonPath: "/Users/x/.cerebrium/bin/daemon.js",
+  daemonTarget: "/Users/x/projects/cerebrium/dist/daemon.js",
   home: "/Users/x/.cerebrium",
   logPath: "/Users/x/.cerebrium/daemon.log",
 };
@@ -27,7 +29,7 @@ describe("LaunchAgent plist", () => {
     expect(plist).toContain("<key>KeepAlive</key>\n    <true/>");
   });
 
-  it("should pin absolute paths for node and the daemon bundle", () => {
+  it("should pin absolute paths for node and the daemon entry point", () => {
     // Given / When
     const plist = renderLaunchAgent(spec);
 
@@ -35,6 +37,20 @@ describe("LaunchAgent plist", () => {
     expect(plist).toContain(`<string>${spec.nodePath}</string>`);
     expect(plist).toContain(`<string>${spec.daemonPath}</string>`);
     expect(plist).toContain(`<key>CEREBRIUM_HOME</key>\n      <string>${spec.home}</string>`);
+  });
+
+  it("should run the stable link, never the build directory, so no working-tree path is baked in", () => {
+    // Given / When
+    const plist = renderLaunchAgent(spec);
+
+    // Then
+    expect(plist).toContain("<string>/Users/x/.cerebrium/bin/daemon.js</string>");
+    expect(plist).not.toContain(spec.daemonTarget);
+  });
+
+  it("should place the daemon link under the install root", () => {
+    // Given / When / Then
+    expect(daemonLinkPath("/Users/x/.cerebrium")).toBe("/Users/x/.cerebrium/bin/daemon.js");
   });
 
   it("should escape a path that would otherwise break the XML", () => {
