@@ -1,8 +1,16 @@
 import { inject, injectable, type DependencyContainer } from "tsyringe";
-import { ActivityMonitor } from "@/application/services";
+import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
+import { CapabilityDeniedError } from "@/application/errors";
+import {
+  ActivityMonitor,
+  PrincipalPolicyService,
+  PrincipalQuotaService,
+} from "@/application/services";
 import {
   CALL_SURFACE,
   callAction,
+  callCapability,
   isAudited,
   isCallName,
   readNameOf,
@@ -14,6 +22,8 @@ import {
   type TouchSession,
   type UseCase,
 } from "@/application/use-cases";
+import { UNKNOWN_WRITER, type Writer } from "@/runtime/client-identity";
+import { Posture } from "@/core/vocab";
 
 // Two invariants used to live only in the MCP adapters: a call carrying a session_id
 // validates it first, and every call appends an `events` row (invariant #7). A second
@@ -42,14 +52,23 @@ export class CallPipeline {
   constructor(
     @inject(TOUCH_SESSION) private readonly sessions: TouchSession,
     @inject(RECORD_EVENTS) private readonly events: RecordEvents,
+    @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
+    @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly activity: ActivityMonitor,
+    private readonly policy: PrincipalPolicyService,
+    private readonly quotas: PrincipalQuotaService,
   ) {}
 
   useReadDispatcher(dispatch: ReadDispatcher | undefined): void {
     this.reads = dispatch;
   }
 
-  async invoke(container: DependencyContainer, name: string, args: unknown): Promise<unknown> {
+  async invoke(
+    container: DependencyContainer,
+    name: string,
+    args: unknown,
+    writer: Writer = UNKNOWN_WRITER,
+  ): Promise<unknown> {
     if (!isCallName(name)) {
       throw new UnknownCallError(name);
     }
@@ -66,27 +85,65 @@ export class CallPipeline {
       await this.sessions.invoke({ session_id: session });
     }
 
-    try {
-      const result = await this.run(container, name, args);
+    const principal = this.policy.principalOf(writer.client);
 
-      await this.record(name, session, result, null);
+    try {
+      const review = this.authorize(name, principal);
+      const result = await this.run(container, name, args, writer);
+
+      await this.record(name, session, result, null, review);
 
       return result;
     } catch (error) {
-      await this.record(name, session, null, error as Error);
+      await this.record(name, session, null, error as Error, false);
 
       throw error;
     }
   }
 
-  private run(container: DependencyContainer, name: CallName, args: unknown): Promise<unknown> {
-    const read = readNameOf(name);
+  // `off` refuses before the call runs. `suggest` lets it through and says so, which is
+  // what marks a writer as suspect without dropping what it had to say.
+  private authorize(name: CallName, principal: string): boolean {
+    const capability = callCapability(name);
+    const posture = this.policy.postureFor(principal, capability);
 
-    if (read !== null && this.reads !== undefined) {
-      return this.reads(read, args);
+    if (posture === Posture.OFF) {
+      throw new CapabilityDeniedError(principal, capability, name);
     }
 
-    return container.resolve<UseCase<unknown, unknown>>(CALL_SURFACE[name].token).invoke(args);
+    this.quotas.consume(
+      principal,
+      capability,
+      this.policy.quotaFor(principal),
+      Date.parse(this.clock.now()),
+    );
+
+    return posture === Posture.SUGGEST;
+  }
+
+  private async run(
+    container: DependencyContainer,
+    name: CallName,
+    args: unknown,
+    writer: Writer,
+  ): Promise<unknown> {
+    const read = readNameOf(name);
+
+    if (read === null || this.reads === undefined) {
+      return await container
+        .resolve<UseCase<unknown, unknown>>(CALL_SURFACE[name].token)
+        .invoke(stamped(name, args, writer));
+    }
+
+    const result = await this.reads(read, args);
+
+    // A pooled read runs on a read-only handle, so the use accounting `get` owes its
+    // nodes is settled here instead.
+    if (read === "fetch_nodes") {
+      this.uses.recordUse(usedIds(result), this.clock.now());
+    }
+
+    return result;
   }
 
   // `events.session_id` is NOT NULL, so a call that cannot be attributed logs nothing —
@@ -96,8 +153,13 @@ export class CallPipeline {
     session: string | null,
     result: unknown,
     error: Error | null,
+    review: boolean,
   ): Promise<void> {
-    if (session === null || !isAudited(name)) {
+    // `start_session` mints the very session it is attributed to, so its id is in the
+    // result rather than the arguments.
+    const attributed = session ?? sessionOf(result);
+
+    if (attributed === null || !isAudited(name)) {
       return;
     }
 
@@ -105,13 +167,39 @@ export class CallPipeline {
       events: [
         {
           action: callAction(name),
-          session_id: session,
+          session_id: attributed,
           ...(error === null ? nodeOf(result) : {}),
-          detail: error === null ? null : { error: error.message },
+          detail: detailOf(error, review),
         },
       ],
     });
   }
+}
+
+// The writer identity is transport knowledge, not an argument: it is attached here rather
+// than accepted from whatever the caller sent, and only the one call that persists it takes
+// it at all.
+function stamped(name: CallName, args: unknown, writer: Writer): unknown {
+  if (name !== "start_session") return args;
+
+  return { ...(typeof args === "object" && args !== null ? args : {}), client: writer };
+}
+
+function detailOf(error: Error | null, review: boolean): Record<string, unknown> | null {
+  const detail = {
+    ...(error === null ? {} : { error: error.message }),
+    ...(review ? { review: true } : {}),
+  };
+
+  return Object.keys(detail).length ? detail : null;
+}
+
+function usedIds(result: unknown): string[] {
+  if (typeof result !== "object" || result === null) return [];
+
+  const used = (result as { used?: unknown }).used;
+
+  return Array.isArray(used) ? used.filter((id): id is string => typeof id === "string") : [];
 }
 
 function sessionOf(args: unknown): string | null {

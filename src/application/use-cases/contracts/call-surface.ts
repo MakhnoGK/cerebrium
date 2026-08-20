@@ -10,8 +10,8 @@ import {
 import { REGISTER_SOURCE, UPSERT_MIRRORS } from "@/application/use-cases/contracts/mirror";
 import { INDEX_CODE } from "@/application/use-cases/contracts/operations";
 import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/read-surface";
-import { SESSION_HINTS } from "@/application/use-cases/contracts/session";
-import { EventAction } from "@/core/vocab";
+import { SESSION_HINTS, START_SESSION } from "@/application/use-cases/contracts/session";
+import { Capability, EventAction } from "@/core/vocab";
 
 // Everything a client outside this process may call, by name. Extends the read surface with
 // the writes, so there is exactly one list to consult rather than one per delivery layer.
@@ -24,49 +24,139 @@ import { EventAction } from "@/core/vocab";
 // read-loop data.
 export const CALL_SURFACE = {
   // Reads — safe to retry, dispatched to the read pool.
-  search_memory: { token: READ_SURFACE.search_memory, kind: "read", action: EventAction.SEARCH },
-  fetch_nodes: { token: READ_SURFACE.fetch_nodes, kind: "read", action: EventAction.GET },
-  lookup_code: { token: READ_SURFACE.lookup_code, kind: "read", action: EventAction.CODE_LOOKUP },
-  stats_snapshot: { token: READ_SURFACE.stats_snapshot, kind: "read", action: EventAction.STATS },
+  search_memory: {
+    token: READ_SURFACE.search_memory,
+    kind: "read",
+    action: EventAction.SEARCH,
+    capability: Capability.READ,
+  },
+  fetch_nodes: {
+    token: READ_SURFACE.fetch_nodes,
+    kind: "read",
+    action: EventAction.GET,
+    capability: Capability.READ,
+  },
+  lookup_code: {
+    token: READ_SURFACE.lookup_code,
+    kind: "read",
+    action: EventAction.CODE_LOOKUP,
+    capability: Capability.READ,
+  },
+  stats_snapshot: {
+    token: READ_SURFACE.stats_snapshot,
+    kind: "read",
+    action: EventAction.STATS,
+    capability: Capability.READ,
+  },
   operator_snapshot: {
     token: READ_SURFACE.operator_snapshot,
     kind: "read",
     action: EventAction.STATS,
+    capability: Capability.READ,
   },
   suggest_candidates: {
     token: READ_SURFACE.suggest_candidates,
     kind: "read",
     action: EventAction.CONSOLIDATE_SUGGEST,
+    capability: Capability.CONSOLIDATE,
   },
   mirror_status: {
     token: READ_SURFACE.mirror_status,
     kind: "read",
     action: EventAction.MIRROR_STATUS,
+    capability: Capability.READ,
   },
 
   // Writes — NEVER retried. None of these is idempotent: a retried `write_memory` after a
   // timeout creates a second node, and a retried `apply_candidate` resolves twice.
   //
-  // `start_session` is deliberately NOT here. Its `client` is a writer identity the host
-  // supplies from the connection, not something the caller states about itself — accepting
-  // it off the wire would let any client claim to be any writer. It goes on the surface
-  // when the proxy that knows who connected can stamp it.
   // Classified a write, and it is one: `getSessionHints` calls `requireSession`, which
   // touches `sessions.last_seen`. It reads like a lookup and would have gone to a
   // read-only worker, where it would fail. `audit: false` because it accompanies another
   // call rather than being one — a row of its own would double-count every tool invocation.
-  session_hints: { token: SESSION_HINTS, kind: "write", action: EventAction.SEARCH, audit: false },
-  write_memory: { token: WRITE_MEMORY, kind: "write", action: EventAction.WRITE },
-  update_memory: { token: UPDATE_MEMORY, kind: "write", action: EventAction.UPDATE },
-  invalidate_memory: { token: INVALIDATE_MEMORY, kind: "write", action: EventAction.INVALIDATE },
-  restore_memory: { token: RESTORE_MEMORY, kind: "write", action: EventAction.RESTORE },
-  link_nodes: { token: LINK_NODES, kind: "write", action: EventAction.LINK },
-  record_checkpoint: { token: RECORD_CHECKPOINT, kind: "write", action: EventAction.CHECKPOINT },
-  register_source: { token: REGISTER_SOURCE, kind: "write", action: EventAction.SOURCE_REGISTER },
-  upsert_mirrors: { token: UPSERT_MIRRORS, kind: "write", action: EventAction.MIRROR_UPSERT },
-  apply_candidate: { token: APPLY_CANDIDATE, kind: "write", action: EventAction.CONSOLIDATE_APPLY },
-  retry_candidate: { token: RETRY_CANDIDATE, kind: "write", action: EventAction.CONSOLIDATE_RETRY },
-  index_code: { token: INDEX_CODE, kind: "write", action: EventAction.CODE_INDEX },
+  session_hints: {
+    token: SESSION_HINTS,
+    kind: "write",
+    action: EventAction.SEARCH,
+    audit: false,
+    capability: Capability.READ,
+  },
+  write_memory: {
+    token: WRITE_MEMORY,
+    kind: "write",
+    action: EventAction.WRITE,
+    capability: Capability.WRITE,
+  },
+  update_memory: {
+    token: UPDATE_MEMORY,
+    kind: "write",
+    action: EventAction.UPDATE,
+    capability: Capability.WRITE,
+  },
+  invalidate_memory: {
+    token: INVALIDATE_MEMORY,
+    kind: "write",
+    action: EventAction.INVALIDATE,
+    capability: Capability.WRITE,
+  },
+  restore_memory: {
+    token: RESTORE_MEMORY,
+    kind: "write",
+    action: EventAction.RESTORE,
+    capability: Capability.WRITE,
+  },
+  link_nodes: {
+    token: LINK_NODES,
+    kind: "write",
+    action: EventAction.LINK,
+    capability: Capability.WRITE,
+  },
+  record_checkpoint: {
+    token: RECORD_CHECKPOINT,
+    kind: "write",
+    action: EventAction.CHECKPOINT,
+    capability: Capability.WRITE,
+  },
+  register_source: {
+    token: REGISTER_SOURCE,
+    kind: "write",
+    action: EventAction.SOURCE_REGISTER,
+    capability: Capability.ADMIN,
+  },
+  upsert_mirrors: {
+    token: UPSERT_MIRRORS,
+    kind: "write",
+    action: EventAction.MIRROR_UPSERT,
+    capability: Capability.WRITE,
+  },
+  apply_candidate: {
+    token: APPLY_CANDIDATE,
+    kind: "write",
+    action: EventAction.CONSOLIDATE_APPLY,
+    capability: Capability.CONSOLIDATE,
+  },
+  retry_candidate: {
+    token: RETRY_CANDIDATE,
+    kind: "write",
+    action: EventAction.CONSOLIDATE_RETRY,
+    capability: Capability.CONSOLIDATE,
+  },
+  index_code: {
+    token: INDEX_CODE,
+    kind: "write",
+    action: EventAction.CODE_INDEX,
+    capability: Capability.ADMIN,
+  },
+  // `client` is NOT in this call's argument schema. The identity rides in the transport's
+  // `meta`, which the proxy fills from the MCP initialize handshake, so a caller cannot
+  // state who it is — only the host process can. Its capability is READ, not WRITE: a
+  // principal allowed to read must still be able to open a session to do it in.
+  start_session: {
+    token: START_SESSION,
+    kind: "write",
+    action: EventAction.SESSION_START,
+    capability: Capability.READ,
+  },
 } as const;
 
 export type CallName = keyof typeof CALL_SURFACE;
@@ -88,6 +178,10 @@ export function isRetryable(name: CallName): boolean {
 
 export function callAction(name: CallName): EventAction {
   return CALL_SURFACE[name].action;
+}
+
+export function callCapability(name: CallName): Capability {
+  return CALL_SURFACE[name].capability;
 }
 
 // False only for a call that accompanies another rather than being one of its own.

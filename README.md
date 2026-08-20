@@ -138,6 +138,59 @@ Configuration
   set but unusable           : none
 ```
 
+### Principals
+
+Every session resolves to a **principal** — the writer behind it, stable across sessions.
+The name comes from the MCP `initialize` handshake and travels to the daemon in the request
+envelope's `meta`, beside `params` rather than inside them: `params` is what the caller
+asked for, `meta` is what the transport knows about the caller. A model driving a tool can
+put anything in `params`; it cannot reach `meta`, and `start_session` has no `client` in its
+argument schema at all. A host that never names itself resolves to `(unattributed)`, which
+is a principal like any other so policy can still address it — on a store that predates
+writer identity that is most of the history.
+
+Policy is per principal and lives in config, not in the store: the call surface is what
+principals reach, and a principal able to write its own profile could grant itself anything.
+
+```json
+{
+  "principals": {
+    "profiles": {
+      "codex-mcp-client": {
+        "capabilities": { "write": "suggest" },
+        "quota": { "writes": 200, "windowMs": 3600000 },
+        "weight": 0.5
+      },
+      "(unattributed)": { "capabilities": { "write": "off" } }
+    },
+    "default": { "quota": { "calls": 5000 } }
+  }
+}
+```
+
+**Capabilities** classify every call as `read`, `write`, `consolidate` or `admin`, and the
+pipeline refuses one whose principal has that class `off` — before the call runs, with the
+refusal on the audit record. `suggest` lets it through and marks the event `review: true`,
+which flags a suspect writer without dropping what it had to say. Unnamed is `auto`, so a
+deployment that configures nothing behaves exactly as it did before. `start_session` is
+classified `read`: a principal allowed to read must still be able to open a session to do it
+in, or `write: off` would mean "cannot work at all" rather than "cannot author".
+
+**Quotas** are sliding-window ceilings — `calls` for anything, `writes` for authoring — held
+in memory in the daemon, where one process serves every host. The write ceiling gates writes
+only, so a writer that has spent its authoring budget can still read the store it writes
+into. Every principal is counted whether or not it has a ceiling, and `cerebrium-stats`
+reports what each has spent; a limit is what makes a call fail, not what makes it
+observable.
+
+**Weight** multiplies a principal's authored nodes at read time. `1` is neutral, `0` revokes
+— those nodes leave the candidate set, before graph expansion so they cannot seed it either.
+Nothing is deleted or invalidated: restoring the weight restores them. Code mirrors are
+excluded, since a symbol's session is whichever run indexed it. When no principal is
+weighted the lookup is skipped entirely, so an unconfigured deployment pays nothing per
+search.
+
+
 ## Concepts
 
 - **Node** — one memory. Has a `memory_kind`:
@@ -415,6 +468,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_ANNOTATE_BATCH` | `50` | Max un-annotated semantic nodes enriched per sweep. |
 | `MEMORY_CONSOLIDATE_SIM` | `0.9` | Cosine-similarity floor for clustering + link discovery. |
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
+| `MEMORY_PRINCIPALS` | `{}` | Per-principal policy as JSON, keyed by client name: `capabilities`, `quota`, `weight`. See [Principals](#principals). |
+| `MEMORY_PRINCIPAL_DEFAULT` | `{}` | The profile applied to any principal the map does not name. |
 | `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `14` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
 | `MEMORY_CONSOLIDATE_MERGE_BURST_MS` | `3600000` | Burst window for merge detection: a near-duplicate pair one session wrote within it is treated as a series and left to age, not proposed. `0` disables the rule. |

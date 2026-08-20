@@ -1,5 +1,6 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
 import {
   FETCH_NODES,
   useCase,
@@ -18,6 +19,7 @@ export class LocalFetchNodes implements FetchNodes {
     private readonly mirror: MirrorRepo,
     private readonly chunks: ChunksRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
   ) {}
 
   async invoke(args: FetchNodesArgs): Promise<FetchNodesResult> {
@@ -112,9 +114,9 @@ export class LocalFetchNodes implements FetchNodes {
       used.push(id);
     }
 
-    this.nodes.recordUse(used, this.clock.now());
+    this.uses.recordUse(used, this.clock.now());
 
-    return { nodes, not_found };
+    return { nodes, not_found, used };
   }
 
   private reject(args: FetchNodesArgs): void {

@@ -173,16 +173,60 @@ describe("Method surface over the socket", () => {
   });
 
   it("should not expose a name that is not on the surface", async () => {
-    // Given
+    // Given — `touch_session` is what the pipeline does around a call, not a call.
     await serve(surfaceMethods(() => Promise.resolve(null)));
 
     // When / Then
     await expect(rpcCall({ socketPath: SOCKET }, "touch_session", {})).rejects.toThrow(
       /unknown method: touch_session/,
     );
-    await expect(rpcCall({ socketPath: SOCKET }, "start_session", {})).rejects.toThrow(
-      /unknown method: start_session/,
+  });
+
+  it("should carry the writer identity in meta, never in params", async () => {
+    // Given — a caller naming itself in `params`, which is the one thing a model driving a
+    // tool can control.
+    const seen: { args: Record<string, unknown>; writer: unknown }[] = [];
+    await serve(
+      surfaceMethods((_name, args, writer) => {
+        seen.push({ args, writer });
+
+        return Promise.resolve(null);
+      }),
     );
+
+    // When
+    await rpcCall(
+      { socketPath: SOCKET },
+      "start_session",
+      { project: "cerebrium", client: { client: "totally-trusted", version: "9" } },
+      { client: "claude-code", version: "2.1.224" },
+    );
+
+    // Then — the schema dropped the claim and the transport supplied the truth.
+    expect(seen[0]!.args).toEqual({ project: "cerebrium" });
+    expect(seen[0]!.writer).toEqual({ client: "claude-code", version: "2.1.224" });
+  });
+
+  it("should report an unnamed writer rather than a half-filled one", async () => {
+    // Given
+    const seen: unknown[] = [];
+    await serve(
+      surfaceMethods((_name, _args, writer) => {
+        seen.push(writer);
+
+        return Promise.resolve(null);
+      }),
+    );
+
+    // When — no meta at all, and meta whose fields are not strings.
+    await rpcCall({ socketPath: SOCKET }, "stats_snapshot", {});
+    await rpcCall({ socketPath: SOCKET }, "stats_snapshot", {}, { client: 7 as never });
+
+    // Then
+    expect(seen).toEqual([
+      { client: null, version: null },
+      { client: null, version: null },
+    ]);
   });
 
   it("should attempt a failing write exactly once", async () => {

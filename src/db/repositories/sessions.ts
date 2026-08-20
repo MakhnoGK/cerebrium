@@ -7,14 +7,20 @@ import type { EventAction } from "@/core/vocab";
 // Sessions and the events audit log — provenance for every tool call.
 @injectable()
 export class SessionsRepo extends BaseRepo {
-  create(id: string, project: string | null, ts: string, writer: Writer): void {
+  create(
+    id: string,
+    project: string | null,
+    ts: string,
+    writer: Writer,
+    principal_id: string,
+  ): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project, started_at, last_seen, client, client_version)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO sessions (id, project, started_at, last_seen, client, client_version, principal_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen`,
       )
-      .run(id, project, ts, ts, writer.client, writer.version);
+      .run(id, project, ts, ts, writer.client, writer.version, principal_id);
   }
 
   touchExisting(id: string, ts: string): boolean {

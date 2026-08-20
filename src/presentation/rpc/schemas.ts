@@ -63,6 +63,11 @@ const SCHEMAS = {
   mirror_status: z.object({ session_id: ulid.optional(), source_id: z.string().optional() }),
 
   // Writes
+  //
+  // No `client` here, deliberately: the writer identity arrives in the request's `meta`,
+  // stamped by the host from its MCP handshake. A caller-supplied one is stripped by this
+  // schema before the pipeline sees it.
+  start_session: z.object({ project: z.string().nullable().optional() }),
   session_hints: session,
   write_memory: session.extend({
     memory_kind: z.nativeEnum(MemoryKind),

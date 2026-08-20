@@ -5,6 +5,7 @@ import { CallPipeline } from "@/application/call-pipeline";
 import {
   ActivityMonitor,
   ModelWarmupService,
+  PrincipalQuotaService,
   ProcessRegistryService,
   type WarmupOutcome,
 } from "@/application/services";
@@ -272,12 +273,13 @@ async function main(): Promise<void> {
 
   const rpc = new RpcServer(
     {
-      ...surfaceMethods((name, args) => pipeline.invoke(container, name, args)),
+      ...surfaceMethods((name, args, writer) => pipeline.invoke(container, name, args, writer)),
       ...createDaemonMethods(
         container,
         {
           pid: process.pid,
           model: () => model,
+          principals: () => container.resolve(PrincipalQuotaService).usage(Date.now()),
           ...(pool === null ? {} : { queueDepth: () => pool.depth }),
         },
         pool === null ? undefined : (name, args) => pool.invoke(name, args),

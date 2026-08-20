@@ -55,8 +55,20 @@ CREATE TABLE IF NOT EXISTS sessions (
   started_at TEXT NOT NULL,
   last_seen  TEXT NOT NULL,
   client         TEXT,      -- who wrote: MCP initialize clientInfo, or an internal writer
-  client_version TEXT
+  client_version TEXT,
+  principal_id   TEXT       -- the stable writer behind the session; see principals
 );
+CREATE INDEX IF NOT EXISTS idx_sessions_principal ON sessions(principal_id, started_at);
+
+-- The writer behind a session, stable across sessions: what a capability profile, a quota
+-- and a trust weight attach to. Keyed by the client name the MCP handshake reports.
+CREATE TABLE IF NOT EXISTS principals (
+  id         TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  label      TEXT,
+  created_at TEXT NOT NULL,
+  last_seen  TEXT NOT NULL
+) STRICT;
 
 CREATE TABLE IF NOT EXISTS events (
   id         TEXT PRIMARY KEY,

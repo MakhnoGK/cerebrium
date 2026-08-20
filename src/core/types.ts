@@ -391,3 +391,12 @@ export function toEnvelope(row: EnrichedRow): Envelope {
     invalidated: row.invalidated_at != null,
   };
 }
+
+// What one principal has spent inside the current quota window. Lives here because the
+// limiter that produces it and the operator surface that reports it sit on opposite sides
+// of the delivery boundary.
+export interface PrincipalUsage {
+  principal: string;
+  calls: number;
+  writes: number;
+}

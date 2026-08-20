@@ -25,6 +25,14 @@ function events(): { action: string; session_id: string; node_id: string | null 
   }[];
 }
 
+function useCount(id: string): number {
+  const row = env.db.prepare("SELECT use_count FROM nodes WHERE id = ?").get(id) as {
+    use_count: number;
+  };
+
+  return row.use_count;
+}
+
 const write = (title: string): Record<string, unknown> => ({
   session_id: session,
   parent_node_id: null,
@@ -177,6 +185,38 @@ describe("Call pipeline invariants", () => {
     expect(events().filter((e) => e.action === "search")).toHaveLength(1);
   });
 
+  it("should record the use a dispatched `get` could not write itself", async () => {
+    // Given — a read worker holds a read-only handle, so the bump that `get` owes its
+    // nodes has to happen on this side of the dispatch or not at all.
+    const written = (await pipeline.invoke(container, "write_memory", write("Fetched later"))) as {
+      envelope: { id: string };
+    };
+    const id = written.envelope.id;
+    pipeline.useReadDispatcher((_name, args) =>
+      Promise.resolve({ nodes: [{ id }], not_found: [], used: (args as { ids: string[] }).ids }),
+    );
+
+    // When
+    await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id] });
+
+    // Then
+    expect(useCount(id)).toBe(1);
+  });
+
+  it("should not double-count a `get` that ran in-process", async () => {
+    // Given — no dispatcher, so the use case runs here and records the use itself.
+    const written = (await pipeline.invoke(container, "write_memory", write("Fetched here"))) as {
+      envelope: { id: string };
+    };
+    const id = written.envelope.id;
+
+    // When
+    await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id] });
+
+    // Then
+    expect(useCount(id)).toBe(1);
+  });
+
   it("should log nothing for a call that carries no session to attribute it to", async () => {
     // Given — events.session_id is NOT NULL, so an unattributable call logs nothing rather
     // than inventing an attribution.
@@ -189,12 +229,33 @@ describe("Call pipeline invariants", () => {
     expect(events()).toHaveLength(before);
   });
 
-  it("should keep session minting off the wire", async () => {
-    // Given / When / Then — start_session's `client` is a writer identity the host stamps
-    // from the connection; accepting it from a caller would let anyone claim any writer.
-    expect(isCallName("start_session")).toBe(false);
-    await expect(pipeline.invoke(container, "start_session", {})).rejects.toBeInstanceOf(
-      UnknownCallError,
-    );
+  it("should stamp the writer from the transport over anything the caller claims", async () => {
+    // Given — the caller names itself in its arguments, which is what a model driving the
+    // tool could reach.
+    const forged = { project: null, client: { client: "totally-trusted", version: "9" } };
+
+    // When
+    const { session_id } = (await pipeline.invoke(container, "start_session", forged, {
+      client: "claude-code",
+      version: "2.1.224",
+    })) as { session_id: string };
+
+    // Then
+    expect(
+      env.db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
+    ).toEqual({ client: "claude-code", client_version: "2.1.224" });
+  });
+
+  it("should attribute the session-start row to the session it just minted", async () => {
+    // Given / When — the id is in the result, not the arguments, so the audit row would
+    // otherwise have nothing to attach to.
+    const { session_id } = (await pipeline.invoke(container, "start_session", {})) as {
+      session_id: string;
+    };
+
+    // Then
+    expect(
+      events().filter((e) => e.action === "session_start" && e.session_id === session_id),
+    ).toHaveLength(1);
   });
 });

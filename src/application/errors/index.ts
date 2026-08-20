@@ -1,3 +1,5 @@
+export { CapabilityDeniedError } from "@/application/errors/capability";
+export { QuotaExceededError } from "@/application/errors/quota";
 export {
   CodeRootsNotConfiguredError,
   RepositoryNotConfiguredError,

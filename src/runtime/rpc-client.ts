@@ -1,5 +1,11 @@
 import { connect, type Socket } from "node:net";
-import { encodeLine, parseResponseLine, PROTOCOL_VERSION, type RpcResponse } from "@/core/rpc";
+import {
+  encodeLine,
+  parseResponseLine,
+  PROTOCOL_VERSION,
+  type RpcMeta,
+  type RpcResponse,
+} from "@/core/rpc";
 
 export interface RpcClientOptions {
   socketPath: string;
@@ -18,8 +24,15 @@ export async function rpcCall(
   options: RpcClientOptions,
   method: string,
   params: Record<string, unknown> = {},
+  meta?: RpcMeta,
 ): Promise<unknown> {
-  const response = await request(options, { jsonrpc: "2.0", id: 1, method, params });
+  const response = await request(options, {
+    jsonrpc: "2.0",
+    id: 1,
+    method,
+    params,
+    ...(meta === undefined ? {} : { meta }),
+  });
 
   if (response.error !== undefined) {
     throw new Error(`${method} failed: ${response.error.message}`);
@@ -46,7 +59,13 @@ export async function rpcHandshake(options: RpcClientOptions): Promise<number> {
 
 function request(
   options: RpcClientOptions,
-  payload: { jsonrpc: "2.0"; id: number; method: string; params: Record<string, unknown> },
+  payload: {
+    jsonrpc: "2.0";
+    id: number;
+    method: string;
+    params: Record<string, unknown>;
+    meta?: RpcMeta;
+  },
 ): Promise<RpcResponse> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 

@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { inject, injectable } from "tsyringe";
+import type { UseRecorder } from "@/domain/ports/use-recorder";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { EdgesRepo } from "@/db/repositories/edges";
 import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
@@ -13,7 +14,7 @@ import { EdgeType } from "@/core/vocab";
 // live here, explicit in SQL. Edge writes are delegated to EdgesRepo so the graph
 // stays a single owner.
 @injectable()
-export class NodesRepo extends BaseRepo {
+export class NodesRepo extends BaseRepo implements UseRecorder {
   constructor(
     @inject(DB_TOKEN) db: Database.Database,
     private readonly edges: EdgesRepo,
@@ -329,6 +330,25 @@ export class NodesRepo extends BaseRepo {
   // The retrieval-outcome signal: an agent spent tokens fetching these nodes. Deliberately
   // does not touch the latest revision — usage is not an edit, and `updated` orders the
   // working set and breaks search ties.
+  // Authored nodes only. A code mirror's session is whichever run indexed it, so
+  // attributing it to that run's principal would weight derived rows by who happened to
+  // refresh the index.
+  principalsOf(ids: string[]): Map<string, string> {
+    if (!ids.length) return new Map();
+
+    const ph = ids.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT n.id AS id, s.principal_id AS principal
+           FROM nodes n JOIN sessions s ON s.id = n.created_by_session
+          WHERE n.id IN (${ph}) AND n.memory_kind IN ('semantic','episodic')
+            AND s.principal_id IS NOT NULL`,
+      )
+      .all(...ids) as { id: string; principal: string }[];
+
+    return new Map(rows.map((row) => [row.id, row.principal]));
+  }
+
   recordUse(ids: string[], ts: string): void {
     if (!ids.length) return;
 
@@ -421,5 +441,13 @@ export class NodesRepo extends BaseRepo {
         e.weight,
       );
     }
+  }
+}
+
+// What a host with a read-only handle gets. A read-pool worker cannot perform the one
+// write a read makes, so the call that dispatched the read makes it on the writer.
+export class NoUseRecorder implements UseRecorder {
+  recordUse(): void {
+    return;
   }
 }

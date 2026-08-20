@@ -20,7 +20,7 @@ import {
   TRAVERSABLE,
   type Entry,
 } from "@/application/retrieval";
-import { EmbeddingService } from "@/application/services";
+import { EmbeddingService, isRevoked, PrincipalTrustService } from "@/application/services";
 import {
   SEARCH_MEMORY,
   useCase,
@@ -45,6 +45,7 @@ export class LocalSearchMemory implements SearchMemory {
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     private readonly retrieval: RetrievalConfig,
+    private readonly trust: PrincipalTrustService,
   ) {}
 
   async invoke(args: SearchQuery): Promise<SearchOutcome> {
@@ -78,6 +79,8 @@ export class LocalSearchMemory implements SearchMemory {
       penalty,
       useWeight: this.retrieval.useWeight,
     });
+
+    this.applyTrust(entries);
 
     if ((args.expand_graph ?? true) && entries.size) {
       for (const entry of this.expandByRank(entries, args.as_of, args.valid_at)) {
@@ -236,7 +239,10 @@ export class LocalSearchMemory implements SearchMemory {
       match,
     );
 
+    const trust = this.trust.factors(rows.map((r) => r.id));
+
     const ranked = rows
+      .filter((row) => !isRevoked(trust.get(row.id)))
       .map((row) => {
         const normalized = best < 0 ? row.bm25 / best : 1;
         const chunk = ftsChunks.get(row.id);
@@ -259,7 +265,8 @@ export class LocalSearchMemory implements SearchMemory {
             normalized *
             memoryFactor(row, now, history) *
             symbolFactor(row, penalty) *
-            strengthFactor(row, this.retrieval.useWeight),
+            strengthFactor(row, this.retrieval.useWeight) *
+            (trust.get(row.id) ?? 1),
         };
       })
       .sort(
@@ -284,6 +291,24 @@ export class LocalSearchMemory implements SearchMemory {
         folded: [],
       },
     };
+  }
+
+  // The weight multiplies what its principal wrote, and a revoked principal's nodes leave
+  // the candidate set outright — before graph expansion, so they cannot seed it either.
+  private applyTrust(entries: Map<string, Entry>): void {
+    const trust = this.trust.factors([...entries.keys()]);
+
+    for (const [id, factor] of trust) {
+      if (isRevoked(factor)) {
+        entries.delete(id);
+
+        continue;
+      }
+
+      const entry = entries.get(id);
+
+      if (entry) entry.score *= factor;
+    }
   }
 
   // Diffusion seeded by the query-matched nodes in proportion to their relevance, over the

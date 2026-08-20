@@ -11,6 +11,9 @@ export {
   type WarmupOutcome,
 } from "@/application/services/model-warmup.service";
 export { NodeService } from "@/application/services/node.service";
+export { PrincipalPolicyService } from "@/application/services/principal-policy.service";
+export { PrincipalQuotaService } from "@/application/services/principal-quota.service";
+export { isRevoked, PrincipalTrustService } from "@/application/services/principal-trust.service";
 export { NodeReferenceService } from "@/application/services/node-reference.service";
 export {
   type LiveProcess,
