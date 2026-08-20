@@ -10,6 +10,12 @@ export interface EmbeddingProvider {
   readonly dim: number;
 
   embed(texts: string[], role: EmbeddingRole): Promise<number[][]>;
+
+  // Load whatever `embed` would otherwise load on first call. Optional: a provider with
+  // no load cost has nothing to do. Loading a local model blocks the event loop for
+  // ~111ms, so a long-lived host calls this when nobody is waiting rather than paying it
+  // inside the first request that happens to need an embedding.
+  warm?(): Promise<void>;
 }
 
 export enum EmbeddingRole {

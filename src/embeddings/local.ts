@@ -29,6 +29,10 @@ export class LocalProvider implements EmbeddingProvider {
     return output.tolist();
   }
 
+  async warm(): Promise<void> {
+    await this.load();
+  }
+
   private load(): Promise<FeatureExtractor> {
     this.pipe ??= (async () => {
       // Dynamic import keeps the heavy dep (and its model download) out of any
