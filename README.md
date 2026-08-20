@@ -322,6 +322,17 @@ downloads `Xenova/multilingual-e5-small` (the ONNX build of
 (default `~/.cerebrium/models`) on first embed. No API key, no daemon, no cost — a node
 is searchable via FTS instantly and vector search catches up once the model is warm.
 
+**The daemon loads the model before it starts draining.** Loading costs a few hundred
+milliseconds of blocked event loop, so the process whose job is to hold the model pays it
+at startup rather than inside the first batch that needs it. A load failure does not stop
+the daemon — every tick then fails and backs off the way the queue already handles — but
+it is recorded, so `cerebrium-stats` shows a running daemon that cannot embed as
+`model failed` with the reason instead of leaving it looking healthy. The MCP server's
+in-process fallback worker does not pre-warm: there the load would stall the client's own
+startup, and a background timer is already off the request path. Inference itself does
+*not* block the loop for its duration — `onnxruntime-node` runs the graph on its own
+threads — so only the load is worth moving.
+
 ### Development & checks
 
 ```bash
@@ -460,7 +471,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
-| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), reranker usage (eligible vs actually reranked searches, candidates scored), the live process registry (role, pid, whether it is still alive, config state), and the names of any variables that were set but unusable. `session_id` optional. |
+| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), reranker usage (eligible vs actually reranked searches, candidates scored), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
 
 Every tool call updates the session's `last_seen` and appends an `events` row — written at
 the boundary by `AuditedTool`, on failures as well as successes, so provenance cannot be
@@ -483,7 +494,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 |---------|--------------|
 | `cerebrium` | The MCP server (stdio). Registered in each agent host — see *Agent hosts*. |
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
-| `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool), plus the process registry and the resolved configuration with the tier each value came from. Safe to run anytime — it never writes — including when no server or daemon is up, or before any writer has migrated the store. |
+| `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool), plus the process registry (including each process's model state and what the load cost) and the resolved configuration with the tier each value came from. Safe to run anytime — it never writes — including when no server or daemon is up, or before any writer has migrated the store. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
 | `npm run report:readloop` | Read-only read-loop report against a real store: which nodes retrieval surfaced, which of those a later `get` actually read, and therefore what "never fetched" means. `--json`, `--since <ISO instant>`. See *Reading the read loop*. |

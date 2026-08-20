@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import { ProcessRegistryService } from "@/application/services";
+import { ModelWarmupService, ProcessRegistryService } from "@/application/services";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
@@ -128,6 +128,7 @@ async function main(): Promise<void> {
   const consolidation = container.resolve(ConsolidationWorker);
 
   const registry = container.resolve(ProcessRegistryService);
+  const warmup = container.resolve(ModelWarmupService);
 
   writeDaemonPid(dbPath);
   const registered = registry.publish("daemon");
@@ -145,6 +146,20 @@ async function main(): Promise<void> {
 
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
+
+  // Before the loop, not inside its first tick: this is the process that exists to hold
+  // the model, so it should finish loading while nothing is waiting on it. The MCP
+  // server's fallback worker deliberately does NOT do this — there the load would stall
+  // the client's own startup, and a background timer is already off the request path.
+  const warmed = await warmup.warm();
+
+  registry.recordModel(registered, warmed);
+
+  process.stderr.write(
+    warmed.state === "ready"
+      ? `model ready in ${String(warmed.ms)}ms\n`
+      : `model failed to load after ${String(warmed.ms)}ms: ${warmed.error ?? "unknown"}\n`,
+  );
 
   try {
     await runDaemon(queue, worker, {

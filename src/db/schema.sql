@@ -285,5 +285,8 @@ CREATE TABLE IF NOT EXISTS processes (
   db_path TEXT NOT NULL,
   config_file TEXT,
   config_state TEXT NOT NULL,
-  config_json TEXT NOT NULL
+  config_json TEXT NOT NULL,
+  model_state TEXT,
+  model_ms INTEGER,
+  model_error TEXT
 ) STRICT;

@@ -17,6 +17,9 @@ function row(overrides: Partial<ProcessRow> = {}): ProcessRow {
     config_file: "/home/x/.cerebrium/config.json",
     config_state: "loaded",
     config_json: JSON.stringify({ database: { path: "/home/x/.cerebrium/memory.db" } }),
+    model_state: null,
+    model_ms: null,
+    model_error: null,
     ...overrides,
   };
 }
@@ -98,6 +101,74 @@ function registry(opts: {
 
   return container.resolve(ProcessRegistryService);
 }
+
+describe("Model state on a process row", () => {
+  let repo: ProcessesRepo;
+
+  beforeEach(() => {
+    setup();
+    repo = container.resolve(ProcessesRepo);
+  });
+
+  it("should publish a row with no model state, since warming finishes later", () => {
+    // Given / When
+    repo.publish(row());
+
+    // Then — a reader between publish and warm sees the process up with no model yet.
+    const [stored] = repo.list();
+    expect(stored).toMatchObject({ model_state: null, model_ms: null, model_error: null });
+  });
+
+  it("should record a successful warm-up against the row", () => {
+    // Given
+    repo.publish(row({ role: "daemon" }));
+
+    // When
+    container
+      .resolve(ProcessRegistryService)
+      .recordModel("01JPROCESS0000000000000001", { state: "ready", ms: 624 });
+
+    // Then
+    const [stored] = repo.list();
+    expect(stored).toMatchObject({ model_state: "ready", model_ms: 624, model_error: null });
+  });
+
+  it("should keep the reason a warm-up failed, so a broken daemon is not silently up", () => {
+    // Given
+    repo.publish(row({ role: "daemon" }));
+
+    // When
+    container.resolve(ProcessRegistryService).recordModel("01JPROCESS0000000000000001", {
+      state: "failed",
+      ms: 90,
+      error: "no such file: model.onnx",
+    });
+
+    // Then
+    const [stored] = repo.list();
+    expect(stored).toMatchObject({
+      model_state: "failed",
+      model_ms: 90,
+      model_error: "no such file: model.onnx",
+    });
+  });
+
+  it("should leave other processes' rows alone", () => {
+    // Given
+    repo.publish(row({ id: "01JPROCESS0000000000000001", role: "server", pid: 1 }));
+    repo.publish(row({ id: "01JPROCESS0000000000000002", role: "daemon", pid: 2 }));
+
+    // When
+    container
+      .resolve(ProcessRegistryService)
+      .recordModel("01JPROCESS0000000000000002", { state: "ready", ms: 5 });
+
+    // Then
+    const byRole = new Map(repo.list().map((r) => [r.role, r.model_state]));
+    expect(byRole.get("server")).toBeNull();
+    expect(byRole.get("daemon")).toBe("ready");
+  });
+});
 
 describe("ProcessRegistryService", () => {
   let repo: ProcessesRepo;
