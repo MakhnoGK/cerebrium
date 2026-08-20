@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isDaemonAlive } from "@/runtime/daemon-pid";
+import { cerebriumHome } from "@/runtime/paths";
 
 export type EnsureResult = "spawned" | "already-running" | "skipped";
 
@@ -43,7 +44,9 @@ export function ensureDaemon({ dbPath, embedProvider }: EnsureDaemonOptions): En
   const child = spawn(process.execPath, [daemonPath], {
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, MEMORY_DB_PATH: dbPath },
+    // Both halves of the resolution are pinned: the install root the child reads
+    // config.json from, and the database it drains.
+    env: { ...process.env, CEREBRIUM_HOME: cerebriumHome(), MEMORY_DB_PATH: dbPath },
   });
 
   child.unref();

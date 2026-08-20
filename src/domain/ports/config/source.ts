@@ -30,3 +30,21 @@ export interface FieldProvenance {
   source: "default" | ConfigOrigin;
   ignored?: { raw: string; reason: string };
 }
+
+export type ConfigFileState = "loaded" | "absent" | "unreadable";
+
+// The file tier's own health, which no per-field provenance can express: a corrupt file
+// makes every field read as env-or-default, and without this the reason is invisible.
+export interface ConfigFileReport {
+  path: string;
+  state: ConfigFileState;
+  // Set only when `state` is "unreadable": what went wrong, in one line.
+  problem?: string;
+  // Scalar leaves the file contributes, so an empty file is visible as one.
+  keys: number;
+}
+
+// Null when a caller pinned its own ConfigSource (tests, eval scripts): no file was
+// consulted, which is different from having looked and found nothing.
+export const CONFIG_FILE_TOKEN: InjectionToken<ConfigFileReport | null> =
+  Symbol("ConfigFileReport");

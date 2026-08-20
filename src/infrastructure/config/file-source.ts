@@ -1,16 +1,10 @@
 import { readFileSync } from "node:fs";
-import type { ConfigSource, ConfigValue } from "@/domain/ports/config";
-
-export type ConfigFileState = "loaded" | "absent" | "unreadable";
-
-export interface ConfigFileReport {
-  path: string;
-  state: ConfigFileState;
-  // Set only when `state` is "unreadable": what went wrong, in one line.
-  problem?: string;
-  // Scalar leaves the file contributes, so an empty or all-comment file is visible as one.
-  keys: number;
-}
+import type {
+  ConfigFileReport,
+  ConfigFileState,
+  ConfigSource,
+  ConfigValue,
+} from "@/domain/ports/config";
 
 // `$CEREBRIUM_HOME/config.json`, the file-as-truth tier. Keyed by dotted CONFIG PATH
 // (`consolidation.posture.merge`), not by env-var name, so what a human edits matches
@@ -56,7 +50,7 @@ export class FileConfigSource implements ConfigSource {
     }
   }
 
-  read(path: string): ConfigValue | undefined {
+  read(path: string, _envName: string): ConfigValue | undefined {
     const leaf = walk(this.tree, path.split("."));
 
     if (leaf === undefined || leaf === null) {

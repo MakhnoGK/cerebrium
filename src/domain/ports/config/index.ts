@@ -18,6 +18,9 @@ export {
   type SectionSpec,
 } from "@/domain/ports/config/section";
 export {
+  CONFIG_FILE_TOKEN,
+  type ConfigFileReport,
+  type ConfigFileState,
   CONFIG_SOURCE_TOKEN,
   type ConfigOrigin,
   type ConfigSource,
