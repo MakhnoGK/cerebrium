@@ -50,9 +50,11 @@ describe("Read surface naming", () => {
     expect(Object.keys(READ_SURFACE).sort()).toEqual([
       "fetch_nodes",
       "lookup_code",
+      "mirror_status",
       "operator_snapshot",
       "search_memory",
       "stats_snapshot",
+      "suggest_candidates",
     ]);
   });
 

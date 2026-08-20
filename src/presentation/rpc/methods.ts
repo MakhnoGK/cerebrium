@@ -1,5 +1,11 @@
 import type { DependencyContainer } from "tsyringe";
-import { OPERATOR_SNAPSHOT, type OperatorSnapshot, type ReadName } from "@/application/use-cases";
+import {
+  CALL_SURFACE,
+  OPERATOR_SNAPSHOT,
+  type CallName,
+  type OperatorSnapshot,
+  type ReadName,
+} from "@/application/use-cases";
 import { PROTOCOL_VERSION } from "@/core/rpc";
 import type { RpcMethod } from "@/presentation/rpc/server";
 
@@ -15,6 +21,19 @@ export interface DaemonIdentity {
   // Reported rather than awaited: `status` has to answer while the model is still
   // loading, and after a load that failed outright.
   model: () => { state: string; ms: number | null; error?: string } | null;
+}
+
+// One JSON-RPC method per call on the surface, dispatched through the pipeline so a socket
+// caller gets the same session check and the same audit row as an MCP caller.
+export function surfaceMethods(
+  call: (name: CallName, args: Record<string, unknown>) => Promise<unknown>,
+): Record<string, RpcMethod> {
+  return Object.fromEntries(
+    (Object.keys(CALL_SURFACE) as CallName[]).map((name) => [
+      name,
+      (params: Record<string, unknown>) => call(name, params),
+    ]),
+  );
 }
 
 export function createDaemonMethods(

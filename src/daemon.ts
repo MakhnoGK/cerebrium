@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import { CallPipeline } from "@/application/call-pipeline";
 import {
   ModelWarmupService,
   ProcessRegistryService,
@@ -11,7 +12,7 @@ import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-
 import { isMainModule } from "@/runtime/is-main";
 import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker";
 import { ReadPool } from "@/runtime/read-pool";
-import { createDaemonMethods, RpcServer } from "@/presentation/rpc";
+import { createDaemonMethods, RpcServer, surfaceMethods } from "@/presentation/rpc";
 import { buildContainer } from "@/container";
 import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
 
@@ -202,16 +203,25 @@ async function main(): Promise<void> {
   // Listening starts before the model is loaded, and the handler reads whatever state
   // warming has reached. That ordering is the whole point of `status`: a daemon that is
   // still loading, or whose load failed, must still be able to say so.
+  // Reads that arrive over the socket go to the pool; the pipeline attaches the session
+  // check and the audit row either way.
+  const pipeline = container.resolve(CallPipeline);
+
+  pipeline.useReadDispatcher(pool === null ? undefined : (name, args) => pool.invoke(name, args));
+
   const rpc = new RpcServer(
-    createDaemonMethods(
-      container,
-      {
-        pid: process.pid,
-        model: () => model,
-        ...(pool === null ? {} : { queueDepth: () => pool.depth }),
-      },
-      pool === null ? undefined : (name, args) => pool.invoke(name, args),
-    ),
+    {
+      ...surfaceMethods((name, args) => pipeline.invoke(container, name, args)),
+      ...createDaemonMethods(
+        container,
+        {
+          pid: process.pid,
+          model: () => model,
+          ...(pool === null ? {} : { queueDepth: () => pool.depth }),
+        },
+        pool === null ? undefined : (name, args) => pool.invoke(name, args),
+      ),
+    },
     {
       isOwnedByLiveDaemon: () => isDaemonAlive(dbPath),
       onError: (message) => process.stderr.write(`rpc: ${message}\n`),

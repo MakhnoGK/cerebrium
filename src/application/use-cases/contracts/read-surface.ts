@@ -1,3 +1,5 @@
+import { SUGGEST_CANDIDATES } from "@/application/use-cases/contracts/consolidation";
+import { READ_MIRROR_STATUS } from "@/application/use-cases/contracts/mirror";
 import { OPERATOR_SNAPSHOT, STATS_SNAPSHOT } from "@/application/use-cases/contracts/operations";
 import { FETCH_NODES, LOOKUP_CODE } from "@/application/use-cases/contracts/read";
 import { SEARCH_MEMORY } from "@/application/use-cases/contracts/search";
@@ -12,6 +14,8 @@ export const READ_SURFACE = {
   search_memory: SEARCH_MEMORY,
   fetch_nodes: FETCH_NODES,
   lookup_code: LOOKUP_CODE,
+  suggest_candidates: SUGGEST_CANDIDATES,
+  mirror_status: READ_MIRROR_STATUS,
   stats_snapshot: STATS_SNAPSHOT,
   operator_snapshot: OPERATOR_SNAPSHOT,
 } as const;

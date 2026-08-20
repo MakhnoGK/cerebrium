@@ -3,7 +3,7 @@ import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rpcCall, rpcHandshake, RpcUnavailableError } from "@/runtime/rpc-client";
 import { parseRequest, PROTOCOL_VERSION, RPC_ERROR, socketPathProblem } from "@/core/rpc";
-import { createDaemonMethods, RpcServer, type RpcMethod } from "@/presentation/rpc";
+import { createDaemonMethods, RpcServer, surfaceMethods, type RpcMethod } from "@/presentation/rpc";
 import { setup } from "@test/helpers";
 
 // Kept short deliberately: the macOS sun_path limit is 103 bytes and the system temp
@@ -139,6 +139,60 @@ describe("RPC server over a real socket", () => {
     // Then
     await expect(intruder.listen(SOCKET)).rejects.toThrow(/another daemon is listening/);
     expect(await rpcCall({ socketPath: SOCKET }, "ping")).toBe(1);
+  });
+});
+
+describe("Method surface over the socket", () => {
+  it("should expose one method per call on the surface", async () => {
+    // Given
+    const calls: string[] = [];
+    await serve(
+      surfaceMethods((name, args) => {
+        calls.push(name);
+
+        return Promise.resolve({ name, args });
+      }),
+    );
+
+    // When
+    await rpcCall({ socketPath: SOCKET }, "write_memory", { title: "x" });
+    await rpcCall({ socketPath: SOCKET }, "search_memory", { query: "y" });
+
+    // Then
+    expect(calls).toEqual(["write_memory", "search_memory"]);
+  });
+
+  it("should not expose a name that is not on the surface", async () => {
+    // Given
+    await serve(surfaceMethods(() => Promise.resolve(null)));
+
+    // When / Then
+    await expect(rpcCall({ socketPath: SOCKET }, "touch_session", {})).rejects.toThrow(
+      /unknown method: touch_session/,
+    );
+    await expect(rpcCall({ socketPath: SOCKET }, "start_session", {})).rejects.toThrow(
+      /unknown method: start_session/,
+    );
+  });
+
+  it("should attempt a failing write exactly once", async () => {
+    // Given — writes are not idempotent, so a retry after a timeout would duplicate work.
+    let attempts = 0;
+    await serve(
+      surfaceMethods(() => {
+        attempts++;
+
+        return Promise.reject(new Error("write blew up"));
+      }),
+    );
+
+    // When
+    await expect(rpcCall({ socketPath: SOCKET }, "write_memory", {})).rejects.toThrow(
+      /write blew up/,
+    );
+
+    // Then
+    expect(attempts).toBe(1);
   });
 });
 
