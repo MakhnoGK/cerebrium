@@ -28,8 +28,11 @@ src/
   core/            pure primitives — ids, vocab, tokens, chunking, FTS, types (no I/O)
   domain/ports/    interfaces the inner layers own — Clock, Embedding/Rerank/Consolidation
                    providers, and the declarative config mechanism
-  application/     services/ (node, memory, session, hints, embedding, consolidation,
-                             code index, event log)
+  application/     use-cases/ (the seam every delivery layer resolves: contracts +
+                              local implementations)
+                   retrieval/ (the ranking model: fusion, PageRank, decay, diversify)
+                   services/ (node, memory, session, hints, embedding, consolidation,
+                             code index, event log, model warm-up)
                    workers/  (embedding drain, consolidation sweep)
                    errors/   (typed errors a use case throws)
   db/              SQLite: migrations, per-aggregate repositories, schema snapshot
@@ -38,10 +41,12 @@ src/
   rerank/          pluggable cross-encoder reranker (second-stage precision)
   code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
   consolidation/   pluggable generation adapter (manual / command / http)
-  runtime/         process/IO glue (install layout, daemon spawn, pid file, clock, liveness)
-  presentation/    the MCP delivery layer — stdio server, audit + output adapters,
-                   one dir per tool
-  server.ts        stdio MCP server    daemon.ts  embedding drain    stats-cli.ts
+  runtime/         process/IO glue (install layout, daemon spawn, pid file, clock,
+                   liveness, launchd agent, the socket client)
+  presentation/    delivery — mcp/ (stdio server, audit + output adapters, one dir per
+                   tool) and rpc/ (the daemon's local socket server and its methods)
+  server.ts        stdio MCP server      daemon.ts      embedding drain + socket
+  stats-cli.ts     operational snapshot  service-cli.ts launchd agent management
 ```
 
 Dependencies point inward only: `core` imports nothing, `domain/ports` sees only `core`,
@@ -380,6 +385,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
+| `MEMORY_DAEMON_RESIDENT` | `false` | Skip idle-exit entirely and let a supervisor own the daemon's lifetime. Set by the launchd agent `cerebrium-service install` writes; off by default because resident mode with no supervisor strands a process nothing restarts. |
+| `MEMORY_DAEMON_SOCKET` | `$CEREBRIUM_HOME/daemon.sock` | Where the daemon listens. Rejected at startup if over the platform's 103-byte `sun_path` limit — set a shorter `CEREBRIUM_HOME` rather than working around it here. |
 | `MEMORY_DEDUP_THRESHOLD` | `0.92` | Cosine similarity above which a write reports `similar_existing`. Calibrated, not chosen — see below. |
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
@@ -433,6 +440,23 @@ and — once the queue has been empty for `MEMORY_DAEMON_IDLE_MS` — releases t
 and exits, to be respawned by the next session. This keeps the backlog moving even
 after every Claude session has closed. If a daemon can't be spawned, the server
 falls back to an in-process worker; the lease guarantees the two never double-write.
+
+**Always-on mode.** `cerebrium-service install` writes a launchd user agent that runs
+the daemon in resident mode (`MEMORY_DAEMON_RESIDENT=1`), so it starts at login, is
+restarted on crash, and holds the model instead of reloading it once per burst of work.
+The two settings go together: `KeepAlive` plus idle-exit would respawn the daemon every
+five minutes forever. Without a supervisor the auto-spawn posture above is the right one,
+which is why resident mode defaults to off. It also closes a real gap — `ensureDaemon`
+runs once at server startup, so before this a daemon that died mid-session was never
+replaced and the backlog simply waited for the next session.
+
+**Local socket.** The daemon listens on `$CEREBRIUM_HOME/daemon.sock` (mode `0600`;
+owner-only permissions are the whole auth model on a single-user desktop) and speaks
+newline-delimited JSON carrying JSON-RPC 2.0 — the same framing as MCP stdio. Two methods
+so far, `initialize` and `status`. Listening starts *before* the model is loaded and the
+handler reports whatever state warming has reached, so a daemon that is still loading or
+whose load failed can still be asked what is wrong with it. `cerebrium-stats` asks the
+socket first and opens the database only when no daemon answers.
 
 **Dimension.** Both vector tables (`chunk_vec`, `code_vec`) are fixed at `FLOAT[384]`
 (the default model's dimension). If a configured provider reports a different `dim`, the
@@ -494,7 +518,8 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 |---------|--------------|
 | `cerebrium` | The MCP server (stdio). Registered in each agent host — see *Agent hosts*. |
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
-| `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool), plus the process registry (including each process's model state and what the load cost) and the resolved configuration with the tier each value came from. Safe to run anytime — it never writes — including when no server or daemon is up, or before any writer has migrated the store. |
+| `cerebrium-stats [--json] [--local]` | Read-only operational snapshot: the DB counters (same data as the `stats` tool), the process registry (including each process's model state and what the load cost) and the resolved configuration with the tier each value came from. Asks the running daemon over its socket and falls back to reading the DB itself, printing which of the two it used; `--local` skips the socket. Safe to run anytime — it never writes — including when no server or daemon is up, or before any writer has migrated the store. |
+| `cerebrium-service <install\|uninstall\|status\|print>` | Manages the launchd user agent that keeps the daemon always-on. `print` renders the plist without touching the system. macOS only. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
 | `npm run report:readloop` | Read-only read-loop report against a real store: which nodes retrieval surfaced, which of those a later `get` actually read, and therefore what "never fetched" means. `--json`, `--since <ISO instant>`. See *Reading the read loop*. |
@@ -990,7 +1015,7 @@ WAL mode (already on) is required for Litestream.
 - **Async embeddings, single-writer safe.** A node is findable via FTS the instant it is
   written; a 384-dim vector per content-addressed chunk is computed asynchronously, so
   editing one section re-embeds only that chunk. A standalone daemon drains the queue across
-  sessions and idle-exits; a `worker_lease` elects exactly one drain writer, and every write
+  sessions and either idle-exits or, under launchd, stays resident; a `worker_lease` elects exactly one drain writer, and every write
   is an `IMMEDIATE` transaction wrapped in busy-retry — so several session processes can
   share one SQLite file without lockstep writes.
 - **In-process code indexing.** tree-sitter (WASM, no external process) mirrors

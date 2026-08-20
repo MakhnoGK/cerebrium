@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { configSection, custom, int, num, SectionOf, str } from "@/domain/ports/config";
+import { bool, configSection, custom, int, num, SectionOf, str } from "@/domain/ports/config";
 import { cerebriumHome } from "@/runtime/paths";
 
 const home = (...parts: string[]): string => join(cerebriumHome(), ...parts);
@@ -48,12 +48,16 @@ export class RetrievalConfig extends SectionOf("retrieval", {
 }) {}
 
 // `idleIntervalMs` is the poll cadence once the queue is empty; `idleExitMs` is how long
-// the daemon stays idle before releasing the model and exiting.
+// the daemon stays idle before releasing the model and exiting. Under `resident` the
+// idle-exit branch is skipped entirely and `idleExitMs` only paces the consolidation
+// sweep, so a launchd-supervised daemon holds the model instead of reloading it per burst.
 @configSection()
 export class DaemonConfig extends SectionOf("daemon", {
   activeIntervalMs: int(0).nonNegative().env("MEMORY_DAEMON_ACTIVE_MS"),
   idleIntervalMs: int(5_000).positive(),
   idleExitMs: int(300_000).positive().env("MEMORY_DAEMON_IDLE_MS"),
+  resident: bool(false).env("MEMORY_DAEMON_RESIDENT"),
+  socketPath: str(home("daemon.sock")).env("MEMORY_DAEMON_SOCKET"),
 }) {}
 
 export interface CodeRoot {

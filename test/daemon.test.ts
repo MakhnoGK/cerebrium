@@ -83,6 +83,21 @@ describe("DaemonService", () => {
     expect(service.getDaemonPidPath(DB)).toBe(daemonPidPath(DB));
     expect(service.readDaemonPid()).toBe(process.pid);
   });
+
+  it("should count the calling process itself as a live daemon", () => {
+    // Given — the daemon answers `status` about itself, so excluding its own pid the way
+    // the spawn-dedup check does would make it report itself as not running.
+    const service = new DaemonService(
+      new DatabaseConfig(new StaticConfigSource({ MEMORY_DB_PATH: DB })),
+    );
+
+    // When
+    writeDaemonPid(DB);
+
+    // Then
+    expect(service.isDaemonAlive()).toBe(true);
+    expect(isDaemonAlive(DB)).toBe(false);
+  });
 });
 
 describe("runDaemon loop", () => {
@@ -110,6 +125,32 @@ describe("runDaemon loop", () => {
 
     // Then
     expect(env.queue.embeddingStats().backlog).toBe(0);
+  });
+
+  it("should keep running past the idle threshold when resident", async () => {
+    // Given
+    const env = setup();
+    let stop = false;
+    let ticks = 0;
+    let clock = 0;
+
+    // When — the same advancing clock that makes the non-resident loop exit on its
+    // second idle check; only `stopped` ends this one.
+    const p = runDaemon(env.queue, env.worker, {
+      resident: true,
+      stopped: () => stop,
+      idleExitMs: 50,
+      nowMs: () => (clock += 100),
+      sleepMs: () => {
+        if (++ticks >= 3) stop = true;
+
+        return Promise.resolve();
+      },
+    });
+
+    // Then
+    await expect(p).resolves.toBeUndefined();
+    expect(ticks).toBe(3);
   });
 
   it("should honor an external stop signal", async () => {

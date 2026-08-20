@@ -1,5 +1,6 @@
 // Public entry for the config mechanism. Sections import the builders by direct path.
 export {
+  bool,
   custom,
   derivedEnvName,
   enumOf,

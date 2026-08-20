@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import { ModelWarmupService, ProcessRegistryService } from "@/application/services";
+import {
+  ModelWarmupService,
+  ProcessRegistryService,
+  type WarmupOutcome,
+} from "@/application/services";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
+import { createDaemonMethods, RpcServer } from "@/presentation/rpc";
 import { buildContainer } from "@/container";
 import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
 
@@ -14,11 +19,16 @@ import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastruct
 // worth releasing the ~120MB model. Then it exits and the next session respawns
 // it. It is the canonical writer for embeddings; the worker_lease still guards
 // against any overlap with a fallback in-process worker.
+//
+// Under `daemon.resident` it never exits on its own and a supervisor (launchd) owns
+// the lifetime instead. Without a supervisor, resident mode strands a process that
+// nothing will ever restart or reap — `cerebrium-service install` sets both together.
 
 export interface DaemonOptions {
   activeIntervalMs?: number; // poll cadence while there is a backlog
   idleIntervalMs?: number; // poll cadence once the queue is empty
   idleExitMs?: number; // exit after this long with an empty queue
+  resident?: boolean; // never idle-exit; a supervisor owns the lifetime
 }
 
 // The model sustains hundreds of chunks/sec; a dedicated daemon should feed it in
@@ -70,6 +80,7 @@ export async function runDaemon(
   const active = opts.activeIntervalMs ?? ACTIVE_MS;
   const idle = opts.idleIntervalMs ?? IDLE_MS;
   const idleExit = opts.idleExitMs ?? IDLE_EXIT_MS;
+  const resident = opts.resident ?? false;
   const stopped = opts.stopped ?? (() => false);
   const nap = opts.sleepMs ?? sleep;
   const now = opts.nowMs ?? Date.now;
@@ -105,7 +116,7 @@ export async function runDaemon(
     const { state, shouldExit } = nextIdleState(idleState, backlog, now(), idleExit);
     idleState = state;
 
-    if (shouldExit) {
+    if (shouldExit && !resident) {
       return;
     }
 
@@ -134,11 +145,26 @@ async function main(): Promise<void> {
   const registered = registry.publish("daemon");
 
   let stopping = false;
+  let model: WarmupOutcome | null = null;
+
+  // Listening starts before the model is loaded, and the handler reads whatever state
+  // warming has reached. That ordering is the whole point of `status`: a daemon that is
+  // still loading, or whose load failed, must still be able to say so.
+  const rpc = new RpcServer(
+    createDaemonMethods(container, {
+      pid: process.pid,
+      model: () => model,
+    }),
+    {
+      isOwnedByLiveDaemon: () => isDaemonAlive(dbPath),
+      onError: (message) => process.stderr.write(`rpc: ${message}\n`),
+    },
+  );
 
   const shutdown = async () => {
     stopping = true;
 
-    await Promise.all([worker.stop(), consolidation.stop()]);
+    await Promise.all([worker.stop(), consolidation.stop(), rpc.close()]);
     registry.retire(registered);
     clearDaemonPid(dbPath);
     process.exit(0);
@@ -147,12 +173,21 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
 
+  try {
+    await rpc.listen(daemonConfig.socketPath);
+  } catch (err) {
+    // A daemon that cannot be asked anything still drains the queue, which is the job it
+    // had before the socket existed.
+    process.stderr.write(`rpc unavailable: ${(err as Error).message}\n`);
+  }
+
   // Before the loop, not inside its first tick: this is the process that exists to hold
   // the model, so it should finish loading while nothing is waiting on it. The MCP
   // server's fallback worker deliberately does NOT do this — there the load would stall
   // the client's own startup, and a background timer is already off the request path.
   const warmed = await warmup.warm();
 
+  model = warmed;
   registry.recordModel(registered, warmed);
 
   process.stderr.write(
@@ -168,6 +203,7 @@ async function main(): Promise<void> {
       activeIntervalMs: daemonConfig.activeIntervalMs,
       idleIntervalMs: daemonConfig.idleIntervalMs,
       idleExitMs: daemonConfig.idleExitMs,
+      resident: daemonConfig.resident,
       consolidateIntervalMs: container.resolve(ConsolidationConfig).intervalMs,
     });
   } finally {
@@ -175,7 +211,7 @@ async function main(): Promise<void> {
     // analysis can't see that closure mutation and reads it as always-false.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!stopping) {
-      await Promise.all([worker.stop(), consolidation.stop()]);
+      await Promise.all([worker.stop(), consolidation.stop(), rpc.close()]);
       registry.retire(registered);
       clearDaemonPid(dbPath);
     }

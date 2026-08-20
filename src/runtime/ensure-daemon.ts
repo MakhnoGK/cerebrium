@@ -16,7 +16,7 @@ export interface EnsureDaemonOptions {
 // The daemon's location relative to this module depends on the build layout: bundled
 // (tsup) the bins are flat siblings in dist/ ("./daemon.js"); running from source
 // (tsx) it is one level up ("../daemon.ts"). Resolve by probing rather than assuming.
-function resolveDaemonPath(): string {
+export function resolveDaemonPath(): string {
   for (const rel of ["./daemon.js", "../daemon.js", "./daemon.ts", "../daemon.ts"]) {
     const p = fileURLToPath(new URL(rel, import.meta.url));
 
