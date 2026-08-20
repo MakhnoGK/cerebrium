@@ -2,6 +2,7 @@ import { inject, injectable, type DependencyContainer } from "tsyringe";
 import {
   CALL_SURFACE,
   callAction,
+  isAudited,
   isCallName,
   readNameOf,
   RECORD_EVENTS,
@@ -90,7 +91,7 @@ export class CallPipeline {
     result: unknown,
     error: Error | null,
   ): Promise<void> {
-    if (session === null) {
+    if (session === null || !isAudited(name)) {
       return;
     }
 

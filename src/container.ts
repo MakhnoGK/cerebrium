@@ -12,6 +12,7 @@ import { DB_TOKEN } from "@/db/repositories/base";
 import { ConsolidationRepo } from "@/db/repositories/consolidation";
 import {
   ConsolidationConfig,
+  DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
   EnvConfigSource,
@@ -20,6 +21,7 @@ import {
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
 import { configFilePath } from "@/runtime/paths";
+import { registerRemoteKernel } from "@/runtime/remote-kernel";
 import { SystemClock } from "@/runtime/system-clock";
 import { SystemProcessProbe } from "@/runtime/system-process-probe";
 import { createConsolidator } from "@/consolidation";
@@ -31,8 +33,14 @@ import { createProvider } from "@/embeddings";
 // host and be present in another.
 export type HostRole = "server" | "daemon" | "cli" | "reader";
 
+// Which kernel backs the tokens. `local` resolves everything in-process against SQLite;
+// `remote` resolves the same tokens against the daemon's socket and registers no database
+// at all, so a host in that mode cannot reach the file even by accident.
+export type KernelMode = "local" | "remote";
+
 export interface ContainerOptions {
   role: HostRole;
+  kernel?: KernelMode;
   // Pin configuration instead of resolving the tiers below (tests, eval scripts).
   source?: ConfigSource;
   // Where to register. Defaults to the global container the `@tool()` and `@configSection()`
@@ -55,10 +63,23 @@ export const KERNEL_TOKENS = {
   consolidationReporter: CONSOLIDATION_REPORTER_TOKEN,
 } as const;
 
-export function buildContainer({ role, source, into }: ContainerOptions): DependencyContainer {
+export function buildContainer({
+  role,
+  source,
+  into,
+  kernel = "local",
+}: ContainerOptions): DependencyContainer {
   const target = into ?? container;
 
   registerConfigSource(target, source);
+
+  if (kernel === "remote") {
+    // Registered after the config source, because the socket path comes from it. Nothing
+    // else is registered: see registerRemoteKernel.
+    registerRemoteKernel(target, { socketPath: target.resolve(DaemonConfig).socketPath });
+
+    return target;
+  }
 
   registerLocalKernel(role, target);
 

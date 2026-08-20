@@ -67,10 +67,18 @@ describe("Call surface classification", () => {
   });
 
   it("should exclude the pipeline's own machinery from the callable surface", () => {
-    // Given / When / Then — these are what happens around a call, not calls.
+    // Given / When / Then — these are what happens around a call, not calls. `session_hints`
+    // is on the surface, because tools call it themselves and a remote host must be able to.
     expect(isCallName("touch_session")).toBe(false);
     expect(isCallName("record_events")).toBe(false);
-    expect(isCallName("session_hints")).toBe(false);
+    expect(isCallName("session_hints")).toBe(true);
+  });
+
+  it("should treat session_hints as a write, because it touches the session", () => {
+    // Given / When / Then — it reads like a lookup, but requireSession updates last_seen,
+    // so routing it to a read-only worker would fail at runtime.
+    expect(callKind("session_hints")).toBe("write");
+    expect(isRetryable("session_hints")).toBe(false);
   });
 
   it("should refuse a name it does not know", () => {
