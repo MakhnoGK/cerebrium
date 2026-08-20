@@ -1,18 +1,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
+import { defaultDbPath } from "@/runtime/paths";
 import { nowIso } from "@/core/ids";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const requireCjs = createRequire(import.meta.url);
-
-export function defaultDbPath(): string {
-  return join(homedir(), ".cerebrium", "memory.db");
-}
 
 export function openDatabase(dbPath = defaultDbPath()): Database.Database {
   if (dbPath !== ":memory:") {

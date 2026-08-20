@@ -1,6 +1,6 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { defaultDbPath } from "@/db/database";
+import { defaultDbPath } from "@/runtime/paths";
 
 // The daemon's singleton marker lives next to the DB file so it tracks the DB it
 // drains (a different MEMORY_DB_PATH gets its own daemon). Spawn-dedup only — the
