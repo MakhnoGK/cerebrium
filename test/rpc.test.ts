@@ -142,6 +142,16 @@ describe("RPC server over a real socket", () => {
   });
 });
 
+const VALID_WRITE = {
+  session_id: "01M0FP4NF24EWXR6V93NYDPHX8",
+  memory_kind: "semantic",
+  type: "fact",
+  title: "t",
+  content: "c",
+  project: null,
+  parent_node_id: null,
+};
+
 describe("Method surface over the socket", () => {
   it("should expose one method per call on the surface", async () => {
     // Given
@@ -155,7 +165,7 @@ describe("Method surface over the socket", () => {
     );
 
     // When
-    await rpcCall({ socketPath: SOCKET }, "write_memory", { title: "x" });
+    await rpcCall({ socketPath: SOCKET }, "write_memory", VALID_WRITE);
     await rpcCall({ socketPath: SOCKET }, "search_memory", { query: "y" });
 
     // Then
@@ -186,8 +196,8 @@ describe("Method surface over the socket", () => {
       }),
     );
 
-    // When
-    await expect(rpcCall({ socketPath: SOCKET }, "write_memory", {})).rejects.toThrow(
+    // When — valid arguments, so the failure comes from the handler and not from validation.
+    await expect(rpcCall({ socketPath: SOCKET }, "write_memory", VALID_WRITE)).rejects.toThrow(
       /write blew up/,
     );
 

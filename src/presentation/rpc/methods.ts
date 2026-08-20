@@ -7,6 +7,7 @@ import {
   type ReadName,
 } from "@/application/use-cases";
 import { PROTOCOL_VERSION } from "@/core/rpc";
+import { validateCall } from "@/presentation/rpc/schemas";
 import type { RpcMethod } from "@/presentation/rpc/server";
 
 // Dispatches a named read somewhere other than this thread. Absent when there is no read
@@ -31,7 +32,8 @@ export function surfaceMethods(
   return Object.fromEntries(
     (Object.keys(CALL_SURFACE) as CallName[]).map((name) => [
       name,
-      (params: Record<string, unknown>) => call(name, params),
+      // Validated at the edge, before the pipeline touches the writer.
+      (params: Record<string, unknown>) => call(name, validateCall(name, params)),
     ]),
   );
 }

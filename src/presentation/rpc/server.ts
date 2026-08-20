@@ -9,6 +9,7 @@ import {
   socketPathProblem,
   successResponse,
 } from "@/core/rpc";
+import { InvalidArgsError } from "@/presentation/rpc/schemas";
 
 export type RpcMethod = (params: Record<string, unknown>) => Promise<unknown>;
 
@@ -151,11 +152,14 @@ export class RpcServer {
       if (!isNotification(request)) this.reply(socket, successResponse(id, result));
     } catch (err) {
       const message = (err as Error).message || String(err);
+      // A caller that sent the wrong arguments should be told so, not handed an internal
+      // error it cannot act on.
+      const code = err instanceof InvalidArgsError ? RPC_ERROR.invalidParams : RPC_ERROR.internal;
 
       this.options.onError?.(`${request.method}: ${message}`);
 
       if (!isNotification(request)) {
-        this.reply(socket, errorResponse(id, RPC_ERROR.internal, message));
+        this.reply(socket, errorResponse(id, code, message, issuesOf(err)));
       }
     }
   }
@@ -163,4 +167,8 @@ export class RpcServer {
   private reply(socket: Socket, response: ReturnType<typeof successResponse>): void {
     if (socket.writable) socket.write(encodeLine(response));
   }
+}
+
+function issuesOf(err: unknown): { issues: string[] } | undefined {
+  return err instanceof InvalidArgsError ? { issues: err.issues } : undefined;
 }
