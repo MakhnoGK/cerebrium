@@ -1,5 +1,5 @@
 import { ZodRawShape } from "zod";
-import { SessionService } from "@/application/services";
+import type { TouchSession } from "@/application/use-cases";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 
@@ -9,7 +9,7 @@ export class SessionGuardedTool<Schema extends ZodRawShape, Response> implements
 > {
   constructor(
     private readonly tool: McpTool<Schema, Response>,
-    private readonly sessions: SessionService,
+    private readonly sessions: TouchSession,
   ) {}
 
   public getMetadata() {
@@ -20,7 +20,7 @@ export class SessionGuardedTool<Schema extends ZodRawShape, Response> implements
     const sessionId = sessionOf(args);
 
     if (sessionId) {
-      this.sessions.requireSession(sessionId, new Date().toISOString());
+      await this.sessions.invoke({ session_id: sessionId });
     }
 
     return this.tool.invoke(args);

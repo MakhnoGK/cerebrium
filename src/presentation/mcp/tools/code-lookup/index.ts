@@ -1,10 +1,17 @@
-import { HintsService } from "@/application/services";
-import type { SymbolLookup } from "@/db/repo";
-import { CodeRepo } from "@/db/repositories";
+import { inject } from "tsyringe";
+import {
+  LOOKUP_CODE,
+  SESSION_HINTS,
+  type LookupCode,
+  type SessionHints,
+} from "@/application/use-cases";
+import type { SymbolLookup } from "@/core/types";
 import { metadata } from "@/presentation/mcp/tools/code-lookup/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
+
+type Schema = (typeof metadata)["schema"];
 
 interface ToolResponse {
   symbols: Record<string, unknown>[];
@@ -12,26 +19,24 @@ interface ToolResponse {
 }
 
 @tool()
-export class CodeLookupTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+export class CodeLookupTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
-    private readonly code: CodeRepo,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
+    @inject(LOOKUP_CODE) private readonly lookup: LookupCode,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const hints = await this.hints.getSessionHints(args.session_id);
+  async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
+    const { symbols } = await this.lookup.invoke({
+      name: args.name,
+      file: args.file,
+      repo: args.repo,
+      limit: args.limit,
+    });
 
-    if (!args.name && !args.file) {
-      throw new Error("provide `name` (resolve a symbol) or `file` (list a file's symbols).");
-    }
-
-    const found = args.name
-      ? this.code.findSymbolsByName(args.name, args.repo, args.limit)
-      : this.code.findSymbolsInFile(args.repo, args.file!, args.limit);
-
-    const out: ToolResponse = { symbols: found.map(present) };
+    const out: ToolResponse = { symbols: symbols.map(present) };
 
     if (hints.length) out.hints = hints;
 
@@ -39,7 +44,7 @@ export class CodeLookupTool implements McpTool<(typeof metadata)["schema"], Tool
   }
 
   // Same retrieval-outcome log as `search`: the lookup key stands in for the query.
-  public describeEvent(args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+  public describeEvent(args: ToolArgs<Schema>, result: ToolResponse) {
     const detail: Record<string, unknown> = {
       results: result.symbols.length,
       ids: result.symbols.map((s) => s.id).filter((id): id is string => typeof id === "string"),

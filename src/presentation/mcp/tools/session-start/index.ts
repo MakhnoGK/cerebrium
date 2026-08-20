@@ -1,8 +1,10 @@
-import { ulid } from "ulid";
-import { EmbeddingService, MemoryService, SessionService } from "@/application/services";
+import { inject } from "tsyringe";
+import { START_SESSION, type StartSession } from "@/application/use-cases";
 import { ClientIdentity } from "@/runtime/client-identity";
 import { McpTool, tool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { metadata } from "@/presentation/mcp/tools/session-start/metadata";
+
+type Schema = (typeof metadata)["schema"];
 
 interface ToolResponse {
   session_id: string;
@@ -13,30 +15,24 @@ interface ToolResponse {
 }
 
 @tool()
-export class SessionStartTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+export class SessionStartTool implements McpTool<Schema, ToolResponse> {
   constructor(
-    private readonly sessionService: SessionService,
-    private readonly memoryService: MemoryService,
-    private readonly embeddingService: EmbeddingService,
+    @inject(START_SESSION) private readonly start: StartSession,
     private readonly identity: ClientIdentity,
   ) {}
 
   public getMetadata = () => metadata;
 
-  public async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const now = new Date().toISOString();
-    const sessionId = ulid();
-    const project = args.project ?? null;
-
-    this.sessionService.startSession(sessionId, project, now, this.identity.get());
-
-    const workingSet = this.memoryService.getWorkingSet(project ?? undefined);
-    const notes = this.embeddingService.getEmbeddingNotes();
+  public async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
+    const { session_id, project, working_set, notes } = await this.start.invoke({
+      project: args.project ?? null,
+      client: this.identity.get(),
+    });
 
     return {
       project,
-      session_id: sessionId,
-      working_set: workingSet,
+      session_id,
+      working_set,
       hints: ["Search before writing. Prefer update/link over creating near-duplicates."],
       ...(notes.length ? { context_notes: notes } : {}),
     };
@@ -44,7 +40,7 @@ export class SessionStartTool implements McpTool<(typeof metadata)["schema"], To
 
   // The working set is a surfacing: its ids join against a later `get` like a `search`
   // row's do.
-  public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+  public describeEvent(_args: ToolArgs<Schema>, result: ToolResponse) {
     return {
       session_id: result.session_id,
       detail: { project: result.project ?? null, ids: surfacedNodeIds(result.working_set) },

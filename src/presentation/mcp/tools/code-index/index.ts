@@ -1,42 +1,39 @@
-import { CodeIndexService, EmbeddingService, HintsService } from "@/application/services";
+import { inject } from "tsyringe";
+import {
+  INDEX_CODE,
+  SESSION_HINTS,
+  type IndexCode,
+  type SessionHints,
+} from "@/application/use-cases";
 import type { IndexStats } from "@/core/types";
 import { metadata } from "@/presentation/mcp/tools/code-index/metadata";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 
-// TODO: Separate file
+type Schema = (typeof metadata)["schema"];
+
 type ToolResponse =
-  | (IndexStats & {
-      hints?: string[];
-      context_notes?: string[];
-    })
-  | {
-      repos: IndexStats[];
-      hints?: string[];
-      context_notes?: string[];
-    };
+  | (IndexStats & { hints?: string[]; context_notes?: string[] })
+  | { repos: IndexStats[]; hints?: string[]; context_notes?: string[] };
 
 @tool()
-export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+export class CodeIndexTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly embeddings: EmbeddingService,
-    private readonly hints: HintsService,
-
-    private readonly indexer: CodeIndexService,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
+    @inject(INDEX_CODE) private readonly index: IndexCode,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const targets = this.indexer.resolveTargets(args);
-    const results = await this.indexer.indexTargets(targets, {
+  async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
+    const { results, notes } = await this.index.invoke({
       session_id: args.session_id,
+      repo: args.repo,
+      path: args.path,
       force: args.force,
     });
-
-    const notes = this.embeddings.getEmbeddingNotes();
-    const hints = await this.hints.getSessionHints(args.session_id);
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
 
     const out: ToolResponse = results.length === 1 ? { ...results[0]! } : { repos: results };
 
@@ -51,7 +48,7 @@ export class CodeIndexTool implements McpTool<(typeof metadata)["schema"], ToolR
     return out;
   }
 
-  public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+  public describeEvent(_args: ToolArgs<Schema>, result: ToolResponse) {
     const indexed = "repos" in result ? result.repos : [result];
 
     return indexed.map((stats) => ({

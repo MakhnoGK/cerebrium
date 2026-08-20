@@ -1,32 +1,34 @@
 import { inject } from "tsyringe";
-import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
-import { HintsService } from "@/application/services";
-import { MirrorRepo } from "@/db/repositories";
+import {
+  REGISTER_SOURCE,
+  SESSION_HINTS,
+  type RegisterSource,
+  type SessionHints,
+} from "@/application/use-cases";
 import { McpTool, tool, ToolArgs } from "@/presentation/mcp/tools/contracts";
 import { metadata } from "@/presentation/mcp/tools/source-register/metadata";
 
+type Schema = (typeof metadata)["schema"];
+
 @tool()
-export class SourceRegisterTool implements McpTool<(typeof metadata)["schema"], unknown> {
+export class SourceRegisterTool implements McpTool<Schema, unknown> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
-    private readonly mirror: MirrorRepo,
-    @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
+    @inject(REGISTER_SOURCE) private readonly register: RegisterSource,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    const hints = await this.hints.getSessionHints(args.session_id);
-
-    const source = this.mirror.registerSource({
+  async invoke(args: ToolArgs<Schema>): Promise<unknown> {
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
+    const { source } = await this.register.invoke({
       id: args.id,
       kind: args.kind,
-      label: args.label ?? null,
-      project: args.project ?? null,
-      freshness_hours: args.freshness_hours ?? null,
-      recipe: args.recipe ?? null,
+      label: args.label,
+      project: args.project,
+      freshness_hours: args.freshness_hours,
+      recipe: args.recipe,
       enabled: args.enabled,
-      ts: this.clock.now(),
     });
 
     return hints.length ? { source, hints } : { source };

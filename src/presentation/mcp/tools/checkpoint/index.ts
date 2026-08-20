@@ -1,70 +1,45 @@
-import { HintsService, NodeReferenceService } from "@/application/services";
-import { NodesRepo } from "@/db/repositories";
+import { inject } from "tsyringe";
+import {
+  RECORD_CHECKPOINT,
+  SESSION_HINTS,
+  type RecordCheckpoint,
+  type SessionHints,
+} from "@/application/use-cases";
 import { Envelope } from "@/core/types";
-import { EdgeType, MemoryKind } from "@/core/vocab";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { tool } from "@/presentation/mcp/tools/contracts/tool";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { metadata } from "./metadata";
 
-// TODO: Move to a separate file
-type ToolResponse =
-  | (Envelope & {
-      hints: string[];
-    })
-  | Envelope;
+type Schema = (typeof metadata)["schema"];
+type ToolResponse = (Envelope & { hints: string[] }) | Envelope;
 
 @tool()
-export class CheckpointTool implements McpTool<(typeof metadata)["schema"], ToolResponse> {
+export class CheckpointTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
   constructor(
-    private readonly hints: HintsService,
-    private readonly references: NodeReferenceService,
-    // TODO: Think how to move to service
-    private readonly nodes: NodesRepo,
+    @inject(SESSION_HINTS) private readonly sessionHints: SessionHints,
+    @inject(RECORD_CHECKPOINT) private readonly checkpoint: RecordCheckpoint,
   ) {}
 
-  async invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<ToolResponse> {
-    const hints = await this.hints.getSessionHints(args.session_id);
-
-    for (const id of args.touched_node_ids ?? []) {
-      this.references.requireLive(id, "touched node");
-    }
-
-    const envelope = await this.nodes.createNode({
-      memory_kind: MemoryKind.EPISODIC,
-      type: "checkpoint",
-      title: args.title,
-      content: buildBody(args.summary, args.decisions, args.open_threads),
-      project: args.project ?? null,
+  async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
+    const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
+    const { envelope } = await this.checkpoint.invoke({
       session_id: args.session_id,
-      ts: new Date().toISOString(),
-      links: (args.touched_node_ids ?? []).map((dst) => ({
-        dst,
-        type: EdgeType.REFERENCES,
-      })),
+      title: args.title,
+      summary: args.summary,
+      decisions: args.decisions,
+      open_threads: args.open_threads,
+      project: args.project,
+      touched_node_ids: args.touched_node_ids,
     });
 
     return hints.length ? { ...envelope, hints } : envelope;
   }
 
-  public describeEvent(_args: ToolArgs<(typeof metadata)["schema"]>, result: ToolResponse) {
+  public describeEvent(_args: ToolArgs<Schema>, result: ToolResponse) {
     // A fresh checkpoint's only edges are the `references` links to the touched nodes.
     return { node_id: result.id, detail: { touched: result.edges } };
   }
-}
-
-function buildBody(summary: string, decisions?: string[], openThreads?: string[]): string {
-  const parts = [`## Summary\n${summary.trim()}`];
-
-  if (decisions?.length) {
-    parts.push(`## Decisions\n${decisions.map((d) => `- ${d}`).join("\n")}`);
-  }
-
-  if (openThreads?.length) {
-    parts.push(`## Open threads\n${openThreads.map((t) => `- ${t}`).join("\n")}`);
-  }
-
-  return parts.join("\n\n");
 }

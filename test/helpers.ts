@@ -8,7 +8,8 @@ import {
   type ConsolidationProvider,
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
-import { EventLogService } from "@/application/services";
+import { RECORD_EVENTS, type RecordEvents } from "@/application/use-cases";
+import "@/application/use-cases/local";
 import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import {
@@ -115,5 +116,5 @@ export function callTool<Schema extends ZodRawShape, Response>(
   tool: McpTool<Schema, Response>,
   args: ToolArgs<Schema>,
 ): Promise<Response> {
-  return new AuditedTool(tool, container.resolve(EventLogService)).invoke(args);
+  return new AuditedTool(tool, container.resolve<RecordEvents>(RECORD_EVENTS)).invoke(args);
 }
