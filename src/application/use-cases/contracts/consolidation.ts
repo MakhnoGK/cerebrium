@@ -1,5 +1,6 @@
 import type { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/use-case";
+import type { PageRequest } from "@/core/page";
 import type { ConsolidationCandidate } from "@/core/types";
 import type { ConsolidationKind, ConsolidationStatus } from "@/core/vocab";
 
@@ -18,13 +19,16 @@ export const RETRY_CANDIDATE = useCaseToken<RetryCandidateArgs, RetryCandidateRe
   "RetryCandidate",
 );
 
-export interface SuggestCandidatesArgs {
+export interface SuggestCandidatesArgs extends PageRequest {
   kind?: ConsolidationKind;
+  // Pre-cursor callers pass `limit` and get one page with no cursor back. Kept so the MCP
+  // tool's contract does not change under them.
   limit?: number;
 }
 
 export interface SuggestCandidatesResult {
   candidates: ConsolidationCandidate[];
+  next_cursor?: string;
 }
 
 export type SuggestCandidates = UseCase<SuggestCandidatesArgs, SuggestCandidatesResult>;
