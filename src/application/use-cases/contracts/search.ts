@@ -16,6 +16,10 @@ export interface SearchQuery {
   expand_graph?: boolean;
   as_of?: string;
   valid_at?: string;
+  // A query embedding the caller already has. Set when the model lives in a different
+  // thread from the database: embedding is 3ms of a ~200ms search, so it stays where the
+  // model is and the vector travels instead of the model being loaded twice.
+  query_vector?: number[];
 }
 
 // A near-duplicate that gave up its slot to the result carrying it. Still addressable —
