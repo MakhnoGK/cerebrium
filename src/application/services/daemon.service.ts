@@ -7,9 +7,12 @@ import { DatabaseConfig } from "@/infrastructure/config";
 export class DaemonService {
   constructor(private readonly database: DatabaseConfig) {}
 
+  // "Is a drain daemon alive", self included. The spawn-dedup check in runtime/daemon-pid
+  // deliberately excludes the caller's own pid; this one must not, because the daemon
+  // answers `status` about itself and would otherwise report itself as not running.
   isDaemonAlive() {
     const pid = this.readDaemonPid();
-    return pid != null && pid !== process.pid && this.isProcessAlive(pid);
+    return pid != null && this.isProcessAlive(pid);
   }
 
   isProcessAlive(pid: number) {

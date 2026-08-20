@@ -83,6 +83,21 @@ describe("DaemonService", () => {
     expect(service.getDaemonPidPath(DB)).toBe(daemonPidPath(DB));
     expect(service.readDaemonPid()).toBe(process.pid);
   });
+
+  it("should count the calling process itself as a live daemon", () => {
+    // Given — the daemon answers `status` about itself, so excluding its own pid the way
+    // the spawn-dedup check does would make it report itself as not running.
+    const service = new DaemonService(
+      new DatabaseConfig(new StaticConfigSource({ MEMORY_DB_PATH: DB })),
+    );
+
+    // When
+    writeDaemonPid(DB);
+
+    // Then
+    expect(service.isDaemonAlive()).toBe(true);
+    expect(isDaemonAlive(DB)).toBe(false);
+  });
 });
 
 describe("runDaemon loop", () => {
