@@ -2,6 +2,7 @@ import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import { PROCESS_PROBE_TOKEN, type ProcessProbe } from "@/domain/ports/process-probe";
+import type { WarmupOutcome } from "@/application/services/model-warmup.service";
 import { ProcessesRepo, type ProcessRow } from "@/db/repositories";
 import { newId } from "@/core/ids";
 import { ConfigRegistry, DatabaseConfig } from "@/infrastructure/config";
@@ -43,6 +44,10 @@ export class ProcessRegistryService {
     this.sweepDead();
 
     return id;
+  }
+
+  recordModel(id: string, outcome: WarmupOutcome): void {
+    this.processes.recordModel(id, outcome.state, outcome.ms, outcome.error ?? null);
   }
 
   retire(id: string): void {

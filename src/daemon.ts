@@ -153,6 +153,8 @@ async function main(): Promise<void> {
   // the client's own startup, and a background timer is already off the request path.
   const warmed = await warmup.warm();
 
+  registry.recordModel(registered, warmed);
+
   process.stderr.write(
     warmed.state === "ready"
       ? `model ready in ${String(warmed.ms)}ms\n`

@@ -6,7 +6,7 @@ import {
   type ConfigFileReport,
   type FieldProvenance,
 } from "@/domain/ports/config";
-import { ProcessRegistryService } from "@/application/services";
+import { ProcessRegistryService, type LiveProcess } from "@/application/services";
 import { StatsRepo } from "@/db/repositories";
 import { DB_TOKEN } from "@/db/repositories/base";
 import { isDaemonAlive, readDaemonPid } from "@/runtime/daemon-pid";
@@ -31,6 +31,17 @@ function fmtBytes(n: number): string {
 
 // The tier each value came from, for the values that are not simply the declared default.
 // Printing all of them would bury the three lines that actually explain a deployment.
+// A role that holds no model reports "-", not "cold": nothing is missing.
+function modelOf(p: LiveProcess): string {
+  if (!p.model_state) return "-";
+
+  const ms = p.model_ms === null ? "" : ` (${String(p.model_ms)}ms)`;
+
+  return p.model_state === "failed"
+    ? `failed${ms}: ${p.model_error ?? "unknown"}`
+    : `${p.model_state}${ms}`;
+}
+
 function overrides(provenance: FieldProvenance[], values: Record<string, unknown>): string[] {
   return provenance
     .filter((entry) => entry.source !== "default")
@@ -105,7 +116,7 @@ function main(): void {
     for (const p of processes) {
       L.push(
         `  ${p.role.padEnd(8)} pid ${String(p.pid).padEnd(8)} ${p.alive ? "alive" : "gone "}  ` +
-          `started ${p.started_at}  config ${p.config_state}`,
+          `started ${p.started_at}  config ${p.config_state}  model ${modelOf(p)}`,
       );
     }
     L.push("");

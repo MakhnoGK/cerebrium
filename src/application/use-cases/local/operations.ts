@@ -71,6 +71,9 @@ export class LocalStatsSnapshot implements StatsSnapshot {
         alive: row.alive,
         started_at: row.started_at,
         config_state: row.config_state,
+        // Absent for a role that holds no model, so the key only appears where it means
+        // something.
+        ...(row.model_state ? { model_state: row.model_state } : {}),
       })),
       config: { ignored: this.config.ignored().map((entry) => entry.envName) },
     });
