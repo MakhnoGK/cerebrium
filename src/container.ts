@@ -5,6 +5,7 @@ import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provi
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
+import "@/application/use-cases/local";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";

@@ -9,6 +9,7 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { EventLogService } from "@/application/services";
+import "@/application/use-cases/local";
 import { EmbeddingWorker } from "@/application/workers";
 import { openDatabase } from "@/db/database";
 import {
