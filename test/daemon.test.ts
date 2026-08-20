@@ -16,7 +16,7 @@ import { ensureDaemon } from "@/runtime/ensure-daemon";
 import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { nextIdleState, runDaemon } from "@/daemon";
+import { nextIdleState, runDaemon, waitForOwnership } from "@/daemon";
 import { DatabaseConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
 
@@ -97,6 +97,71 @@ describe("DaemonService", () => {
     // Then
     expect(service.isDaemonAlive()).toBe(true);
     expect(isDaemonAlive(DB)).toBe(false);
+  });
+});
+
+describe("waitForOwnership", () => {
+  it("should return as soon as the other owner is gone", async () => {
+    // Given
+    let owned = true;
+    let sleeps = 0;
+
+    // When
+    const result = await waitForOwnership({
+      owned: () => owned,
+      intervalMs: 5,
+      maxWaits: 10,
+      sleepMs: () => {
+        owned = ++sleeps >= 3 ? false : true;
+
+        return Promise.resolve();
+      },
+    });
+
+    // Then
+    expect(result).toBe("acquired");
+    expect(sleeps).toBe(3);
+  });
+
+  it("should not wait at all when nobody owns it", async () => {
+    // Given
+    let sleeps = 0;
+
+    // When
+    const result = await waitForOwnership({
+      owned: () => false,
+      intervalMs: 5,
+      maxWaits: 5,
+      sleepMs: () => {
+        sleeps++;
+
+        return Promise.resolve();
+      },
+    });
+
+    // Then
+    expect(result).toBe("acquired");
+    expect(sleeps).toBe(0);
+  });
+
+  it("should give up on a stop signal rather than waiting forever", async () => {
+    // Given — a supervisor booting the agent out mid-wait.
+    let stop = false;
+
+    // When
+    const result = await waitForOwnership({
+      owned: () => true,
+      intervalMs: 5,
+      stopped: () => stop,
+      sleepMs: () => {
+        stop = true;
+
+        return Promise.resolve();
+      },
+    });
+
+    // Then
+    expect(result).toBe("stopped");
   });
 });
 
