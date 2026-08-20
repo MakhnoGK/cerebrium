@@ -110,3 +110,13 @@ export enum EventAction {
 export function typeAllowedForKind(kind: WritableKind, type: string): boolean {
   return NODE_TYPES[kind].includes(type);
 }
+
+// The principal a session with no named writer resolves to. Parenthesised so it cannot
+// collide with a real client name from an MCP handshake.
+export const UNATTRIBUTED_PRINCIPAL = "(unattributed)";
+
+export enum PrincipalKind {
+  AGENT = "agent",
+  SYSTEM = "system",
+  UNATTRIBUTED = "unattributed",
+}

@@ -5,6 +5,7 @@ export { BaseRepo } from "@/db/repositories/base";
 export { SessionsRepo } from "@/db/repositories/sessions";
 export { EdgesRepo } from "@/db/repositories/edges";
 export { NodesRepo } from "@/db/repositories/nodes";
+export { PrincipalsRepo, type PrincipalRow } from "@/db/repositories/principals";
 export { EmbeddingQueueRepo } from "@/db/repositories/embedding-queue";
 export { SearchRepo } from "@/db/repositories/search";
 export { ChunksRepo } from "@/db/repositories/chunks";
