@@ -1,6 +1,5 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { type EmbeddingProvider } from "@/domain/ports/embedding-provider";
+import { modelsDir } from "@/runtime/paths";
 
 // In-process embeddings via transformers.js. Default model multilingual-e5-small
 // (dim 384), using the Xenova ONNX build (identical weights, packaged with quantized
@@ -14,10 +13,7 @@ export class LocalProvider implements EmbeddingProvider {
   readonly dim = 384;
   private pipe: Promise<FeatureExtractor> | null = null;
 
-  constructor(
-    model = "Xenova/multilingual-e5-small",
-    cacheDir = join(homedir(), ".cerebrium", "models"),
-  ) {
+  constructor(model = "Xenova/multilingual-e5-small", cacheDir = modelsDir()) {
     this.name = model;
     this.cacheDir = cacheDir;
   }

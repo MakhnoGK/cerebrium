@@ -1,9 +1,10 @@
 import { container, instanceCachingFactory, type DependencyContainer } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
-import { CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
+import { CONFIG_FILE_TOKEN, CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
@@ -13,9 +14,13 @@ import {
   DatabaseConfig,
   EmbeddingConfig,
   EnvConfigSource,
+  FileConfigSource,
+  LayeredConfigSource,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
+import { configFilePath } from "@/runtime/paths";
 import { SystemClock } from "@/runtime/system-clock";
+import { SystemProcessProbe } from "@/runtime/system-process-probe";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
 
@@ -27,7 +32,7 @@ export type HostRole = "server" | "daemon" | "cli";
 
 export interface ContainerOptions {
   role: HostRole;
-  // Pin configuration instead of reading the environment (tests, and later a config file).
+  // Pin configuration instead of resolving the tiers below (tests, eval scripts).
   source?: ConfigSource;
   // Where to register. Defaults to the global container the `@tool()` and `@configSection()`
   // decorators populate at import time. A child container isolates one build from another,
@@ -39,8 +44,10 @@ export interface ContainerOptions {
 // missing one and say which.
 export const KERNEL_TOKENS = {
   configSource: CONFIG_SOURCE_TOKEN,
+  configFile: CONFIG_FILE_TOKEN,
   database: DB_TOKEN,
   clock: CLOCK_TOKEN,
+  processProbe: PROCESS_PROBE_TOKEN,
   workerOptions: WORKER_OPTIONS_TOKEN,
   embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
   consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
@@ -50,11 +57,32 @@ export const KERNEL_TOKENS = {
 export function buildContainer({ role, source, into }: ContainerOptions): DependencyContainer {
   const target = into ?? container;
 
-  target.register(CONFIG_SOURCE_TOKEN, { useValue: source ?? new EnvConfigSource() });
+  registerConfigSource(target, source);
 
   registerLocalKernel(role, target);
 
   return target;
+}
+
+// Tiers: defaults <- config.json <- environment. Every host resolves them here and only
+// here, so spawn order can no longer decide what a process is configured with — the
+// daemon's posture used to depend on whether the GUI or Claude Code started it first.
+function registerConfigSource(target: DependencyContainer, pinned?: ConfigSource): void {
+  if (pinned) {
+    target.register(CONFIG_SOURCE_TOKEN, { useValue: pinned });
+    // A factory, not `useValue: null`: tsyringe tests `useValue != undefined`, so a null
+    // value provider falls through and it tries to construct the token instead.
+    target.register(CONFIG_FILE_TOKEN, { useFactory: () => null });
+
+    return;
+  }
+
+  const file = new FileConfigSource(configFilePath());
+
+  target.register(CONFIG_SOURCE_TOKEN, {
+    useValue: new LayeredConfigSource(new EnvConfigSource(), file),
+  });
+  target.register(CONFIG_FILE_TOKEN, { useValue: file.report() });
 }
 
 // The local kernel: everything resolves in-process against one SQLite file. A remote
@@ -74,6 +102,7 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
   });
 
   target.registerSingleton(CLOCK_TOKEN, SystemClock);
+  target.registerSingleton(PROCESS_PROBE_TOKEN, SystemProcessProbe);
 
   target.register(WORKER_OPTIONS_TOKEN, {
     // The daemon feeds the model in large batches; the server's in-process fallback

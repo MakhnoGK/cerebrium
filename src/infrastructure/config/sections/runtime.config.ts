@@ -1,8 +1,8 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { configSection, custom, int, num, SectionOf, str } from "@/domain/ports/config";
+import { cerebriumHome } from "@/runtime/paths";
 
-const home = (...parts: string[]): string => join(homedir(), ".cerebrium", ...parts);
+const home = (...parts: string[]): string => join(cerebriumHome(), ...parts);
 
 @configSection()
 export class DatabaseConfig extends SectionOf("database", {

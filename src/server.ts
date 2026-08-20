@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import { ProcessRegistryService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { isMainModule } from "@/runtime/is-main";
 import { Server } from "@/presentation/mcp/server";
@@ -12,6 +13,20 @@ async function main(): Promise<void> {
 
   const worker = container.resolve(EmbeddingWorker);
   const server = container.resolve(Server);
+  const registry = container.resolve(ProcessRegistryService);
+  const registered = registry.publish("server");
+
+  // stdio hosts stop the server by closing the pipe or signalling it; either way the row
+  // must go, and a sweep on the next publish is the backstop for a hard kill.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => {
+      registry.retire(registered);
+      process.exit(0);
+    });
+  }
+  process.once("exit", () => {
+    registry.retire(registered);
+  });
 
   await server.connect();
 

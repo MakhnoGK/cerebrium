@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import { ProcessRegistryService } from "@/application/services";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
@@ -126,7 +127,10 @@ async function main(): Promise<void> {
   const worker = container.resolve(EmbeddingWorker);
   const consolidation = container.resolve(ConsolidationWorker);
 
+  const registry = container.resolve(ProcessRegistryService);
+
   writeDaemonPid(dbPath);
+  const registered = registry.publish("daemon");
 
   let stopping = false;
 
@@ -134,6 +138,7 @@ async function main(): Promise<void> {
     stopping = true;
 
     await Promise.all([worker.stop(), consolidation.stop()]);
+    registry.retire(registered);
     clearDaemonPid(dbPath);
     process.exit(0);
   };
@@ -156,6 +161,7 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!stopping) {
       await Promise.all([worker.stop(), consolidation.stop()]);
+      registry.retire(registered);
       clearDaemonPid(dbPath);
     }
   }

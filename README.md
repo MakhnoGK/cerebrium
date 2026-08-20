@@ -38,7 +38,7 @@ src/
   rerank/          pluggable cross-encoder reranker (second-stage precision)
   code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
   consolidation/   pluggable generation adapter (manual / command / http)
-  runtime/         process/IO glue (daemon spawn, pid file, system clock, main detection)
+  runtime/         process/IO glue (install layout, daemon spawn, pid file, clock, liveness)
   presentation/    the MCP delivery layer — stdio server, audit + output adapters,
                    one dir per tool
   server.ts        stdio MCP server    daemon.ts  embedding drain    stats-cli.ts
@@ -85,6 +85,52 @@ Two failure modes, deliberately different:
   a silent fallback is how config drift stays invisible, so it is surfaced instead.
 - **Out of range** (`MEMORY_CONSOLIDATE_SIM=1.5`) — fatal at startup, naming the variable,
   the config path, the constraint, and the offending value.
+
+#### Three tiers, and one place that resolves them
+
+```
+declared defaults  <-  $CEREBRIUM_HOME/config.json  <-  environment
+```
+
+`CEREBRIUM_HOME` (default `~/.cerebrium`) is the **only** variable read directly, before
+any config exists: `config.json`, `memory.db`, `daemon.pid` and `models/` all derive from
+it, so the install relocates as a unit. `config.json` is keyed by **config path**, which is
+what a human edits and what `status` prints back:
+
+```json
+{
+  "database": { "path": "/Users/me/.cerebrium/memory.db" },
+  "retrieval": { "mmrLambda": 0.85 },
+  "consolidation": { "posture": { "merge": "suggest" } }
+}
+```
+
+Environment variables stay on top as the documented override, and every value carries the
+tier that produced it, so `provenance` reads `file` or `env` rather than being assumed. A
+missing `config.json` is normal and silent; a **corrupt** one degrades to environment plus
+defaults and says so in `cerebrium-stats` — this process is the daily working memory, and a
+stray comma must not leave an agent with no store at all. A non-scalar where a scalar
+belongs is reported through the same `ignored()` channel as an unparseable variable.
+
+`buildContainer` resolves all three tiers in one place, for every host. Before that, config
+travelled by process-env inheritance through three independent spawners, so a daemon
+started by the GUI could run a different consolidation provider than one started by Claude
+Code — same machine, same database, no signal. Each process now also **publishes what it
+resolved** to the `processes` table on startup, which is what makes the question "is the
+right configuration loaded?" answerable at all:
+
+```
+Processes
+  server   pid 5122     alive  started 2026-08-20T09:12:44.031Z  config loaded
+  daemon   pid 5140     alive  started 2026-08-20T09:12:45.882Z  config loaded
+
+Configuration
+  file                       : /Users/me/.cerebrium/config.json (loaded, 3 keys)
+  non-default values         : 2
+  retrieval.mmrLambda                    0.85  (file)
+  embedding.provider                     "local"  (env)
+  set but unusable           : none
+```
 
 ## Concepts
 
@@ -303,20 +349,23 @@ claude mcp add cerebrium-dev -s user \
 ## Environment
 
 Every variable below overrides one config-section property (see
-[Configuration](#configuration)). A blank value reads as unset. Numeric values are used
+[Configuration](#configuration)) — they are the top tier, above `config.json`. The one
+exception is `CEREBRIUM_HOME`, which is not an override but the bootstrap root every other
+path derives from. A blank value reads as unset. Numeric values are used
 as given — `0` means `0`, not "fall back to the default" — and a value outside its
 declared range fails at startup rather than being quietly replaced.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `MEMORY_DB_PATH` | `~/.cerebrium/memory.db` | SQLite file. `:memory:` for ephemeral. |
+| `CEREBRIUM_HOME` | `~/.cerebrium` | Install root. `config.json`, `memory.db`, `daemon.pid` and `models/` all derive from it. Read before any config tier exists. |
+| `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | SQLite file. `:memory:` for ephemeral. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
 | `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
 | `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model) or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). |
 | `MEMORY_RERANK` | `off` | Second-stage search reranker: `off`, `local` (cross-encoder via transformers.js), or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder model id for the `local` reranker. |
-| `MEMORY_MODEL_CACHE` | `~/.cerebrium/models` | Where model weights are cached (embeddings and reranker). |
+| `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached (embeddings and reranker). |
 | `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
@@ -411,7 +460,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
-| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), and reranker usage (eligible vs actually reranked searches, candidates scored). `session_id` optional. |
+| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), reranker usage (eligible vs actually reranked searches, candidates scored), the live process registry (role, pid, whether it is still alive, config state), and the names of any variables that were set but unusable. `session_id` optional. |
 
 Every tool call updates the session's `last_seen` and appends an `events` row — written at
 the boundary by `AuditedTool`, on failures as well as successes, so provenance cannot be
@@ -434,7 +483,7 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 |---------|--------------|
 | `cerebrium` | The MCP server (stdio). Registered in each agent host — see *Agent hosts*. |
 | `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
-| `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool). Safe to run anytime — it never writes — including when no server or daemon is up. |
+| `cerebrium-stats [--json]` | Read-only snapshot of the DB (same data as the `stats` tool), plus the process registry and the resolved configuration with the tier each value came from. Safe to run anytime — it never writes — including when no server or daemon is up, or before any writer has migrated the store. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
 | `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
 | `npm run report:readloop` | Read-only read-loop report against a real store: which nodes retrieval surfaced, which of those a later `get` actually read, and therefore what "never fetched" means. `--json`, `--since <ISO instant>`. See *Reading the read loop*. |

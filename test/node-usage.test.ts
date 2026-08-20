@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Envelope } from "@/db/repo";
+import type { EnrichedRow, Envelope } from "@/db/repo";
 import { newId } from "@/core/ids";
 import { MemoryKind } from "@/core/vocab";
 import { GetTool } from "@/presentation/mcp/tools/get";
-import { SearchTool } from "@/presentation/mcp/tools/search";
+import { SearchTool, strengthFactor } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { RetrievalConfig, StaticConfigSource } from "@/infrastructure/config";
@@ -201,22 +201,28 @@ describe("Usage in ranking", () => {
     expect(ranked.indexOf(used.id)).toBeLessThan(ranked.indexOf(unused.id));
   });
 
-  it("should treat runaway usage the same as saturated usage", async () => {
-    // Given
+  it("should let the usage prior order a pair nothing else separates", async () => {
+    // Given — same body, and titles equally unrelated to the query, so the counter under
+    // test is the only asymmetry left.
     const topic = "the http client retries three times with exponential backoff";
-    const saturated = await write("Retry budget", topic);
-    const runaway = await write("Client retries", topic);
+    const query = "http client retries";
+    const first = await write("Note one", topic);
+    const second = await write("Note two", topic);
     await env.worker.tick();
-    setUseCount(saturated.id, 20);
-    setUseCount(runaway.id, 1000);
 
-    // When
-    const ranked = await rank("http client retries");
+    // When — the count moves from one node to the other.
+    setUseCount(first.id, 20);
+    const firstBoosted = await rank(query);
 
-    // Then
-    // Both sit at the ceiling, so the pre-existing tie-break decides — not the count.
-    expect(ranked.slice(0, 2).sort()).toEqual([saturated.id, runaway.id].sort());
-    expect(ranked[0]).toBe([saturated.id, runaway.id].sort((a, b) => b.localeCompare(a))[0]);
+    setUseCount(first.id, 0);
+    setUseCount(second.id, 20);
+    const secondBoosted = await rank(query);
+
+    // Then — whichever node holds it leads. Never assert a winner by id: ULIDs minted in
+    // the same millisecond differ only in a random tail, which is what made the previous
+    // version of this test fail roughly once in fifteen runs.
+    expect(firstBoosted[0]).toBe(first.id);
+    expect(secondBoosted[0]).toBe(second.id);
   });
 
   it("should ignore usage entirely when the weight is zero", async () => {
@@ -235,5 +241,32 @@ describe("Usage in ranking", () => {
     // Then
     expect(after).toEqual(before);
     expect(after).toContain(plain.id);
+  });
+});
+
+// The ceiling is arithmetic, and search order cannot see it: on a real corpus the base
+// score gap between two candidates is smaller than the boost itself, so a capped and an
+// uncapped prior pick the same winner. Asserting it through `search` is how the previous
+// version of this suite ended up claiming something it could not detect.
+describe("Usage prior ceiling", () => {
+  const prior = (use_count: number, weight = 0.25): number =>
+    strengthFactor({ use_count } as EnrichedRow, weight);
+
+  it("should stop growing once the count reaches the ceiling", () => {
+    // Given / When / Then
+    expect(prior(1000)).toBe(prior(20));
+    expect(prior(20)).toBe(1.25);
+  });
+
+  it("should grow with the count below the ceiling", () => {
+    // Given / When / Then
+    expect(prior(5)).toBeGreaterThan(prior(1));
+    expect(prior(5)).toBeLessThan(prior(20));
+  });
+
+  it("should stay neutral with no usage and with the prior disabled", () => {
+    // Given / When / Then
+    expect(prior(0)).toBe(1);
+    expect(prior(1000, 0)).toBe(1);
   });
 });

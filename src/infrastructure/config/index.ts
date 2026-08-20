@@ -5,5 +5,6 @@ export {
   LayeredConfigSource,
   StaticConfigSource,
 } from "@/infrastructure/config/env-source";
+export { FileConfigSource } from "@/infrastructure/config/file-source";
 export { ConfigRegistry, type EffectiveConfig } from "@/infrastructure/config/registry";
 export * from "@/infrastructure/config/sections";

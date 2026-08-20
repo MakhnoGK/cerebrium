@@ -159,8 +159,8 @@ describe("LayeredConfigSource", () => {
     );
 
     // When / Then
-    expect(layered.read("a", "MEMORY_A")).toBe("pinned");
-    expect(layered.read("b", "MEMORY_B")).toBe("fallback");
+    expect(layered.read("a", "MEMORY_A")?.raw).toBe("pinned");
+    expect(layered.read("b", "MEMORY_B")?.raw).toBe("fallback");
     expect(layered.read("c", "MEMORY_C")).toBeUndefined();
   });
 
@@ -176,7 +176,7 @@ describe("LayeredConfigSource", () => {
     mutable.MEMORY_LATE = "set-after-construction";
 
     // Then
-    expect(layered.read("late", "MEMORY_LATE")).toBe("set-after-construction");
+    expect(layered.read("late", "MEMORY_LATE")?.raw).toBe("set-after-construction");
   });
 });
 

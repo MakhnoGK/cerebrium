@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
+import { CONFIG_FILE_TOKEN } from "@/domain/ports/config";
+import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
+import { ProcessRegistryService } from "@/application/services";
 import { openDatabase, openDatabaseReadonly } from "@/db/database";
+import { ProcessesRepo } from "@/db/repositories";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { StatsTool } from "@/presentation/mcp/tools/stats";
@@ -217,5 +221,38 @@ describe("Read-only inspection handle", () => {
     } finally {
       for (const suffix of ["", "-wal", "-shm"]) rmSync(`${dbPath}${suffix}`, { force: true });
     }
+  });
+});
+
+describe("StatsTool observability channels", () => {
+  it("should list the registered processes and any unusable configuration", async () => {
+    // Given
+    setup();
+    container.register(PROCESS_PROBE_TOKEN, {
+      useValue: { self: () => 700, alive: () => true },
+    });
+    container.register(CONFIG_FILE_TOKEN, { useFactory: () => null });
+    container.resolve(ProcessRegistryService).publish("server");
+
+    // When
+    const out = (await container.resolve(StatsTool).invoke({})) as {
+      processes: { role: string; pid: number; alive: boolean }[];
+      config: { ignored: string[] };
+    };
+
+    // Then
+    expect(out.processes).toEqual([
+      expect.objectContaining({ role: "server", pid: 700, alive: true }),
+    ]);
+    expect(out.config.ignored).toEqual([]);
+  });
+
+  it("should report an empty registry rather than failing on a store no writer has migrated", () => {
+    // Given — a read-only handle never runs migrations, which is the CLI's situation.
+    const env = setup();
+    env.db.exec("DROP TABLE processes");
+
+    // When / Then
+    expect(container.resolve(ProcessesRepo).list()).toEqual([]);
   });
 });

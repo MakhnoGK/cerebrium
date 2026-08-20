@@ -790,8 +790,10 @@ function memoryFactor(row: EnrichedRow, now: number, history: boolean): number {
 }
 
 // Importance prior: log-scaled in the number of fetches and hard-capped at 1 + weight, so
-// a hot node tilts a close call but can never outrank on popularity alone.
-function strengthFactor(row: EnrichedRow, weight: number): number {
+// a hot node tilts a close call but can never outrank on popularity alone. Exported for the
+// cap's own test: the ceiling is a numeric property, and on a real corpus the base score gap
+// between two candidates is smaller than the boost itself, so search order cannot see it.
+export function strengthFactor(row: EnrichedRow, weight: number): number {
   if (weight <= 0 || row.use_count <= 0) {
     return 1;
   }
