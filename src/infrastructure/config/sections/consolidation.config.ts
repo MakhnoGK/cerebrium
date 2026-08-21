@@ -75,8 +75,12 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   prune: int(200).positive().env("MEMORY_CONSOLIDATE_PRUNE_BATCH"),
   annotate: int(50).positive().env("MEMORY_CONSOLIDATE_ANNOTATE_BATCH"),
   backfill: int(10).positive().env("MEMORY_CONSOLIDATE_BACKFILL_BATCH"),
-  // Note->symbol citations proposed per sweep. Small: they land in a queue a person reads.
-  documents: int(25).positive().env("MEMORY_CONSOLIDATE_DOCUMENTS_BATCH"),
+  // Note->symbol citations acted on per sweep. This caps the writes, not the work: the scan
+  // walks every authored body and every backticked name regardless, so the ceiling only
+  // decides how many of the resolved pairs get an edge. Each one is an insert plus a queue
+  // update, measured as noise against a 2-6s citations stage, and none of it reaches a
+  // generating provider.
+  documents: int(100).positive().env("MEMORY_CONSOLIDATE_DOCUMENTS_BATCH"),
   // Wall-clock a loop may hold the thread before handing it back, in every loop the sweep
   // runs. This is the bound on how long a waiting client can be blocked, and the RPC
   // deadline it has to stay under is 3000ms. Lower trades sweep throughput for read
