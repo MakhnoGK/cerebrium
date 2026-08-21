@@ -9,6 +9,9 @@ import type { CodeRepo } from "@/db/repositories";
 // Directories never worth walking, independent of .gitignore.
 const SKIP_DIRS = new Set([
   "node_modules",
+  // Composer's third-party tree. Its absence here is why one PHP repo put 98,748 Laravel
+  // symbols in the mirror, against 2,328 for this project's own code.
+  "vendor",
   ".git",
   "dist",
   "build",
@@ -19,6 +22,10 @@ const SKIP_DIRS = new Set([
   ".cache",
   ".vscode-test",
 ]);
+// Generated files that carry a known grammar but no authored code. `_ide_helper` is
+// Laravel's IDE stub, tens of thousands of symbols describing the framework.
+const SKIP_FILES = [/^_ide_helper/];
+
 export const MAX_BYTES = 1_000_000;
 // Yield the event loop this often during a long index so a big repo can't
 // monopolize the shared DB — other server processes' writes (and this process's
@@ -87,6 +94,7 @@ export function walk(root: string): Candidate[] {
       } else if (entry.isFile()) {
         const def = langForPath(entry.name);
         if (!def) continue; // no grammar -> not a code file
+        if (SKIP_FILES.some((re) => re.test(entry.name))) continue;
         if (localMatchers.some((m) => m(childRel, false))) continue;
         out.push({ rel: childRel, abs: join(dir, entry.name), lang: def.lang, wasm: def.wasm });
       }
