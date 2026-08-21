@@ -9,7 +9,6 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
-import { RECORD_EVENTS, type RecordEvents } from "@/application/use-cases";
 import "@/application/use-cases/local";
 import { PrincipalQuotaService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
@@ -29,7 +28,7 @@ import {
 import { DB_TOKEN } from "@/db/repositories/base";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { ClientIdentity, UNKNOWN_WRITER } from "@/runtime/client-identity";
-import { AuditedTool } from "@/presentation/mcp/adapters";
+import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { createConsolidator } from "@/consolidation";
@@ -114,11 +113,21 @@ export function setup(opts?: {
   };
 }
 
-// Routes a call through the audit boundary the server composes, instead of straight
-// into `invoke` — use it when a test asserts on the `events` log.
+type ToolClass<Schema extends ZodRawShape, Response> = new (
+  ...args: unknown[]
+) => McpTool<Schema, Response>;
+
+// Routes a call the way a host with no daemon does — the tool is rebuilt in a scope whose
+// call surface runs through the pipeline, instead of `invoke` reaching the raw use cases.
+// Use it when a test asserts on the `events` log or on principal policy.
 export function callTool<Schema extends ZodRawShape, Response>(
   tool: McpTool<Schema, Response>,
   args: ToolArgs<Schema>,
 ): Promise<Response> {
-  return new AuditedTool(tool, container.resolve<RecordEvents>(RECORD_EVENTS)).invoke(args);
+  const scope = pipelinedContainer(container);
+  const built = scope.resolve<McpTool<Schema, Response>>(
+    tool.constructor as ToolClass<Schema, Response>,
+  );
+
+  return built.invoke(args);
 }

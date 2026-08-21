@@ -32,7 +32,29 @@ export function auditDetail(
     return startedDetail(result);
   }
 
+  if (name === "index_code") {
+    return indexedDetail(result);
+  }
+
   return null;
+}
+
+// The one call whose row points at no node, so its detail is the only record of what it
+// changed.
+function indexedDetail(result: unknown): Record<string, unknown> | null {
+  if (!isRecord(result) || !Array.isArray(result.results)) return null;
+
+  return {
+    repos: result.results.filter(isRecord).map((stats) => ({
+      repo: stats.repo,
+      indexed: stats.files_indexed,
+      added: stats.symbols_added,
+      updated: stats.symbols_updated,
+      invalidated: stats.symbols_invalidated,
+      branch: stats.branch,
+      commit: stats.commit,
+    })),
+  };
 }
 
 // A code lookup surfaces symbols the same way a search surfaces nodes, and its ids join
@@ -43,7 +65,7 @@ function lookedUpDetail(args: unknown, result: unknown): Record<string, unknown>
   const symbols = Array.isArray(result.symbols) ? result.symbols : [];
   const detail: Record<string, unknown> = {
     results: symbols.length,
-    ids: symbols.map((symbol) => (isRecord(symbol) ? symbol.id : null)).filter(isId),
+    ids: symbols.map(nodeIdOf).filter(isId),
   };
 
   if (!isRecord(args)) return detail;
@@ -76,6 +98,8 @@ function startedDetail(result: unknown): Record<string, unknown> | null {
 // a node id.
 const SURFACED_SECTIONS = ["tasks", "checkpoints", "semantic", "recent"];
 
+// A use case answers `{envelope:{id},facets,neighbors}` while a delivery layer flattens the
+// envelope into the entry itself. Both shapes reach here.
 function nodeIdOf(entry: unknown): unknown {
   if (!isRecord(entry)) return null;
 

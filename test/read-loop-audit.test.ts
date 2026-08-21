@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { container, type InjectionToken } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CallPipeline } from "@/application/call-pipeline";
@@ -7,6 +9,8 @@ import { CodeLookupTool } from "@/presentation/mcp/tools/code-lookup";
 import { GetTool } from "@/presentation/mcp/tools/get";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { setup, type TestEnv } from "@test/helpers";
+
+const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
 
 // The retrieval-outcome log is what `report:readloop`, the gold set and every calibration
 // run are computed from. It went blind for reads the moment the host became a proxy: the
@@ -170,6 +174,29 @@ describe("Retrieval-outcome log", () => {
       .get(session) as { detail: string | null };
 
     expect(JSON.parse(row.detail!)).toMatchObject({ results: 0, ids: [], name: "AuthService" });
+  });
+
+  it("should record the ids of symbols a lookup did surface", async () => {
+    // Given — a lookup that finds nothing reports an empty list either way, so the ids can
+    // only be checked against symbols that exist.
+    await pipeline.invoke(container, "index_code", { session_id: session, path: FIXTURE });
+
+    // When
+    const found = (await pipeline.invoke(container, "lookup_code", {
+      session_id: session,
+      file: "util/crypto.ts",
+      limit: 10,
+    })) as { symbols: { envelope: { id: string } }[] };
+
+    // Then
+    const [row] = rows("code_lookup").filter((r) => "file" in r.detail);
+
+    expect(found.symbols.length).toBeGreaterThan(0);
+    expect(row?.detail).toEqual({
+      file: "util/crypto.ts",
+      results: found.symbols.length,
+      ids: found.symbols.map((symbol) => symbol.envelope.id),
+    });
   });
 
   it("should still record the node a write produced", async () => {

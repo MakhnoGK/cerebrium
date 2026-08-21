@@ -45,18 +45,6 @@ export class CodeLookupTool implements McpTool<Schema, ToolResponse> {
   }
 
   // Same retrieval-outcome log as `search`: the lookup key stands in for the query.
-  public describeEvent(args: ToolArgs<Schema>, result: ToolResponse) {
-    const detail: Record<string, unknown> = {
-      results: result.symbols.length,
-      ids: result.symbols.map((s) => s.id).filter((id): id is string => typeof id === "string"),
-    };
-
-    if (args.name) detail.name = args.name;
-    if (args.file) detail.file = args.file;
-    if (args.repo) detail.repo = args.repo;
-
-    return { detail };
-  }
 }
 
 function present(s: SymbolLookup): Record<string, unknown> {

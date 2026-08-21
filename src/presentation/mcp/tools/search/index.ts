@@ -2,7 +2,6 @@ import { inject } from "tsyringe";
 import {
   SEARCH_MEMORY,
   SESSION_HINTS,
-  type SearchAudit,
   type SearchMemory,
   type SearchResult,
   type SessionHints,
@@ -19,14 +18,8 @@ interface ToolResponse {
   context_notes?: string[];
 }
 
-// Telemetry for the `events` row, carried out of `invoke` on a symbol key: symbols are
-// invisible to JSON.stringify, so this never reaches the agent or costs it tokens.
-const AUDIT = Symbol("search.audit");
-
-type AuditedResponse = ToolResponse & { [AUDIT]?: SearchAudit };
-
 @tool()
-export class SearchTool implements McpTool<Schema, AuditedResponse> {
+export class SearchTool implements McpTool<Schema, ToolResponse> {
   public getMetadata = () => metadata;
 
   constructor(
@@ -34,9 +27,9 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
     @inject(SEARCH_MEMORY) private readonly search: SearchMemory,
   ) {}
 
-  async invoke(args: ToolArgs<Schema>): Promise<AuditedResponse> {
+  async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
     const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
-    const { results, total_matches, notes, audit } = await this.search.invoke({
+    const { results, total_matches, notes } = await this.search.invoke({
       session_id: args.session_id,
       query: args.query,
       limit: args.limit,
@@ -50,17 +43,11 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
       valid_at: args.valid_at,
     });
 
-    const out: AuditedResponse = { results, total_matches };
+    const out: ToolResponse = { results, total_matches };
 
     if (hints.length) out.hints = hints;
     if (notes.length) out.context_notes = notes;
 
-    out[AUDIT] = audit;
-
     return out;
-  }
-
-  public describeEvent(_args: ToolArgs<Schema>, result: AuditedResponse) {
-    return { detail: result[AUDIT] ?? null };
   }
 }
