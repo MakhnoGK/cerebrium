@@ -13,6 +13,7 @@ import {
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { openDatabase } from "@/db/database";
 import { DB_TOKEN } from "@/db/repositories/base";
+import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { Server } from "@/presentation/mcp/server";
 import { sessionIdDescription } from "@/presentation/mcp/tools/contracts";
 import { createConsolidator } from "@/consolidation";
@@ -20,14 +21,15 @@ import { createProvider } from "@/embeddings";
 
 // Every test gets its own MCP client backed by a fresh in-memory DB, so ordering and
 // cross-test state never leak. A child DI container re-binds DB_TOKEN, and the Server
-// (with all seventeen tools) is resolved from that scope.
+// (with all seventeen tools) is resolved from a pipelined scope of it — the same way a
+// host with no daemon serves them.
 async function connect(): Promise<Client> {
   const scope = container.createChildContainer();
   scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
   scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
   scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
 
-  const server = scope.resolve(Server);
+  const server = pipelinedContainer(scope).resolve(Server);
   const client = new Client({ name: "test", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
