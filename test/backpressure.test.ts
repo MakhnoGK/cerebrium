@@ -52,12 +52,17 @@ function sweeper(yieldAfter = Number.POSITIVE_INFINITY) {
   };
 }
 
-async function loop(opts: { busy?: () => boolean; consolidation: ReturnType<typeof sweeper> }) {
+async function loop(opts: {
+  busy?: () => boolean;
+  consolidation: ReturnType<typeof sweeper>;
+  onSwept?: (result: { links_added: number }) => void;
+}) {
   let clock = 0;
   let ticks = 0;
 
   await runDaemon(env.queue, env.worker, {
     ...(opts.busy === undefined ? {} : { busy: opts.busy }),
+    ...(opts.onSwept === undefined ? {} : { onSwept: opts.onSwept }),
     consolidation: opts.consolidation as never,
     consolidateIntervalMs: 0,
     idleExitMs: 50,
@@ -71,6 +76,27 @@ async function loop(opts: { busy?: () => boolean; consolidation: ReturnType<type
 
   return ticks;
 }
+
+describe("Announcing a sweep", () => {
+  it("should hand each sweep's result to whoever is publishing it", async () => {
+    // Given — the loop holds no socket and must not reach for one; it is told where to
+    // send the result.
+    const consolidation = sweeper();
+    const announced: { links_added: number }[] = [];
+
+    // When
+    await loop({
+      consolidation,
+      onSwept: (result) => {
+        announced.push(result);
+      },
+    });
+
+    // Then
+    expect(announced).toHaveLength(consolidation.calls.length);
+    expect(announced.length).toBeGreaterThan(0);
+  });
+});
 
 describe("Activity monitor", () => {
   it("should treat a store nobody has asked anything as quiet", () => {

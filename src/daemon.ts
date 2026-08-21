@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import type { ConsolidationTickResult } from "@/domain/ports/consolidation-reporter";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingRole } from "@/domain/ports/embedding-provider";
 import { CallPipeline } from "@/application/call-pipeline";
 import {
@@ -7,8 +8,10 @@ import {
   ModelWarmupService,
   PrincipalQuotaService,
   ProcessRegistryService,
+  SubscriptionService,
   type WarmupOutcome,
 } from "@/application/services";
+import { NotificationTopic } from "@/application/use-cases";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import { EmbeddingQueueRepo } from "@/db/repositories";
 import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
@@ -127,6 +130,9 @@ export async function runDaemon(
     nowMs?: () => number;
     consolidation?: ConsolidationWorker;
     consolidateIntervalMs?: number;
+    // Called with each sweep's result, for whoever wants to tell somebody about it. The
+    // loop does not know about the socket, and should not.
+    onSwept?: (result: ConsolidationTickResult) => void;
   } = {},
 ): Promise<void> {
   const active = opts.activeIntervalMs ?? ACTIVE_MS;
@@ -163,8 +169,15 @@ export async function runDaemon(
 
       const swept = await consolidation.tick({ shouldYield: busy });
 
+      opts.onSwept?.(swept);
+
       const total =
-        swept.distilled + swept.merged + swept.pruned + swept.links_added + swept.annotated;
+        swept.distilled +
+        swept.merged +
+        swept.pruned +
+        swept.links_added +
+        swept.wikilinks_linked +
+        swept.annotated;
       const failures = swept.generation_failures;
       if (total > 0 || failures > 0 || swept.yielded) {
         process.stderr.write(
@@ -277,9 +290,9 @@ async function main(): Promise<void> {
 
     try {
       const [vector] = await container
-        .resolve<{ embed: (t: string[], r: EmbeddingRole) => Promise<number[][]> }>(
-          EMBEDDING_PROVIDER_TOKEN,
-        )
+        .resolve<{
+          embed: (t: string[], r: EmbeddingRole) => Promise<number[][]>;
+        }>(EMBEDDING_PROVIDER_TOKEN)
         .embed([query.query], EmbeddingRole.QUERY);
 
       return vector === undefined ? args : { ...args, query_vector: vector };
@@ -314,6 +327,28 @@ async function main(): Promise<void> {
       onError: (message) => process.stderr.write(`rpc: ${message}\n`),
     },
   );
+
+  // The first producer on the push channel. Fire-and-forget by design: a subscriber that
+  // was not connected reads the run from `consolidation_runs` instead, so nothing here has
+  // to be durable.
+  const subscriptions = container.resolve(SubscriptionService);
+  const publishSweep = (swept: ConsolidationTickResult): void => {
+    if (swept.stage === "failed" || subscriptions.subscribers === 0) return;
+
+    rpc.notify(
+      "consolidation.swept",
+      {
+        links_added: swept.links_added,
+        wikilinks_linked: swept.wikilinks_linked,
+        wikilinks_dangling: swept.wikilinks_dangling,
+        distill_suggested: swept.distill_suggested,
+        merge_suggested: swept.merge_suggested,
+        prune_suggested: swept.prune_suggested,
+        yielded: swept.yielded === true,
+      },
+      (client) => subscriptions.wants(client, NotificationTopic.CONSOLIDATION),
+    );
+  };
 
   const shutdown = async () => {
     stopping = true;
@@ -360,6 +395,7 @@ async function main(): Promise<void> {
       resident: daemonConfig.resident,
       busy: () => !activity.isQuiet(daemonConfig.quietMs) || (pool?.depth ?? 0) > 0,
       consolidateIntervalMs: container.resolve(ConsolidationConfig).intervalMs,
+      onSwept: publishSweep,
     });
   } finally {
     // `stopping` is flipped by the SIGTERM/SIGINT handler above; eslint's flow

@@ -19,4 +19,6 @@ export {
   type LiveProcess,
   ProcessRegistryService,
 } from "@/application/services/process-registry.service";
+export { SessionNotices } from "@/application/services/session-notices.service";
 export { SessionService } from "@/application/services/session.service";
+export { SubscriptionService } from "@/application/services/subscription.service";

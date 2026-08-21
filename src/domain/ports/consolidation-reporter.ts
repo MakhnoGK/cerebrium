@@ -5,6 +5,10 @@ export interface ConsolidationTickResult {
   links_added: number;
   links_suggested: number;
   links_pruned: number;
+  // Wikilink edges created, and wikilinks that resolved to nothing — the second is the
+  // backlog of nodes named in prose that were never written.
+  wikilinks_linked: number;
+  wikilinks_dangling: number;
   distilled: number;
   distill_suggested: number;
   merged: number;

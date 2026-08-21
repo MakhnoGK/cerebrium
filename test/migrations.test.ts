@@ -38,6 +38,7 @@ const MIGRATION_IDS = [
   "024_principals.cjs",
   "025_normalize_edge_timestamps.cjs",
   "026_consolidation_stage_ms.cjs",
+  "027_wikilink_counters.cjs",
 ];
 
 const dirs: string[] = [];

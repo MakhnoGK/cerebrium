@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CALL_SURFACE, type CallName } from "@/application/use-cases";
+import { CALL_SURFACE, NotificationTopic, type CallName } from "@/application/use-cases";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 
 // Argument validation for the socket edge. The MCP layer validates its own edge with zod
@@ -69,6 +69,9 @@ const SCHEMAS = {
   // schema before the pipeline sees it.
   start_session: z.object({ project: z.string().nullable().optional() }),
   session_hints: session,
+  subscribe_events: session.extend({
+    topics: z.array(z.nativeEnum(NotificationTopic)),
+  }),
   write_memory: session.extend({
     memory_kind: z.nativeEnum(MemoryKind),
     type: z.string().min(1),

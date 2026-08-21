@@ -29,7 +29,10 @@ export interface RpcServerOptions {
 
 export class RpcServer {
   private server: Server | null = null;
-  private readonly sockets = new Set<Socket>();
+  // The identity a connection last called with, so a notification can be routed by
+  // principal. Recorded from `meta` on any request rather than at the handshake, which
+  // carries no identity of its own.
+  private readonly sockets = new Map<Socket, { client: string | null }>();
 
   constructor(
     private readonly methods: Record<string, RpcMethod>,
@@ -69,7 +72,7 @@ export class RpcServer {
   }
 
   async close(): Promise<void> {
-    for (const socket of this.sockets) socket.destroy();
+    for (const socket of this.sockets.keys()) socket.destroy();
     this.sockets.clear();
 
     const server = this.server;
@@ -89,11 +92,21 @@ export class RpcServer {
   // undirected: which client should hear what is a routing question, and routing needs
   // subscriptions, which do not exist yet. This is the channel they will be carried on.
   broadcast(method: string, params: Record<string, unknown> = {}): number {
+    return this.notify(method, params, () => true);
+  }
+
+  // The directed form: only connections whose principal wants this topic hear it. `wants`
+  // is supplied by the caller, so routing policy stays out of the transport.
+  notify(
+    method: string,
+    params: Record<string, unknown>,
+    wants: (client: string | null) => boolean,
+  ): number {
     const line = encodeLine(notificationFrame(method, params));
     let reached = 0;
 
-    for (const socket of this.sockets) {
-      if (!socket.writable) continue;
+    for (const [socket, identity] of this.sockets) {
+      if (!socket.writable || !wants(identity.client)) continue;
 
       socket.write(line);
       reached++;
@@ -103,7 +116,7 @@ export class RpcServer {
   }
 
   private accept(socket: Socket): void {
-    this.sockets.add(socket);
+    this.sockets.set(socket, { client: null });
     socket.setEncoding("utf8");
 
     let buffer = "";
@@ -149,6 +162,12 @@ export class RpcServer {
     }
 
     const { request } = parsed;
+    const identity = this.sockets.get(socket);
+
+    if (identity && typeof request.meta?.client === "string") {
+      identity.client = request.meta.client;
+    }
+
     const method = this.methods[request.method];
     const id = request.id ?? null;
 

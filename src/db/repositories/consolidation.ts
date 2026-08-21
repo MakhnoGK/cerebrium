@@ -166,6 +166,16 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // `id ASC` is not decoration: score and detected_at are not unique together, and a
   // keyset cursor over a non-total order skips or repeats rows at every page boundary.
+  // How many candidates are waiting for a decision. Counted rather than listed: this is
+  // asked on every tool call.
+  pendingCandidateCount(): number {
+    return (
+      this.db
+        .prepare("SELECT COUNT(*) AS n FROM consolidation_candidates WHERE status = 'pending'")
+        .get() as { n: number }
+    ).n;
+  }
+
   private static readonly PENDING_ORDER = "ORDER BY score DESC, detected_at ASC, id ASC";
 
   pendingCandidates(opts?: { kind?: ConsolidationKind; limit?: number }): ConsolidationCandidate[] {
@@ -621,6 +631,45 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     };
   }
 
+  // ---- detection: wikilinks -------------------------------------------------
+
+  // Every live authored node with its current body, which is both the text the wikilinks
+  // are read from and the titles they resolve against.
+  authoredBodies(): { id: string; title: string; content: string }[] {
+    return this.db
+      .prepare(
+        `WITH current AS (
+           SELECT r.node_id, r.content, r.rev,
+                  ROW_NUMBER() OVER (PARTITION BY r.node_id ORDER BY r.rev DESC) AS seq
+           FROM revisions r
+         )
+         SELECT n.id AS id, n.title AS title, c.content AS content
+         FROM current c
+         JOIN nodes n ON n.id = c.node_id
+         WHERE c.seq = 1
+           AND n.invalidated_at IS NULL
+           AND n.memory_kind IN ('semantic', 'episodic')`,
+      )
+      .all() as { id: string; title: string; content: string }[];
+  }
+
+  // Revisions are append-only, so this changes if and only if a body or a title arrived
+  // since the last look — and only those can make a new wikilink resolvable.
+  revisionCount(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM revisions").get() as { n: number }).n;
+  }
+
+  // Titles of retired authored nodes, so a wikilink naming one can be followed to
+  // whatever superseded it. Titles only — the bodies are not read.
+  retiredAuthoredTitles(): { id: string; title: string }[] {
+    return this.db
+      .prepare(
+        `SELECT id, title FROM nodes
+         WHERE invalidated_at IS NOT NULL AND memory_kind IN ('semantic', 'episodic')`,
+      )
+      .all() as { id: string; title: string }[];
+  }
+
   // ---- detection: Tier-1 mirror prune ---------------------------------------
 
   // Advances on every code index run. `code_files` is only ever written by indexing, so
@@ -733,13 +782,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .prepare(
         `INSERT INTO consolidation_runs (
           id, started_at, updated_at, ended_at, stage,
-          links_added, links_suggested, links_pruned,
+          links_added, links_suggested, links_pruned, wikilinks_linked, wikilinks_dangling,
           distilled, distill_suggested, merged, merge_suggested, merge_delayed,
           pruned, prune_suggested, proposals_backfilled, rejected, annotated,
           generation_failures, last_error, stage_ms
         ) VALUES (
           @id, @started_at, @updated_at, @ended_at, @stage,
-          @links_added, @links_suggested, @links_pruned,
+          @links_added, @links_suggested, @links_pruned, @wikilinks_linked, @wikilinks_dangling,
           @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
           @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
           @generation_failures, @last_error, @stage_ms
@@ -751,6 +800,8 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           links_added = excluded.links_added,
           links_suggested = excluded.links_suggested,
           links_pruned = excluded.links_pruned,
+          wikilinks_linked = excluded.wikilinks_linked,
+          wikilinks_dangling = excluded.wikilinks_dangling,
           distilled = excluded.distilled,
           distill_suggested = excluded.distill_suggested,
           merged = excluded.merged,
@@ -776,6 +827,8 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         links_added: result.links_added,
         links_suggested: result.links_suggested,
         links_pruned: result.links_pruned,
+        wikilinks_linked: result.wikilinks_linked,
+        wikilinks_dangling: result.wikilinks_dangling,
         distilled: result.distilled,
         distill_suggested: result.distill_suggested,
         merged: result.merged,
