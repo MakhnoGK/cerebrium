@@ -1032,6 +1032,19 @@ store. It has two arms, because only one gate has ground truth:
   returned. Both are reported twice, on cosine alone and with the burst rule excluding a
   pair one writer produced in one moment.
 
+**What the labelled arm found, 2026-08-21: `mergeSim` cannot be calibrated on this store.**
+Over 440 labelled pairs (237 applied / 203 dismissed) cosine ranks the two classes at **AUC
+0.504** — chance — with applied at 0.932±0.009 against dismissed at 0.933±0.010 (Cohen's d
+−0.04). Precision sits near 0.5 across the entire sweep and *falls* as the gate rises: 0.553
+at 0.925, 0.444 at 0.950. So raising the gate buys no precision and only cuts recall, and
+the report now says why instead of printing an empty recommendation. Two notes being 93%
+similar carries no information about whether they are one fact on this corpus; the
+generation judge is the discriminator, and it has been right on every dismissal read so far.
+That makes `MEMORY_CONSOLIDATE_MERGE_SIM` a **volume** control — how many pairs the judge is
+asked about — and the knob for what that costs is `consolidation.batch.backfill`, measured
+at ~22s of generation per judged pair (532s for 24 pairs in one sweep, 227s for 10 in
+another).
+
 The fold gate lives on **its own similarity scale** and must never be read off
 `mergeSim`: `search` compares one vector per node (the lowest-seq chunk, what
 `SearchRepo.vectorsFor` hands MMR), while the merge detector compares a node's seed chunk
