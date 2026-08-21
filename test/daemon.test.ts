@@ -16,7 +16,7 @@ import { ensureDaemon } from "@/runtime/ensure-daemon";
 import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { nextIdleState, runDaemon, waitForOwnership } from "@/daemon";
+import { nextIdleState, runDaemon, stepsAside, waitForOwnership } from "@/daemon";
 import { DatabaseConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
 
@@ -242,5 +242,33 @@ describe("ensureDaemon", () => {
   it("should skip spawning under the local-null provider", () => {
     // Given / When / Then — the decision comes from the resolved config, not process.env.
     expect(ensureDaemon({ dbPath: DB, embedProvider: "local-null" })).toBe("skipped");
+  });
+});
+
+describe("Stepping aside when the database is already owned", () => {
+  const LAUNCHD_PID = 4242;
+
+  it("should step aside when it was never asked to stay", () => {
+    // Given / When / Then — a session-spawned daemon has nothing to wait for; the owner
+    // is already draining.
+    expect(stepsAside({ resident: false, managedPid: LAUNCHD_PID, pid: 99 })).toBe(true);
+  });
+
+  it("should wait when it is the daemon launchd manages", () => {
+    // Given / When / Then — exiting here is what produced the throttled respawn loop:
+    // KeepAlive restarts on any exit, including a clean one.
+    expect(stepsAside({ resident: true, managedPid: LAUNCHD_PID, pid: LAUNCHD_PID })).toBe(false);
+  });
+
+  it("should step aside when it is resident but not the one launchd manages", () => {
+    // Given / When / Then — the case that left idle second writers accumulating. Being
+    // told to stay resident is not the same as being the owner.
+    expect(stepsAside({ resident: true, managedPid: LAUNCHD_PID, pid: 99 })).toBe(true);
+  });
+
+  it("should step aside rather than wait forever when launchd manages nothing", () => {
+    // Given / When / Then — no agent installed, or no launchd to ask. Waiting for an
+    // owner that will never leave is worse than leaving.
+    expect(stepsAside({ resident: true, managedPid: null, pid: 99 })).toBe(true);
   });
 });

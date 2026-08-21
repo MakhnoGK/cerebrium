@@ -5,6 +5,7 @@ import {
   isInstallableDaemonPath,
   LAUNCH_AGENT_LABEL,
   launchAgentPlistPath,
+  launchdPid,
   renderLaunchAgent,
   stableNodePath,
   type LaunchAgentSpec,
@@ -140,5 +141,70 @@ describe("Stable node path", () => {
   it("should survive an unresolvable execPath", () => {
     // Given / When / Then
     expect(stableNodePath("/gone/node", { PATH: "/opt/homebrew/bin" }, resolve)).toBe("/gone/node");
+  });
+});
+
+describe("Asking launchd which daemon it manages", () => {
+  // Trimmed from real `launchctl print` output: the pid sits well down a long report, so
+  // the parse has to survive everything above it.
+  const PRINTED = `net.obrio.cerebrium.daemon = {
+	active count = 1
+	path = /Users/me/Library/LaunchAgents/net.obrio.cerebrium.daemon.plist
+	state = running
+	program = /opt/homebrew/bin/node
+	arguments = {
+		/opt/homebrew/bin/node
+		/Users/me/.cerebrium/bin/daemon.js
+	}
+	default environment = {
+		PATH => /usr/bin:/bin
+	}
+	pid = 45190
+	immediate reason = speculative
+	properties = keepalive | runatload
+}`;
+
+  it("should report the pid launchd supervises", () => {
+    // Given / When / Then
+    expect(launchdPid(() => PRINTED, 501)).toBe(45190);
+  });
+
+  it("should ask about this user's own agent by label", () => {
+    // Given
+    const asked: string[] = [];
+
+    // When
+    launchdPid((command) => {
+      asked.push(command);
+
+      return PRINTED;
+    }, 501);
+
+    // Then — the label is the one the installer writes, not a second copy of the string.
+    expect(asked).toEqual([`launchctl print gui/501/${LAUNCH_AGENT_LABEL}`]);
+  });
+
+  it("should report nothing when the agent is not installed", () => {
+    // Given / When / Then — `launchctl print` exits non-zero and the call throws.
+    expect(
+      launchdPid(() => {
+        throw new Error("Could not find service");
+      }, 501),
+    ).toBeNull();
+  });
+
+  it("should report nothing when launchd names no pid", () => {
+    // Given / When / Then — a loaded but not running agent prints a report with no pid.
+    expect(
+      launchdPid(() => "net.obrio.cerebrium.daemon = {\n\tstate = not running\n}", 501),
+    ).toBeNull();
+  });
+
+  it("should not mistake another number for the pid", () => {
+    // Given — `active count` and `runs` are numbers that sit above the pid in the report.
+    const noisy = "net.obrio.cerebrium.daemon = {\n\tactive count = 1\n\truns = 7\n\tpid = 900\n}";
+
+    // When / Then
+    expect(launchdPid(() => noisy, 501)).toBe(900);
   });
 });

@@ -1,9 +1,35 @@
+import { execSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { delimiter, join, join as joinPath } from "node:path";
 import { cerebriumHome } from "@/runtime/paths";
 
 export const LAUNCH_AGENT_LABEL = "net.obrio.cerebrium.daemon";
+
+// The pid launchd supervises for this agent, or null when it supervises none — the agent is
+// not installed, launchd is not there to ask, or it answered something unparseable. Asking
+// launchd is the only way to tell the daemon it manages from one a session or the desktop
+// app started: both are the same executable on the same database.
+//
+// `run` is a parameter so the parse can be tested against real `launchctl print` output
+// without a launchd to run it.
+export function launchdPid(
+  run: (command: string) => string = (command) =>
+    execSync(command, { encoding: "utf8", stdio: "pipe" }),
+  uid: number = userInfo().uid,
+): number | null {
+  let printed: string;
+
+  try {
+    printed = run(`launchctl print gui/${String(uid)}/${LAUNCH_AGENT_LABEL}`);
+  } catch {
+    return null;
+  }
+
+  const match = /\bpid\s*=\s*(\d+)/.exec(printed);
+
+  return match === null ? null : Number.parseInt(match[1]!, 10);
+}
 
 export interface LaunchAgentSpec {
   // Absolute path to the node binary and to the daemon entry point. Both are captured at
