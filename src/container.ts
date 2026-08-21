@@ -162,6 +162,7 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
         model: config.model,
         cmd: config.command ?? undefined,
         timeoutMs: config.timeoutMs,
+        reconcileTimeoutMs: config.reconcileTimeoutMs,
       });
     }),
   });

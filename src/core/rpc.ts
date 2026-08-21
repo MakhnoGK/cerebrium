@@ -16,6 +16,22 @@ export const PROTOCOL_VERSION = 2;
 // fails with a message that does not mention the length.
 export const SUN_PATH_MAX = 103;
 
+// What a client waits for an answer, by the shape of the work the call does. Interactive
+// covers in-memory work plus at most one embedding model load (measured 4.6-5.7s);
+// generative covers a write whose inline reconcile reaches the generation provider;
+// indexing covers a repo parse and re-embed.
+export enum RpcWork {
+  INTERACTIVE = "interactive",
+  GENERATIVE = "generative",
+  INDEXING = "indexing",
+}
+
+export const RPC_DEADLINE_MS: Record<RpcWork, number> = {
+  [RpcWork.INTERACTIVE]: 15_000,
+  [RpcWork.GENERATIVE]: 45_000,
+  [RpcWork.INDEXING]: 600_000,
+};
+
 export const RPC_ERROR = {
   parse: -32700,
   invalidRequest: -32600,

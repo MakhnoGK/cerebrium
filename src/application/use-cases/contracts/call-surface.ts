@@ -12,6 +12,7 @@ import { INDEX_CODE } from "@/application/use-cases/contracts/operations";
 import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/read-surface";
 import { SESSION_HINTS, START_SESSION } from "@/application/use-cases/contracts/session";
 import { SUBSCRIBE_EVENTS } from "@/application/use-cases/contracts/subscriptions";
+import { RPC_DEADLINE_MS, RpcWork } from "@/core/rpc";
 import { Capability, EventAction } from "@/core/vocab";
 
 // Everything a client outside this process may call, by name. Extends the read surface with
@@ -91,11 +92,14 @@ export const CALL_SURFACE = {
     audit: false,
     capability: Capability.READ,
   },
+  // Reconciles a near-duplicate draft against the generation provider before it answers,
+  // which is what `work` records.
   write_memory: {
     token: WRITE_MEMORY,
     kind: "write",
     action: EventAction.WRITE,
     capability: Capability.WRITE,
+    work: RpcWork.GENERATIVE,
   },
   update_memory: {
     token: UPDATE_MEMORY,
@@ -156,6 +160,7 @@ export const CALL_SURFACE = {
     kind: "write",
     action: EventAction.CODE_INDEX,
     capability: Capability.ADMIN,
+    work: RpcWork.INDEXING,
   },
   // `client` is NOT in this call's argument schema. The identity rides in the transport's
   // `meta`, which the proxy fills from the MCP initialize handshake, so a caller cannot
@@ -184,6 +189,14 @@ export function callKind(name: CallName): CallKind {
 // legible from the name alone rather than inferred per call site.
 export function isRetryable(name: CallName): boolean {
   return CALL_SURFACE[name].kind === "read";
+}
+
+// How long a client waits for this call before it reports the daemon unreachable. A call
+// that names no `work` is interactive.
+export function callDeadlineMs(name: CallName): number {
+  const entry = CALL_SURFACE[name];
+
+  return RPC_DEADLINE_MS["work" in entry ? entry.work : RpcWork.INTERACTIVE];
 }
 
 export function callAction(name: CallName): EventAction {

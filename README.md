@@ -468,6 +468,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
+| `MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS` | `25000` | Budget for the one generation call that happens on an interactive path: the write-time reconcile a `write_memory` waits for before it answers. Deliberately far under `MEMORY_CONSOLIDATE_TIMEOUT_MS`, which is sized for a background sweep — and under the 45 s RPC deadline for a write, so a busy model costs the write its advice rather than making a landed write look like a failure. |
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
@@ -550,6 +551,22 @@ A daemon that dies mid-session fails the in-flight call and reconnects on the ne
 it does not silently degrade. The error says whether repeating the call is safe: a read may
 be retried, while a write may already have been applied and repeating it could duplicate
 the change.
+
+**Per-method deadlines.** How long a client waits is set by the shape of the work the call
+does, not by one number for the whole surface. Interactive calls get 15 s — enough to ride
+out a cold embedding-model load (measured 4.6–5.7 s) or a busy window; `write_memory` gets
+45 s, because a draft resembling an existing record is reconciled against the generation
+provider before the write answers; `index_code` gets 10 minutes, because it parses and
+re-embeds a repository in the daemon. A single 3 s deadline reported a failure on every
+`index_code` call while the index landed, which is worse than an honest failure: an
+unattended caller is told a write may or may not have been applied when it certainly was.
+A dead daemon still fails instantly — the socket closes, and that is a different signal
+from silence.
+
+The other half of that is bounding the work rather than only the wait: the reconcile a
+`write` waits on runs under `MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS` (25 s), not the 500 s
+generation timeout the background sweep uses. Its verdict is advisory, so a model that is
+busy costs the write its advice, never its answer.
 
 **Pagination.** Paged reads use a keyset cursor, never an offset. The daemon writes while
 clients read, so an offset skips a row whenever something is inserted ahead of the page
