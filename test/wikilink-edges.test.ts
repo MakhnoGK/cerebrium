@@ -1,7 +1,9 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationWorker } from "@/application/workers";
+import { EdgesRepo } from "@/db/repositories";
 import { EdgeType, MemoryKind } from "@/core/vocab";
+import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -124,6 +126,54 @@ describe("Wikilinks as edges", () => {
     // Then
     expect(edgeBetween(source, target)?.provenance).toBe("agent");
     expect(result.wikilinks_linked).toBe(0);
+  });
+
+  it("should follow a supersede when the wikilink still names the retired title", async () => {
+    // Given
+    const old = await write("Old finding", "what we believed about the retry budget at first");
+    const fresh = await write("Newer finding", "what replaced it after the second measurement");
+    const source = await write("Plan", "acting on [[old-finding]], which has since moved on");
+
+    await container.resolve(InvalidateTool).invoke({
+      session_id: session,
+      id: old,
+      reason: "measured again",
+      superseded_by: fresh,
+    });
+
+    // When
+    const result = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(result.wikilinks_linked).toBeGreaterThanOrEqual(1);
+    expect(edgeBetween(source, fresh)?.type).toBe(EdgeType.REFERENCES);
+  });
+
+  it("should not guess when a retired target has more than one live successor", async () => {
+    // Given — the second `supersedes` goes in through the repo: `link` refuses a retired
+    // destination, so a store can only reach this state by another route.
+    const old = await write("Split finding", "one claim that later became two separate ones");
+    const first = await write("First half", "the first of the two claims it was split into");
+    const second = await write("Second half", "the second of the two claims it was split into");
+    const source = await write("Reader", "this still points at [[split-finding]] as one thing");
+
+    await container.resolve(InvalidateTool).invoke({
+      session_id: session,
+      id: old,
+      reason: "split in two",
+      superseded_by: first,
+    });
+    container
+      .resolve(EdgesRepo)
+      .insertEdge(second, old, EdgeType.SUPERSEDES, "agent", session, "2026-01-01T00:00:00.000Z");
+
+    // When
+    const result = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(edgeBetween(source, first)).toBeUndefined();
+    expect(edgeBetween(source, second)).toBeUndefined();
+    expect(result.wikilinks_dangling).toBeGreaterThanOrEqual(1);
   });
 
   it("should link a wikilink written before its target existed, once it exists", async () => {

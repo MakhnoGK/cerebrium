@@ -12,6 +12,7 @@ import {
   type ConsolidationReporter,
   type ConsolidationTickResult,
 } from "@/domain/ports/consolidation-reporter";
+import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
@@ -34,6 +35,18 @@ import {
 } from "@/infrastructure/config";
 
 const CONSOLIDATION_LEASE = "consolidation";
+
+function slugIndexOf(rows: { id: string; title: string }[]): SlugIndex {
+  const index: SlugIndex = new Map();
+
+  for (const row of rows) {
+    const slug = slugify(row.title);
+
+    index.set(slug, [...(index.get(slug) ?? []), row.id]);
+  }
+
+  return index;
+}
 
 function breathe(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
@@ -92,6 +105,7 @@ export class ConsolidationWorker {
     private readonly nodesRepo: NodesRepo,
 
     private readonly sessionService: SessionService,
+    private readonly nodeReferences: NodeReferenceService,
 
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
 
@@ -380,30 +394,43 @@ export class ConsolidationWorker {
   // nothing to suggest and nothing to judge.
   private resolveWikilinks(now: string, result: ConsolidationTickResult): void {
     const bodies = this.consolidationRepo.authoredBodies();
-    const index: SlugIndex = new Map();
-
-    for (const row of bodies) {
-      const slug = slugify(row.title);
-
-      index.set(slug, [...(index.get(slug) ?? []), row.id]);
-    }
+    const live = slugIndexOf(bodies);
+    const retired = slugIndexOf(this.consolidationRepo.retiredAuthoredTitles());
 
     for (const row of bodies) {
       for (const target of wikilinkTargets(row.content)) {
-        const hit = resolveTarget(index, target);
+        const dst = this.wikilinkTarget(live, retired, target);
 
-        if (hit.kind === "ambiguous" || hit.kind === "unknown") {
+        if (dst === null) {
           result.wikilinks_dangling++;
           continue;
         }
 
-        if (hit.id === row.id) continue;
+        if (dst === row.id) continue;
 
-        if (this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, hit.id, this.ownerId, now)) {
+        if (this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, dst, this.ownerId, now)) {
           result.wikilinks_linked++;
         }
       }
     }
+  }
+
+  // A wikilink written before a supersede still names the retired title, so a target that
+  // no longer resolves live is followed forward — the same move `invalidate` makes when it
+  // repoints a retired node's referrers. More than one successor is not a guess to make.
+  private wikilinkTarget(live: SlugIndex, retired: SlugIndex, target: string): string | null {
+    const hit = resolveTarget(live, target);
+
+    if (hit.kind === "exact" || hit.kind === "prefix") return hit.id;
+    if (hit.kind === "ambiguous") return null;
+
+    const gone = resolveTarget(retired, target);
+
+    if (gone.kind !== "exact" && gone.kind !== "prefix") return null;
+
+    const successors = this.nodeReferences.terminalLiveSuccessors(gone.id);
+
+    return successors.length === 1 ? successors[0]! : null;
   }
 
   // Retire similar_to edges the cap has already been exceeded by — the backlog the

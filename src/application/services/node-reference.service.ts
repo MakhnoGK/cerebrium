@@ -29,7 +29,10 @@ export class NodeReferenceService {
     throw new Error(`${label} ${id} is invalidated and has no live successor.`);
   }
 
-  private terminalLiveSuccessors(id: string): string[] {
+  // Where a retired node's identity went: the live nodes reachable by following
+  // `supersedes` forward, however many hops it takes. More than one means the question
+  // has no single answer and the caller has to say so rather than pick.
+  terminalLiveSuccessors(id: string): string[] {
     const live = new Set<string>();
     const visited = new Set<string>();
     const pending = [id];

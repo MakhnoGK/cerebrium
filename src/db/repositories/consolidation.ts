@@ -643,6 +643,17 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .all() as { id: string; title: string; content: string }[];
   }
 
+  // Titles of retired authored nodes, so a wikilink naming one can be followed to
+  // whatever superseded it. Titles only — the bodies are not read.
+  retiredAuthoredTitles(): { id: string; title: string }[] {
+    return this.db
+      .prepare(
+        `SELECT id, title FROM nodes
+         WHERE invalidated_at IS NOT NULL AND memory_kind IN ('semantic', 'episodic')`,
+      )
+      .all() as { id: string; title: string }[];
+  }
+
   // ---- detection: Tier-1 mirror prune ---------------------------------------
 
   // Advances on every code index run. `code_files` is only ever written by indexing, so
