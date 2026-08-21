@@ -1,4 +1,5 @@
 import { VECTOR_DIM, type EmbeddingProvider } from "@/domain/ports/embedding-provider";
+import { HttpProvider } from "@/embeddings/http";
 import { LocalProvider } from "@/embeddings/local";
 import { LocalNullProvider } from "@/embeddings/local-null";
 
@@ -8,9 +9,14 @@ export function createProvider(
   name = "local",
   model?: string,
   cacheDir?: string,
+  remote?: { url?: string; timeoutMs?: number; batchSize?: number },
 ): EmbeddingProvider {
   const provider =
-    name === "local-null" ? new LocalNullProvider() : new LocalProvider(model, cacheDir);
+    name === "local-null"
+      ? new LocalNullProvider()
+      : name === "http"
+        ? new HttpProvider({ ...remote, ...(model === undefined ? {} : { model }) })
+        : new LocalProvider(model, cacheDir);
 
   if (provider.dim !== VECTOR_DIM) {
     throw new Error(

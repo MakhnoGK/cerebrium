@@ -132,6 +132,13 @@ function render(s: OperatorSnapshotResult, source: string): string {
   L.push("Consolidation");
   L.push(`  runs total                 : ${s.consolidation.runs_total}`);
   L.push(
+    `  sweep now                  : ${
+      s.consolidation.sweep_running
+        ? `running (${s.consolidation.sweep_lease_owner ?? "?"}, lease to ${s.consolidation.sweep_lease_expires_at ?? "?"})`
+        : "idle"
+    }`,
+  );
+  L.push(
     `  candidates                 : ${s.consolidation.pending} pending, ${s.consolidation.applied} applied, ${s.consolidation.dismissed} dismissed`,
   );
   if (s.consolidation.runs_total > 0) {

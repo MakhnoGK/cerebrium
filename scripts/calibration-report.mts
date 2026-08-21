@@ -46,6 +46,11 @@ const FOLD_SWEEP = [0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98];
 // operator would have merged.
 const TARGET_FOLD_PRECISION = 0.95;
 
+// Below this, the scorer is not ranking the labelled classes at all, and no threshold read
+// off it means anything. Reporting a bare "—" there reads as "not enough data yet", which
+// is a different and much more hopeful problem than the one being measured.
+const CHANCE_AUC = 0.6;
+
 // The burst rule, measured at 7/7 against 19% delay: one writer, one moment. At detection
 // time it compares node age to the detection instant; there is no such instant at read
 // time, so the read-time reading is "written by the same session, within an hour of each
@@ -346,12 +351,17 @@ async function report(opts: {
   L.push("");
 
   const rec = recommendation(sweep, dedup, link, lexical);
+  const production = stats.find((row) => row.name.includes("production"));
+  const atChance = production !== undefined && production.auc < CHANCE_AUC;
   L.push("── Suggested thresholds ──");
   L.push(
     `  fold    ${foldGate ?? "—"}   (lowest gate at >=${TARGET_FOLD_PRECISION} labelled precision with no series folded)`,
   );
   L.push(
-    `  merge   ${rec.mergeSim ?? "—"}   (highest precision at >=0.95, preferring recall on ties)`,
+    rec.mergeSim === null && atChance
+      ? `  merge   —   (cosine ranks applied vs dismissed at AUC ${production.auc.toFixed(3)}, i.e. chance: ` +
+          `no threshold on this scorer carries the decision, so the gate is volume control and the judge is the discriminator)`
+      : `  merge   ${rec.mergeSim ?? "—"}   (highest precision at >=0.95, preferring recall on ties)`,
   );
   L.push(
     `  dedup   ${rec.dedupThreshold ?? "—"}   (lowest threshold with <=${(TARGET_DEDUP_HIT_RATE * 100).toFixed(0)}% of writes surfacing a hit)`,

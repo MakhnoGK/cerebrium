@@ -99,6 +99,12 @@ export class StatsRepo extends BaseRepo {
       .prepare("SELECT owner, expires_at FROM worker_lease WHERE role = 'embedding'")
       .get() as { owner: string; expires_at: string } | undefined;
 
+    // The sweep lease, not an open run row: a row stays open when the process holding it
+    // is killed, so "is a sweep running" has to be asked of something that expires.
+    const sweepLease = this.db
+      .prepare("SELECT owner, expires_at FROM worker_lease WHERE role = 'consolidation'")
+      .get() as { owner: string; expires_at: string } | undefined;
+
     const candStats = this.db
       .prepare(
         `SELECT
@@ -164,6 +170,9 @@ export class StatsRepo extends BaseRepo {
         last_run_at: lastRun?.started_at ?? null,
         last_error: lastRun?.last_error ?? null,
         last_stage: lastRun?.stage ?? null,
+        sweep_running: !!sweepLease && sweepLease.expires_at > now,
+        sweep_lease_owner: sweepLease?.owner ?? null,
+        sweep_lease_expires_at: sweepLease?.expires_at ?? null,
       },
       code_repos: this.code.allRepoProvenance(),
       last_activity: one<{ t: string | null }>("SELECT MAX(ts) AS t FROM events").t,

@@ -392,6 +392,34 @@ downloads `Xenova/multilingual-e5-small` (the ONNX build of
 (default `~/.cerebrium/models`) on first embed. No API key, no daemon, no cost — a node
 is searchable via FTS instantly and vector search catches up once the model is warm.
 
+**Serving the embedding model instead of loading it.** `MEMORY_EMBED_PROVIDER=http` points
+the same port at a model served over HTTP (Ollama's `/api/embed` shape), which takes the
+repeated load/unload of a local model off the daemon's own thread — measured at 4.6-5.7s per
+load, paid inside whatever call happened to need a vector. The provider owns the parts a
+server cannot: the mandatory `query: ` / `passage: ` prefixes, because e5 is asymmetric and
+the remote cannot know which side it is embedding, and L2 normalization, because
+`/api/embed` makes no promise about it and cosine over unnormalized vectors is a silent
+ranking error rather than a visible failure. `warm()` embeds one token, so a wrong model, a
+wrong endpoint or a wrong dimension fails at daemon startup instead of inside the first
+write that needs a vector.
+
+**It must be the same model, and dimension is not proof of that.** Every response is checked
+against `FLOAT[384]` and a mismatch throws — but 384 dimensions from a *different* model is
+not an error any runtime check can see. It silently re-bases new vectors against every
+vector already stored, which does not fail, it just quietly stops finding things. So a
+switch on a populated store has a gate in front of it:
+
+```sh
+npm run eval:embedding -- --model multilingual-e5-small   # cosine vs the STORED vectors
+npm run eval:retrieval                                    # and no P@1 regression
+```
+
+`eval:embedding` re-embeds a deterministic sample of real chunks through the remote and
+compares each against the vector already in `chunk_vec`, reporting min/p10/p50/mean and
+exiting non-zero if any chunk falls below 0.99. Both gates have to hold; if either does not,
+the switch means a full re-embed rather than a config change, and `embedding_meta.model`
+records which model wrote each chunk so a half-migrated store is detectable.
+
 **The daemon loads the model before it starts draining.** Loading costs a few hundred
 milliseconds of blocked event loop, so the process whose job is to hold the model pays it
 at startup rather than inside the first batch that needs it. A load failure does not stop
@@ -442,11 +470,13 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | SQLite file. `:memory:` for ephemeral. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
 | `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
-| `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model) or `local-null` (deterministic, offline, for tests). |
-| `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). |
+| `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model), `http` (a model served over HTTP, so the daemon holds none), or `local-null` (deterministic, offline, for tests). |
+| `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). Under `http` this is the serving backend's own tag, and it must name the model the store was already embedded with — see **Serving the embedding model** below. |
 | `MEMORY_RERANK` | `off` | Second-stage search reranker: `off`, `local` (cross-encoder via transformers.js), or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder model id for the `local` reranker. |
 | `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached (embeddings and reranker). |
+| `MEMORY_EMBED_URL` | `http://127.0.0.1:11434/api/embed` | `http` provider only: the batch embedding endpoint (`{model, input[]}` -> `{embeddings[][]}`). |
+| `MEMORY_EMBED_TIMEOUT_MS` | `30000` | `http` provider only: budget for one batch. A batch is `MEMORY_EMBED_BATCH` texts, so raise both together. |
 | `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
@@ -816,6 +846,18 @@ Provider errors name the cause — the HTTP status with the response body, or th
 and the variable that governs it — because the alternative signal, a candidate arriving
 for review with no proposal, looks exactly like a model with nothing to say.
 
+**Whether a sweep is running is asked of the lease, never of a run row.** Each tick upserts
+one `consolidation_runs` row and stamps `ended_at` when it finishes (`idle`) or throws
+(`failed`). A tick that is killed outright reaches neither — parked on a generation call, it
+is gone the moment the daemon exits — so an open row is not evidence of a running sweep, and
+one left behind would read as "in progress" for the life of the store. Three rules make the
+record honest: the worker closes its own open run as `interrupted` when it is stopped, the
+next daemon closes any row nobody could close (`ended_at` set to the last instant the sweep
+actually reported, not to the restart), and a closed run never re-opens — whoever closes it
+first names why, so a late report from an abandoned tick changes nothing. `cerebrium-stats`
+reports `sweep now` from the `consolidation` worker lease, which expires on its own and is
+therefore the only signal a scheduler can trust.
+
 ## Evaluating a ranking change
 
 `npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It
@@ -989,6 +1031,19 @@ store. It has two arms, because only one gate has ground truth:
   once); the impact one replays the fold pass over the result sets real logged searches
   returned. Both are reported twice, on cosine alone and with the burst rule excluding a
   pair one writer produced in one moment.
+
+**What the labelled arm found, 2026-08-21: `mergeSim` cannot be calibrated on this store.**
+Over 440 labelled pairs (237 applied / 203 dismissed) cosine ranks the two classes at **AUC
+0.504** — chance — with applied at 0.932±0.009 against dismissed at 0.933±0.010 (Cohen's d
+−0.04). Precision sits near 0.5 across the entire sweep and *falls* as the gate rises: 0.553
+at 0.925, 0.444 at 0.950. So raising the gate buys no precision and only cuts recall, and
+the report now says why instead of printing an empty recommendation. Two notes being 93%
+similar carries no information about whether they are one fact on this corpus; the
+generation judge is the discriminator, and it has been right on every dismissal read so far.
+That makes `MEMORY_CONSOLIDATE_MERGE_SIM` a **volume** control — how many pairs the judge is
+asked about — and the knob for what that costs is `consolidation.batch.backfill`, measured
+at ~22s of generation per judged pair (532s for 24 pairs in one sweep, 227s for 10 in
+another).
 
 The fold gate lives on **its own similarity scale** and must never be read off
 `mergeSim`: `search` compares one vector per node (the lowest-seq chunk, what

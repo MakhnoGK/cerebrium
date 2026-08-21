@@ -13,7 +13,7 @@ import {
 } from "@/application/services";
 import { NotificationTopic } from "@/application/use-cases";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
-import { EmbeddingQueueRepo } from "@/db/repositories";
+import { ConsolidationRepo, EmbeddingQueueRepo } from "@/db/repositories";
 import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
@@ -22,7 +22,12 @@ import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker
 import { ReadPool } from "@/runtime/read-pool";
 import { createDaemonMethods, RpcServer, surfaceMethods } from "@/presentation/rpc";
 import { buildContainer } from "@/container";
-import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
+import {
+  ConsolidationConfig,
+  DaemonConfig,
+  DatabaseConfig,
+  EmbeddingConfig,
+} from "@/infrastructure/config";
 
 // Standalone embedding drain. Outlives any Claude Code session: the MCP server
 // spawns it detached (see ensureDaemon in server.ts) and it keeps draining the
@@ -214,8 +219,17 @@ async function main(): Promise<void> {
   const embedEntry = resolveEmbedWorker();
 
   if (embedEntry !== null) {
+    const embedding = container.resolve(EmbeddingConfig);
+
     container.register(EMBEDDING_PROVIDER_TOKEN, {
-      useValue: new WorkerEmbeddingProvider(embedEntry),
+      useValue: new WorkerEmbeddingProvider(embedEntry, {
+        provider: embedding.provider,
+        model: embedding.model,
+        cacheDir: embedding.cacheDir,
+        url: embedding.url,
+        timeoutMs: embedding.timeoutMs,
+        batchSize: embedding.batchSize,
+      }),
     });
   }
 
@@ -243,6 +257,17 @@ async function main(): Promise<void> {
   const queue = container.resolve(EmbeddingQueueRepo);
   const worker = container.resolve(EmbeddingWorker);
   const consolidation = container.resolve(ConsolidationWorker);
+
+  // A sweep killed outright leaves its row open, and only the process that starts next can
+  // say so. `interrupted` is the truth; a row still open would read as a sweep in progress
+  // for as long as the store lives.
+  const abandoned = container
+    .resolve(ConsolidationRepo)
+    .closeAbandonedRuns("the daemon exited before the sweep finished");
+
+  if (abandoned > 0) {
+    process.stderr.write(`closed ${String(abandoned)} abandoned sweep(s)\n`);
+  }
 
   const registry = container.resolve(ProcessRegistryService);
   const warmup = container.resolve(ModelWarmupService);

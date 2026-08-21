@@ -15,6 +15,11 @@ export class EmbeddingConfig extends SectionOf("embedding", {
   model: str("Xenova/multilingual-e5-small").env("MEMORY_EMBED_MODEL"),
   cacheDir: str(home("models")).env("MEMORY_MODEL_CACHE"),
   batchSize: int(64).positive().env("MEMORY_EMBED_BATCH"),
+  // `http` only: where the model is served, and how long one batch may take. `model` is
+  // then the server's own tag rather than a Hugging Face id, and it must name the model
+  // the store was embedded with — see the README before switching a live store.
+  url: str("http://127.0.0.1:11434/api/embed").env("MEMORY_EMBED_URL"),
+  timeoutMs: int(30_000).positive().env("MEMORY_EMBED_TIMEOUT_MS"),
 }) {}
 
 // Ranking and write-path policy. These are the knobs that shape what the agent gets back,

@@ -125,6 +125,9 @@ const CONSOLIDATION_WRITER: Writer = { client: "cerebrium-consolidation", versio
 export class ConsolidationWorker {
   private readonly ownerId = newId();
   private stopping = false;
+  // The run this worker has open, so a stop can close it. A tick that is killed mid-await
+  // never reaches `finish`, and an unclosed row reads as a sweep still in progress forever.
+  private currentRun: string | null = null;
   private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
   private stageMark: { stage: string; at: number } | null = null;
   private lastCitationScan: {
@@ -162,6 +165,13 @@ export class ConsolidationWorker {
 
   async stop(): Promise<void> {
     this.stopping = true;
+
+    const abandoned = this.currentRun;
+    this.currentRun = null;
+
+    if (abandoned !== null) {
+      this.reporter.closeRun(abandoned, this.now(), "the daemon stopped mid-sweep");
+    }
 
     await this.queueRepo.releaseWorkerLease(CONSOLIDATION_LEASE, this.ownerId);
   }
@@ -216,6 +226,8 @@ export class ConsolidationWorker {
       return result;
     }
 
+    this.currentRun = runId;
+
     this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
     this.stageMark = null;
@@ -268,6 +280,7 @@ export class ConsolidationWorker {
       result.last_error = errorText(err);
       result.ended_at = this.now();
       await this.report(runId, "failed", result);
+      this.currentRun = null;
     }
 
     return result;
@@ -279,6 +292,7 @@ export class ConsolidationWorker {
   ): Promise<ConsolidationTickResult> {
     result.ended_at = this.now();
     await this.report(runId, "idle", result);
+    this.currentRun = null;
 
     return result;
   }

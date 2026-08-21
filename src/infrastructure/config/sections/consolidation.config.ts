@@ -51,9 +51,16 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
 
 // `mergeSim` is deliberately higher than the write-time dedup probe so merge stays
 // conservative; `minCluster` below 2 is not a cluster. Both similarity gates are
-// calibrated against a real store by `npm run calibrate:report` — `mergeSim` from the
-// applied/dismissed merge record, `sim` from a target edges-per-node density — and both
-// are specific to the embedding model in use. `maxLinkDegree` is a degree cap, not a
+// calibrated against a real store by `npm run calibrate:report` — `sim` from a target
+// edges-per-node density — and both are specific to the embedding model in use.
+//
+// ⚠️ `mergeSim` is NOT calibratable on this store, measured 2026-08-21 over 440 labelled
+// pairs (237 applied / 203 dismissed): cosine ranks the two classes at AUC 0.504, dead
+// chance, with applied 0.932±0.009 against dismissed 0.933±0.010. Precision is flat near
+// 0.5 across the whole sweep and FALLS as the gate rises (0.553 at 0.925, 0.444 at 0.950),
+// so raising it buys no precision and only cuts recall. The number therefore controls
+// volume, not correctness: what separates a duplicate from a series here is the generation
+// judge, and the knob for its cost is `batch.backfill` (measured ~22s per judged pair). `maxLinkDegree` is a degree cap, not a
 // similarity gate: it is read from the store's observed similar_to degree distribution.
 // `mergeBurstMs` is the burst window: a pair one session wrote inside it is a series its
 // writer meant to keep apart, not a duplication, so merge detection lets it age instead
