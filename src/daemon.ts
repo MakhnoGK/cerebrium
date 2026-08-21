@@ -14,6 +14,7 @@ import { EmbeddingQueueRepo } from "@/db/repositories";
 import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
+import { launchdPid } from "@/runtime/launch-agent";
 import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker";
 import { ReadPool } from "@/runtime/read-pool";
 import { createDaemonMethods, RpcServer, surfaceMethods } from "@/presentation/rpc";
@@ -78,6 +79,24 @@ export function nextIdleState(
 // launchd's KeepAlive set means being respawned forever — a ~10s loop that never converges
 // while a session-spawned daemon holds the pidfile. Waiting keeps the supervised process
 // up and lets it take over the moment the other one goes away.
+// A daemon that finds the database already owned is in one of two situations, and only one
+// of them should wait for the owner to leave:
+//
+//   - launchd's own daemon, restarted while a stray still holds the database. Exiting here
+//     is what produced the throttled respawn loop, because `KeepAlive` restarts on any exit.
+//   - a stray — session-spawned or started by the desktop app. Waiting here is what left
+//     idle second writers accumulating, one per spawn, each with the file open read-write.
+//
+// The daemon cannot tell these apart from its own configuration: both are the same binary,
+// and `resident` only says it was asked to stay. Only launchd knows which pid it manages.
+export function stepsAside(opts: {
+  resident: boolean;
+  managedPid: number | null;
+  pid: number;
+}): boolean {
+  return !opts.resident || opts.managedPid !== opts.pid;
+}
+
 export async function waitForOwnership(opts: {
   owned: () => boolean;
   sleepMs: (ms: number) => Promise<void>;
@@ -189,8 +208,13 @@ async function main(): Promise<void> {
 
   // Registrations are lazy, so this decides before the DB is ever opened.
   if (isDaemonAlive(dbPath)) {
-    if (!daemonConfig.resident) {
-      return; // a session-spawned daemon steps aside; the owner is already draining
+    if (
+      stepsAside({ resident: daemonConfig.resident, managedPid: launchdPid(), pid: process.pid })
+    ) {
+      // Nothing has been claimed yet — no pidfile, no registry row, no lease — so leaving
+      // is clean. `return` was not: it ended `main`, not the process, and a stray went on
+      // holding a writable handle on the database for as long as the machine was up.
+      process.exit(0);
     }
 
     process.stderr.write("another daemon owns this database; waiting for it to exit\n");
