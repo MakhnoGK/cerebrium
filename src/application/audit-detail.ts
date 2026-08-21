@@ -43,7 +43,7 @@ function lookedUpDetail(args: unknown, result: unknown): Record<string, unknown>
   const symbols = Array.isArray(result.symbols) ? result.symbols : [];
   const detail: Record<string, unknown> = {
     results: symbols.length,
-    ids: symbols.map((symbol) => (isRecord(symbol) ? symbol.id : null)).filter(isId),
+    ids: symbols.map(nodeIdOf).filter(isId),
   };
 
   if (!isRecord(args)) return detail;
@@ -76,6 +76,8 @@ function startedDetail(result: unknown): Record<string, unknown> | null {
 // a node id.
 const SURFACED_SECTIONS = ["tasks", "checkpoints", "semantic", "recent"];
 
+// A use case answers `{envelope:{id},facets,neighbors}` while a delivery layer flattens the
+// envelope into the entry itself. Both shapes reach here.
 function nodeIdOf(entry: unknown): unknown {
   if (!isRecord(entry)) return null;
 
