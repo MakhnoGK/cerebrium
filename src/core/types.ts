@@ -169,6 +169,10 @@ export interface TechStats {
     last_run_at: string | null;
     last_error: string | null;
     last_stage: string | null;
+    // Whether a sweep holds the lease right now. Ask this, never `ended_at IS NULL`.
+    sweep_running: boolean;
+    sweep_lease_owner: string | null;
+    sweep_lease_expires_at: string | null;
   };
   code_repos: RepoProvenance[];
   last_activity: string | null;

@@ -854,6 +854,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           generation_failures = excluded.generation_failures,
           last_error = excluded.last_error,
           stage_ms = excluded.stage_ms
+        WHERE consolidation_runs.ended_at IS NULL
         `,
       )
       .run({
@@ -883,6 +884,32 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         generation_failures: result.generation_failures,
         last_error: result.last_error,
       });
+  }
+
+  closeRun(runId: string, at: string, reason: string): void {
+    this.db
+      .prepare(
+        `UPDATE consolidation_runs
+            SET ended_at = ?, updated_at = ?, stage = 'interrupted',
+                last_error = COALESCE(last_error, ?)
+          WHERE id = ? AND ended_at IS NULL`,
+      )
+      .run(at, at, reason, runId);
+  }
+
+  closeAbandonedRuns(reason: string): number {
+    // `ended_at = updated_at`, not now: the last instant the sweep reported is when it
+    // actually stopped, and "now" would claim it ran until this process started.
+    const info = this.db
+      .prepare(
+        `UPDATE consolidation_runs
+            SET ended_at = updated_at, stage = 'interrupted',
+                last_error = COALESCE(last_error, ?)
+          WHERE ended_at IS NULL`,
+      )
+      .run(reason);
+
+    return info.changes;
   }
 
   clearCandidateProposal(id: string, error: string | null): void {

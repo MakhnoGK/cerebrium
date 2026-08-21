@@ -816,6 +816,18 @@ Provider errors name the cause — the HTTP status with the response body, or th
 and the variable that governs it — because the alternative signal, a candidate arriving
 for review with no proposal, looks exactly like a model with nothing to say.
 
+**Whether a sweep is running is asked of the lease, never of a run row.** Each tick upserts
+one `consolidation_runs` row and stamps `ended_at` when it finishes (`idle`) or throws
+(`failed`). A tick that is killed outright reaches neither — parked on a generation call, it
+is gone the moment the daemon exits — so an open row is not evidence of a running sweep, and
+one left behind would read as "in progress" for the life of the store. Three rules make the
+record honest: the worker closes its own open run as `interrupted` when it is stopped, the
+next daemon closes any row nobody could close (`ended_at` set to the last instant the sweep
+actually reported, not to the restart), and a closed run never re-opens — whoever closes it
+first names why, so a late report from an abandoned tick changes nothing. `cerebrium-stats`
+reports `sweep now` from the `consolidation` worker lease, which expires on its own and is
+therefore the only signal a scheduler can trust.
+
 ## Evaluating a ranking change
 
 `npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It

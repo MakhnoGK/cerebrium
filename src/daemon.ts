@@ -13,7 +13,7 @@ import {
 } from "@/application/services";
 import { NotificationTopic } from "@/application/use-cases";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
-import { EmbeddingQueueRepo } from "@/db/repositories";
+import { ConsolidationRepo, EmbeddingQueueRepo } from "@/db/repositories";
 import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
 import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
@@ -243,6 +243,17 @@ async function main(): Promise<void> {
   const queue = container.resolve(EmbeddingQueueRepo);
   const worker = container.resolve(EmbeddingWorker);
   const consolidation = container.resolve(ConsolidationWorker);
+
+  // A sweep killed outright leaves its row open, and only the process that starts next can
+  // say so. `interrupted` is the truth; a row still open would read as a sweep in progress
+  // for as long as the store lives.
+  const abandoned = container
+    .resolve(ConsolidationRepo)
+    .closeAbandonedRuns("the daemon exited before the sweep finished");
+
+  if (abandoned > 0) {
+    process.stderr.write(`closed ${String(abandoned)} abandoned sweep(s)\n`);
+  }
 
   const registry = container.resolve(ProcessRegistryService);
   const warmup = container.resolve(ModelWarmupService);

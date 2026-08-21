@@ -35,6 +35,12 @@ export interface ConsolidationTickResult {
 
 export interface ConsolidationReporter {
   reportTick(runId: string, result: ConsolidationTickResult): void;
+  // Close a run this process is about to abandon. A run row is closed once and whoever
+  // closes it first names why, so this is a no-op on a run that already ended.
+  closeRun(runId: string, at: string, reason: string): void;
+  // Close every run left open by a process that never got to close its own. Returns how
+  // many there were.
+  closeAbandonedRuns(reason: string): number;
 }
 
 export const CONSOLIDATION_REPORTER_TOKEN = Symbol("ConsolidationReporter");
