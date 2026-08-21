@@ -229,7 +229,7 @@ export class ConsolidationWorker {
       if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "citations", result);
-      this.resolveCitations(now, result);
+      await this.resolveCitations(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -430,7 +430,7 @@ export class ConsolidationWorker {
   // One pass over authored prose, producing both kinds of citation it can carry: a
   // `[[wikilink]]` to another note, and a `backticked` symbol name from this project's own
   // code. Both need every live body, so they share the read and the watermark.
-  private resolveCitations(now: string, result: ConsolidationTickResult): void {
+  private async resolveCitations(now: string, result: ConsolidationTickResult): Promise<void> {
     const revisions = this.consolidationRepo.revisionCount();
     const codeIndex = this.consolidationRepo.codeIndexWatermark();
 
@@ -447,8 +447,11 @@ export class ConsolidationWorker {
     const live = slugIndexOf(bodies);
     const retired = slugIndexOf(this.consolidationRepo.retiredAuthoredTitles());
     const symbols = this.citableSymbolIndex();
+    const breath = breather(this.batch.itemsPerBreath);
 
     for (const row of bodies) {
+      await breath();
+
       for (const target of wikilinkTargets(row.content)) {
         const dst = this.wikilinkTarget(live, retired, target);
 
