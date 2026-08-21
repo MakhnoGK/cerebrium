@@ -47,20 +47,4 @@ export class CodeIndexTool implements McpTool<Schema, ToolResponse> {
 
     return out;
   }
-
-  public describeEvent(_args: ToolArgs<Schema>, result: ToolResponse) {
-    const indexed = "repos" in result ? result.repos : [result];
-
-    return indexed.map((stats) => ({
-      detail: {
-        repo: stats.repo,
-        indexed: stats.files_indexed,
-        added: stats.symbols_added,
-        updated: stats.symbols_updated,
-        invalidated: stats.symbols_invalidated,
-        branch: stats.branch,
-        commit: stats.commit,
-      },
-    }));
-  }
 }

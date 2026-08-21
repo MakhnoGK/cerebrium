@@ -37,9 +37,4 @@ export class CheckpointTool implements McpTool<Schema, ToolResponse> {
 
     return hints.length ? { ...envelope, hints } : envelope;
   }
-
-  public describeEvent(_args: ToolArgs<Schema>, result: ToolResponse) {
-    // A fresh checkpoint's only edges are the `references` links to the touched nodes.
-    return { node_id: result.id, detail: { touched: result.edges } };
-  }
 }

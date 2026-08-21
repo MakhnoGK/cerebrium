@@ -17,16 +17,7 @@ export function tool(): ClassDecorator {
   };
 }
 
-// What only the tool can know about the call it just served. `action` and `ts` are
-// filled in at the boundary; `session_id` defaults to the one in `args`.
-export interface ToolEvent {
-  session_id?: string;
-  node_id?: string | null;
-  detail?: unknown;
-}
-
 export interface McpTool<Schema extends ZodRawShape, Response> {
   getMetadata(): { name: ToolName; description: string; schema: Schema };
   invoke(args: ToolArgs<Schema>): Promise<Response>;
-  describeEvent?(args: ToolArgs<Schema>, result: Response): ToolEvent | ToolEvent[] | null;
 }

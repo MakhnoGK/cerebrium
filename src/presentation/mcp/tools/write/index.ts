@@ -52,8 +52,4 @@ export class WriteTool implements McpTool<Schema, ToolResponse> {
       ...(reconcile ? { reconcile } : {}),
     };
   }
-
-  public describeEvent(args: ToolArgs<Schema>, result: ToolResponse) {
-    return { node_id: result.id, detail: { type: args.type, kind: args.memory_kind } };
-  }
 }
