@@ -7,18 +7,14 @@ import { isDaemonAlive } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { chooseKernel, HANDSHAKE_BUDGET_MS } from "@/runtime/kernel-choice";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
-import { PassThroughToolWrapper, TOOL_WRAPPER } from "@/presentation/mcp/adapters";
 import { Server } from "@/presentation/mcp/server";
 import { buildContainer } from "@/container";
 import { DaemonConfig, DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";
 import { ensureDaemon } from "./runtime/ensure-daemon";
 
-// Talking to the daemon: the host holds no database at all. It also does not guard or audit
-// — the daemon's pipeline does both, and doing it here too would check the session twice and
-// write two `events` rows per call.
+// Talking to the daemon: the host holds no database at all, and the daemon's pipeline is
+// what checks the session and writes the audit row.
 async function serveRemote(container: DependencyContainer): Promise<void> {
-  container.register(TOOL_WRAPPER, { useValue: new PassThroughToolWrapper() });
-
   await container.resolve(Server).connect();
 }
 
@@ -28,7 +24,6 @@ async function serveRemote(container: DependencyContainer): Promise<void> {
 // posture, the quota and the audit row apply here too.
 async function serveLocal(container: DependencyContainer): Promise<void> {
   const scope = pipelinedContainer(container);
-  scope.register(TOOL_WRAPPER, { useValue: new PassThroughToolWrapper() });
 
   const worker = container.resolve(EmbeddingWorker);
   const server = scope.resolve(Server);

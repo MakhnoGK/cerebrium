@@ -38,7 +38,7 @@ async function session(): Promise<string> {
   return session_id;
 }
 
-describe("SessionStartTool.describeEvent", () => {
+describe("SessionStartTool audit row", () => {
   it("should log the minted session id and the project", async () => {
     // Given
     const { db } = setup();
@@ -82,7 +82,7 @@ describe("SessionStartTool.describeEvent", () => {
   });
 });
 
-describe("WriteTool.describeEvent", () => {
+describe("WriteTool audit row", () => {
   it("should log the new node id with its type and kind", async () => {
     // Given
     const { db } = setup();
@@ -102,11 +102,11 @@ describe("WriteTool.describeEvent", () => {
     const [row] = eventsFor(db, EventAction.WRITE);
     expect(row?.node_id).toBe(envelope.id);
     expect(row?.session_id).toBe(session_id);
-    expect(detailOf(row)).toEqual({ type: "fact", kind: MemoryKind.SEMANTIC });
+    expect(detailOf(row)).toBeNull();
   });
 });
 
-describe("CheckpointTool.describeEvent", () => {
+describe("CheckpointTool audit row", () => {
   it("should log the checkpoint node id and how many touched nodes it linked", async () => {
     // Given
     const { db } = setup();
@@ -131,11 +131,11 @@ describe("CheckpointTool.describeEvent", () => {
     // Then
     const [row] = eventsFor(db, EventAction.CHECKPOINT);
     expect(row?.node_id).toBe(envelope.id);
-    expect(detailOf(row)).toEqual({ touched: 1 });
+    expect(detailOf(row)).toBeNull();
   });
 });
 
-describe("GetTool.describeEvent", () => {
+describe("GetTool audit row", () => {
   it("should log the requested ids and how many resolved", async () => {
     // Given
     const { db } = setup();
@@ -154,7 +154,7 @@ describe("GetTool.describeEvent", () => {
 
     // Then
     const [row] = eventsFor(db, EventAction.GET);
-    expect(row?.node_id).toBe(envelope.id);
+    expect(row?.node_id).toBeNull();
     expect(detailOf(row)).toEqual({
       ids: [envelope.id, "missing"],
       found: 1,
@@ -238,7 +238,7 @@ describe("GetTool.describeEvent", () => {
   });
 });
 
-describe("SearchTool.describeEvent", () => {
+describe("SearchTool audit row", () => {
   it("should log the query and the returned ids in rank order", async () => {
     // Given
     const { db } = setup();
@@ -361,7 +361,7 @@ describe("SearchTool.describeEvent", () => {
   });
 });
 
-describe("CodeLookupTool.describeEvent", () => {
+describe("CodeLookupTool audit row", () => {
   it("should log the lookup key and the symbol ids it surfaced", async () => {
     // Given
     const { db } = setup();
@@ -386,7 +386,7 @@ describe("CodeLookupTool.describeEvent", () => {
   });
 });
 
-describe("CodeIndexTool.describeEvent", () => {
+describe("CodeIndexTool audit row", () => {
   it("should log one row per indexed repo with its counters and git provenance", async () => {
     // Given
     const { db } = setup();
@@ -398,13 +398,9 @@ describe("CodeIndexTool.describeEvent", () => {
     // Then
     const rows = eventsFor(db, EventAction.CODE_INDEX);
     expect(rows).toHaveLength(1);
-    expect(detailOf(rows[0])).toMatchObject({
-      repo: "demo-repo",
-      indexed: 2,
-      updated: 0,
-      invalidated: 0,
-    });
-    expect(detailOf(rows[0])).toHaveProperty("branch");
-    expect(detailOf(rows[0])).toHaveProperty("commit");
+    const [indexed] = (detailOf(rows[0]) as { repos: Record<string, unknown>[] }).repos;
+    expect(indexed).toMatchObject({ repo: "demo-repo", indexed: 2, updated: 0, invalidated: 0 });
+    expect(indexed).toHaveProperty("branch");
+    expect(indexed).toHaveProperty("commit");
   });
 });
