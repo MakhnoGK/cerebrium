@@ -244,7 +244,7 @@ export class ConsolidationWorker {
       if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "mirrors", result);
-      this.pruneMirrors(now, result);
+      await this.pruneMirrors(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -850,7 +850,7 @@ export class ConsolidationWorker {
   // Tier-1 mirror prune. Deterministic, no generation. auto soft-invalidates
   // dead mirror nodes (they then never surface in default search or graph expansion);
   // suggest queues for a prune candidate; off skips. Never touches authored memory.
-  private pruneMirrors(now: string, result: ConsolidationTickResult): void {
+  private async pruneMirrors(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = this.posture.prune;
 
     if (posture === Posture.OFF) {
@@ -869,7 +869,11 @@ export class ConsolidationWorker {
     // again whatever the watermark says.
     this.lastOrphanScan = { watermark, clean: dead.length === 0 };
 
+    const breath = breather(this.batch.itemsPerBreath);
+
     for (const id of dead) {
+      await breath();
+
       if (posture === Posture.AUTO) {
         this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;
