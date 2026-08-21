@@ -285,7 +285,8 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
   annotated INTEGER NOT NULL DEFAULT 0,
   generation_failures INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
-  merge_delayed INTEGER NOT NULL DEFAULT 0
+  merge_delayed INTEGER NOT NULL DEFAULT 0,
+  stage_ms TEXT
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS processes (

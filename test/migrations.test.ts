@@ -37,6 +37,7 @@ const MIGRATION_IDS = [
   "023_process_model_state.sql",
   "024_principals.cjs",
   "025_normalize_edge_timestamps.cjs",
+  "026_consolidation_stage_ms.cjs",
 ];
 
 const dirs: string[] = [];

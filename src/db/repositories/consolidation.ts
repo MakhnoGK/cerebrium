@@ -8,7 +8,7 @@ import { BaseRepo } from "@/db/repositories/base";
 import { LATEST_REVISION } from "@/db/repositories/internal";
 import { newId } from "@/core/ids";
 import type { ConsolidationCandidate, ConsolidationProposal, NewCandidate } from "@/core/types";
-import { ConsolidationStatus, type ConsolidationKind } from "@/core/vocab";
+import { ConsolidationKind, ConsolidationStatus, MemoryKind } from "@/core/vocab";
 
 // The consolidation queue aggregate. Detection (in the daemon's
 // ConsolidationWorker) inserts candidates here; the auto path or the
@@ -19,6 +19,12 @@ import { ConsolidationStatus, type ConsolidationKind } from "@/core/vocab";
 
 const CANDIDATE_COLS =
   "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by, attempts, last_error";
+
+export interface SweepSeed {
+  id: string;
+  kind: MemoryKind;
+  ordinal: number;
+}
 
 export interface DuplicatePair {
   member_ids: string[];
@@ -60,7 +66,7 @@ export function candidateHash(kind: ConsolidationKind, memberIds: string[]): str
 
 // Canonical orientation for a symmetric pair, so (a,b) and (b,a) dedupe to one key and
 // one stored edge (graph expansion via neighborsOf is symmetric, so one direction suffices).
-function pairKey(a: string, b: string): string {
+export function pairKey(a: string, b: string): string {
   return a < b ? `${a}\0${b}` : `${b}\0${a}`;
 }
 
@@ -311,15 +317,38 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .all({ node: nodeId, seed, k, cap }) as { id: string; distance: number }[];
   }
 
-  similarLinkCandidates(opts: {
-    minScore: number;
-    k?: number;
-    capPerNode?: number;
-    limit: number;
-  }): { src: string; dst: string; score: number }[] {
-    const k = opts.k ?? 20;
-    const cap = opts.capPerNode ?? 10;
-    const existing = new Set(
+  // The seed set for one sweep: newest embedded semantic nodes, then embedded episodics
+  // with no live edge. `ordinal` is the seed's position within its own kind, which is what
+  // lets one scan serve two stages with different batch budgets.
+  sweepSeeds(limit: number): SweepSeed[] {
+    return [
+      ...this.linkableNodes(limit).map((id, ordinal) => ({
+        id,
+        kind: MemoryKind.SEMANTIC,
+        ordinal,
+      })),
+      ...this.orphanEpisodics(limit).map((id, ordinal) => ({
+        id,
+        kind: MemoryKind.EPISODIC,
+        ordinal,
+      })),
+    ];
+  }
+
+  // One seed's semantic neighbours above `minScore`, as similarity rather than distance.
+  neighboursOf(
+    seedId: string,
+    opts: { minScore: number; k?: number; capPerNode?: number },
+  ): { id: string; score: number }[] {
+    return this.nearestSemantic(seedId, opts.k ?? 20, opts.capPerNode ?? 10)
+      .map((nb) => ({ id: nb.id, score: 1 - nb.distance }))
+      .filter((nb) => nb.score >= opts.minScore);
+  }
+
+  // Every `similar_to` pair already stored, invalidated ones included: a pair retired by
+  // the degree cap must not be rediscovered on the next sweep and added back.
+  storedSimilarPairs(): Set<string> {
+    return new Set(
       (
         this.db.prepare("SELECT src, dst FROM edges WHERE type = 'similar_to'").all() as {
           src: string;
@@ -327,21 +356,6 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         }[]
       ).map((e) => pairKey(e.src, e.dst)),
     );
-    const seen = new Set<string>();
-    const out: { src: string; dst: string; score: number }[] = [];
-    const seeds = [...this.linkableNodes(opts.limit), ...this.orphanEpisodics(opts.limit)];
-    for (const id of seeds) {
-      for (const nb of this.nearestSemantic(id, k, cap)) {
-        const score = 1 - nb.distance;
-        if (score < opts.minScore) continue;
-        const key = pairKey(id, nb.id);
-        if (existing.has(key) || seen.has(key)) continue;
-        seen.add(key);
-        const [src, dst] = id < nb.id ? [id, nb.id] : [nb.id, id];
-        out.push({ src, dst, score });
-      }
-    }
-    return out;
   }
 
   // ---- detection: similar_to degree control ---------------------------------
@@ -575,47 +589,50 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // `same_session` and `youngest_created_at` carry the burst signature: who wrote the pair
   // and when. Provenance is what separates a real duplicate from a series; content
   // similarity does not.
-  duplicateSemanticPairs(opts: {
-    minScore: number;
-    limit: number;
-    k?: number;
-    capPerNode?: number;
-  }): DuplicatePair[] {
-    const k = opts.k ?? 20;
-    const cap = opts.capPerNode ?? 10;
-    const projectOf = this.db.prepare("SELECT project FROM nodes WHERE id = ?");
+  // One duplicate pair, built from a neighbour hit the sweep already found. Null when the
+  // two are already related by `supersedes`, or when the pair is a candidate already —
+  // both cheap, and both ahead of the four lookups the pair itself costs.
+  duplicatePairFor(a: string, b: string, score: number): DuplicatePair | null {
+    if (this.hasSupersedes(a, b)) return null;
+
+    const [x, y] = a < b ? [a, b] : [b, a];
+
+    if (this.candidateExists(ConsolidationKind.MERGE, [x, y])) return null;
+
+    const { survivor } = this.chooseSurvivor(a, b);
+    const project = (
+      this.db.prepare("SELECT project FROM nodes WHERE id = ?").get(survivor) as {
+        project: string | null;
+      }
+    ).project;
     const provenanceOf = this.db.prepare(
       "SELECT created_by_session AS session, created_at FROM nodes WHERE id = ?",
     );
-    const seen = new Set<string>();
-    const out: DuplicatePair[] = [];
-    for (const id of this.linkableNodes(opts.limit)) {
-      for (const nb of this.nearestSemantic(id, k, cap)) {
-        const score = 1 - nb.distance;
-        if (score < opts.minScore) continue;
-        const key = pairKey(id, nb.id);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (this.hasSupersedes(id, nb.id)) continue;
-        const { survivor } = this.chooseSurvivor(id, nb.id);
-        const project = (projectOf.get(survivor) as { project: string | null }).project;
-        const [a, b] = id < nb.id ? [id, nb.id] : [nb.id, id];
-        const pa = provenanceOf.get(a) as Provenance;
-        const pb = provenanceOf.get(b) as Provenance;
-        out.push({
-          member_ids: [a, b],
-          canonical_id: survivor,
-          project,
-          score,
-          same_session: pa.session === pb.session,
-          youngest_created_at: pa.created_at > pb.created_at ? pa.created_at : pb.created_at,
-        });
-      }
-    }
-    return out;
+    const px = provenanceOf.get(x) as Provenance;
+    const py = provenanceOf.get(y) as Provenance;
+
+    return {
+      member_ids: [x, y],
+      canonical_id: survivor,
+      project,
+      score,
+      same_session: px.session === py.session,
+      youngest_created_at: px.created_at > py.created_at ? px.created_at : py.created_at,
+    };
   }
 
   // ---- detection: Tier-1 mirror prune ---------------------------------------
+
+  // Advances on every code index run. `code_files` is only ever written by indexing, so
+  // an unchanged watermark means no symbol can have been orphaned since the last look.
+  codeIndexWatermark(): string | null {
+    return (
+      this.db.prepare("SELECT MAX(indexed_at) AS at FROM code_repos").get() as {
+        at: string | null;
+      }
+    ).at;
+  }
+
   // Dead mirror nodes to soft-invalidate: valid `symbol` mirrors whose (repo, path) is
   // no longer in the code index (orphaned — a removed file that left symbols dangling).
   // A reconciliation safety net (removeFile normally keeps these in sync). Touches only
@@ -719,13 +736,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           links_added, links_suggested, links_pruned,
           distilled, distill_suggested, merged, merge_suggested, merge_delayed,
           pruned, prune_suggested, proposals_backfilled, rejected, annotated,
-          generation_failures, last_error
+          generation_failures, last_error, stage_ms
         ) VALUES (
           @id, @started_at, @updated_at, @ended_at, @stage,
           @links_added, @links_suggested, @links_pruned,
           @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
           @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
-          @generation_failures, @last_error
+          @generation_failures, @last_error, @stage_ms
         )
         ON CONFLICT(id) DO UPDATE SET
           updated_at = excluded.updated_at,
@@ -745,7 +762,8 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           rejected = excluded.rejected,
           annotated = excluded.annotated,
           generation_failures = excluded.generation_failures,
-          last_error = excluded.last_error
+          last_error = excluded.last_error,
+          stage_ms = excluded.stage_ms
         `,
       )
       .run({
@@ -754,6 +772,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         updated_at: new Date().toISOString(),
         ended_at: result.ended_at || null,
         stage: result.stage || "unknown",
+        stage_ms: result.stage_ms ? JSON.stringify(result.stage_ms) : null,
         links_added: result.links_added,
         links_suggested: result.links_suggested,
         links_pruned: result.links_pruned,

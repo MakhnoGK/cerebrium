@@ -15,10 +15,16 @@ import {
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
-import type { DuplicatePair } from "@/db/repositories/consolidation";
+import { pairKey, type DuplicatePair, type SweepSeed } from "@/db/repositories/consolidation";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
-import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
+import {
+  ConsolidationKind,
+  ConsolidationStatus,
+  EdgeType,
+  MemoryKind,
+  Posture,
+} from "@/core/vocab";
 import {
   ConsolidationBatchConfig,
   ConsolidationConfig,
@@ -27,6 +33,19 @@ import {
 } from "@/infrastructure/config";
 
 const CONSOLIDATION_LEASE = "consolidation";
+
+function breathe(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+// A neighbour hit, carrying the seed it was found from: the seed's kind decides whether
+// merge may consider it, and its ordinal decides which stage's batch budget it falls in.
+interface NeighbourPair {
+  src: string;
+  dst: string;
+  score: number;
+  seed: SweepSeed;
+}
 
 const MAX_ERROR_CHARS = 500;
 
@@ -57,6 +76,8 @@ const CONSOLIDATION_WRITER: Writer = { client: "cerebrium-consolidation", versio
 export class ConsolidationWorker {
   private readonly ownerId = newId();
   private stopping = false;
+  private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
+  private stageMark: { stage: string; at: number } | null = null;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -94,6 +115,13 @@ export class ConsolidationWorker {
   // between clusters, so losing it (or being stopped) ends the sweep where it stands and
   // returns what was already done.
   private async report(runId: string, stage: string, result: ConsolidationTickResult) {
+    const at = Date.now();
+
+    if (this.stageMark) {
+      result.stage_ms = { ...result.stage_ms, [this.stageMark.stage]: at - this.stageMark.at };
+    }
+
+    this.stageMark = { stage, at };
     result.stage = stage;
     this.reporter.reportTick(runId, result);
   }
@@ -130,9 +158,19 @@ export class ConsolidationWorker {
 
     this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
+    this.stageMark = null;
+
     try {
+      // One kNN pass over the seed set, shared by link discovery and merge detection: the
+      // two used to scan the same vectors, differing only in the threshold they applied.
+      await this.report(runId, "neighbours", result);
+
+      const neighbours = await this.neighbourPairs();
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
       await this.report(runId, "links", result);
-      this.discoverLinks(now, result);
+      this.discoverLinks(now, result, neighbours);
       this.pruneLinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
@@ -143,7 +181,7 @@ export class ConsolidationWorker {
       if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "merge", result);
-      await this.mergeDuplicates(now, result);
+      await this.mergeDuplicates(now, result, neighbours);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -234,18 +272,56 @@ export class ConsolidationWorker {
 
   // similar_to link discovery. Deterministic kNN over stored vectors; no
   // generation. auto -> write system similar_to edges; suggest -> queue; off -> skip.
-  private discoverLinks(now: string, result: ConsolidationTickResult): void {
+  // Neighbour pairs above the *lower* of the two thresholds, so merge can filter the same
+  // list at `mergeSim`. A seed budget of max(link, merge) with the seed's ordinal carried
+  // through is what keeps each stage's own batch size exact.
+  private async neighbourPairs(): Promise<NeighbourPair[]> {
+    const budget = Math.max(this.batch.link, this.batch.merge);
+    const seen = new Set<string>();
+    const out: NeighbourPair[] = [];
+    const perBreath = this.batch.seedsPerBreath;
+    let untilBreath = perBreath;
+
+    for (const seed of this.consolidationRepo.sweepSeeds(budget)) {
+      // Each seed is a synchronous vector search, so a whole pass would hold the event
+      // loop and the socket with it. The daemon serves reads on this thread.
+      if (--untilBreath <= 0) {
+        untilBreath = perBreath;
+        await breathe();
+      }
+
+      for (const nb of this.consolidationRepo.neighboursOf(seed.id, {
+        minScore: this.thresholds.sim,
+      })) {
+        const key = pairKey(seed.id, nb.id);
+
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+
+        const [src, dst] = seed.id < nb.id ? [seed.id, nb.id] : [nb.id, seed.id];
+
+        out.push({ src, dst, score: nb.score, seed });
+      }
+    }
+
+    return out;
+  }
+
+  private discoverLinks(
+    now: string,
+    result: ConsolidationTickResult,
+    neighbours: NeighbourPair[],
+  ): void {
     const posture = this.posture.links;
 
     if (posture === Posture.OFF) {
       return;
     }
 
-    const pairs = this.consolidationRepo
-      .similarLinkCandidates({
-        minScore: this.thresholds.sim,
-        limit: this.batch.link,
-      })
+    const stored = this.consolidationRepo.storedSimilarPairs();
+    const pairs = neighbours
+      .filter((n) => n.seed.ordinal < this.batch.link && !stored.has(pairKey(n.src, n.dst)))
       .sort((a, b) => b.score - a.score);
 
     const maxDegree = this.thresholds.maxLinkDegree;
@@ -332,12 +408,12 @@ export class ConsolidationWorker {
     });
 
     for (const cluster of clusters) {
-      if (!(await this.holdLease())) {
-        return;
-      }
-
       if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
         continue;
+      }
+
+      if (!(await this.holdLease())) {
+        return;
       }
 
       const gen = await this.tryGenerate(
@@ -417,25 +493,35 @@ export class ConsolidationWorker {
     return Date.parse(now) - Date.parse(pair.youngest_created_at) < window;
   }
 
-  private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
+  private async mergeDuplicates(
+    now: string,
+    result: ConsolidationTickResult,
+    neighbours: NeighbourPair[],
+  ): Promise<void> {
     const posture = this.posture.merge;
 
     if (posture === Posture.OFF) {
       return;
     }
 
-    const pairs = this.consolidationRepo.duplicateSemanticPairs({
-      minScore: this.thresholds.mergeSim,
-      limit: this.batch.merge,
-    });
+    // Semantic seeds only: a merge folds one authored node into another, and an episodic
+    // is write-once. Only the seed side of a pair can be episodic.
+    const hits = neighbours.filter(
+      (n) =>
+        n.seed.kind === MemoryKind.SEMANTIC &&
+        n.seed.ordinal < this.batch.merge &&
+        n.score >= this.thresholds.mergeSim,
+    );
 
-    for (const pair of pairs) {
-      if (!(await this.holdLease())) {
-        return;
+    for (const hit of hits) {
+      const pair = this.consolidationRepo.duplicatePairFor(hit.src, hit.dst, hit.score);
+
+      if (pair === null) {
+        continue;
       }
 
-      if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
-        continue;
+      if (!(await this.holdLease())) {
+        return;
       }
 
       // A pair one session wrote minutes apart is a series, not a duplication: the writer
@@ -582,7 +668,19 @@ export class ConsolidationWorker {
       return;
     }
 
-    for (const id of this.consolidationRepo.deadMirrorNodes(this.batch.prune)) {
+    const watermark = this.consolidationRepo.codeIndexWatermark();
+
+    if (this.lastOrphanScan?.clean === true && this.lastOrphanScan.watermark === watermark) {
+      return;
+    }
+
+    const dead = this.consolidationRepo.deadMirrorNodes(this.batch.prune);
+
+    // Not clean means the batch limit may have truncated the list, so the next sweep looks
+    // again whatever the watermark says.
+    this.lastOrphanScan = { watermark, clean: dead.length === 0 };
+
+    for (const id of dead) {
       if (posture === Posture.AUTO) {
         this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;

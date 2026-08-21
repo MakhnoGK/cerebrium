@@ -45,6 +45,35 @@ afterEach(() => {
 });
 
 describe("Tier-1 mirror prune", () => {
+  it("should not look for orphans again until the code index has changed", async () => {
+    // Given — one worker across three ticks, and a first sweep that finds nothing, which
+    // is what arms the skip.
+    const env = setup();
+    const worker = container.resolve(ConsolidationWorker);
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const stats = (await container
+      .resolve(CodeIndexTool)
+      .invoke({ session_id: s, path: root })) as { repo: string };
+    const symbolId = env.code.findSymbolsByName("prunableWidget", stats.repo, 1)[0]!.envelope.id;
+
+    expect((await worker.tick()).pruned).toBe(0);
+
+    // When — the file's row goes without the index run that would normally remove it
+    env.db.prepare("DELETE FROM code_files WHERE repo = ?").run(stats.repo);
+
+    // Then
+    expect((await worker.tick()).pruned).toBe(0);
+    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
+
+    // And once an index run advances the watermark, the same drift is found
+    env.db
+      .prepare("UPDATE code_repos SET indexed_at = ? WHERE repo = ?")
+      .run("2099-01-01T00:00:00.000Z", stats.repo);
+
+    expect((await worker.tick()).pruned).toBeGreaterThanOrEqual(1);
+    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(true);
+  });
+
   it("should auto-invalidate an orphaned symbol so it drops out of retrieval", async () => {
     // Given
     const env = setup();
