@@ -736,13 +736,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           links_added, links_suggested, links_pruned,
           distilled, distill_suggested, merged, merge_suggested, merge_delayed,
           pruned, prune_suggested, proposals_backfilled, rejected, annotated,
-          generation_failures, last_error
+          generation_failures, last_error, stage_ms
         ) VALUES (
           @id, @started_at, @updated_at, @ended_at, @stage,
           @links_added, @links_suggested, @links_pruned,
           @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
           @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
-          @generation_failures, @last_error
+          @generation_failures, @last_error, @stage_ms
         )
         ON CONFLICT(id) DO UPDATE SET
           updated_at = excluded.updated_at,
@@ -762,7 +762,8 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           rejected = excluded.rejected,
           annotated = excluded.annotated,
           generation_failures = excluded.generation_failures,
-          last_error = excluded.last_error
+          last_error = excluded.last_error,
+          stage_ms = excluded.stage_ms
         `,
       )
       .run({
@@ -771,6 +772,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         updated_at: new Date().toISOString(),
         ended_at: result.ended_at || null,
         stage: result.stage || "unknown",
+        stage_ms: result.stage_ms ? JSON.stringify(result.stage_ms) : null,
         links_added: result.links_added,
         links_suggested: result.links_suggested,
         links_pruned: result.links_pruned,

@@ -34,6 +34,10 @@ import {
 
 const CONSOLIDATION_LEASE = "consolidation";
 
+function breathe(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 // A neighbour hit, carrying the seed it was found from: the seed's kind decides whether
 // merge may consider it, and its ordinal decides which stage's batch budget it falls in.
 interface NeighbourPair {
@@ -73,6 +77,7 @@ export class ConsolidationWorker {
   private readonly ownerId = newId();
   private stopping = false;
   private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
+  private stageMark: { stage: string; at: number } | null = null;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -110,6 +115,13 @@ export class ConsolidationWorker {
   // between clusters, so losing it (or being stopped) ends the sweep where it stands and
   // returns what was already done.
   private async report(runId: string, stage: string, result: ConsolidationTickResult) {
+    const at = Date.now();
+
+    if (this.stageMark) {
+      result.stage_ms = { ...result.stage_ms, [this.stageMark.stage]: at - this.stageMark.at };
+    }
+
+    this.stageMark = { stage, at };
     result.stage = stage;
     this.reporter.reportTick(runId, result);
   }
@@ -146,10 +158,16 @@ export class ConsolidationWorker {
 
     this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
+    this.stageMark = null;
+
     try {
       // One kNN pass over the seed set, shared by link discovery and merge detection: the
       // two used to scan the same vectors, differing only in the threshold they applied.
-      const neighbours = this.neighbourPairs();
+      await this.report(runId, "neighbours", result);
+
+      const neighbours = await this.neighbourPairs();
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "links", result);
       this.discoverLinks(now, result, neighbours);
@@ -257,12 +275,21 @@ export class ConsolidationWorker {
   // Neighbour pairs above the *lower* of the two thresholds, so merge can filter the same
   // list at `mergeSim`. A seed budget of max(link, merge) with the seed's ordinal carried
   // through is what keeps each stage's own batch size exact.
-  private neighbourPairs(): NeighbourPair[] {
+  private async neighbourPairs(): Promise<NeighbourPair[]> {
     const budget = Math.max(this.batch.link, this.batch.merge);
     const seen = new Set<string>();
     const out: NeighbourPair[] = [];
+    const perBreath = this.batch.seedsPerBreath;
+    let untilBreath = perBreath;
 
     for (const seed of this.consolidationRepo.sweepSeeds(budget)) {
+      // Each seed is a synchronous vector search, so a whole pass would hold the event
+      // loop and the socket with it. The daemon serves reads on this thread.
+      if (--untilBreath <= 0) {
+        untilBreath = perBreath;
+        await breathe();
+      }
+
       for (const nb of this.consolidationRepo.neighboursOf(seed.id, {
         minScore: this.thresholds.sim,
       })) {

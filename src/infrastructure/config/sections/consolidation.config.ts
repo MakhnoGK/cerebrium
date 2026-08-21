@@ -71,4 +71,8 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   prune: int(200).positive().env("MEMORY_CONSOLIDATE_PRUNE_BATCH"),
   annotate: int(50).positive().env("MEMORY_CONSOLIDATE_ANNOTATE_BATCH"),
   backfill: int(10).positive().env("MEMORY_CONSOLIDATE_BACKFILL_BATCH"),
+  // Seeds walked between event-loop yields in the neighbour pass. One seed's kNN measures
+  // ~2ms on the reference store, so the default bounds what a waiting client can be
+  // blocked by to ~50ms. Lower trades sweep throughput for read latency.
+  seedsPerBreath: int(25).positive().env("MEMORY_CONSOLIDATE_SEEDS_PER_BREATH"),
 }) {}

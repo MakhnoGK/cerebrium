@@ -18,6 +18,9 @@ export interface ConsolidationTickResult {
   generation_failures: number;
   last_error: string | null;
   stage?: string;
+  // Wall time of each completed stage, in ms. One row per run keeps only the last stage
+  // name, so without this the cost of a sweep is not recoverable after it ends.
+  stage_ms?: Record<string, number>;
   started_at?: string;
   ended_at?: string | null;
 }
