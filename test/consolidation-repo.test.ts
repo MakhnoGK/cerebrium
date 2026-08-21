@@ -179,13 +179,17 @@ describe("ConsolidationRepo kNN seeding", () => {
     const { consolidation, twinA, twinB, orphan } = await seedWithVectorlessNode();
 
     // When
-    const pairs = consolidation.similarLinkCandidates({ minScore: 0.5, limit: 50 });
+    const keys = consolidation
+      .sweepSeeds(50)
+      .flatMap((seed) =>
+        consolidation
+          .neighboursOf(seed.id, { minScore: 0.5 })
+          .map((nb) => [seed.id, nb.id].sort().join()),
+      );
 
     // Then
-    expect(pairs.some((p) => [p.src, p.dst].sort().join() === [twinA, twinB].sort().join())).toBe(
-      true,
-    );
-    expect(pairs.some((p) => p.src === orphan || p.dst === orphan)).toBe(false);
+    expect(keys).toContain([twinA, twinB].sort().join());
+    expect(keys.some((key) => key.includes(orphan))).toBe(false);
   });
 
   it("should not throw when merge detection walks a node with no chunk_vec row", async () => {
@@ -193,9 +197,7 @@ describe("ConsolidationRepo kNN seeding", () => {
     const { consolidation, twinA, twinB } = await seedWithVectorlessNode();
 
     // When / Then
-    const pairs = consolidation.duplicateSemanticPairs({ minScore: 0.9, limit: 50 });
-    expect(pairs.map((p) => p.member_ids.slice().sort().join())).toContain(
-      [twinA, twinB].sort().join(),
-    );
+    const pair = consolidation.duplicatePairFor(twinA, twinB, 0.95);
+    expect(pair?.member_ids.slice().sort().join()).toBe([twinA, twinB].sort().join());
   });
 });

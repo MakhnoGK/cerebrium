@@ -15,10 +15,16 @@ import {
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
-import type { DuplicatePair } from "@/db/repositories/consolidation";
+import { pairKey, type DuplicatePair, type SweepSeed } from "@/db/repositories/consolidation";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
-import { ConsolidationKind, ConsolidationStatus, EdgeType, Posture } from "@/core/vocab";
+import {
+  ConsolidationKind,
+  ConsolidationStatus,
+  EdgeType,
+  MemoryKind,
+  Posture,
+} from "@/core/vocab";
 import {
   ConsolidationBatchConfig,
   ConsolidationConfig,
@@ -27,6 +33,15 @@ import {
 } from "@/infrastructure/config";
 
 const CONSOLIDATION_LEASE = "consolidation";
+
+// A neighbour hit, carrying the seed it was found from: the seed's kind decides whether
+// merge may consider it, and its ordinal decides which stage's batch budget it falls in.
+interface NeighbourPair {
+  src: string;
+  dst: string;
+  score: number;
+  seed: SweepSeed;
+}
 
 const MAX_ERROR_CHARS = 500;
 
@@ -131,8 +146,12 @@ export class ConsolidationWorker {
     this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
     try {
+      // One kNN pass over the seed set, shared by link discovery and merge detection: the
+      // two used to scan the same vectors, differing only in the threshold they applied.
+      const neighbours = this.neighbourPairs();
+
       await this.report(runId, "links", result);
-      this.discoverLinks(now, result);
+      this.discoverLinks(now, result, neighbours);
       this.pruneLinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
@@ -143,7 +162,7 @@ export class ConsolidationWorker {
       if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "merge", result);
-      await this.mergeDuplicates(now, result);
+      await this.mergeDuplicates(now, result, neighbours);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -234,18 +253,47 @@ export class ConsolidationWorker {
 
   // similar_to link discovery. Deterministic kNN over stored vectors; no
   // generation. auto -> write system similar_to edges; suggest -> queue; off -> skip.
-  private discoverLinks(now: string, result: ConsolidationTickResult): void {
+  // Neighbour pairs above the *lower* of the two thresholds, so merge can filter the same
+  // list at `mergeSim`. A seed budget of max(link, merge) with the seed's ordinal carried
+  // through is what keeps each stage's own batch size exact.
+  private neighbourPairs(): NeighbourPair[] {
+    const budget = Math.max(this.batch.link, this.batch.merge);
+    const seen = new Set<string>();
+    const out: NeighbourPair[] = [];
+
+    for (const seed of this.consolidationRepo.sweepSeeds(budget)) {
+      for (const nb of this.consolidationRepo.neighboursOf(seed.id, {
+        minScore: this.thresholds.sim,
+      })) {
+        const key = pairKey(seed.id, nb.id);
+
+        if (seen.has(key)) continue;
+
+        seen.add(key);
+
+        const [src, dst] = seed.id < nb.id ? [seed.id, nb.id] : [nb.id, seed.id];
+
+        out.push({ src, dst, score: nb.score, seed });
+      }
+    }
+
+    return out;
+  }
+
+  private discoverLinks(
+    now: string,
+    result: ConsolidationTickResult,
+    neighbours: NeighbourPair[],
+  ): void {
     const posture = this.posture.links;
 
     if (posture === Posture.OFF) {
       return;
     }
 
-    const pairs = this.consolidationRepo
-      .similarLinkCandidates({
-        minScore: this.thresholds.sim,
-        limit: this.batch.link,
-      })
+    const stored = this.consolidationRepo.storedSimilarPairs();
+    const pairs = neighbours
+      .filter((n) => n.seed.ordinal < this.batch.link && !stored.has(pairKey(n.src, n.dst)))
       .sort((a, b) => b.score - a.score);
 
     const maxDegree = this.thresholds.maxLinkDegree;
@@ -417,21 +465,35 @@ export class ConsolidationWorker {
     return Date.parse(now) - Date.parse(pair.youngest_created_at) < window;
   }
 
-  private async mergeDuplicates(now: string, result: ConsolidationTickResult): Promise<void> {
+  private async mergeDuplicates(
+    now: string,
+    result: ConsolidationTickResult,
+    neighbours: NeighbourPair[],
+  ): Promise<void> {
     const posture = this.posture.merge;
 
     if (posture === Posture.OFF) {
       return;
     }
 
-    const pairs = this.consolidationRepo.duplicateSemanticPairs({
-      minScore: this.thresholds.mergeSim,
-      limit: this.batch.merge,
-    });
+    // Semantic seeds only: a merge folds one authored node into another, and an episodic
+    // is write-once. Only the seed side of a pair can be episodic.
+    const hits = neighbours.filter(
+      (n) =>
+        n.seed.kind === MemoryKind.SEMANTIC &&
+        n.seed.ordinal < this.batch.merge &&
+        n.score >= this.thresholds.mergeSim,
+    );
 
-    for (const pair of pairs) {
+    for (const hit of hits) {
       if (!(await this.holdLease())) {
         return;
+      }
+
+      const pair = this.consolidationRepo.duplicatePairFor(hit.src, hit.dst, hit.score);
+
+      if (pair === null) {
+        continue;
       }
 
       if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
