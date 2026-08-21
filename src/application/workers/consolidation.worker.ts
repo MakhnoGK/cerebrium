@@ -65,6 +65,22 @@ function breathe(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+// A breath every `perBreath` items. `await` alone is not enough: a stage whose awaits all
+// resolve synchronously only drains the microtask queue, and socket reads are macrotasks.
+function breather(perBreath: number): () => Promise<void> {
+  let until = perBreath;
+
+  return async () => {
+    if (--until > 0) {
+      return;
+    }
+
+    until = perBreath;
+
+    await breathe();
+  };
+}
+
 // A neighbour hit, carrying the seed it was found from: the seed's kind decides whether
 // merge may consider it, and its ordinal decides which stage's batch budget it falls in.
 interface NeighbourPair {
@@ -321,16 +337,12 @@ export class ConsolidationWorker {
     const budget = Math.max(this.batch.link, this.batch.merge);
     const seen = new Set<string>();
     const out: NeighbourPair[] = [];
-    const perBreath = this.batch.seedsPerBreath;
-    let untilBreath = perBreath;
+    const breath = breather(this.batch.itemsPerBreath);
 
     for (const seed of this.consolidationRepo.sweepSeeds(budget)) {
       // Each seed is a synchronous vector search, so a whole pass would hold the event
       // loop and the socket with it. The daemon serves reads on this thread.
-      if (--untilBreath <= 0) {
-        untilBreath = perBreath;
-        await breathe();
-      }
+      await breath();
 
       for (const nb of this.consolidationRepo.neighboursOf(seed.id, {
         minScore: this.thresholds.sim,

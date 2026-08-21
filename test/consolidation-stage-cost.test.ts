@@ -67,7 +67,7 @@ describe("Sweep cost", () => {
 
     container.register(ConsolidationBatchConfig, {
       useValue: new ConsolidationBatchConfig(
-        new StaticConfigSource({ MEMORY_CONSOLIDATE_SEEDS_PER_BREATH: "4" }),
+        new StaticConfigSource({ MEMORY_CONSOLIDATE_ITEMS_PER_BREATH: "4" }),
       ),
     });
 
