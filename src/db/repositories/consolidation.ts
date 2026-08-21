@@ -166,6 +166,16 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // `id ASC` is not decoration: score and detected_at are not unique together, and a
   // keyset cursor over a non-total order skips or repeats rows at every page boundary.
+  // How many candidates are waiting for a decision. Counted rather than listed: this is
+  // asked on every tool call.
+  pendingCandidateCount(): number {
+    return (
+      this.db
+        .prepare("SELECT COUNT(*) AS n FROM consolidation_candidates WHERE status = 'pending'")
+        .get() as { n: number }
+    ).n;
+  }
+
   private static readonly PENDING_ORDER = "ORDER BY score DESC, detected_at ASC, id ASC";
 
   pendingCandidates(opts?: { kind?: ConsolidationKind; limit?: number }): ConsolidationCandidate[] {
