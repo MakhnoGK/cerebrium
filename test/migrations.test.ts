@@ -41,6 +41,7 @@ const MIGRATION_IDS = [
   "027_wikilink_counters.cjs",
   "028_retire_third_party_symbols.cjs",
   "029_documents_suggested.cjs",
+  "030_documents_linked.cjs",
 ];
 
 const dirs: string[] = [];

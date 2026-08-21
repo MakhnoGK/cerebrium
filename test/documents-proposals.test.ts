@@ -1,15 +1,16 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { container } from "tsyringe";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/application/workers";
-import { CodeRepo } from "@/db/repositories";
-import { ConsolidationKind, EdgeType, MemoryKind } from "@/core/vocab";
+import { CodeRepo, ConsolidationRepo } from "@/db/repositories";
+import { ConsolidationKind, EdgeType, MemoryKind, Posture } from "@/core/vocab";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
 import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
+import { ConsolidationPostureConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup, type TestEnv } from "@test/helpers";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
@@ -37,9 +38,23 @@ function candidates(): { kind: string; member_ids: string; canonical_id: string 
     .all() as { kind: string; member_ids: string; canonical_id: string | null }[];
 }
 
+function withDocumentsPosture(posture: Posture): void {
+  container.register(ConsolidationPostureConfig, {
+    useValue: new ConsolidationPostureConfig(
+      new StaticConfigSource({ MEMORY_CONSOLIDATE_DOCUMENTS: posture }),
+    ),
+  });
+}
+
 function symbolId(name: string): string {
   return container.resolve(CodeRepo).findSymbolsByName(name, "demo-repo", 1)[0]!.envelope.id;
 }
+
+afterEach(() => {
+  container.register(ConsolidationPostureConfig, {
+    useValue: new ConsolidationPostureConfig(new StaticConfigSource({})),
+  });
+});
 
 beforeEach(async () => {
   env = setup();
@@ -50,6 +65,8 @@ beforeEach(async () => {
 describe("Proposing note-to-code citations", () => {
   it("should propose the symbol a note cites in backticks", async () => {
     // Given
+    withDocumentsPosture(Posture.SUGGEST);
+
     const id = await note("the token check goes through `hashToken` before anything else");
 
     // When
@@ -104,6 +121,8 @@ describe("Proposing note-to-code citations", () => {
 
   it("should leave a pair that is already connected alone", async () => {
     // Given
+    withDocumentsPosture(Posture.SUGGEST);
+
     const id = await note("the token check goes through `hashToken` before anything else");
     const worker = container.resolve(ConsolidationWorker);
 
@@ -125,5 +144,68 @@ describe("Proposing note-to-code citations", () => {
       .get(id, symbolId("hashToken")) as { type: string } | undefined;
 
     expect(edge?.type).toBe(EdgeType.DOCUMENTS);
+  });
+});
+
+describe("Applying note-to-code citations directly", () => {
+  it("should write the edge itself under auto instead of queueing it", async () => {
+    // Given
+    const id = await note("the token check goes through `hashToken` before anything else");
+
+    // When
+    const result = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(result.documents_linked).toBe(1);
+    expect(result.documents_suggested).toBe(0);
+    expect(candidates()).toEqual([]);
+    expect(
+      env.db
+        .prepare(
+          "SELECT provenance FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
+        )
+        .get(id, symbolId("hashToken"), EdgeType.DOCUMENTS),
+    ).toEqual({ provenance: "system" });
+  });
+
+  it("should close a candidate a person never got to, rather than leave it pending forever", async () => {
+    // Given — the queue a `suggest` posture built in an earlier process, which is how this
+    // is reached: the posture is read once at daemon start, so the queue outlives it.
+    withDocumentsPosture(Posture.AUTO);
+
+    const id = await note("the token check goes through `hashToken` before anything else");
+    const queued = container.resolve(ConsolidationRepo).insertCandidate({
+      kind: ConsolidationKind.DOCUMENTS,
+      member_ids: [id, symbolId("hashToken")],
+      canonical_id: symbolId("hashToken"),
+      score: 1,
+      detected_at: new Date(0).toISOString(),
+    });
+
+    expect(queued).not.toBeNull();
+
+    // When
+    const result = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(result.documents_linked).toBe(1);
+    expect(
+      env.db.prepare("SELECT status FROM consolidation_candidates WHERE id = ?").get(queued),
+    ).toEqual({ status: "applied" });
+  });
+
+  it("should propose nothing at all when the posture is off", async () => {
+    // Given
+    withDocumentsPosture(Posture.OFF);
+
+    await note("the token check goes through `hashToken` before anything else");
+
+    // When
+    const result = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(result.documents_linked).toBe(0);
+    expect(result.documents_suggested).toBe(0);
+    expect(candidates()).toEqual([]);
   });
 });

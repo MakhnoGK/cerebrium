@@ -762,6 +762,29 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     return info.changes > 0;
   }
 
+  // Resolve a still-pending candidate identified by what it is about rather than by id, for
+  // when the sweep performs the same act the queued candidate was asking a person to
+  // approve. Without this a posture switched from `suggest` to `auto` leaves its old queue
+  // pending forever, since nothing will ever apply a row whose work is already done.
+  resolvePendingByMembers(
+    kind: ConsolidationKind,
+    memberIds: string[],
+    status: Exclude<ConsolidationStatus, "pending">,
+    resolvedBy: string,
+    ts: string,
+  ): boolean {
+    const info = this.tx(() =>
+      this.db
+        .prepare(
+          `UPDATE consolidation_candidates SET status = ?, resolved_at = ?, resolved_by = ?
+           WHERE member_hash = ? AND status = 'pending'`,
+        )
+        .run(status, ts, resolvedBy, candidateHash(kind, memberIds)),
+    );
+
+    return info.changes > 0;
+  }
+
   resolveCandidateAtomically(
     id: string,
     resolvedBy: string,
@@ -794,13 +817,15 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .prepare(
         `INSERT INTO consolidation_runs (
           id, started_at, updated_at, ended_at, stage,
-          links_added, links_suggested, links_pruned, wikilinks_linked, wikilinks_dangling, documents_suggested,
+          links_added, links_suggested, links_pruned, wikilinks_linked, wikilinks_dangling,
+          documents_linked, documents_suggested,
           distilled, distill_suggested, merged, merge_suggested, merge_delayed,
           pruned, prune_suggested, proposals_backfilled, rejected, annotated,
           generation_failures, last_error, stage_ms
         ) VALUES (
           @id, @started_at, @updated_at, @ended_at, @stage,
-          @links_added, @links_suggested, @links_pruned, @wikilinks_linked, @wikilinks_dangling, @documents_suggested,
+          @links_added, @links_suggested, @links_pruned, @wikilinks_linked, @wikilinks_dangling,
+          @documents_linked, @documents_suggested,
           @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
           @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
           @generation_failures, @last_error, @stage_ms
@@ -814,6 +839,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           links_pruned = excluded.links_pruned,
           wikilinks_linked = excluded.wikilinks_linked,
           wikilinks_dangling = excluded.wikilinks_dangling,
+          documents_linked = excluded.documents_linked,
           documents_suggested = excluded.documents_suggested,
           distilled = excluded.distilled,
           distill_suggested = excluded.distill_suggested,
@@ -842,6 +868,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         links_pruned: result.links_pruned,
         wikilinks_linked: result.wikilinks_linked,
         wikilinks_dangling: result.wikilinks_dangling,
+        documents_linked: result.documents_linked,
         documents_suggested: result.documents_suggested,
         distilled: result.distilled,
         distill_suggested: result.distill_suggested,

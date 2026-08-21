@@ -196,6 +196,7 @@ export class ConsolidationWorker {
       links_pruned: 0,
       wikilinks_linked: 0,
       wikilinks_dangling: 0,
+      documents_linked: 0,
       documents_suggested: 0,
       distilled: 0,
       distill_suggested: 0,
@@ -507,8 +508,14 @@ export class ConsolidationWorker {
     symbols: Map<string, { node_id: string; repo: string }[]>,
     row: { id: string; project: string | null; content: string },
   ): void {
+    const posture = this.posture.documents;
+
+    if (posture === Posture.OFF) {
+      return;
+    }
+
     for (const name of citedSymbolNames(row.content)) {
-      if (result.documents_suggested >= this.batch.documents) return;
+      if (result.documents_linked + result.documents_suggested >= this.batch.documents) return;
 
       const targets = new Set(
         (symbols.get(name) ?? [])
@@ -521,6 +528,21 @@ export class ConsolidationWorker {
       const symbol = [...targets][0]!;
 
       if (this.edgesRepo.pairIsConnected(row.id, symbol)) continue;
+
+      if (posture === Posture.AUTO) {
+        if (this.edgesRepo.insertSystemDocumentsIfLive(row.id, symbol, this.ownerId, now)) {
+          result.documents_linked++;
+          this.consolidationRepo.resolvePendingByMembers(
+            ConsolidationKind.DOCUMENTS,
+            [row.id, symbol],
+            ConsolidationStatus.APPLIED,
+            this.ownerId,
+            now,
+          );
+        }
+
+        continue;
+      }
 
       const id = this.consolidationRepo.insertCandidate({
         kind: ConsolidationKind.DOCUMENTS,
