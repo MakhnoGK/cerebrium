@@ -6,11 +6,8 @@ import { EmbeddingWorker } from "@/application/workers";
 import { isDaemonAlive } from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { chooseKernel, HANDSHAKE_BUDGET_MS } from "@/runtime/kernel-choice";
-import {
-  GuardedToolWrapper,
-  PassThroughToolWrapper,
-  TOOL_WRAPPER,
-} from "@/presentation/mcp/adapters";
+import { pipelinedContainer } from "@/runtime/pipelined-kernel";
+import { PassThroughToolWrapper, TOOL_WRAPPER } from "@/presentation/mcp/adapters";
 import { Server } from "@/presentation/mcp/server";
 import { buildContainer } from "@/container";
 import { DaemonConfig, DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";
@@ -26,12 +23,15 @@ async function serveRemote(container: DependencyContainer): Promise<void> {
 }
 
 // No daemon reachable: the host degrades to resolving everything in-process, which is what
-// it did before a transport existed. It guards and audits itself, because nothing else will.
+// it did before a transport existed. The tools are resolved from a scope whose call surface
+// runs through the same pipeline the daemon uses, so the session check, the capability
+// posture, the quota and the audit row apply here too.
 async function serveLocal(container: DependencyContainer): Promise<void> {
-  container.register(TOOL_WRAPPER, { useToken: GuardedToolWrapper });
+  const scope = pipelinedContainer(container);
+  scope.register(TOOL_WRAPPER, { useValue: new PassThroughToolWrapper() });
 
   const worker = container.resolve(EmbeddingWorker);
-  const server = container.resolve(Server);
+  const server = scope.resolve(Server);
   const registry = container.resolve(ProcessRegistryService);
   const registered = registry.publish("server");
 
