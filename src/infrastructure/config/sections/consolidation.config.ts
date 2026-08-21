@@ -39,6 +39,10 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
   prune: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_PRUNE"),
   annotate: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_ANNOTATE"),
   reconcile: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_RECONCILE"),
+  // `auto` because the ambiguity is already resolved before a citation is ever proposed:
+  // a backticked name is only taken when it matches exactly one symbol inside the note's
+  // own project, and the edge it writes is additive and soft-reversible.
+  documents: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_DOCUMENTS"),
 }) {}
 
 // `mergeSim` is deliberately higher than the write-time dedup probe so merge stays

@@ -9,7 +9,9 @@ export interface ConsolidationTickResult {
   // backlog of nodes named in prose that were never written.
   wikilinks_linked: number;
   wikilinks_dangling: number;
-  // Note->symbol citations queued for review.
+  // Note->symbol citations: edges written directly under `auto`, queued for review under
+  // `suggest`. A queued one that `auto` later resolves counts as linked, not suggested.
+  documents_linked: number;
   documents_suggested: number;
   distilled: number;
   distill_suggested: number;
