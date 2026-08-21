@@ -92,6 +92,19 @@ export class LocalApplyCandidate implements ApplyCandidate {
           return ConsolidationStatus.DISMISSED;
         }
 
+        if (candidate.kind === ConsolidationKind.DOCUMENTS) {
+          const [note, symbol] = candidate.member_ids;
+          if (!note || !symbol) throw new Error(`documents candidate ${args.id} is malformed.`);
+
+          const inserted = this.edges.insertSystemDocumentsIfLive(
+            note,
+            symbol,
+            args.session_id,
+            now,
+          );
+          return inserted ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+        }
+
         if (candidate.kind === ConsolidationKind.LINK) {
           const [src, dst] = candidate.member_ids;
           if (!src || !dst) throw new Error(`link candidate ${args.id} is malformed.`);

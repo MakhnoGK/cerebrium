@@ -68,6 +68,9 @@ export enum ConsolidationKind {
   MERGE = "merge",
   LINK = "link",
   PRUNE = "prune",
+  // A note citing a symbol in prose. Proposed rather than applied: the citation is
+  // authored, but which symbol it means is inferred.
+  DOCUMENTS = "documents",
 }
 
 // Per-behaviour consolidation posture. `suggest` routes to the candidate queue for an

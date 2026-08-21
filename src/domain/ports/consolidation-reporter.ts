@@ -9,6 +9,8 @@ export interface ConsolidationTickResult {
   // backlog of nodes named in prose that were never written.
   wikilinks_linked: number;
   wikilinks_dangling: number;
+  // Note->symbol citations queued for review.
+  documents_suggested: number;
   distilled: number;
   distill_suggested: number;
   merged: number;

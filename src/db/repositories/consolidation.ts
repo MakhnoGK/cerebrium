@@ -633,9 +633,21 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // ---- detection: wikilinks -------------------------------------------------
 
-  // Every live authored node with its current body, which is both the text the wikilinks
-  // are read from and the titles they resolve against.
-  authoredBodies(): { id: string; title: string; content: string }[] {
+  // Symbols that a citation may resolve to: name, the node it is, and the repo it came
+  // from, so a note can be held to its own project's code.
+  citableSymbols(): { name: string; node_id: string; repo: string }[] {
+    return this.db
+      .prepare(
+        `SELECT sy.name AS name, sy.node_id AS node_id, sy.repo AS repo
+         FROM symbols sy JOIN nodes n ON n.id = sy.node_id
+         WHERE n.invalidated_at IS NULL`,
+      )
+      .all() as { name: string; node_id: string; repo: string }[];
+  }
+
+  // Every live authored node with its current body, which is both the text the citations
+  // are read from and the titles the wikilinks resolve against.
+  authoredBodies(): { id: string; title: string; project: string | null; content: string }[] {
     return this.db
       .prepare(
         `WITH current AS (
@@ -643,14 +655,14 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
                   ROW_NUMBER() OVER (PARTITION BY r.node_id ORDER BY r.rev DESC) AS seq
            FROM revisions r
          )
-         SELECT n.id AS id, n.title AS title, c.content AS content
+         SELECT n.id AS id, n.title AS title, n.project AS project, c.content AS content
          FROM current c
          JOIN nodes n ON n.id = c.node_id
          WHERE c.seq = 1
            AND n.invalidated_at IS NULL
            AND n.memory_kind IN ('semantic', 'episodic')`,
       )
-      .all() as { id: string; title: string; content: string }[];
+      .all() as { id: string; title: string; project: string | null; content: string }[];
   }
 
   // Revisions are append-only, so this changes if and only if a body or a title arrived
@@ -782,13 +794,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .prepare(
         `INSERT INTO consolidation_runs (
           id, started_at, updated_at, ended_at, stage,
-          links_added, links_suggested, links_pruned, wikilinks_linked, wikilinks_dangling,
+          links_added, links_suggested, links_pruned, wikilinks_linked, wikilinks_dangling, documents_suggested,
           distilled, distill_suggested, merged, merge_suggested, merge_delayed,
           pruned, prune_suggested, proposals_backfilled, rejected, annotated,
           generation_failures, last_error, stage_ms
         ) VALUES (
           @id, @started_at, @updated_at, @ended_at, @stage,
-          @links_added, @links_suggested, @links_pruned, @wikilinks_linked, @wikilinks_dangling,
+          @links_added, @links_suggested, @links_pruned, @wikilinks_linked, @wikilinks_dangling, @documents_suggested,
           @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
           @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
           @generation_failures, @last_error, @stage_ms
@@ -802,6 +814,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
           links_pruned = excluded.links_pruned,
           wikilinks_linked = excluded.wikilinks_linked,
           wikilinks_dangling = excluded.wikilinks_dangling,
+          documents_suggested = excluded.documents_suggested,
           distilled = excluded.distilled,
           distill_suggested = excluded.distill_suggested,
           merged = excluded.merged,
@@ -829,6 +842,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
         links_pruned: result.links_pruned,
         wikilinks_linked: result.wikilinks_linked,
         wikilinks_dangling: result.wikilinks_dangling,
+        documents_suggested: result.documents_suggested,
         distilled: result.distilled,
         distill_suggested: result.distill_suggested,
         merged: result.merged,
