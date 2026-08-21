@@ -65,19 +65,25 @@ function breathe(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-// A breath every `perBreath` items. `await` alone is not enough: a stage whose awaits all
-// resolve synchronously only drains the microtask queue, and socket reads are macrotasks.
-function breather(perBreath: number): () => Promise<void> {
-  let until = perBreath;
+// A breath once `budgetMs` of wall-clock has passed since the last one, which is what
+// bounds how long a waiting client can be blocked. Measured by time rather than by a count
+// of items because per-item cost across these loops spans a seed's ~7ms kNN to a distill
+// cluster's hundreds of ms: a fixed cadence either never fires in a short expensive loop or
+// fires far too often in a long cheap one.
+//
+// `await` alone is not enough: a stage whose awaits all resolve synchronously only drains
+// the microtask queue, and socket reads are macrotasks.
+function breather(budgetMs: number): () => Promise<void> {
+  let last = Date.now();
 
   return async () => {
-    if (--until > 0) {
+    if (Date.now() - last < budgetMs) {
       return;
     }
 
-    until = perBreath;
-
     await breathe();
+
+    last = Date.now();
   };
 }
 
@@ -337,7 +343,7 @@ export class ConsolidationWorker {
     const budget = Math.max(this.batch.link, this.batch.merge);
     const seen = new Set<string>();
     const out: NeighbourPair[] = [];
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const seed of this.consolidationRepo.sweepSeeds(budget)) {
       // Each seed is a synchronous vector search, so a whole pass would hold the event
@@ -382,7 +388,7 @@ export class ConsolidationWorker {
     const degrees = this.consolidationRepo.linkDegrees([
       ...new Set(pairs.flatMap((p) => [p.src, p.dst])),
     ]);
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const p of pairs) {
       await breath();
@@ -447,7 +453,7 @@ export class ConsolidationWorker {
     const live = slugIndexOf(bodies);
     const retired = slugIndexOf(this.consolidationRepo.retiredAuthoredTitles());
     const symbols = this.citableSymbolIndex();
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const row of bodies) {
       await breath();
@@ -558,7 +564,7 @@ export class ConsolidationWorker {
       maxDegree: this.thresholds.maxLinkDegree,
       limit: this.batch.linkPrune,
     });
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const edge of stale) {
       await breath();
@@ -588,7 +594,7 @@ export class ConsolidationWorker {
       cutoff,
       limit: this.batch.distill,
     });
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const cluster of clusters) {
       await breath();
@@ -698,7 +704,7 @@ export class ConsolidationWorker {
         n.score >= this.thresholds.mergeSim,
     );
 
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const hit of hits) {
       await breath();
@@ -869,7 +875,7 @@ export class ConsolidationWorker {
     // again whatever the watermark says.
     this.lastOrphanScan = { watermark, clean: dead.length === 0 };
 
-    const breath = breather(this.batch.itemsPerBreath);
+    const breath = breather(this.batch.msPerBreath);
 
     for (const id of dead) {
       await breath();
