@@ -49,3 +49,38 @@ export function resolveTarget(index: SlugIndex, target: string): Resolution {
 
   return found === undefined ? { kind: "unknown" } : { kind: "prefix", id: found };
 }
+
+// ---- code citations --------------------------------------------------------
+// Prose cites code in backticks. A bare word is not a citation: matching those against a
+// symbol index resolves `migration`, `provider` and `different` to whatever happens to
+// carry that name.
+const CITATION = /`([^`\n]{2,80})`/g;
+
+// A citation may be written `Class.method`, `path/file.ts:Symbol` or `bareName(...)`.
+export function citedSymbolNames(content: string): string[] {
+  const out = new Set<string>();
+
+  for (const match of content.matchAll(CITATION)) {
+    const raw = (match[1] ?? "").trim();
+    const tail = raw.includes(":") ? raw.slice(raw.lastIndexOf(":") + 1) : raw;
+    const name = tail.includes("(") ? tail.slice(0, tail.indexOf("(")) : tail;
+
+    if (isDistinctive(raw, name)) out.add(name);
+  }
+
+  return [...out];
+}
+
+// An ordinary lowercase word is a coincidence, not a citation — `stats`, `node`, `install`
+// and `vector` are all real symbol names in this repo and none of them was meant as one.
+function isDistinctive(raw: string, name: string): boolean {
+  return /[a-z0-9][A-Z]/.test(name) || name.includes("_") || /[./:]/.test(raw);
+}
+
+// A note is held to its own project's code: exactly the repo of that name, or one of its
+// `project-*` siblings.
+export function repoBelongsToProject(repo: string, project: string | null): boolean {
+  if (project === null) return false;
+
+  return repo === project || repo.startsWith(`${project}-`);
+}

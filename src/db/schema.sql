@@ -288,7 +288,8 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
   merge_delayed INTEGER NOT NULL DEFAULT 0,
   stage_ms TEXT,
   wikilinks_linked INTEGER NOT NULL DEFAULT 0,
-  wikilinks_dangling INTEGER NOT NULL DEFAULT 0
+  wikilinks_dangling INTEGER NOT NULL DEFAULT 0,
+  documents_suggested INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS processes (

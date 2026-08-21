@@ -74,5 +74,7 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   // Seeds walked between event-loop yields in the neighbour pass. One seed's kNN measures
   // ~2ms on the reference store, so the default bounds what a waiting client can be
   // blocked by to ~50ms. Lower trades sweep throughput for read latency.
+  // Note->symbol citations proposed per sweep. Small: they land in a queue a person reads.
+  documents: int(25).positive().env("MEMORY_CONSOLIDATE_DOCUMENTS_BATCH"),
   seedsPerBreath: int(25).positive().env("MEMORY_CONSOLIDATE_SEEDS_PER_BREATH"),
 }) {}

@@ -181,6 +181,10 @@ export interface RepoProvenance {
   commit: string | null;
   dirty: boolean;
   indexed_at: string;
+  // The root is no longer on this machine, so the symbols under it can never be refreshed
+  // or verified against source. They stay retrievable; they just cannot be trusted as
+  // current, and nothing should propose new links into them.
+  detached: boolean;
 }
 
 export interface Neighbor {

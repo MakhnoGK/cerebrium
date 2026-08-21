@@ -90,6 +90,31 @@ export class EdgesRepo extends BaseRepo {
     });
   }
 
+  // Whether anything already relates these two, in either direction and of any type. Used
+  // before proposing or deriving a link, so a known relationship is not restated.
+  pairIsConnected(a: string, b: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM edges
+           WHERE invalidated_at IS NULL
+             AND ((src = @a AND dst = @b) OR (src = @b AND dst = @a))
+           LIMIT 1`,
+        )
+        .get({ a, b }) !== undefined
+    );
+  }
+
+  // A note -> symbol citation, approved from the review queue.
+  insertSystemDocumentsIfLive(
+    note: string,
+    symbol: string,
+    session_id: string,
+    ts: string,
+  ): boolean {
+    return this.insertSystemEdgeIfLive(EdgeType.DOCUMENTS, note, symbol, session_id, ts, 1.0);
+  }
+
   private insertSystemEdgeIfLive(
     type: EdgeType,
     src: string,

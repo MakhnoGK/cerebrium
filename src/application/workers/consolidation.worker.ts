@@ -15,7 +15,13 @@ import {
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
-import { ConsolidationRepo, EdgesRepo, EmbeddingQueueRepo, NodesRepo } from "@/db/repositories";
+import {
+  CodeRepo,
+  ConsolidationRepo,
+  EdgesRepo,
+  EmbeddingQueueRepo,
+  NodesRepo,
+} from "@/db/repositories";
 import { pairKey, type DuplicatePair, type SweepSeed } from "@/db/repositories/consolidation";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
@@ -26,7 +32,14 @@ import {
   MemoryKind,
   Posture,
 } from "@/core/vocab";
-import { resolveTarget, slugify, wikilinkTargets, type SlugIndex } from "@/core/wikilinks";
+import {
+  citedSymbolNames,
+  repoBelongsToProject,
+  resolveTarget,
+  slugify,
+  wikilinkTargets,
+  type SlugIndex,
+} from "@/core/wikilinks";
 import {
   ConsolidationBatchConfig,
   ConsolidationConfig,
@@ -92,7 +105,11 @@ export class ConsolidationWorker {
   private stopping = false;
   private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
   private stageMark: { stage: string; at: number } | null = null;
-  private lastWikilinkScan: { revisions: number; dangling: number } | null = null;
+  private lastCitationScan: {
+    revisions: number;
+    codeIndex: string | null;
+    dangling: number;
+  } | null = null;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -103,6 +120,7 @@ export class ConsolidationWorker {
     private readonly queueRepo: EmbeddingQueueRepo,
     private readonly consolidationRepo: ConsolidationRepo,
     private readonly edgesRepo: EdgesRepo,
+    private readonly codeRepo: CodeRepo,
     private readonly nodesRepo: NodesRepo,
 
     private readonly sessionService: SessionService,
@@ -156,6 +174,7 @@ export class ConsolidationWorker {
       links_pruned: 0,
       wikilinks_linked: 0,
       wikilinks_dangling: 0,
+      documents_suggested: 0,
       distilled: 0,
       distill_suggested: 0,
       merged: 0,
@@ -193,8 +212,8 @@ export class ConsolidationWorker {
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
-      await this.report(runId, "wikilinks", result);
-      this.resolveWikilinks(now, result);
+      await this.report(runId, "citations", result);
+      this.resolveCitations(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -393,11 +412,18 @@ export class ConsolidationWorker {
   // What a node's prose already claims, made into edges. No posture gate: a wikilink is an
   // authored statement about a relationship, not an inference about one, so there is
   // nothing to suggest and nothing to judge.
-  private resolveWikilinks(now: string, result: ConsolidationTickResult): void {
+  // One pass over authored prose, producing both kinds of citation it can carry: a
+  // `[[wikilink]]` to another note, and a `backticked` symbol name from this project's own
+  // code. Both need every live body, so they share the read and the watermark.
+  private resolveCitations(now: string, result: ConsolidationTickResult): void {
     const revisions = this.consolidationRepo.revisionCount();
+    const codeIndex = this.consolidationRepo.codeIndexWatermark();
 
-    if (this.lastWikilinkScan?.revisions === revisions) {
-      result.wikilinks_dangling = this.lastWikilinkScan.dangling;
+    if (
+      this.lastCitationScan?.revisions === revisions &&
+      this.lastCitationScan.codeIndex === codeIndex
+    ) {
+      result.wikilinks_dangling = this.lastCitationScan.dangling;
 
       return;
     }
@@ -405,6 +431,7 @@ export class ConsolidationWorker {
     const bodies = this.consolidationRepo.authoredBodies();
     const live = slugIndexOf(bodies);
     const retired = slugIndexOf(this.consolidationRepo.retiredAuthoredTitles());
+    const symbols = this.citableSymbolIndex();
 
     for (const row of bodies) {
       for (const target of wikilinkTargets(row.content)) {
@@ -421,9 +448,66 @@ export class ConsolidationWorker {
           result.wikilinks_linked++;
         }
       }
+
+      this.proposeDocuments(now, result, symbols, row);
     }
 
-    this.lastWikilinkScan = { revisions, dangling: result.wikilinks_dangling };
+    this.lastCitationScan = { revisions, codeIndex, dangling: result.wikilinks_dangling };
+  }
+
+  // Cited symbols, by name, excluding repos whose root is gone: a detached repo cannot be
+  // checked against source, so nothing new should be linked into it.
+  private citableSymbolIndex(): Map<string, { node_id: string; repo: string }[]> {
+    const attached = new Set(
+      this.codeRepo
+        .allRepoProvenance()
+        .filter((provenance) => !provenance.detached)
+        .map((provenance) => provenance.repo),
+    );
+    const index = new Map<string, { node_id: string; repo: string }[]>();
+
+    for (const symbol of this.consolidationRepo.citableSymbols()) {
+      if (!attached.has(symbol.repo)) continue;
+
+      index.set(symbol.name, [...(index.get(symbol.name) ?? []), symbol]);
+    }
+
+    return index;
+  }
+
+  // Proposed, never applied: the citation is authored but which symbol it means is
+  // inferred, and a wrong edge would be in the graph for good.
+  private proposeDocuments(
+    now: string,
+    result: ConsolidationTickResult,
+    symbols: Map<string, { node_id: string; repo: string }[]>,
+    row: { id: string; project: string | null; content: string },
+  ): void {
+    for (const name of citedSymbolNames(row.content)) {
+      if (result.documents_suggested >= this.batch.documents) return;
+
+      const targets = new Set(
+        (symbols.get(name) ?? [])
+          .filter((symbol) => repoBelongsToProject(symbol.repo, row.project))
+          .map((symbol) => symbol.node_id),
+      );
+
+      if (targets.size !== 1) continue;
+
+      const symbol = [...targets][0]!;
+
+      if (this.edgesRepo.pairIsConnected(row.id, symbol)) continue;
+
+      const id = this.consolidationRepo.insertCandidate({
+        kind: ConsolidationKind.DOCUMENTS,
+        member_ids: [row.id, symbol],
+        canonical_id: symbol,
+        score: 1,
+        detected_at: now,
+      });
+
+      if (id) result.documents_suggested++;
+    }
   }
 
   // A wikilink written before a supersede still names the retired title, so a target that

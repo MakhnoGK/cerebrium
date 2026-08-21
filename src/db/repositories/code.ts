@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { inject, injectable } from "tsyringe";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
@@ -389,6 +390,8 @@ export class CodeRepo extends BaseRepo {
       commit: r.commit_sha,
       dirty: !!r.dirty,
       indexed_at: r.indexed_at,
+      // A stored root is a filesystem claim, and the only way to check it is to look.
+      detached: r.root !== null && !existsSync(r.root),
     }));
   }
 }
