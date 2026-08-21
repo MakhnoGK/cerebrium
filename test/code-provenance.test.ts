@@ -85,6 +85,22 @@ describe("Repo provenance store", () => {
     });
   });
 
+  it("should report a repo whose root is gone as detached", () => {
+    // Given — the machine was renamed and nine repos' roots went with it; symbols under a
+    // missing root can never be refreshed or checked against source again.
+    const { code, clock } = setup();
+
+    code.setRepoProvenance("gone", "/repos/deleted-last-year", "main", "abc1234", false, clock.t);
+    code.setRepoProvenance("here", process.cwd(), "main", "def5678", false, clock.t);
+
+    // When
+    const provenance = code.allRepoProvenance();
+
+    // Then
+    expect(provenance.find((r) => r.repo === "gone")?.detached).toBe(true);
+    expect(provenance.find((r) => r.repo === "here")?.detached).toBe(false);
+  });
+
   it("should expose remembered roots as index targets and exclude rootless repos", () => {
     // Given
     const { code, clock } = setup();
