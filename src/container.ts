@@ -149,7 +149,11 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
 
       const config = c.resolve(EmbeddingConfig);
 
-      return createProvider(config.provider, config.model, config.cacheDir);
+      return createProvider(config.provider, config.model, config.cacheDir, {
+        url: config.url,
+        timeoutMs: config.timeoutMs,
+        batchSize: config.batchSize,
+      });
     }),
   });
 

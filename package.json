@@ -35,13 +35,14 @@
     "report:readloop": "vite-node --config vitest.config.ts scripts/read-loop-report.ts",
     "gold:generate": "vite-node --config vitest.config.ts scripts/gold-generate.mts",
     "gold:adjudicate": "vite-node --config vitest.config.ts scripts/gold-adjudicate.mts",
-    "smoke:scripts": "npm run service -- --help > /dev/null && npm run agent:setup -- --help > /dev/null && npm run eval:agents -- --help > /dev/null && npm run eval:retrieval -- --help > /dev/null && npm run calibrate:report -- --help > /dev/null && npm run report:readloop -- --help > /dev/null && npm run eval:encoding -- --help > /dev/null && npm run gold:generate -- --help > /dev/null && npm run gold:adjudicate -- --help > /dev/null",
+    "smoke:scripts": "npm run service -- --help > /dev/null && npm run agent:setup -- --help > /dev/null && npm run eval:agents -- --help > /dev/null && npm run eval:retrieval -- --help > /dev/null && npm run calibrate:report -- --help > /dev/null && npm run report:readloop -- --help > /dev/null && npm run eval:encoding -- --help > /dev/null && npm run eval:embedding -- --help > /dev/null && npm run gold:generate -- --help > /dev/null && npm run gold:adjudicate -- --help > /dev/null",
     "inspect": "MEMORY_DB_PATH=.tmp/dev.db npx @modelcontextprotocol/inspector tsx src/server.ts",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/e2e/**'",
     "test:e2e": "vitest run test/e2e",
     "test:watch": "vitest",
-    "eval:encoding": "vite-node --config vitest.config.ts scripts/eval-encoding.mts"
+    "eval:encoding": "vite-node --config vitest.config.ts scripts/eval-encoding.mts",
+    "eval:embedding": "vite-node --config vitest.config.ts scripts/embed-agreement.mts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

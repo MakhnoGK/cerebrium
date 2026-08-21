@@ -392,6 +392,34 @@ downloads `Xenova/multilingual-e5-small` (the ONNX build of
 (default `~/.cerebrium/models`) on first embed. No API key, no daemon, no cost — a node
 is searchable via FTS instantly and vector search catches up once the model is warm.
 
+**Serving the embedding model instead of loading it.** `MEMORY_EMBED_PROVIDER=http` points
+the same port at a model served over HTTP (Ollama's `/api/embed` shape), which takes the
+repeated load/unload of a local model off the daemon's own thread — measured at 4.6-5.7s per
+load, paid inside whatever call happened to need a vector. The provider owns the parts a
+server cannot: the mandatory `query: ` / `passage: ` prefixes, because e5 is asymmetric and
+the remote cannot know which side it is embedding, and L2 normalization, because
+`/api/embed` makes no promise about it and cosine over unnormalized vectors is a silent
+ranking error rather than a visible failure. `warm()` embeds one token, so a wrong model, a
+wrong endpoint or a wrong dimension fails at daemon startup instead of inside the first
+write that needs a vector.
+
+**It must be the same model, and dimension is not proof of that.** Every response is checked
+against `FLOAT[384]` and a mismatch throws — but 384 dimensions from a *different* model is
+not an error any runtime check can see. It silently re-bases new vectors against every
+vector already stored, which does not fail, it just quietly stops finding things. So a
+switch on a populated store has a gate in front of it:
+
+```sh
+npm run eval:embedding -- --model multilingual-e5-small   # cosine vs the STORED vectors
+npm run eval:retrieval                                    # and no P@1 regression
+```
+
+`eval:embedding` re-embeds a deterministic sample of real chunks through the remote and
+compares each against the vector already in `chunk_vec`, reporting min/p10/p50/mean and
+exiting non-zero if any chunk falls below 0.99. Both gates have to hold; if either does not,
+the switch means a full re-embed rather than a config change, and `embedding_meta.model`
+records which model wrote each chunk so a half-migrated store is detectable.
+
 **The daemon loads the model before it starts draining.** Loading costs a few hundred
 milliseconds of blocked event loop, so the process whose job is to hold the model pays it
 at startup rather than inside the first batch that needs it. A load failure does not stop
@@ -442,11 +470,13 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | SQLite file. `:memory:` for ephemeral. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
 | `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
-| `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model) or `local-null` (deterministic, offline, for tests). |
-| `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). |
+| `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model), `http` (a model served over HTTP, so the daemon holds none), or `local-null` (deterministic, offline, for tests). |
+| `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). Under `http` this is the serving backend's own tag, and it must name the model the store was already embedded with — see **Serving the embedding model** below. |
 | `MEMORY_RERANK` | `off` | Second-stage search reranker: `off`, `local` (cross-encoder via transformers.js), or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder model id for the `local` reranker. |
 | `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached (embeddings and reranker). |
+| `MEMORY_EMBED_URL` | `http://127.0.0.1:11434/api/embed` | `http` provider only: the batch embedding endpoint (`{model, input[]}` -> `{embeddings[][]}`). |
+| `MEMORY_EMBED_TIMEOUT_MS` | `30000` | `http` provider only: budget for one batch. A batch is `MEMORY_EMBED_BATCH` texts, so raise both together. |
 | `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
