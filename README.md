@@ -111,6 +111,17 @@ what a human edits and what `status` prints back:
 }
 ```
 
+`docs/config.example.json` is a working copy of the one setup that needs more than a single
+key: pointing the sweep at a generation provider, which pre-writes proposals for `distill`
+and `merge` candidates and lets `annotate` run. `documents` candidates never carry a
+proposal — a note-to-symbol citation is judged directly, not from a draft.
+
+The three non-obvious values there are all sized from generation time, not picked. At the
+reference model's ~20 tokens/s a 600-1200 token proposal takes 30-60s, so `annotate` and
+`backfill` are capped at 10 apiece to bound one sweep to roughly 15 minutes, and
+`intervalMs` is raised to 30 minutes so sweeps do not overlap. The default 5-minute cadence
+is sized for detection only.
+
 Environment variables stay on top as the documented override, and every value carries the
 tier that produced it, so `provenance` reads `file` or `env` rather than being assumed. A
 missing `config.json` is normal and silent; a **corrupt** one degrades to environment plus

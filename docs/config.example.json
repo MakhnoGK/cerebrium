@@ -1,0 +1,13 @@
+{
+  "consolidation": {
+    "provider": "http",
+    "url": "http://100.92.157.103:11434/api/chat",
+    "model": "gemma4:12b-it-qat",
+    "timeoutMs": 500000,
+    "intervalMs": 1800000,
+    "batch": {
+      "annotate": 10,
+      "backfill": 10
+    }
+  }
+}

@@ -71,10 +71,12 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   prune: int(200).positive().env("MEMORY_CONSOLIDATE_PRUNE_BATCH"),
   annotate: int(50).positive().env("MEMORY_CONSOLIDATE_ANNOTATE_BATCH"),
   backfill: int(10).positive().env("MEMORY_CONSOLIDATE_BACKFILL_BATCH"),
-  // Seeds walked between event-loop yields in the neighbour pass. One seed's kNN measures
-  // ~2ms on the reference store, so the default bounds what a waiting client can be
-  // blocked by to ~50ms. Lower trades sweep throughput for read latency.
   // Note->symbol citations proposed per sweep. Small: they land in a queue a person reads.
   documents: int(25).positive().env("MEMORY_CONSOLIDATE_DOCUMENTS_BATCH"),
-  seedsPerBreath: int(25).positive().env("MEMORY_CONSOLIDATE_SEEDS_PER_BREATH"),
+  // Items walked between event-loop yields, in every loop the sweep runs — the neighbour
+  // pass, link discovery, link pruning, distillation and merge detection. Measured on a
+  // 1,975-vector authored pool at 4.8-6.7ms per seed kNN (worst single seed 44.5ms), so
+  // the default bounds a waiting client to roughly 120-170ms. Lower trades sweep
+  // throughput for read latency.
+  itemsPerBreath: int(25).positive().env("MEMORY_CONSOLIDATE_ITEMS_PER_BREATH"),
 }) {}
