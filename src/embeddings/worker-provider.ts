@@ -19,6 +19,19 @@ interface Pending {
   reject: (error: Error) => void;
 }
 
+// What the worker needs to build the same provider the daemon resolved. Passed in rather
+// than re-read there: config is resolved in one place (`buildContainer`), and a worker
+// reading the environment on its own saw only the env tier — a `config.json` that selected
+// `http` left it quietly loading a local model instead.
+export interface EmbedWorkerSettings {
+  provider: string;
+  model: string;
+  cacheDir: string;
+  url: string;
+  timeoutMs: number;
+  batchSize: number;
+}
+
 type WorkerReply =
   | { ready: true; name: string; version: string; dim: number }
   | { id: number; ok: true; vectors: number[][] }
@@ -46,8 +59,11 @@ export class WorkerEmbeddingProvider implements EmbeddingProvider {
   private next = 1;
   private dead: Error | null = null;
 
-  constructor(entry: string, env: NodeJS.ProcessEnv = process.env) {
-    this.worker = new Worker(entry, { env: { ...env } });
+  constructor(entry: string, settings?: EmbedWorkerSettings, env: NodeJS.ProcessEnv = process.env) {
+    this.worker = new Worker(entry, {
+      env: { ...env },
+      ...(settings === undefined ? {} : { workerData: settings }),
+    });
     this.worker.unref();
 
     this.worker.on("message", (reply: WorkerReply) => {

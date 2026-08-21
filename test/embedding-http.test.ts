@@ -176,3 +176,30 @@ describe("Choosing the provider", () => {
 function norm(vector: number[]): number {
   return Math.sqrt(vector.reduce((t, x) => t + x * x, 0));
 }
+
+describe("The model worker's provider", () => {
+  it("should be built from the settings it was handed, not from the environment it inherited", () => {
+    // Given — what the daemon resolves and passes as workerData. A worker that read the
+    // environment instead saw only the env tier, so a `config.json` selecting `http` left
+    // it loading a local model.
+    const settings = {
+      provider: "http",
+      model: MODEL,
+      cacheDir: "/unused",
+      url: "http://remote:11434/api/embed",
+      timeoutMs: 1_000,
+      batchSize: 8,
+    };
+
+    // When
+    const provider = createProvider(settings.provider, settings.model, settings.cacheDir, {
+      url: settings.url,
+      timeoutMs: settings.timeoutMs,
+      batchSize: settings.batchSize,
+    });
+
+    // Then
+    expect(provider.name).toBe(MODEL);
+    expect(provider.dim).toBe(VECTOR_DIM);
+  });
+});

@@ -22,7 +22,12 @@ import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker
 import { ReadPool } from "@/runtime/read-pool";
 import { createDaemonMethods, RpcServer, surfaceMethods } from "@/presentation/rpc";
 import { buildContainer } from "@/container";
-import { ConsolidationConfig, DaemonConfig, DatabaseConfig } from "@/infrastructure/config";
+import {
+  ConsolidationConfig,
+  DaemonConfig,
+  DatabaseConfig,
+  EmbeddingConfig,
+} from "@/infrastructure/config";
 
 // Standalone embedding drain. Outlives any Claude Code session: the MCP server
 // spawns it detached (see ensureDaemon in server.ts) and it keeps draining the
@@ -214,8 +219,17 @@ async function main(): Promise<void> {
   const embedEntry = resolveEmbedWorker();
 
   if (embedEntry !== null) {
+    const embedding = container.resolve(EmbeddingConfig);
+
     container.register(EMBEDDING_PROVIDER_TOKEN, {
-      useValue: new WorkerEmbeddingProvider(embedEntry),
+      useValue: new WorkerEmbeddingProvider(embedEntry, {
+        provider: embedding.provider,
+        model: embedding.model,
+        cacheDir: embedding.cacheDir,
+        url: embedding.url,
+        timeoutMs: embedding.timeoutMs,
+        batchSize: embedding.batchSize,
+      }),
     });
   }
 
