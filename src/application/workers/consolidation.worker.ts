@@ -223,8 +223,8 @@ export class ConsolidationWorker {
       if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "links", result);
-      this.discoverLinks(now, result, neighbours);
-      this.pruneLinks(now, result);
+      await this.discoverLinks(now, result, neighbours);
+      await this.pruneLinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -362,11 +362,11 @@ export class ConsolidationWorker {
     return out;
   }
 
-  private discoverLinks(
+  private async discoverLinks(
     now: string,
     result: ConsolidationTickResult,
     neighbours: NeighbourPair[],
-  ): void {
+  ): Promise<void> {
     const posture = this.posture.links;
 
     if (posture === Posture.OFF) {
@@ -382,8 +382,11 @@ export class ConsolidationWorker {
     const degrees = this.consolidationRepo.linkDegrees([
       ...new Set(pairs.flatMap((p) => [p.src, p.dst])),
     ]);
+    const breath = breather(this.batch.itemsPerBreath);
 
     for (const p of pairs) {
+      await breath();
+
       const srcDegree = degrees.get(p.src) ?? 0;
       const dstDegree = degrees.get(p.dst) ?? 0;
 
@@ -543,7 +546,7 @@ export class ConsolidationWorker {
   // Retire similar_to edges the cap has already been exceeded by — the backlog the
   // discovery guard cannot reach, since it only governs new pairs. Soft-invalidate only,
   // and never below a node's own top `maxLinkDegree`.
-  private pruneLinks(now: string, result: ConsolidationTickResult): void {
+  private async pruneLinks(now: string, result: ConsolidationTickResult): Promise<void> {
     if (this.posture.linkPrune === Posture.OFF) {
       return;
     }
@@ -552,8 +555,11 @@ export class ConsolidationWorker {
       maxDegree: this.thresholds.maxLinkDegree,
       limit: this.batch.linkPrune,
     });
+    const breath = breather(this.batch.itemsPerBreath);
 
     for (const edge of stale) {
+      await breath();
+
       this.edgesRepo.invalidateEdge(edge.src, edge.dst, EdgeType.SIMILAR_TO, now);
       result.links_pruned++;
     }
@@ -579,8 +585,11 @@ export class ConsolidationWorker {
       cutoff,
       limit: this.batch.distill,
     });
+    const breath = breather(this.batch.itemsPerBreath);
 
     for (const cluster of clusters) {
+      await breath();
+
       if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
         continue;
       }
@@ -686,7 +695,11 @@ export class ConsolidationWorker {
         n.score >= this.thresholds.mergeSim,
     );
 
+    const breath = breather(this.batch.itemsPerBreath);
+
     for (const hit of hits) {
+      await breath();
+
       const pair = this.consolidationRepo.duplicatePairFor(hit.src, hit.dst, hit.score);
 
       if (pair === null) {
