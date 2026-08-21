@@ -11,5 +11,6 @@ import "@/application/use-cases/local/record-checkpoint";
 import "@/application/use-cases/local/restore-memory";
 import "@/application/use-cases/local/search-memory";
 import "@/application/use-cases/local/session";
+import "@/application/use-cases/local/subscriptions";
 import "@/application/use-cases/local/update-memory";
 import "@/application/use-cases/local/write-memory";

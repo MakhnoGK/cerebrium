@@ -11,6 +11,7 @@ import { REGISTER_SOURCE, UPSERT_MIRRORS } from "@/application/use-cases/contrac
 import { INDEX_CODE } from "@/application/use-cases/contracts/operations";
 import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/read-surface";
 import { SESSION_HINTS, START_SESSION } from "@/application/use-cases/contracts/session";
+import { SUBSCRIBE_EVENTS } from "@/application/use-cases/contracts/subscriptions";
 import { Capability, EventAction } from "@/core/vocab";
 
 // Everything a client outside this process may call, by name. Extends the read surface with
@@ -76,6 +77,15 @@ export const CALL_SURFACE = {
   // call rather than being one — a row of its own would double-count every tool invocation.
   session_hints: {
     token: SESSION_HINTS,
+    kind: "write",
+    action: EventAction.SEARCH,
+    audit: false,
+    capability: Capability.READ,
+  },
+  // Interest, not data: a subscriber states what it wants to hear and nothing is stored,
+  // so there is no node and no row worth auditing.
+  subscribe_events: {
+    token: SUBSCRIBE_EVENTS,
     kind: "write",
     action: EventAction.SEARCH,
     audit: false,
