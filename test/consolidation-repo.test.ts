@@ -200,4 +200,24 @@ describe("ConsolidationRepo kNN seeding", () => {
     const pair = consolidation.duplicatePairFor(twinA, twinB, 0.95);
     expect(pair?.member_ids.slice().sort().join()).toBe([twinA, twinB].sort().join());
   });
+
+  it("should not rebuild a pair that is already a merge candidate", async () => {
+    // Given
+    const { consolidation, twinA, twinB } = await seedWithVectorlessNode();
+    const [a, b] = [twinA, twinB].sort();
+
+    expect(consolidation.duplicatePairFor(a!, b!, 0.95)).not.toBeNull();
+
+    // When
+    consolidation.insertCandidate({
+      kind: ConsolidationKind.MERGE,
+      member_ids: [a!, b!],
+      canonical_id: a!,
+      score: 0.95,
+      detected_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Then
+    expect(consolidation.duplicatePairFor(a!, b!, 0.95)).toBeNull();
+  });
 });

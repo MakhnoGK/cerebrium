@@ -590,11 +590,15 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // and when. Provenance is what separates a real duplicate from a series; content
   // similarity does not.
   // One duplicate pair, built from a neighbour hit the sweep already found. Null when the
-  // two are already related by `supersedes`.
+  // two are already related by `supersedes`, or when the pair is a candidate already —
+  // both cheap, and both ahead of the four lookups the pair itself costs.
   duplicatePairFor(a: string, b: string, score: number): DuplicatePair | null {
     if (this.hasSupersedes(a, b)) return null;
 
     const [x, y] = a < b ? [a, b] : [b, a];
+
+    if (this.candidateExists(ConsolidationKind.MERGE, [x, y])) return null;
+
     const { survivor } = this.chooseSurvivor(a, b);
     const project = (
       this.db.prepare("SELECT project FROM nodes WHERE id = ?").get(survivor) as {

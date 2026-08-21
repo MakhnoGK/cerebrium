@@ -381,12 +381,12 @@ export class ConsolidationWorker {
     });
 
     for (const cluster of clusters) {
-      if (!(await this.holdLease())) {
-        return;
-      }
-
       if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
         continue;
+      }
+
+      if (!(await this.holdLease())) {
+        return;
       }
 
       const gen = await this.tryGenerate(
@@ -487,18 +487,14 @@ export class ConsolidationWorker {
     );
 
     for (const hit of hits) {
-      if (!(await this.holdLease())) {
-        return;
-      }
-
       const pair = this.consolidationRepo.duplicatePairFor(hit.src, hit.dst, hit.score);
 
       if (pair === null) {
         continue;
       }
 
-      if (this.consolidationRepo.candidateExists(ConsolidationKind.MERGE, pair.member_ids)) {
-        continue;
+      if (!(await this.holdLease())) {
+        return;
       }
 
       // A pair one session wrote minutes apart is a series, not a duplication: the writer
