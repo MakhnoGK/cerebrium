@@ -25,6 +25,7 @@ import {
   MemoryKind,
   Posture,
 } from "@/core/vocab";
+import { resolveTarget, slugify, wikilinkTargets, type SlugIndex } from "@/core/wikilinks";
 import {
   ConsolidationBatchConfig,
   ConsolidationConfig,
@@ -138,6 +139,8 @@ export class ConsolidationWorker {
       links_added: 0,
       links_suggested: 0,
       links_pruned: 0,
+      wikilinks_linked: 0,
+      wikilinks_dangling: 0,
       distilled: 0,
       distill_suggested: 0,
       merged: 0,
@@ -172,6 +175,11 @@ export class ConsolidationWorker {
       await this.report(runId, "links", result);
       this.discoverLinks(now, result, neighbours);
       this.pruneLinks(now, result);
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
+      await this.report(runId, "wikilinks", result);
+      this.resolveWikilinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -362,6 +370,37 @@ export class ConsolidationWorker {
 
         if (id) {
           result.links_suggested++;
+        }
+      }
+    }
+  }
+
+  // What a node's prose already claims, made into edges. No posture gate: a wikilink is an
+  // authored statement about a relationship, not an inference about one, so there is
+  // nothing to suggest and nothing to judge.
+  private resolveWikilinks(now: string, result: ConsolidationTickResult): void {
+    const bodies = this.consolidationRepo.authoredBodies();
+    const index: SlugIndex = new Map();
+
+    for (const row of bodies) {
+      const slug = slugify(row.title);
+
+      index.set(slug, [...(index.get(slug) ?? []), row.id]);
+    }
+
+    for (const row of bodies) {
+      for (const target of wikilinkTargets(row.content)) {
+        const hit = resolveTarget(index, target);
+
+        if (hit.kind === "ambiguous" || hit.kind === "unknown") {
+          result.wikilinks_dangling++;
+          continue;
+        }
+
+        if (hit.id === row.id) continue;
+
+        if (this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, hit.id, this.ownerId, now)) {
+          result.wikilinks_linked++;
         }
       }
     }

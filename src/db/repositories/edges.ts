@@ -60,6 +60,36 @@ export class EdgesRepo extends BaseRepo {
     );
   }
 
+  // For a relationship a node's prose states and the graph does not have yet. Three things
+  // it deliberately will not do: overwrite the provenance of an edge somebody authored,
+  // revive one that was retired, or add a second edge between a pair that is already
+  // connected — graph expansion weights by edge, so restating a known link only skews it.
+  insertSystemReferenceIfUnconnected(
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+  ): boolean {
+    return this.tx(() => {
+      const info = this.db
+        .prepare(
+          `INSERT INTO edges (src, dst, type, provenance, weight, valid_from, session_id)
+           SELECT @src, @dst, @type, 'system', 1.0, @ts, @session
+           WHERE EXISTS (SELECT 1 FROM nodes WHERE id = @src AND invalidated_at IS NULL)
+             AND EXISTS (SELECT 1 FROM nodes WHERE id = @dst AND invalidated_at IS NULL)
+             AND NOT EXISTS (
+               SELECT 1 FROM edges e
+               WHERE e.invalidated_at IS NULL
+                 AND ((e.src = @src AND e.dst = @dst) OR (e.src = @dst AND e.dst = @src))
+             )
+           ON CONFLICT(src, dst, type) DO NOTHING`,
+        )
+        .run({ src, dst, type: EdgeType.REFERENCES, ts, session: session_id });
+
+      return info.changes > 0;
+    });
+  }
+
   private insertSystemEdgeIfLive(
     type: EdgeType,
     src: string,

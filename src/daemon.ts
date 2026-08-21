@@ -164,7 +164,12 @@ export async function runDaemon(
       const swept = await consolidation.tick({ shouldYield: busy });
 
       const total =
-        swept.distilled + swept.merged + swept.pruned + swept.links_added + swept.annotated;
+        swept.distilled +
+        swept.merged +
+        swept.pruned +
+        swept.links_added +
+        swept.wikilinks_linked +
+        swept.annotated;
       const failures = swept.generation_failures;
       if (total > 0 || failures > 0 || swept.yielded) {
         process.stderr.write(
