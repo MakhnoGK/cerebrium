@@ -618,6 +618,17 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   }
 
   // ---- detection: Tier-1 mirror prune ---------------------------------------
+
+  // Advances on every code index run. `code_files` is only ever written by indexing, so
+  // an unchanged watermark means no symbol can have been orphaned since the last look.
+  codeIndexWatermark(): string | null {
+    return (
+      this.db.prepare("SELECT MAX(indexed_at) AS at FROM code_repos").get() as {
+        at: string | null;
+      }
+    ).at;
+  }
+
   // Dead mirror nodes to soft-invalidate: valid `symbol` mirrors whose (repo, path) is
   // no longer in the code index (orphaned — a removed file that left symbols dangling).
   // A reconciliation safety net (removeFile normally keeps these in sync). Touches only

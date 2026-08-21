@@ -72,6 +72,7 @@ const CONSOLIDATION_WRITER: Writer = { client: "cerebrium-consolidation", versio
 export class ConsolidationWorker {
   private readonly ownerId = newId();
   private stopping = false;
+  private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -644,7 +645,19 @@ export class ConsolidationWorker {
       return;
     }
 
-    for (const id of this.consolidationRepo.deadMirrorNodes(this.batch.prune)) {
+    const watermark = this.consolidationRepo.codeIndexWatermark();
+
+    if (this.lastOrphanScan?.clean === true && this.lastOrphanScan.watermark === watermark) {
+      return;
+    }
+
+    const dead = this.consolidationRepo.deadMirrorNodes(this.batch.prune);
+
+    // Not clean means the batch limit may have truncated the list, so the next sweep looks
+    // again whatever the watermark says.
+    this.lastOrphanScan = { watermark, clean: dead.length === 0 };
+
+    for (const id of dead) {
       if (posture === Posture.AUTO) {
         this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;
