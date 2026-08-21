@@ -1,5 +1,11 @@
 import type { DependencyContainer, InjectionToken } from "tsyringe";
-import { CALL_SURFACE, isRetryable, type CallName, type UseCase } from "@/application/use-cases";
+import {
+  CALL_SURFACE,
+  callDeadlineMs,
+  isRetryable,
+  type CallName,
+  type UseCase,
+} from "@/application/use-cases";
 import { ClientIdentity } from "@/runtime/client-identity";
 import { rpcCall, RpcUnavailableError } from "@/runtime/rpc-client";
 import type { RpcMeta } from "@/core/rpc";
@@ -35,6 +41,8 @@ export class DaemonUnreachableError extends Error {
 
 export interface RemoteKernelOptions {
   socketPath: string;
+  // Flattens the per-method deadline to one number for every call. For tests; production
+  // leaves it unset so each call is measured against its own work.
   timeoutMs?: number;
 }
 
@@ -52,7 +60,7 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
       return await rpcCall(
         {
           socketPath: this.options.socketPath,
-          ...(this.options.timeoutMs === undefined ? {} : { timeoutMs: this.options.timeoutMs }),
+          timeoutMs: this.options.timeoutMs ?? callDeadlineMs(this.name),
           // The same read/write distinction the error message below explains to an agent,
           // applied one layer down: a dropped connection is ridden out for a read and
           // surfaced for a write.

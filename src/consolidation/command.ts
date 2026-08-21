@@ -33,11 +33,20 @@ export class CommandConsolidator implements ConsolidationProvider {
   readonly version = "1";
   readonly enabled = true;
   private readonly runner: CommandRunner;
+  // `reconcile` runs while a `write` waits for it, so it gets the shorter budget.
+  private readonly interactiveRunner: CommandRunner;
 
-  constructor(opts?: { cmd?: string; timeoutMs?: number; runner?: CommandRunner }) {
+  constructor(opts?: {
+    cmd?: string;
+    timeoutMs?: number;
+    reconcileTimeoutMs?: number;
+    runner?: CommandRunner;
+  }) {
     const cmd = opts?.cmd;
     const timeoutMs = opts?.timeoutMs ?? 500_000;
+    const reconcileTimeoutMs = opts?.reconcileTimeoutMs ?? 25_000;
     this.runner = opts?.runner ?? defaultRunner(cmd, timeoutMs);
+    this.interactiveRunner = opts?.runner ?? defaultRunner(cmd, reconcileTimeoutMs);
   }
 
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
@@ -61,7 +70,7 @@ export class CommandConsolidator implements ConsolidationProvider {
       draft: task.draft,
       candidates: task.candidates,
     });
-    return parseReconcile(await this.runner(input));
+    return parseReconcile(await this.interactiveRunner(input));
   }
 
   async annotate(task: AnnotateTask): Promise<AnnotateResult> {

@@ -15,6 +15,9 @@ import { Posture } from "@/core/vocab";
 // picked: decode dominates (prompt eval averages 1.5 s; the response runs 600–1200 tokens
 // at ~19.5 t/s), and a timeout near that band silently discards proposals, since a cut-off
 // generation is indistinguishable from a provider with nothing to say.
+// `reconcileTimeoutMs` is the same knob for the one generation call that happens on an
+// interactive path: a `write` waits for it before answering, and its verdict is advisory,
+// so it is bounded well under the RPC deadline for a write and degrades to no advice.
 // `leaseTtlMs` must outlive a single generation call: the worker renews the lease between
 // clusters, so anything shorter reads as expired to every observer mid-sweep.
 @configSection()
@@ -24,6 +27,7 @@ export class ConsolidationConfig extends SectionOf("consolidation", {
   model: str("gemma4:12b-it-qat").env("MEMORY_CONSOLIDATE_MODEL"),
   command: nullableStr(null).env("MEMORY_CONSOLIDATE_CMD"),
   timeoutMs: int(500_000).positive().env("MEMORY_CONSOLIDATE_TIMEOUT_MS"),
+  reconcileTimeoutMs: int(25_000).positive().env("MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS"),
   leaseTtlMs: int(600_000).positive().env("MEMORY_CONSOLIDATE_LEASE_TTL_MS"),
   intervalMs: int(300_000).nonNegative().env("MEMORY_CONSOLIDATE_INTERVAL_MS"),
 }) {}

@@ -3,12 +3,16 @@ import {
   encodeLine,
   parseInbound,
   PROTOCOL_VERSION,
+  RPC_DEADLINE_MS,
+  RpcWork,
   type RpcMeta,
   type RpcResponse,
 } from "@/core/rpc";
 
 export interface RpcClientOptions {
   socketPath: string;
+  // How long to wait for the answer. A caller that knows the method should pass the
+  // deadline for that method's work — see `callDeadlineMs`.
   timeoutMs?: number;
   // Whether THIS call may be sent again if the connection dies before it is answered.
   // A held-open connection can be dropped under a caller by something as ordinary as a
@@ -30,7 +34,7 @@ export class RpcUnavailableError extends Error {
 
 export type NotificationHandler = (method: string, params: Record<string, unknown>) => void;
 
-const DEFAULT_TIMEOUT_MS = 3_000;
+const DEFAULT_TIMEOUT_MS = RPC_DEADLINE_MS[RpcWork.INTERACTIVE];
 
 interface Pending {
   resolve: (response: RpcResponse) => void;

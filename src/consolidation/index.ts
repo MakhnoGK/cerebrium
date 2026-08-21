@@ -36,7 +36,13 @@ class DisabledConsolidator implements ConsolidationProvider {
 // one-file change plus a class — the ConsolidationProvider interface is the contract.
 export function createConsolidator(
   name = "manual",
-  opts?: { url?: string; model?: string; cmd?: string; timeoutMs?: number },
+  opts?: {
+    url?: string;
+    model?: string;
+    cmd?: string;
+    timeoutMs?: number;
+    reconcileTimeoutMs?: number;
+  },
 ): ConsolidationProvider {
   if (name === "off") return new DisabledConsolidator();
   if (name === "http") return new HttpConsolidator(opts);

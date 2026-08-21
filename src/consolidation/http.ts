@@ -40,7 +40,14 @@ const DEFAULTS = {
   url: "http://127.0.0.1:11434/api/chat",
   model: "gemma4:12b-it-qat",
   timeoutMs: 500_000,
+  reconcileTimeoutMs: 25_000,
 };
+
+// A budget and the knob that raises it, so a timeout says which one it was.
+interface Deadline {
+  ms: number;
+  env: string;
+}
 
 export class HttpConsolidator implements ConsolidationProvider {
   readonly name = "http";
@@ -48,31 +55,57 @@ export class HttpConsolidator implements ConsolidationProvider {
   readonly enabled = true;
   private readonly url: string;
   private readonly model: string;
-  private readonly timeoutMs: number;
+  private readonly generation: Deadline;
+  private readonly interactive: Deadline;
   private readonly fetchFn: FetchFn;
   // Flipped for the process once a backend rejects the field; see `chat`.
   private thinkSupported = true;
 
-  constructor(opts?: { url?: string; model?: string; timeoutMs?: number; fetchFn?: FetchFn }) {
+  constructor(opts?: {
+    url?: string;
+    model?: string;
+    timeoutMs?: number;
+    reconcileTimeoutMs?: number;
+    fetchFn?: FetchFn;
+  }) {
     this.url = opts?.url ?? DEFAULTS.url;
     this.model = opts?.model ?? DEFAULTS.model;
-    this.timeoutMs = opts?.timeoutMs ?? DEFAULTS.timeoutMs;
+    this.generation = {
+      ms: opts?.timeoutMs ?? DEFAULTS.timeoutMs,
+      env: "MEMORY_CONSOLIDATE_TIMEOUT_MS",
+    };
+    this.interactive = {
+      ms: opts?.reconcileTimeoutMs ?? DEFAULTS.reconcileTimeoutMs,
+      env: "MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS",
+    };
     this.fetchFn = opts?.fetchFn ?? fetch;
   }
 
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
-    return parseResult(await this.chat(SYSTEM_PROMPT, taskPrompt(task), RESULT_SCHEMA));
+    return parseResult(
+      await this.chat(SYSTEM_PROMPT, taskPrompt(task), RESULT_SCHEMA, this.generation),
+    );
   }
 
   async reconcile(task: ReconcileTask): Promise<ReconcileResult> {
     return parseReconcile(
-      await this.chat(RECONCILE_SYSTEM_PROMPT, reconcilePrompt(task), RECONCILE_SCHEMA),
+      await this.chat(
+        RECONCILE_SYSTEM_PROMPT,
+        reconcilePrompt(task),
+        RECONCILE_SCHEMA,
+        this.interactive,
+      ),
     );
   }
 
   async annotate(task: AnnotateTask): Promise<AnnotateResult> {
     return parseAnnotate(
-      await this.chat(ANNOTATE_SYSTEM_PROMPT, annotatePrompt(task), ANNOTATE_SCHEMA),
+      await this.chat(
+        ANNOTATE_SYSTEM_PROMPT,
+        annotatePrompt(task),
+        ANNOTATE_SCHEMA,
+        this.generation,
+      ),
     );
   }
 
@@ -81,11 +114,16 @@ export class HttpConsolidator implements ConsolidationProvider {
   // throws — the caller (daemon or write tool) then degrades gracefully. Every throw names
   // what went wrong, because the caller's only other signal is the absence of a proposal:
   // a timeout, a dead endpoint and a model with nothing to say look identical otherwise.
-  private async chat(system: string, user: string, format: object): Promise<string> {
+  private async chat(
+    system: string,
+    user: string,
+    format: object,
+    deadline: Deadline,
+  ): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-    }, this.timeoutMs);
+    }, deadline.ms);
     try {
       let res = await this.post(system, user, format, controller.signal);
 
@@ -115,7 +153,7 @@ export class HttpConsolidator implements ConsolidationProvider {
       // Naming the timeout is what tells an operator to raise it rather than hunt a bug.
       if (controller.signal.aborted) {
         throw new Error(
-          `consolidation http provider: timed out after ${String(this.timeoutMs)}ms (MEMORY_CONSOLIDATE_TIMEOUT_MS)`,
+          `consolidation http provider: timed out after ${String(deadline.ms)}ms (${deadline.env})`,
           { cause: err },
         );
       }

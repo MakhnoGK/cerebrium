@@ -69,6 +69,19 @@ describe("Consolidator environment selection", () => {
     expect(config.provider).toBe("http");
     expect(createConsolidator(config.provider, config).name).toBe("http");
   });
+
+  it("should read the reconcile budget from configuration, well under the generation one", () => {
+    // Given
+    const defaults = new ConsolidationConfig(new StaticConfigSource({}));
+    const raised = new ConsolidationConfig(
+      new StaticConfigSource({ MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS: "40000" }),
+    );
+
+    // When / Then
+    expect(defaults.reconcileTimeoutMs).toBe(25_000);
+    expect(defaults.reconcileTimeoutMs).toBeLessThan(defaults.timeoutMs);
+    expect(raised.reconcileTimeoutMs).toBe(40_000);
+  });
 });
 
 describe("Non-generating providers (manual and off)", () => {
@@ -324,6 +337,26 @@ describe("HttpConsolidator (injected fetch)", () => {
     await expect(
       new HttpConsolidator({ fetchFn: hangs, timeoutMs: 5 }).generate(TASK),
     ).rejects.toThrow(/timed out after 5ms \(MEMORY_CONSOLIDATE_TIMEOUT_MS\)/);
+  });
+
+  it("should hold reconcile to its own budget rather than the generation timeout", async () => {
+    // Given — a backend that only ever settles when the caller gives up, and a generation
+    // timeout far above the reconcile one.
+    const hangs: FetchFn = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("This operation was aborted", "AbortError"));
+        });
+      });
+
+    // When / Then
+    await expect(
+      new HttpConsolidator({
+        fetchFn: hangs,
+        timeoutMs: 500_000,
+        reconcileTimeoutMs: 5,
+      }).reconcile(RECONCILE_TASK),
+    ).rejects.toThrow(/timed out after 5ms \(MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS\)/);
   });
 
   it("should post the reconcile schema and parse the verdict when reconciling", async () => {
