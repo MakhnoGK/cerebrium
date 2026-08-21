@@ -107,8 +107,9 @@ describe("The use-case seam", () => {
       .resolve(SearchTool)
       .invoke({ session_id, query: "anything", limit: 3 });
 
-    // Then
-    expect(calls).toEqual([{ query: "anything", limit: 3 }]);
+    // Then — the session travels with the call, which is the only thing that lets the
+    // daemon attribute the audit row to it.
+    expect(calls).toEqual([{ session_id, query: "anything", limit: 3 }]);
     expect(result).toMatchObject({ total_matches: 7, context_notes: ["a note"] });
   });
 });

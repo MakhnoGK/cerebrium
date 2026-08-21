@@ -2,6 +2,9 @@ import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/us
 import type { SymbolLookup } from "@/core/types";
 
 export interface FetchNodesArgs {
+  // Carried only so the call can be attributed in the audit log. The daemon reads it off
+  // the arguments, which is the only place a call's session travels.
+  session_id?: string;
   ids: string[];
   rev?: number;
   as_of?: string;
@@ -25,6 +28,7 @@ export type FetchNodes = UseCase<FetchNodesArgs, FetchNodesResult>;
 export const FETCH_NODES = useCaseToken<FetchNodesArgs, FetchNodesResult>("FetchNodes");
 
 export interface LookupCodeArgs {
+  session_id?: string;
   name?: string;
   file?: string;
   repo?: string;

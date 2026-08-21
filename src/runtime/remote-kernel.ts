@@ -53,6 +53,10 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
         {
           socketPath: this.options.socketPath,
           ...(this.options.timeoutMs === undefined ? {} : { timeoutMs: this.options.timeoutMs }),
+          // The same read/write distinction the error message below explains to an agent,
+          // applied one layer down: a dropped connection is ridden out for a read and
+          // surfaced for a write.
+          retryable: isRetryable(this.name),
         },
         this.name,
         // Arguments cross as JSON, so they must already be plain data. They are: the seam

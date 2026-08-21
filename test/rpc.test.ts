@@ -1,7 +1,12 @@
 import { rmSync, statSync, writeFileSync } from "node:fs";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { rpcCall, rpcHandshake, RpcUnavailableError } from "@/runtime/rpc-client";
+import {
+  closeRpcConnections,
+  rpcCall,
+  rpcHandshake,
+  RpcUnavailableError,
+} from "@/runtime/rpc-client";
 import { parseRequest, PROTOCOL_VERSION, RPC_ERROR, socketPathProblem } from "@/core/rpc";
 import { createDaemonMethods, RpcServer, surfaceMethods, type RpcMethod } from "@/presentation/rpc";
 import { setup } from "@test/helpers";
@@ -18,6 +23,7 @@ async function serve(methods: Record<string, RpcMethod>): Promise<void> {
 }
 
 afterEach(async () => {
+  closeRpcConnections();
   await server?.close();
   server = null;
   rmSync(SOCKET, { force: true });

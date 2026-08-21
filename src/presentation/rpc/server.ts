@@ -4,6 +4,7 @@ import {
   encodeLine,
   errorResponse,
   isNotification,
+  notificationFrame,
   parseRequest,
   RPC_ERROR,
   socketPathProblem,
@@ -82,6 +83,23 @@ export class RpcServer {
         resolve();
       });
     });
+  }
+
+  // Speaks to every connection the daemon is holding, without being asked. Deliberately
+  // undirected: which client should hear what is a routing question, and routing needs
+  // subscriptions, which do not exist yet. This is the channel they will be carried on.
+  broadcast(method: string, params: Record<string, unknown> = {}): number {
+    const line = encodeLine(notificationFrame(method, params));
+    let reached = 0;
+
+    for (const socket of this.sockets) {
+      if (!socket.writable) continue;
+
+      socket.write(line);
+      reached++;
+    }
+
+    return reached;
   }
 
   private accept(socket: Socket): void {

@@ -37,6 +37,7 @@ export class SearchTool implements McpTool<Schema, AuditedResponse> {
   async invoke(args: ToolArgs<Schema>): Promise<AuditedResponse> {
     const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { results, total_matches, notes, audit } = await this.search.invoke({
+      session_id: args.session_id,
       query: args.query,
       limit: args.limit,
       project: args.project,

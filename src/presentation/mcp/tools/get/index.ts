@@ -29,6 +29,7 @@ export class GetTool implements McpTool<Schema, GetResponse> {
   async invoke(args: ToolArgs<Schema>): Promise<GetResponse> {
     const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
     const { nodes, not_found } = await this.fetch.invoke({
+      session_id: args.session_id,
       ids: args.ids,
       rev: args.rev,
       as_of: args.as_of,
