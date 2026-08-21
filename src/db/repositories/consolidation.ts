@@ -643,6 +643,12 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .all() as { id: string; title: string; content: string }[];
   }
 
+  // Revisions are append-only, so this changes if and only if a body or a title arrived
+  // since the last look — and only those can make a new wikilink resolvable.
+  revisionCount(): number {
+    return (this.db.prepare("SELECT COUNT(*) AS n FROM revisions").get() as { n: number }).n;
+  }
+
   // Titles of retired authored nodes, so a wikilink naming one can be followed to
   // whatever superseded it. Titles only — the bodies are not read.
   retiredAuthoredTitles(): { id: string; title: string }[] {

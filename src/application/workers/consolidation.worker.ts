@@ -92,6 +92,7 @@ export class ConsolidationWorker {
   private stopping = false;
   private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
   private stageMark: { stage: string; at: number } | null = null;
+  private lastWikilinkScan: { revisions: number; dangling: number } | null = null;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -393,6 +394,14 @@ export class ConsolidationWorker {
   // authored statement about a relationship, not an inference about one, so there is
   // nothing to suggest and nothing to judge.
   private resolveWikilinks(now: string, result: ConsolidationTickResult): void {
+    const revisions = this.consolidationRepo.revisionCount();
+
+    if (this.lastWikilinkScan?.revisions === revisions) {
+      result.wikilinks_dangling = this.lastWikilinkScan.dangling;
+
+      return;
+    }
+
     const bodies = this.consolidationRepo.authoredBodies();
     const live = slugIndexOf(bodies);
     const retired = slugIndexOf(this.consolidationRepo.retiredAuthoredTitles());
@@ -413,6 +422,8 @@ export class ConsolidationWorker {
         }
       }
     }
+
+    this.lastWikilinkScan = { revisions, dangling: result.wikilinks_dangling };
   }
 
   // A wikilink written before a supersede still names the retired title, so a target that

@@ -1,7 +1,7 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationWorker } from "@/application/workers";
-import { EdgesRepo } from "@/db/repositories";
+import { EdgesRepo, NodesRepo } from "@/db/repositories";
 import { EdgeType, MemoryKind } from "@/core/vocab";
 import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
 import { LinkTool } from "@/presentation/mcp/tools/link";
@@ -174,6 +174,28 @@ describe("Wikilinks as edges", () => {
     expect(edgeBetween(source, first)).toBeUndefined();
     expect(edgeBetween(source, second)).toBeUndefined();
     expect(result.wikilinks_dangling).toBeGreaterThanOrEqual(1);
+  });
+
+  it("should not re-read the bodies when nothing has been written since the last pass", async () => {
+    // Given — a dangling link, counted once
+    const worker = container.resolve(ConsolidationWorker);
+    const lonely = await write("Lonely", "this refers to [[a-node-nobody-ever-wrote]] and stops");
+
+    expect((await worker.tick()).wikilinks_dangling).toBe(1);
+
+    // When — the node carrying it is retired, which adds no revision
+    container.resolve(NodesRepo).invalidateNode(lonely, {
+      ts: "2026-02-01T00:00:00.000Z",
+      session_id: session,
+    });
+
+    // Then — the count is the one already known, not one recomputed from live bodies
+    expect((await worker.tick()).wikilinks_dangling).toBe(1);
+
+    // And a single new revision is enough to make it look again
+    await write("Anything", "a body whose only job is to advance the revision count");
+
+    expect((await worker.tick()).wikilinks_dangling).toBe(0);
   });
 
   it("should link a wikilink written before its target existed, once it exists", async () => {
