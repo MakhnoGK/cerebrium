@@ -139,3 +139,25 @@ export enum PrincipalKind {
   SYSTEM = "system",
   UNATTRIBUTED = "unattributed",
 }
+
+// Where a job is in its life. A terminal state is never left: `done`, `failed` and
+// `cancelled` rows are history, and the completion UPDATE is guarded so a late report
+// from an attempt whose lease has already been reclaimed cannot reopen one.
+export enum JobState {
+  PENDING = "pending",
+  RUNNING = "running",
+  DONE = "done",
+  FAILED = "failed",
+  CANCELLED = "cancelled",
+}
+
+export const TERMINAL_JOB_STATES = [JobState.DONE, JobState.FAILED, JobState.CANCELLED] as const;
+
+// What a job asks for. The prefix before the dot names the consumer that may claim it:
+// `code.*` is kernel work the daemon does in-process, `agent.*` is reserved for a host
+// that spawns an external process and is deliberately not claimable by the daemon.
+export enum JobKind {
+  CODE_INDEX = "code.index",
+}
+
+export const AGENT_JOB_PREFIX = "agent.";
