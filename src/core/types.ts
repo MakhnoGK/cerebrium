@@ -174,6 +174,14 @@ export interface TechStats {
     sweep_lease_owner: string | null;
     sweep_lease_expires_at: string | null;
   };
+  jobs: {
+    by_state: Record<string, number>;
+    // The kernel's own recurring maintenance: when the mirror refresh last finished, and
+    // whether one is queued or in flight right now.
+    last_code_index_at: string | null;
+    last_code_index_error: string | null;
+    code_index_open: boolean;
+  };
   code_repos: RepoProvenance[];
   last_activity: string | null;
 }

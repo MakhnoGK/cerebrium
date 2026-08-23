@@ -4,8 +4,9 @@ import { inject, injectable } from "tsyringe";
 import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
 import { CodeRepo } from "@/db/repositories/code";
 import { EmbeddingQueueRepo } from "@/db/repositories/embedding-queue";
+import { JobsRepo } from "@/db/repositories/jobs";
 import type { TechStats } from "@/core/types";
-import { EdgeType, MemoryKind } from "@/core/vocab";
+import { EdgeType, JobKind, MemoryKind } from "@/core/vocab";
 
 function walBytes(dbPath: string): number {
   if (dbPath === ":memory:" || !dbPath) return 0;
@@ -24,6 +25,7 @@ export class StatsRepo extends BaseRepo {
     @inject(DB_TOKEN) db: Database.Database,
     private readonly queue: EmbeddingQueueRepo,
     private readonly code: CodeRepo,
+    private readonly jobs: JobsRepo,
   ) {
     super(db);
   }
@@ -174,8 +176,20 @@ export class StatsRepo extends BaseRepo {
         sweep_lease_owner: sweepLease?.owner ?? null,
         sweep_lease_expires_at: sweepLease?.expires_at ?? null,
       },
+      jobs: this.jobStats(),
       code_repos: this.code.allRepoProvenance(),
       last_activity: one<{ t: string | null }>("SELECT MAX(ts) AS t FROM events").t,
+    };
+  }
+
+  private jobStats(): TechStats["jobs"] {
+    const [last] = this.jobs.recent({ kind: JobKind.CODE_INDEX, limit: 1 });
+
+    return {
+      by_state: this.jobs.counts(),
+      last_code_index_at: last?.ended_at ?? null,
+      last_code_index_error: last?.last_error ?? null,
+      code_index_open: this.jobs.hasOpen(JobKind.CODE_INDEX),
     };
   }
 

@@ -148,6 +148,22 @@ function render(s: OperatorSnapshotResult, source: string): string {
     );
   }
   L.push("");
+  L.push("Jobs");
+  L.push(
+    `  by state                   : ${
+      Object.keys(s.jobs.by_state).length === 0
+        ? "none"
+        : Object.entries(s.jobs.by_state)
+            .map(([state, n]) => `${n} ${state}`)
+            .join(", ")
+    }`,
+  );
+  L.push(`  code index open            : ${s.jobs.code_index_open ? "yes" : "no"}`);
+  L.push(`  last code index            : ${s.jobs.last_code_index_at ?? "—"}`);
+  if (s.jobs.last_code_index_error) {
+    L.push(`  last code index error      : ${s.jobs.last_code_index_error}`);
+  }
+  L.push("");
   L.push("Storage");
   L.push(
     `  db                         : ${fmtBytes(s.storage.db_bytes)}  (${s.storage.page_count} pages × ${s.storage.page_size} B)`,
