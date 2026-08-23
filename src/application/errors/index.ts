@@ -5,3 +5,4 @@ export {
   RepositoryNotConfiguredError,
 } from "@/application/errors/code-index";
 export { InvalidCursorError } from "@/application/errors/page";
+export { UnsubmittableJobKindError } from "@/application/errors/jobs";

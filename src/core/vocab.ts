@@ -107,6 +107,8 @@ export enum EventAction {
   CONSOLIDATE_APPLY = "consolidate_apply",
   CONSOLIDATE_RETRY = "consolidate_retry",
   CONSOLIDATE_TICK = "consolidate_tick",
+  JOB_SUBMIT = "job_submit",
+  JOB_STATUS = "job_status",
   STATS = "stats",
 }
 

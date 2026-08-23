@@ -61,6 +61,12 @@ const SCHEMAS = {
     ...page,
   }),
   mirror_status: z.object({ session_id: ulid.optional(), source_id: z.string().optional() }),
+  job_status: z.object({
+    session_id: ulid.optional(),
+    id: ulid.optional(),
+    kind: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+  }),
 
   // Writes
   //
@@ -130,6 +136,11 @@ const SCHEMAS = {
     repo: z.string().optional(),
     path: z.string().optional(),
     force: z.boolean().optional(),
+  }),
+  submit_job: session.extend({
+    kind: z.string().min(1),
+    payload: z.record(z.unknown()).optional(),
+    scheduled_for: iso.optional(),
   }),
 } as const satisfies Record<CallName, z.ZodType>;
 

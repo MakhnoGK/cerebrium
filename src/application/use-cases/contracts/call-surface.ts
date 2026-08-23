@@ -1,4 +1,5 @@
 import { APPLY_CANDIDATE, RETRY_CANDIDATE } from "@/application/use-cases/contracts/consolidation";
+import { SUBMIT_JOB } from "@/application/use-cases/contracts/jobs";
 import {
   INVALIDATE_MEMORY,
   LINK_NODES,
@@ -66,6 +67,12 @@ export const CALL_SURFACE = {
     token: READ_SURFACE.mirror_status,
     kind: "read",
     action: EventAction.MIRROR_STATUS,
+    capability: Capability.READ,
+  },
+  job_status: {
+    token: READ_SURFACE.job_status,
+    kind: "read",
+    action: EventAction.JOB_STATUS,
     capability: Capability.READ,
   },
 
@@ -154,6 +161,15 @@ export const CALL_SURFACE = {
     kind: "write",
     action: EventAction.CONSOLIDATE_RETRY,
     capability: Capability.CONSOLIDATE,
+  },
+  // The async form of `index_code`, and it costs the same capability: submitting work is
+  // not a cheaper way to ask for something the synchronous call gates behind ADMIN. Which
+  // kinds may be named here is enforced by the use case, not by this entry.
+  submit_job: {
+    token: SUBMIT_JOB,
+    kind: "write",
+    action: EventAction.JOB_SUBMIT,
+    capability: Capability.ADMIN,
   },
   index_code: {
     token: INDEX_CODE,

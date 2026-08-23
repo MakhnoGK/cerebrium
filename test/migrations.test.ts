@@ -42,6 +42,7 @@ const MIGRATION_IDS = [
   "028_retire_third_party_symbols.cjs",
   "029_documents_suggested.cjs",
   "030_documents_linked.cjs",
+  "031_jobs.sql",
 ];
 
 const dirs: string[] = [];
