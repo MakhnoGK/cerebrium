@@ -8,6 +8,7 @@ export * from "@/application/use-cases/contracts/operations";
 export * from "@/application/use-cases/contracts/read";
 export * from "@/application/use-cases/contracts/read-surface";
 export * from "@/application/use-cases/contracts/call-surface";
+export * from "@/application/use-cases/contracts/runner";
 export * from "@/application/use-cases/contracts/search";
 export * from "@/application/use-cases/contracts/session";
 export * from "@/application/use-cases/contracts/subscriptions";

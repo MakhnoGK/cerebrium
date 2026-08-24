@@ -10,6 +10,7 @@ import "@/application/use-cases/local/mirrors";
 import "@/application/use-cases/local/operations";
 import "@/application/use-cases/local/record-checkpoint";
 import "@/application/use-cases/local/restore-memory";
+import "@/application/use-cases/local/runner";
 import "@/application/use-cases/local/search-memory";
 import "@/application/use-cases/local/session";
 import "@/application/use-cases/local/subscriptions";

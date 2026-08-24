@@ -160,6 +160,8 @@ export const TERMINAL_JOB_STATES = [JobState.DONE, JobState.FAILED, JobState.CAN
 // that spawns an external process and is deliberately not claimable by the daemon.
 export enum JobKind {
   CODE_INDEX = "code.index",
+  // Claimed only by the runner host, never by the daemon — see AGENT_JOB_PREFIX.
+  AGENT_SELFTEST = "agent.selftest",
 }
 
 export const AGENT_JOB_PREFIX = "agent.";
