@@ -699,7 +699,14 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // A reconciliation safety net (removeFile normally keeps these in sync). Touches only
   // memory_kind='mirror'; authored memory is never a candidate. (External mirror records
   // from a retired source are a natural future addition here.)
-  deadMirrorNodes(limit: number): string[] {
+  // `unreachable` names repos whose root is not on disk. Their symbols have no `code_files`
+  // row — `removeFile` deletes it alongside the invalidation — so they look exactly like
+  // orphans, and pruning them would retire a whole repo for being unmounted or moved rather
+  // than for being deleted. Caller decides which repos those are; this layer touches no disk.
+  deadMirrorNodes(limit: number, unreachable: readonly string[] = []): string[] {
+    const holes = unreachable.map(() => "?").join(",");
+    const skip = unreachable.length ? `AND sy.repo NOT IN (${holes})` : "";
+
     return (
       this.db
         .prepare(
@@ -707,12 +714,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
            FROM nodes n
            JOIN symbols sy ON sy.node_id = n.id
            WHERE n.memory_kind = 'mirror' AND n.invalidated_at IS NULL
+             ${skip}
              AND NOT EXISTS (
                SELECT 1 FROM code_files cf WHERE cf.repo = sy.repo AND cf.path = sy.path
              )
            LIMIT ?`,
         )
-        .all(limit) as { id: string }[]
+        .all(...unreachable, limit) as { id: string }[]
     ).map((r) => r.id);
   }
 
