@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
@@ -892,6 +893,16 @@ export class ConsolidationWorker {
   // Tier-1 mirror prune. Deterministic, no generation. auto soft-invalidates
   // dead mirror nodes (they then never surface in default search or graph expansion);
   // suggest queues for a prune candidate; off skips. Never touches authored memory.
+  // Repos whose root is no longer on disk. Their symbols cannot be re-verified against
+  // source, but neither were they deleted from it — the checkout moved, the volume is
+  // unmounted, or the remembered root is stale — so the prune must leave them alone.
+  private unreachableRepos(): string[] {
+    return this.codeRepo
+      .storedRepoRoots()
+      .filter((repo) => !existsSync(repo.root))
+      .map((repo) => repo.name);
+  }
+
   private async pruneMirrors(now: string, result: ConsolidationTickResult): Promise<void> {
     const posture = this.posture.prune;
 
@@ -905,7 +916,7 @@ export class ConsolidationWorker {
       return;
     }
 
-    const dead = this.consolidationRepo.deadMirrorNodes(this.batch.prune);
+    const dead = this.consolidationRepo.deadMirrorNodes(this.batch.prune, this.unreachableRepos());
 
     // Not clean means the batch limit may have truncated the list, so the next sweep looks
     // again whatever the watermark says.
