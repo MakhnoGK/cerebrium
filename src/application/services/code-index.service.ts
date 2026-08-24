@@ -96,7 +96,18 @@ export class CodeIndexService {
       dirty: false,
     };
 
-    const candidates = existsSync(target.root) ? walk(target.root) : [];
+    // A root that is not on disk is unreadable, not empty. Walking it yields nothing, and
+    // the sweep below reads "nothing on disk" as "every file was deleted" and retires the
+    // whole repo's symbols — which is how one unattended refresh retired 24,689 of them
+    // across nine repos whose checkout had moved. Returning here is what keeps an
+    // unreachable tree (moved checkout, unmounted volume, stale remembered root) retrievable.
+    if (!existsSync(target.root)) {
+      stats.duration_ms = Date.parse(this.clock.now()) - start;
+
+      return { ...stats, root_missing: true };
+    }
+
+    const candidates = walk(target.root);
     const onDisk = new Set(candidates.map((c) => c.rel));
     const dirty: { rel: string; lang: string; extract: FileExtract }[] = [];
 

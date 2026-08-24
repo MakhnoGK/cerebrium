@@ -305,6 +305,10 @@ export interface IndexStats {
   branch: string | null;
   commit: string | null;
   dirty: boolean;
+  // The root directory was not on disk, so nothing was read and nothing was retired. Absent
+  // on a normal run. Distinguishes "the source tree is gone" from "the author deleted every
+  // file", which the sweep below cannot tell apart on its own.
+  root_missing?: true;
 }
 
 // ---- external mirrors ------------------------------------------------------
