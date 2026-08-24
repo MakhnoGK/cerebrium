@@ -2,6 +2,10 @@ import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import {
+  CONSOLIDATION_PROVIDER_TOKEN,
+  type ConsolidationProvider,
+} from "@/domain/ports/consolidation-provider";
+import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
@@ -16,6 +20,7 @@ import {
   OPERATOR_SNAPSHOT,
   STATS_SNAPSHOT,
   useCase,
+  type GenerationReport,
   type IndexCode,
   type IndexCodeArgs,
   type IndexCodeResult,
@@ -23,8 +28,9 @@ import {
   type OperatorSnapshotResult,
   type StatsSnapshot,
 } from "@/application/use-cases/contracts";
+import { describeRoles, resolveRoles } from "@/consolidation/roles";
 import { StatsRepo } from "@/db/repositories";
-import { ConfigRegistry } from "@/infrastructure/config";
+import { ConfigRegistry, ConsolidationConfig } from "@/infrastructure/config";
 
 @useCase(INDEX_CODE)
 export class LocalIndexCode implements IndexCode {
@@ -51,8 +57,10 @@ export class LocalStatsSnapshot implements StatsSnapshot {
     private readonly statsRepo: StatsRepo,
     private readonly processes: ProcessRegistryService,
     private readonly config: ConfigRegistry,
+    private readonly consolidation: ConsolidationConfig,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
+    @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
   ) {}
 
   invoke(): Promise<Record<string, unknown>> {
@@ -66,6 +74,7 @@ export class LocalStatsSnapshot implements StatsSnapshot {
         daemon_alive: this.daemon.isDaemonAlive(),
         daemon_pid: this.daemon.readDaemonPid(),
       },
+      generation: generationReport(this.consolidator, this.consolidation),
       // The registry and the ignored-config channel, compact: which processes are up and
       // whether any variable was set but unusable. Values themselves stay out — an agent
       // should not pay tokens for the whole config table (`cerebrium-stats` prints it).
@@ -91,8 +100,10 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
     private readonly statsRepo: StatsRepo,
     private readonly processes: ProcessRegistryService,
     private readonly config: ConfigRegistry,
+    private readonly consolidation: ConsolidationConfig,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
+    @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
     @inject(CONFIG_FILE_TOKEN) private readonly file: ConfigFileReport | null,
   ) {}
 
@@ -118,6 +129,7 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
         model_ms: row.model_ms,
         model_error: row.model_error,
       })),
+      generation: generationReport(this.consolidator, this.consolidation),
       config: {
         file: this.file,
         values: effective.values,
@@ -126,4 +138,17 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
       },
     });
   }
+}
+
+// Resolved from the same config the container resolves the provider from, so what this
+// reports is what a call will be sent with.
+function generationReport(
+  consolidator: ConsolidationProvider,
+  config: ConsolidationConfig,
+): GenerationReport {
+  return {
+    provider: `${consolidator.name}@${consolidator.version}`,
+    enabled: consolidator.enabled,
+    roles: describeRoles(resolveRoles(config, config.roles)),
+  };
 }

@@ -683,7 +683,7 @@ describe("checkpoint tool", () => {
           title: "wrapped up the parser",
           summary: "wrapped up the parser",
           decisions: ["use RRF"],
-          open_threads: ["wire the reranker"],
+          open_threads: ["point annotate at a smaller model"],
         },
       }),
     );
@@ -738,7 +738,7 @@ describe("checkpoint tool", () => {
 });
 
 describe("stats tool", () => {
-  it("should report queue, content, and drain sections when called", async () => {
+  it("should report queue, content, drain, and generation sections when called", async () => {
     const client = await connect();
     const sid = await startSession(client);
     await writeFact(client, sid, "x", "a durable fact with a body of words");
@@ -746,13 +746,22 @@ describe("stats tool", () => {
       queue: { backlog: number };
       content: { nodes_total: number };
       drain: { provider: string; daemon_alive: boolean };
-      rerank: { provider: string; enabled: boolean };
+      generation: {
+        provider: string;
+        enabled: boolean;
+        roles: Record<string, { model: string; timeout_ms: number; inherited: boolean }>;
+      };
     }>(await client.callTool({ name: "stats", arguments: { session_id: sid } }));
 
     expect(res.queue.backlog).toBe(1);
     expect(res.content.nodes_total).toBe(1);
     expect(res.drain.provider).toBe("local-null@1");
     expect(res.drain).toHaveProperty("daemon_alive");
+    expect(res.generation).toMatchObject({ provider: "manual@1", enabled: false });
+    expect(res.generation.roles.annotate).toMatchObject({ inherited: true });
+    expect(res.generation.roles.reconcile!.timeout_ms).toBeLessThan(
+      res.generation.roles.generate!.timeout_ms,
+    );
   });
 
   it("should work without a session_id when peeked read-only", async () => {

@@ -80,6 +80,19 @@ function render(s: OperatorSnapshotResult, source: string): string {
   );
   L.push(`  lease expires              : ${s.drain.lease_expires_at ?? "—"}`);
   L.push("");
+  L.push("Generation");
+  L.push(
+    `  provider                   : ${s.generation.provider}${s.generation.enabled ? "" : " (generates nothing)"}`,
+  );
+  for (const [role, resolved] of Object.entries(s.generation.roles)) {
+    const r = resolved as { model: string; url: string; timeout_ms: number; inherited: boolean };
+
+    L.push(
+      `  ${role.padEnd(27)}: ${r.model} @ ${String(r.timeout_ms)}ms` +
+        (r.inherited ? "" : " (role override)"),
+    );
+  }
+  L.push("");
   L.push("Processes");
   if (s.processes.length === 0) {
     L.push("  none registered");
