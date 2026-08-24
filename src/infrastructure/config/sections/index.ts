@@ -18,6 +18,7 @@ export {
   DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
+  IdentityConfig,
   RetrievalConfig,
 } from "@/infrastructure/config/sections/runtime.config";
 export {

@@ -10,6 +10,23 @@
       "backfill": 10
     }
   },
+  "principals": {
+    "profiles": {
+      "cerebrium-runner": {
+        "capabilities": {
+          "read": "auto",
+          "write": "suggest",
+          "consolidate": "off",
+          "admin": "off"
+        },
+        "quota": {
+          "windowMs": 3600000,
+          "writes": 60
+        },
+        "weight": 0.8
+      }
+    }
+  },
   "jobs": {
     "enabled": true,
     "codeIndexIntervalMs": 43200000,

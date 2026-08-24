@@ -1,5 +1,14 @@
 import { join } from "node:path";
-import { bool, configSection, custom, int, num, SectionOf, str } from "@/domain/ports/config";
+import {
+  bool,
+  configSection,
+  custom,
+  int,
+  nullableStr,
+  num,
+  SectionOf,
+  str,
+} from "@/domain/ports/config";
 import { cerebriumHome } from "@/runtime/paths";
 
 const home = (...parts: string[]): string => join(cerebriumHome(), ...parts);
@@ -7,6 +16,24 @@ const home = (...parts: string[]): string => join(cerebriumHome(), ...parts);
 @configSection()
 export class DatabaseConfig extends SectionOf("database", {
   path: str(home("memory.db")).env("MEMORY_DB_PATH"),
+}) {}
+
+// The principal this host writes as, pinning what the MCP `initialize` handshake would
+// otherwise decide. Needed because a headless agent CLI sends the same `clientInfo.name` as
+// the interactive one — measured 2026-08-23, both arrive as `claude-code` — so without a
+// pin an unattended runner is indistinguishable from the human, and none of the per-writer
+// trust, quota or revocation in `principals` can reach it.
+//
+// This does NOT let a caller name itself: the value is read from the host process's own
+// environment, which only whoever spawned the host can set. That is the same rule the call
+// surface already states about `start_session`.
+//
+// ⚠️ Set it per host, through `MEMORY_CLIENT` in that host's own MCP entry — never in the
+// shared `config.json`, which every host on this machine reads. Pinning it there renames
+// the owner's interactive sessions too, which is the opposite of what it is for.
+@configSection()
+export class IdentityConfig extends SectionOf("identity", {
+  client: nullableStr(null).env("MEMORY_CLIENT"),
 }) {}
 
 @configSection()
