@@ -159,3 +159,38 @@ describe("AgentRunService", () => {
     expect(clients).not.toContain("claude-code");
   });
 });
+
+describe("AgentRunService.enqueue", () => {
+  it("should queue an agent job the call surface refuses to take", () => {
+    // Given
+    const env = setup();
+
+    // When
+    const job = service().enqueue(JobKind.AGENT_SELFTEST, { why: "verification" });
+
+    // Then
+    expect(job.state).toBe(JobState.PENDING);
+    expect(env.jobs.byId(job.id)!.kind).toBe(JobKind.AGENT_SELFTEST);
+    expect(JSON.parse(env.jobs.byId(job.id)!.payload_json)).toEqual({ why: "verification" });
+  });
+
+  it("should refuse kernel work, which belongs on the call surface instead", () => {
+    // Given
+    setup();
+
+    // When / Then
+    expect(() => service().enqueue(JobKind.CODE_INDEX, {})).toThrow(/goes through submit_job/);
+  });
+
+  it("should be claimable by the runner as soon as it is queued", () => {
+    // Given
+    setup();
+    const job = service().enqueue(JobKind.AGENT_SELFTEST, {});
+
+    // When
+    const claimed = service().claim([JobKind.AGENT_SELFTEST], OWNER);
+
+    // Then
+    expect(claimed?.id).toBe(job.id);
+  });
+});

@@ -57,6 +57,19 @@ export class AgentRunService {
     });
   }
 
+  // The mirror of `submit_job`, which accepts only `code.*`: this accepts only `agent.*`.
+  // The kernel deliberately does not know which agent tasks exist — that registry lives in
+  // the runner — so an unregistered kind is rejected there, when it is claimed, not here.
+  enqueue(kind: string, payload: Record<string, unknown>): JobRow {
+    if (!kind.startsWith(AGENT_JOB_PREFIX)) {
+      throw new Error(`${kind} is not an agent job; kernel work goes through submit_job`);
+    }
+
+    const now = this.clock.now();
+
+    return this.jobs.submit({ id: newId(), kind, payload, scheduled_for: now, now });
+  }
+
   renew(id: string, owner: string): boolean {
     return this.jobs.renew(id, owner, this.clock.now(), LEASE_MS);
   }

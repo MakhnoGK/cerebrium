@@ -64,3 +64,31 @@ describe("agent task registry", () => {
     expect(task.writes).toBe(false);
   });
 });
+
+describe("selftest result verification", () => {
+  const verify = (r: string | null) => taskFor(JobKind.AGENT_SELFTEST)!.verify(r);
+
+  it("should accept a reply carrying a real session id", () => {
+    // Given / When / Then
+    expect(verify('{"session":"01M0SC2N7PZBQ7JE7VY7AQ5YAQ","hits":1}')).toBeNull();
+  });
+
+  it("should accept the same reply inside a code fence", () => {
+    // Given / When / Then
+    expect(verify('```json\n{"session":"01M0SC2N7PZBQ7JE7VY7AQ5YAQ","hits":1}\n```')).toBeNull();
+  });
+
+  it("should reject the shape a run produces when it never reached the tools", () => {
+    // Given — exactly what the first live self-test returned, having exited 0.
+    const real = '{"session":"session_start tool not available via ToolSearch","hits":0}';
+
+    // When / Then
+    expect(verify(real)).toContain("session is not an id");
+  });
+
+  it("should reject a reply with no session at all, and an empty one", () => {
+    // Given / When / Then
+    expect(verify("I could not do that.")).toBe("no session in the reply");
+    expect(verify(null)).toBe("no reply");
+  });
+});

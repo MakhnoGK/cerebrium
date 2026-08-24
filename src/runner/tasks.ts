@@ -26,6 +26,11 @@ export interface AgentTask {
   // that was supposed to be read-only from one that was not.
   writes: boolean;
   prompt: (ctx: TaskContext, payload: Record<string, unknown>) => Promise<string>;
+  // Judges the run's own output. Returns null when it is usable, or why it is not.
+  // A clean exit is not evidence of work: a run whose MCP server failed to start exits 0
+  // having answered from nothing, which is how the first live self-test "succeeded" while
+  // reaching no tools at all.
+  verify: (result: string | null) => string | null;
 }
 
 // Proves the loop and nothing else: spawn, reach Cerebrium under the pinned identity, do one
@@ -49,6 +54,19 @@ const SELFTEST: AgentTask = {
         "Do not write, update, or link anything.",
       ].join(" "),
     ),
+  verify: (result) => {
+    if (result === null) return "no reply";
+
+    // The model may fence the JSON; the check is about whether it reached the tools, not
+    // about whether it followed formatting to the letter.
+    const match = /\{[^{}]*"session"\s*:\s*"([^"]*)"[^{}]*\}/.exec(result);
+
+    if (match === null) return "no session in the reply";
+
+    return /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(match[1]!)
+      ? null
+      : `session is not an id: ${match[1]!.slice(0, 60)}`;
+  },
 };
 
 const TASKS: readonly AgentTask[] = [SELFTEST];
