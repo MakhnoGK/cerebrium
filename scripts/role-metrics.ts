@@ -4,6 +4,11 @@ import type { AnnotateResult } from "@/domain/ports/consolidation-provider";
 // without a model on the other end of a socket.
 
 export const GATES = {
+  // The incumbent must beat a constant answer by this much before a comparison against it
+  // means anything. Without a floor, a drop gate passes a swap into noise: measured
+  // 2026-08-24, both models scored 0.500 on reconcile-shaped clusters whose majority class
+  // was 0.625, and the candidate "held" only because there was nothing to lose.
+  floorMargin: 0.05,
   // A candidate may not lose more than this much accuracy against the baseline.
   accuracyDrop: 0.05,
   // ...nor this much of the attributes the baseline finds, measured against how much of its
@@ -56,4 +61,14 @@ export function percentile(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
 
   return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] ?? 0;
+}
+
+// What a model that always answered the same way would score on this sample. A gate that
+// cannot clear it is measuring the labels, not the model.
+export function majorityRate(expected: boolean[]): number {
+  if (!expected.length) return 1;
+
+  const yes = expected.filter(Boolean).length;
+
+  return Math.max(yes, expected.length - yes) / expected.length;
 }

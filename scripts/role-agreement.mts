@@ -5,6 +5,7 @@ import {
   GATES,
   inventedNumbers,
   jaccard,
+  majorityRate,
   mean,
   percentile,
   terms,
@@ -149,8 +150,12 @@ async function judgeRole(
 ): Promise<Record<string, unknown> & { verdict: string }> {
   const usable = labelled.filter((row) => row.members.length >= 2);
 
-  if (!usable.length) {
-    return { sampled: 0, verdict: "skip", note: "no labelled candidates in this store" };
+  if (usable.length < 2) {
+    return {
+      sampled: usable.length,
+      verdict: "skip",
+      note: "too few labelled candidates whose members still exist to measure anything",
+    };
   }
 
   const arms = [opts.baseline, opts.candidate].map((model) => ({
@@ -190,6 +195,8 @@ async function judgeRole(
     within_cap: arm.withinCap,
   }));
   const drop = base!.accuracy - cand!.accuracy;
+  const floor = majorityRate(usable.map((row) => row.expectMerge));
+  const measurable = base!.accuracy >= floor + GATES.floorMargin;
 
   return {
     sampled: usable.length,
@@ -199,7 +206,16 @@ async function judgeRole(
     baseline: base,
     candidate: cand,
     accuracy_drop: drop,
-    verdict: drop <= GATES.accuracyDrop && cand!.failures === 0 ? "pass" : "fail",
+    majority_rate: floor,
+    measurable,
+    verdict: !measurable || drop > GATES.accuracyDrop || cand!.failures > 0 ? "fail" : "pass",
+    ...(measurable
+      ? {}
+      : {
+          note:
+            "the baseline does not beat a constant answer on these labels — either the task " +
+            "shape or the labels cannot support this gate, and no swap can be justified by it",
+        }),
   };
 }
 
@@ -331,18 +347,19 @@ async function timed_<T>(call: () => Promise<T>): Promise<Timed<T>> {
   }
 }
 
-// Ordered by id, not sampled at random: two runs compare the same clusters, so a number
-// that moved means the model moved.
+// Ordered by `member_hash`, which is a sha256 already in the table: the order is stable, so
+// two runs compare the same clusters and a number that moved means the model moved — and it
+// is uncorrelated with age, unlike id order, whose head is old candidates whose members have
+// since been superseded. The whole labelled set is read; it is a few hundred rows.
 function loadLabelled(db: Database.Database, n: number): Labelled[] {
   const rows = db
     .prepare(
       `SELECT id, kind, status, member_ids
          FROM consolidation_candidates
         WHERE status IN ('applied','dismissed') AND kind IN ('merge','distill')
-        ORDER BY id
-        LIMIT ?`,
+        ORDER BY member_hash`,
     )
-    .all(n * 4) as { id: string; kind: ConsolidationKind; status: string; member_ids: string }[];
+    .all() as { id: string; kind: ConsolidationKind; status: string; member_ids: string }[];
   const content = db.prepare(
     `SELECT n.id AS id, n.title AS title, r.content AS content
        FROM nodes n
@@ -450,6 +467,10 @@ function render(
 
     L.push(`  clusters           : ${String(row.sampled)}  (${String(row.labels)})`);
     L.push(
+      `  constant answer    : ${fmt(row.majority_rate as number)}` +
+        (row.measurable === true ? "" : "  <- the baseline does not beat it"),
+    );
+    L.push(
       `  accuracy vs labels : ${fmt(base.accuracy as number)} -> ${fmt(cand.accuracy as number)}` +
         `  (drop ${fmt(row.accuracy_drop as number)}, gate ${String(GATES.accuracyDrop)})`,
     );
@@ -463,6 +484,7 @@ function render(
       )} of ${String(row.sampled)}`,
     );
     L.push(`  provider failures  : ${String(base.failures)} -> ${String(cand.failures)}`);
+    if (typeof row.note === "string") L.push(`  ${row.note}`);
   }
 
   L.push("");
