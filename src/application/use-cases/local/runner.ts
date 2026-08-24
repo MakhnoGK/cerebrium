@@ -1,11 +1,14 @@
 import { AgentRunService } from "@/application/services/agent-run.service";
 import {
   CLAIM_JOB,
+  ENQUEUE_AGENT_JOB,
   FINISH_JOB,
   RENEW_JOB,
   useCase,
   type ClaimJob,
   type ClaimJobArgs,
+  type EnqueueAgentJob,
+  type EnqueueAgentJobArgs,
   type FinishJob,
   type FinishJobArgs,
   type RenewJob,
@@ -37,5 +40,14 @@ export class LocalFinishJob implements FinishJob {
 
   invoke(args: FinishJobArgs): Promise<boolean> {
     return this.runs.finish(args.id, args.owner, args.report);
+  }
+}
+
+@useCase(ENQUEUE_AGENT_JOB)
+export class LocalEnqueueAgentJob implements EnqueueAgentJob {
+  constructor(private readonly runs: AgentRunService) {}
+
+  invoke(args: EnqueueAgentJobArgs): Promise<JobRow> {
+    return Promise.resolve(this.runs.enqueue(args.kind, args.payload ?? {}));
   }
 }

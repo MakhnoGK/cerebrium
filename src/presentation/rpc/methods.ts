@@ -2,12 +2,14 @@ import type { DependencyContainer } from "tsyringe";
 import {
   CALL_SURFACE,
   CLAIM_JOB,
+  ENQUEUE_AGENT_JOB,
   FINISH_JOB,
   OPERATOR_SNAPSHOT,
   RENEW_JOB,
   type AgentRunReport,
   type CallName,
   type ClaimJob,
+  type EnqueueAgentJob,
   type FinishJob,
   type OperatorSnapshot,
   type ReadName,
@@ -84,6 +86,15 @@ export function createDaemonMethods(
     // the surface deliberately: claiming and reporting a job is operational, and putting it
     // on the surface would hand the queue's internals to every principal. The trust
     // boundary is the socket's filesystem permissions, the same one `status` relies on.
+    job_enqueue: (params: Record<string, unknown>) =>
+      container.resolve<EnqueueAgentJob>(ENQUEUE_AGENT_JOB).invoke({
+        kind: str(params.kind),
+        payload:
+          typeof params.payload === "object" && params.payload !== null
+            ? (params.payload as Record<string, unknown>)
+            : {},
+      }),
+
     job_claim: (params: Record<string, unknown>) =>
       container
         .resolve<ClaimJob>(CLAIM_JOB)

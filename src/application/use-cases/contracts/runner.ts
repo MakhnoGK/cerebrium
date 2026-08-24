@@ -51,3 +51,12 @@ export interface FinishJobArgs {
 export type FinishJob = UseCase<FinishJobArgs, boolean>;
 
 export const FINISH_JOB = useCaseToken<FinishJobArgs, boolean>("FinishJob");
+
+export interface EnqueueAgentJobArgs {
+  kind: string;
+  payload?: Record<string, unknown>;
+}
+
+export type EnqueueAgentJob = UseCase<EnqueueAgentJobArgs, JobRow>;
+
+export const ENQUEUE_AGENT_JOB = useCaseToken<EnqueueAgentJobArgs, JobRow>("EnqueueAgentJob");

@@ -168,12 +168,41 @@ export async function runLoop(
   }
 }
 
+const USAGE = `cerebrium-runner [--once <kind>]
+
+  (no arguments)   run the claim loop until stopped; needs runner.enabled
+  --once <kind>    enqueue one job of that kind, run it in the foreground, exit
+
+  Registered tasks: ${TASK_KINDS.join(", ")}
+
+--once ignores runner.enabled on purpose: it is how an operator verifies the runner or
+triggers a task deliberately, and it runs exactly one job and stops. The loop is what
+runner.enabled arms, because that is the part that runs unattended.
+`;
+
 async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(USAGE);
+    process.exit(0);
+  }
+
   const container = buildContainer({ role: "runner", kernel: "remote" });
   const runner = container.resolve(RunnerConfig);
 
-  if (!runner.enabled) {
-    process.stderr.write("runner disabled by config; exiting\n");
+  const onceAt = argv.indexOf("--once");
+  const named = onceAt < 0 ? undefined : argv[onceAt + 1];
+
+  if (onceAt >= 0 && (named === undefined || named.startsWith("-"))) {
+    process.stderr.write(`--once needs a kind. ${USAGE}`);
+    process.exit(2);
+  }
+
+  const once: string | null = named ?? null;
+
+  if (once === null && !runner.enabled) {
+    process.stderr.write("runner disabled by config; exiting (use --once to run one job)\n");
     process.exit(0);
   }
 
@@ -187,9 +216,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  process.stderr.write(`runner ${owner} up, tasks: ${TASK_KINDS.join(", ")}\n`);
-
-  await runLoop({
+  const deps = {
     socketPath: container.resolve(DaemonConfig).socketPath,
     owner,
     serverPath: resolveServerPath(),
@@ -198,10 +225,26 @@ async function main(): Promise<void> {
     cwd: runner.cwd,
     cli: runner.cli,
     maxBudgetUsd: runner.maxBudgetUsd,
-    idleMs: runner.idleMs,
-    stopped: () => stopping,
-    log: (line) => process.stderr.write(`${line}\n`),
-  });
+    log: (line: string) => process.stderr.write(`${line}\n`),
+  };
+
+  if (once !== null) {
+    const job = (await rpcCall({ socketPath: deps.socketPath, timeoutMs: 30_000 }, "job_enqueue", {
+      kind: once,
+    })) as { id: string };
+
+    deps.log(`enqueued ${once} as ${job.id}`);
+
+    const did = await runOnce(deps);
+
+    deps.log(did === "ran" ? "done" : "nothing was claimable");
+
+    return;
+  }
+
+  process.stderr.write(`runner ${owner} up, tasks: ${TASK_KINDS.join(", ")}\n`);
+
+  await runLoop({ ...deps, idleMs: runner.idleMs, stopped: () => stopping });
 }
 
 if (isMainModule(import.meta.url)) {
