@@ -67,7 +67,7 @@ instead of a host's env block, which is the better place for anything shared by 
 an env var still wins over the file. `cerebrium-stats` prints which file was loaded and which
 tier each value came from.
 
-`MEMORY_RERANK` and `MEMORY_CONSOLIDATE` are optional; see the Environment table in the root
+`MEMORY_CONSOLIDATE` is optional; see the Environment table in the root
 [README](../README.md). Use absolute paths everywhere — a host spawns the server with its own
 working directory, not yours.
 

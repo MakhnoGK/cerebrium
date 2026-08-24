@@ -70,7 +70,7 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
   index, which is what `restore` exists for.
 - **`stats`** — operational snapshot, no content: embedding queue, content totals, storage,
   daemon/lease health, graph integrity (dangling edges, how many are repairable, stranded
-  nodes — all three should read 0), reranker usage.
+  nodes — all three should read 0), and the generation backend with its per-role models.
 
 **Code is a mirror, not authored knowledge.** `symbol` nodes are derived from source
 and maintained only by `code_index` — never `write`/`update` them by hand. When I learn

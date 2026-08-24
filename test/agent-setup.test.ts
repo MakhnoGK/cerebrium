@@ -477,14 +477,14 @@ describe("codexEnv", () => {
     // Given
     const toml = `[mcp_servers.cerebrium]
 command = "node"
-env = { MEMORY_DB_PATH = "/db/m.db", MEMORY_RERANK = "local" }
+env = { MEMORY_DB_PATH = "/db/m.db", MEMORY_CONSOLIDATE = "http" }
 
 [mcp_servers.other]
 env = { MEMORY_DB_PATH = "/db/other.db" }
 `;
 
     // When / Then
-    expect(codexEnv(toml)).toEqual({ MEMORY_DB_PATH: "/db/m.db", MEMORY_RERANK: "local" });
+    expect(codexEnv(toml)).toEqual({ MEMORY_DB_PATH: "/db/m.db", MEMORY_CONSOLIDATE: "http" });
   });
 });
 

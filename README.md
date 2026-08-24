@@ -13,8 +13,7 @@ It distinguishes **episodic** memory (write-once records of *what happened*, rel
 decaying with age) from **semantic** memory (durable facts, maintained through
 revisions). Search is hybrid — FTS5 bm25 and vector KNN fused with Reciprocal Rank
 Fusion, re-scored by a memory model, then expanded one hop over the graph — with an
-optional cross-encoder reranker, an asynchronous embedding pipeline drained by a
-background daemon, in-process tree-sitter code indexing, credential-free external-source
+asynchronous embedding pipeline drained by a background daemon, in-process tree-sitter code indexing, credential-free external-source
 mirrors, and a consolidation sweep that distils episodic memory into semantic knowledge.
 
 A personal R&D project exploring long-term memory for agents, used daily with Claude Code.
@@ -26,7 +25,7 @@ Clean-architecture layers, no ORM, one directory per MCP tool:
 ```
 src/
   core/            pure primitives — ids, vocab, tokens, chunking, FTS, types (no I/O)
-  domain/ports/    interfaces the inner layers own — Clock, Embedding/Rerank/Consolidation
+  domain/ports/    interfaces the inner layers own — Clock, Embedding/Consolidation
                    providers, and the declarative config mechanism
   application/     use-cases/ (the seam every delivery layer resolves: contracts +
                               local implementations)
@@ -38,7 +37,6 @@ src/
   db/              SQLite: migrations, per-aggregate repositories, schema snapshot
   infrastructure/  config sections + the environment source and registry
   embeddings/      pluggable embedding providers
-  rerank/          pluggable cross-encoder reranker (second-stage precision)
   code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
   consolidation/   pluggable generation adapter (manual / command / http)
   runtime/         process/IO glue (install layout, daemon spawn, pid file, clock,
@@ -472,9 +470,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
 | `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model), `http` (a model served over HTTP, so the daemon holds none), or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). Under `http` this is the serving backend's own tag, and it must name the model the store was already embedded with — see **Serving the embedding model** below. |
-| `MEMORY_RERANK` | `off` | Second-stage search reranker: `off`, `local` (cross-encoder via transformers.js), or `local-null` (deterministic, offline, for tests). |
-| `MEMORY_RERANK_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder model id for the `local` reranker. |
-| `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached (embeddings and reranker). |
+| `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached. |
 | `MEMORY_EMBED_URL` | `http://127.0.0.1:11434/api/embed` | `http` provider only: the batch embedding endpoint (`{model, input[]}` -> `{embeddings[][]}`). |
 | `MEMORY_EMBED_TIMEOUT_MS` | `30000` | `http` provider only: budget for one batch. A batch is `MEMORY_EMBED_BATCH` texts, so raise both together. |
 | `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
@@ -498,6 +494,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MODEL` | `gemma4:12b-it-qat` | Model for the `http` provider. |
 | `MEMORY_CONSOLIDATE_CMD` | *(unset)* | Command for the `command` provider. |
 | `MEMORY_CONSOLIDATE_TIMEOUT_MS` | `500000` | Generation timeout for `http`/`command`. Sized from measured local-model generation (decode dominates: 600–1200 tokens at ~20 t/s), because a timeout near that band discards proposals silently — the candidate is queued bare and looks like a provider with nothing to say. Kept wide even though disabling the model's reasoning mode cut a measured cluster from 61.8 s to 24.9 s: the headroom costs nothing when calls succeed. |
+| `MEMORY_CONSOLIDATE_ROLES` | `{}` | Per-role overrides of the three settings above, as JSON keyed by role (`generate`, `reconcile`, `annotate`); each may set `url`, `model`, `timeoutMs`, and inherits what it omits. A role picks a model, never a backend — `enabled` is a property of the backend and the per-behaviour switch is `MEMORY_CONSOLIDATE_<BEHAVIOUR>`. Sized from measurement, not preference: on the reference host the 12B judge answers `annotate` in ~19 s and an interactive `reconcile` anywhere from 2.7 s to 46 s against its 25 s cap, because prompt eval dominates and is prefix-cache dependent; the same two calls on a 4B sibling take ~9 s and ~8 s. One malformed entry falls the whole field back to no overrides and says so in `cerebrium-stats`. |
 | `MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS` | `25000` | Budget for the one generation call that happens on an interactive path: the write-time reconcile a `write_memory` waits for before it answers. Deliberately far under `MEMORY_CONSOLIDATE_TIMEOUT_MS`, which is sized for a background sweep — and under the 45 s RPC deadline for a write, so a busy model costs the write its advice rather than making a landed write look like a failure. |
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
@@ -654,13 +651,12 @@ node, and candidate id as opaque and never invent or transform one.
 | `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. Paged: pass `page_size` and feed `next_cursor` back until it is absent (`limit` alone still returns one unpaged batch). |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
-| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), reranker usage (eligible vs actually reranked searches, candidates scored), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
+| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), generation (the backend, whether it generates at all, and the resolved model/host/deadline per role), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
 
 Every tool call updates the session's `last_seen` and appends an `events` row — written at
 the boundary by `AuditedTool`, on failures as well as successes, so provenance cannot be
 forgotten by a new tool. A tool contributes the row's `node_id`/`detail` declaratively via
-the optional `describeEvent(args, result)`; `stats`' reranker counters are derived from
-those rows.
+the optional `describeEvent(args, result)`.
 
 `search` and `get` make those rows a **retrieval-outcome log**: a search records its query
 and the ids it returned in rank order, a `get` records the ids it was asked for and how
@@ -958,8 +954,9 @@ a question written from one section never needs a link followed, and a question 
 actually asked often does.
 
 **`MEMORY_MMR_LAMBDA` moves `0.7` → `0.85`.** Both label sources agree in direction, and a
-third run with the reranker on (`MEMORY_RERANK=local`, the deployed configuration, since
-MMR runs after it) agrees again: +0.9 nDCG, +0.8 Rec. On adjudicated queries — which carry
+third run with the reranker on (`MEMORY_RERANK=local`, which was the deployed
+configuration when this was measured on 2026-08-04 — the cross-encoder was removed three
+days later in #17, and MMR ran after it) agrees again: +0.9 nDCG, +0.8 Rec. On adjudicated queries — which carry
 2.1 relevant nodes each — Recall@10 *is* coverage of the answers a query has, so the old
 default was not buying diversity, it was swapping a relevant hit for a merely different
 one. `1.0` measured better still, but turning a stage off on labels that cannot see
@@ -1194,8 +1191,7 @@ WAL mode (already on) is required for Litestream.
   data stays queryable with `history:true`.
 - **Hybrid retrieval with a memory model.** FTS5 bm25 and vector KNN are fused with RRF,
   multiplied by a memory factor (semantic steady, episodic `exp(-age/14d)`), then expanded
-  one hop over typed edges. An optional cross-encoder reranker adds a precision stage over
-  the fused hits without touching the memory model.
+  one hop over typed edges.
 - **Async embeddings, single-writer safe.** A node is findable via FTS the instant it is
   written; a 384-dim vector per content-addressed chunk is computed asynchronously, so
   editing one section re-embeds only that chunk. A standalone daemon drains the queue across
@@ -1217,8 +1213,8 @@ WAL mode (already on) is required for Litestream.
 - **Layering enforced by the build, not by discipline.** Dependencies point inward
   (`core` → `domain/ports` → `application` → adapters → `presentation`), and the direction
   is checked by lint rather than trusted to review — a wrong-way import fails `npm run check`.
-  Providers are ports with swappable adapters, so changing how embeddings, reranking or
-  consolidation are produced is a one-file change plus a class.
+  Providers are ports with swappable adapters, so changing how embeddings or
+  consolidation are produced is an entry in a registry plus a class.
 - **Configuration as declarative, injectable sections.** A setting is declared once —
   default, validation and env name together — and injected where it is used, so adding one
   is a single line and no module reads the environment at the point of use. Unparseable
