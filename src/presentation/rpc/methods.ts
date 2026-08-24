@@ -1,10 +1,17 @@
 import type { DependencyContainer } from "tsyringe";
 import {
   CALL_SURFACE,
+  CLAIM_JOB,
+  FINISH_JOB,
   OPERATOR_SNAPSHOT,
+  RENEW_JOB,
+  type AgentRunReport,
   type CallName,
+  type ClaimJob,
+  type FinishJob,
   type OperatorSnapshot,
   type ReadName,
+  type RenewJob,
 } from "@/application/use-cases";
 import { UNKNOWN_WRITER, type Writer } from "@/runtime/client-identity";
 import { PROTOCOL_VERSION, type RpcMeta } from "@/core/rpc";
@@ -51,6 +58,17 @@ function writerOf(meta: RpcMeta): Writer {
     : { client: meta.client ?? null, version: meta.version ?? null };
 }
 
+// The runner speaks this over a socket, so its arguments are untrusted shapes rather than
+// typed calls. Anything that is not the expected primitive becomes empty, and the service's
+// own checks (lease ownership, the agent-only prefix) do the refusing.
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
 export function createDaemonMethods(
   container: DependencyContainer,
   identity: DaemonIdentity,
@@ -61,6 +79,27 @@ export function createDaemonMethods(
     // protocol it does not speak, so a rebuild against a still-running resident daemon
     // reports the mismatch instead of failing later as an unknown method.
     initialize: () => Promise.resolve({ protocol: PROTOCOL_VERSION, pid: identity.pid }),
+
+    // The runner host's side of the queue. These are daemon methods rather than calls on
+    // the surface deliberately: claiming and reporting a job is operational, and putting it
+    // on the surface would hand the queue's internals to every principal. The trust
+    // boundary is the socket's filesystem permissions, the same one `status` relies on.
+    job_claim: (params: Record<string, unknown>) =>
+      container
+        .resolve<ClaimJob>(CLAIM_JOB)
+        .invoke({ kinds: strings(params.kinds), owner: str(params.owner) }),
+
+    job_renew: (params: Record<string, unknown>) =>
+      container
+        .resolve<RenewJob>(RENEW_JOB)
+        .invoke({ id: str(params.id), owner: str(params.owner) }),
+
+    job_finish: (params: Record<string, unknown>) =>
+      container.resolve<FinishJob>(FINISH_JOB).invoke({
+        id: str(params.id),
+        owner: str(params.owner),
+        report: params.report as AgentRunReport,
+      }),
 
     // The operator payload, not the compact one the agent-facing `stats` tool returns:
     // this is the surface the CLI and the GUI render.

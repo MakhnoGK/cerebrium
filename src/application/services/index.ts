@@ -1,3 +1,4 @@
+export { AgentRunService } from "@/application/services/agent-run.service";
 export { ActivityMonitor } from "@/application/services/activity.service";
 export { CodeIndexService } from "@/application/services/code-index.service";
 export { ConsolidationService } from "@/application/services/consolidation.service";

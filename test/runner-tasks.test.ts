@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DENIED_TOOLS } from "@/runtime/agent-run";
-import { TASK_KINDS, taskFor } from "@/runner/tasks";
 import { AGENT_JOB_PREFIX, JobKind } from "@/core/vocab";
+import { TASK_KINDS, taskFor } from "@/runner/tasks";
 
 describe("agent task registry", () => {
   it("should namespace every task under the agent prefix the daemon refuses to claim", () => {
