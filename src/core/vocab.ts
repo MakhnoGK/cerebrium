@@ -82,6 +82,22 @@ export enum Posture {
   AUTO = "auto",
 }
 
+// What a generating provider is being asked to do. Three roles with different shapes:
+// `generate` is a batch judge behind the sweep, `annotate` is high-volume attribute mining,
+// `reconcile` runs while a `write` waits for it. Each may name its own model and deadline —
+// see `consolidation.roles.*`.
+export enum GenerationRole {
+  GENERATE = "generate",
+  RECONCILE = "reconcile",
+  ANNOTATE = "annotate",
+}
+
+export const GENERATION_ROLES = [
+  GenerationRole.GENERATE,
+  GenerationRole.RECONCILE,
+  GenerationRole.ANNOTATE,
+] as const;
+
 export enum ConsolidationStatus {
   PENDING = "pending",
   APPLIED = "applied",

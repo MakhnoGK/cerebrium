@@ -1,5 +1,6 @@
 import {
   configSection,
+  custom,
   enumOf,
   int,
   nullableStr,
@@ -7,6 +8,7 @@ import {
   SectionOf,
   str,
 } from "@/domain/ports/config";
+import { parseRoleOverrides, type RoleOverrides } from "@/consolidation/roles";
 import { Posture } from "@/core/vocab";
 
 // Provider selection and transport. `manual` (default) detects and queues candidates but
@@ -30,6 +32,13 @@ export class ConsolidationConfig extends SectionOf("consolidation", {
   reconcileTimeoutMs: int(25_000).positive().env("MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS"),
   leaseTtlMs: int(600_000).positive().env("MEMORY_CONSOLIDATE_LEASE_TTL_MS"),
   intervalMs: int(300_000).nonNegative().env("MEMORY_CONSOLIDATE_INTERVAL_MS"),
+  // Per-role overrides of the three settings above, keyed by GenerationRole. A role names a
+  // model, a host and a deadline; anything it leaves out it inherits, so a config that names
+  // no role runs exactly as one model with the two deadlines. Measured 2026-08-24 on the
+  // reference host: the same 12B answers `annotate` in ~19s and an interactive `reconcile`
+  // anywhere from 2.7s to 46s against its 25s cap, because prompt eval dominates and is
+  // prefix-cache dependent — which is what a per-role model is for.
+  roles: custom<RoleOverrides>({}, parseRoleOverrides).env("MEMORY_CONSOLIDATE_ROLES"),
 }) {}
 
 // Per-behaviour posture. Balanced defaults: `auto` for the cheap and reversible

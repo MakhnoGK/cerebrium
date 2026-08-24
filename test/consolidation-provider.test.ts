@@ -14,6 +14,7 @@ import {
   reconcilePrompt,
   taskPrompt,
 } from "@/consolidation/provider";
+import { resolveRoles } from "@/consolidation/roles";
 import { ConsolidationKind } from "@/core/vocab";
 import { createConsolidator } from "@/consolidation";
 import { ConsolidationConfig, StaticConfigSource } from "@/infrastructure/config";
@@ -67,7 +68,9 @@ describe("Consolidator environment selection", () => {
 
     // When / Then
     expect(config.provider).toBe("http");
-    expect(createConsolidator(config.provider, config).name).toBe("http");
+    expect(
+      createConsolidator(config.provider, { roles: resolveRoles(config, config.roles) }).name,
+    ).toBe("http");
   });
 
   it("should read the reconcile budget from configuration, well under the generation one", () => {
