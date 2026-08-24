@@ -307,3 +307,25 @@ CREATE TABLE IF NOT EXISTS processes (
   model_ms INTEGER,
   model_error TEXT
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  state TEXT NOT NULL,
+  scheduled_for TEXT NOT NULL,
+  lease_owner TEXT,
+  lease_expires_at TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  started_at TEXT,
+  ended_at TEXT,
+  result_json TEXT,
+  last_error TEXT,
+  submitted_by TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS jobs_claimable ON jobs (state, scheduled_for);
+CREATE INDEX IF NOT EXISTS jobs_kind_state ON jobs (kind, state);

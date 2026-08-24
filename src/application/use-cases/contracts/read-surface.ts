@@ -1,4 +1,5 @@
 import { SUGGEST_CANDIDATES } from "@/application/use-cases/contracts/consolidation";
+import { JOB_STATUS } from "@/application/use-cases/contracts/jobs";
 import { READ_MIRROR_STATUS } from "@/application/use-cases/contracts/mirror";
 import { OPERATOR_SNAPSHOT, STATS_SNAPSHOT } from "@/application/use-cases/contracts/operations";
 import { FETCH_NODES, LOOKUP_CODE } from "@/application/use-cases/contracts/read";
@@ -16,6 +17,7 @@ export const READ_SURFACE = {
   lookup_code: LOOKUP_CODE,
   suggest_candidates: SUGGEST_CANDIDATES,
   mirror_status: READ_MIRROR_STATUS,
+  job_status: JOB_STATUS,
   stats_snapshot: STATS_SNAPSHOT,
   operator_snapshot: OPERATOR_SNAPSHOT,
 } as const;

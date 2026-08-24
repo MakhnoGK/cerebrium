@@ -9,5 +9,10 @@
       "annotate": 10,
       "backfill": 10
     }
+  },
+  "jobs": {
+    "enabled": true,
+    "codeIndexIntervalMs": 43200000,
+    "maxPerTick": 1
   }
 }

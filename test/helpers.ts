@@ -19,6 +19,7 @@ import {
   ConsolidationRepo,
   EdgesRepo,
   EmbeddingQueueRepo,
+  JobsRepo,
   MirrorRepo,
   NodesRepo,
   SearchRepo,
@@ -68,6 +69,7 @@ export interface TestEnv {
   mirror: MirrorRepo;
   code: CodeRepo;
   consolidation: ConsolidationRepo;
+  jobs: JobsRepo;
   stats: StatsRepo;
   queue: EmbeddingQueueRepo;
   sessions: SessionsRepo;
@@ -107,6 +109,7 @@ export function setup(opts?: {
     mirror: container.resolve(MirrorRepo),
     code: container.resolve(CodeRepo),
     consolidation: container.resolve(ConsolidationRepo),
+    jobs: container.resolve(JobsRepo),
     stats: container.resolve(StatsRepo),
     queue: container.resolve(EmbeddingQueueRepo),
     sessions: container.resolve(SessionsRepo),
