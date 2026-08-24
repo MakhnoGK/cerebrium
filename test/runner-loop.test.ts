@@ -159,3 +159,45 @@ describe("runner loop", () => {
     expect(maxInFlight).toBe(1);
   });
 });
+
+describe("runner refuses to spawn blind", () => {
+  it("should fail the job without spawning when the server path is not a .js bundle", async () => {
+    // Given — what resolveServerPath returns when run from source.
+    const calls = harness([{ id: "job-1", kind: JobKind.AGENT_SELFTEST, payload_json: "{}" }]);
+    const spawned = vi.spyOn(agentRun, "runAgent");
+
+    // When
+    await runOnce({ ...DEPS, serverPath: "/repo/src/server.ts" });
+
+    // Then
+    expect(spawned).not.toHaveBeenCalled();
+    expect(
+      (calls.find((c) => c.method === "job_finish")?.params.report as { error: string }).error,
+    ).toContain("not a .js bundle");
+  });
+
+  it("should call a clean exit a failure when the task cannot use the result", async () => {
+    // Given — the run exits 0 having reached no tools, which is what actually happened live.
+    const calls = harness([{ id: "job-1", kind: JobKind.AGENT_SELFTEST, payload_json: "{}" }]);
+
+    vi.spyOn(agentRun, "runAgent").mockResolvedValue({
+      ...OUTCOME,
+      result: '{"session":"session_start tool not available via ToolSearch","hits":0}',
+    });
+
+    // When
+    await runOnce(DEPS);
+
+    // Then
+    const report = calls.find((c) => c.method === "job_finish")?.params.report as {
+      exit: string;
+      error: string;
+      cost_usd: number;
+    };
+
+    expect(report.exit).toBe("failed");
+    expect(report.error).toContain("unusable result");
+    // The spend still happened and is still recorded.
+    expect(report.cost_usd).toBe(0.05);
+  });
+});

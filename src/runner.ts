@@ -26,6 +26,28 @@ interface JobRow {
 
 const RENEW_MS = 300_000;
 
+type Call = (method: string, params: Record<string, unknown>) => Promise<unknown>;
+
+// Closing a job that never got as far as spawning. Still reported rather than abandoned, so
+// the lease is released now instead of at expiry.
+function fail(call: Call, id: string, owner: string, error: string): Promise<unknown> {
+  return call("job_finish", {
+    id,
+    owner,
+    report: {
+      exit: "failed",
+      result: null,
+      cost_usd: null,
+      turns: null,
+      duration_ms: 0,
+      model: null,
+      permission_denials: 0,
+      error,
+      usage: null,
+    },
+  });
+}
+
 function payloadOf(job: JobRow): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(job.payload_json);
@@ -59,26 +81,28 @@ export async function runOnce(deps: {
 
   if (job === null) return "idle";
 
+  // Bare node runs the server, and it cannot execute TypeScript. From source
+  // `resolveServerPath` finds `src/server.ts`, which exists — so existence is not the check
+  // that matters, the extension is, exactly as `isInstallableDaemonPath` already says for
+  // the daemon. Spawning anyway is worse than failing: the agent starts, finds no Cerebrium
+  // tools, flails for several turns, and reports success having done nothing. Observed.
+  if (!deps.serverPath.endsWith(".js")) {
+    await fail(
+      call,
+      job.id,
+      deps.owner,
+      `server path ${deps.serverPath} is not a .js bundle; run the runner from a build`,
+    );
+
+    return "ran";
+  }
+
   const task = taskFor(job.kind);
 
   if (task === undefined) {
     // Claimed a kind this build cannot run, which only happens if the registry and the
     // claim list drift. Report it rather than hold the lease until it expires.
-    await call("job_finish", {
-      id: job.id,
-      owner: deps.owner,
-      report: {
-        exit: "failed",
-        result: null,
-        cost_usd: null,
-        turns: null,
-        duration_ms: 0,
-        model: null,
-        permission_denials: 0,
-        error: `no task registered for ${job.kind}`,
-        usage: null,
-      },
-    });
+    await fail(call, job.id, deps.owner, `no task registered for ${job.kind}`);
 
     return "ran";
   }
@@ -134,12 +158,23 @@ export async function runOnce(deps: {
     clearInterval(renew);
   }
 
+  // Exiting cleanly is not the same as having done the job. A run whose MCP server failed
+  // to start still exits 0, having answered from nothing — so the task judges its own
+  // result, and a run that cannot show its work is a failure however calmly it ended.
+  const rejected = outcome.exit === "completed" ? task.verify(outcome.result) : null;
+
+  const reported =
+    rejected === null
+      ? outcome
+      : { ...outcome, exit: "failed" as const, error: `unusable result: ${rejected}` };
+
   deps.log(
-    `${job.kind} ${outcome.exit} in ${String(Math.round(outcome.duration_ms / 1000))}s` +
-      (outcome.cost_usd === null ? "" : ` ($${outcome.cost_usd.toFixed(4)})`),
+    `${job.kind} ${reported.exit} in ${String(Math.round(outcome.duration_ms / 1000))}s` +
+      (outcome.cost_usd === null ? "" : ` ($${outcome.cost_usd.toFixed(4)})`) +
+      (rejected === null ? "" : ` — ${rejected}`),
   );
 
-  await call("job_finish", { id: job.id, owner: deps.owner, report: outcome });
+  await call("job_finish", { id: job.id, owner: deps.owner, report: reported });
 
   return "ran";
 }
