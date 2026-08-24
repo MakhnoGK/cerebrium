@@ -60,6 +60,8 @@ const ANTIGRAVITY_PERMISSION_POLICY: Record<ToolName, PermissionPolicy> = {
   [ToolName.CHECKPOINT]: "allow",
   [ToolName.LINK]: "allow",
   [ToolName.CODE_INDEX]: "allow",
+  [ToolName.JOB_SUBMIT]: "allow",
+  [ToolName.JOB_STATUS]: "allow",
   [ToolName.CODE_LOOKUP]: "allow",
   [ToolName.SOURCE_REGISTER]: "allow",
   [ToolName.MIRROR_UPSERT]: "allow",

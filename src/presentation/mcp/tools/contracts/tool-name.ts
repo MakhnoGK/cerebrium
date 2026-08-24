@@ -9,6 +9,8 @@ export enum ToolName {
   CHECKPOINT = "checkpoint",
   LINK = "link",
   CODE_INDEX = "code_index",
+  JOB_SUBMIT = "job_submit",
+  JOB_STATUS = "job_status",
   CODE_LOOKUP = "code_lookup",
   SOURCE_REGISTER = "source_register",
   MIRROR_UPSERT = "mirror_upsert",

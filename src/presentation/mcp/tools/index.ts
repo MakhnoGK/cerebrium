@@ -9,6 +9,8 @@ import "./restore";
 import "./checkpoint";
 import "./link";
 import "./code-index";
+import "./job-submit";
+import "./job-status";
 import "./code-lookup";
 import "./source-register";
 import "./mirror-upsert";
