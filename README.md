@@ -854,6 +854,51 @@ first names why, so a late report from an abandoned tick changes nothing. `cereb
 reports `sweep now` from the `consolidation` worker lease, which expires on its own and is
 therefore the only signal a scheduler can trust.
 
+**One backend, one model per role.** The three things a generation provider is asked to do
+have nothing in common but the transport. Measured 2026-08-24 on the reference host against
+`gemma4:12b-it-qat`: `annotate` runs ~19 s per record and is the sweep's largest generation
+cost (6,706 s over 71 calls); `generate` runs ~235 s per judged cluster and is the one role
+that needs a model that size; `reconcile` sits on the interactive path and took 2.7 s, 9.1 s,
+21.2 s and 46.1 s for the *same* call against its 25 s cap — decode is ~50 tokens, so the
+variance is prompt eval and whether the prefix cache is warm. A write whose reconcile aborts
+looks exactly like a write with no advice, because the verdict is advisory and every failure
+returns null.
+
+So a role may name its own model, host and deadline, and inherits whatever it leaves out:
+
+```json
+{ "consolidation": {
+    "provider": "http", "model": "gemma4:12b-it-qat",
+    "roles": {
+      "annotate":  { "model": "gemma4:e4b-it-qat" },
+      "reconcile": { "model": "gemma4:e4b-it-qat", "timeoutMs": 20000 }
+    } } }
+```
+
+A role picks a model, never a backend: `enabled` is a property of the backend kind (`manual`
+generates nothing at all) and the per-behaviour switch is already `consolidation.posture.*`.
+One malformed entry falls the whole table back to no overrides rather than half-applying it,
+and `cerebrium-stats` prints what each role resolved to, so a swap is visible before a call
+is made.
+
+**A smaller model for a role has a gate in front of it**, for the same reason the embedding
+switch does — a judge can answer fast and answer differently:
+
+```sh
+npm run eval:roles -- --model gemma4:e4b-it-qat --role annotate,reconcile
+```
+
+`generate` and `reconcile` are scored against the verdicts this store actually recorded: a
+merge/distill candidate an agent applied is a real duplication, one it dismissed is a series
+that had to stay apart, and the candidate model may not lose more than 5 points of accuracy
+against the incumbent. `annotate` has no labels — nobody ever adjudicated a keyword set — so
+it is scored on how much of the incumbent's attributes it reproduces, floored by how much of
+its own the incumbent reproduces on a second pass, because no model repeats itself exactly
+and a fixed threshold there would be a guess. Two more conditions: no invented numbers (the
+prompt forbids them, and a digit string absent from the record is the cheapest evidence a
+smaller model started filling gaps), and it has to actually be faster, or there is nothing
+to buy.
+
 ## Evaluating a ranking change
 
 `npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It
