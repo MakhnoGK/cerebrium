@@ -53,3 +53,18 @@ export function ensureDaemon({ dbPath, embedProvider }: EnsureDaemonOptions): En
 
   return "spawned";
 }
+
+// The MCP server entry point, resolved the same way the daemon's is: bundled they are flat
+// siblings in dist/, from source they are one level up. The runner hands this path to the
+// agent it spawns, so the agent talks to the same build the runner does.
+export function resolveServerPath(): string {
+  for (const rel of ["./server.js", "../server.js", "./server.ts", "../server.ts"]) {
+    const p = fileURLToPath(new URL(rel, import.meta.url));
+
+    if (existsSync(p)) {
+      return p;
+    }
+  }
+
+  return fileURLToPath(new URL("./server.js", import.meta.url));
+}

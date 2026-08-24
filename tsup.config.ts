@@ -15,6 +15,7 @@ export default defineConfig({
   entry: [
     "src/server.ts",
     "src/daemon.ts",
+    "src/runner.ts",
     "src/stats-cli.ts",
     "src/service-cli.ts",
     "src/read-worker.ts",

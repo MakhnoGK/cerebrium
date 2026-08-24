@@ -34,7 +34,7 @@ import { createProvider } from "@/embeddings";
 // process drains the queue in large batches, whether it may write at all — never which
 // tokens exist. Every role registers the same set, so a token cannot go missing in one
 // host and be present in another.
-export type HostRole = "server" | "daemon" | "cli" | "reader";
+export type HostRole = "server" | "daemon" | "cli" | "reader" | "runner";
 
 // Which kernel backs the tokens. `local` resolves everything in-process against SQLite;
 // `remote` resolves the same tokens against the daemon's socket and registers no database

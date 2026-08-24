@@ -31,5 +31,13 @@
     "enabled": true,
     "codeIndexIntervalMs": 43200000,
     "maxPerTick": 1
+  },
+  "runner": {
+    "enabled": false,
+    "client": "cerebrium-runner",
+    "cli": "claude",
+    "cwd": "/tmp",
+    "idleMs": 300000,
+    "maxBudgetUsd": 1
   }
 }

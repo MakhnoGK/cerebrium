@@ -12,6 +12,7 @@
   "bin": {
     "cerebrium": "dist/server.js",
     "cerebrium-daemon": "dist/daemon.js",
+    "cerebrium-runner": "dist/runner.js",
     "cerebrium-stats": "dist/stats-cli.js",
     "cerebrium-service": "dist/service-cli.js"
   },
