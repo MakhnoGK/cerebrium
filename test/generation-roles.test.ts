@@ -13,7 +13,7 @@ import {
   type RoleBase,
 } from "@/consolidation/roles";
 import { ConsolidationKind, GenerationRole } from "@/core/vocab";
-import { ConsolidationConfig, StaticConfigSource } from "@/infrastructure/config";
+import { ConsolidationConfig, FileConfigSource, StaticConfigSource } from "@/infrastructure/config";
 
 const BASE: RoleBase = {
   url: "http://host/api/chat",
@@ -192,6 +192,31 @@ describe("Role overrides in configuration", () => {
     expect(roles[GenerationRole.GENERATE].model).toBe(config.model);
     expect(roles[GenerationRole.ANNOTATE].model).toBe(config.model);
     expect(roles[GenerationRole.RECONCILE].timeoutMs).toBe(config.reconcileTimeoutMs);
+  });
+
+  it("should read the table out of config.json, where it is a nested object and not a string", () => {
+    // Given — the deployment path: a human edits config.json, and the file source hands a
+    // non-scalar leaf back as JSON for the field to parse.
+    const file = new FileConfigSource("/opt/brain/config.json", () =>
+      JSON.stringify({
+        consolidation: {
+          model: "big-12b",
+          roles: { annotate: { model: "small-4b" }, reconcile: { timeoutMs: 20000 } },
+        },
+      }),
+    );
+    const config = new ConsolidationConfig(file);
+
+    // When
+    const roles = resolveRoles(config, config.roles);
+
+    // Then
+    expect(roles[GenerationRole.ANNOTATE].model).toBe("small-4b");
+    expect(roles[GenerationRole.RECONCILE]).toMatchObject({
+      model: "big-12b",
+      timeoutMs: 20_000,
+    });
+    expect(roles[GenerationRole.GENERATE].model).toBe("big-12b");
   });
 
   it("should record an unparseable table as ignored instead of failing to start", () => {
