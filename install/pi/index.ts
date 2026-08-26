@@ -78,7 +78,6 @@ export default function (pi: ExtensionAPI): void {
   const connect = async (ctx: ExtensionContext): Promise<void> => {
     const resolved = resolveConfig({ repoRoot });
     config = resolved;
-    rules = resolved.options.rules ? readRules(repoRoot) : null;
 
     const started = new CerebriumBridge(resolved.launch, "pi");
     bridge = started;
@@ -101,6 +100,9 @@ export default function (pi: ExtensionAPI): void {
     registered = catalogue.map((tool) =>
       registerBridgeTool(pi, started, state, tool, resolved.options.autoSessionId),
     );
+    // Only once the tools exist: rules that name tools the model cannot call are worse
+    // than no rules at all.
+    rules = resolved.options.rules ? readRules(repoRoot) : null;
     pi.setActiveTools([...new Set([...pi.getActiveTools(), ...registered])]);
     status(ctx.ui, ctx.hasUI);
   };
