@@ -18,6 +18,9 @@ import {
   ANTIGRAVITY_PERMISSION_GRANTS,
   defaultEnv,
   pending,
+  piBridgeConfig,
+  piExtension,
+  piSettings,
   planHost,
   skillPath,
   type HostId,
@@ -409,5 +412,75 @@ describe("Skill path", () => {
   it("should resolve to the skill the hosts read", () => {
     // Given / When / Then
     expect(existsSync(join(skillPath(REPO), "SKILL.md"))).toBe(true);
+  });
+});
+
+describe("pi", () => {
+  it("should leave nothing outstanding and be a no-op on a second run", () => {
+    // Given
+    expect(outstanding("pi")).toEqual(["extension", "mcp", "skill", "rules", "hook"]);
+
+    // When
+    applyHost("pi", input(), options());
+
+    // Then
+    expect(outstanding("pi")).toEqual([]);
+    expect(applyHost("pi", input(), options())).toEqual([]);
+  });
+
+  it("should declare the extension and the launch entry this working tree provides", () => {
+    // Given / When
+    applyHost("pi", input(), options());
+
+    // Then
+    const settings = JSON.parse(read(piSettings(home)));
+    const bridge = JSON.parse(read(piBridgeConfig(home)));
+    expect(settings.extensions).toEqual([piExtension(REPO)]);
+    expect(bridge.command).toBe(process.execPath);
+    expect(bridge.args).toEqual([join(REPO, "dist", "server.js")]);
+    expect(bridge.env.MEMORY_DB_PATH).toBe(join(home, ".cerebrium", "memory.db"));
+  });
+
+  it("should keep the user's other pi settings and extensions", () => {
+    // Given
+    mkdirSync(dirname(piSettings(home)), { recursive: true });
+    writeFileSync(
+      piSettings(home),
+      JSON.stringify({ theme: "dark", extensions: ["/home/me/.pi/agent/extensions/mine.ts"] }),
+    );
+
+    // When
+    applyHost("pi", input(), options());
+
+    // Then
+    const settings = JSON.parse(read(piSettings(home)));
+    expect(settings.theme).toBe("dark");
+    expect(settings.extensions).toEqual([
+      "/home/me/.pi/agent/extensions/mine.ts",
+      piExtension(REPO),
+    ]);
+  });
+
+  it("should replace an entry left behind by another checkout", () => {
+    // Given
+    mkdirSync(dirname(piSettings(home)), { recursive: true });
+    writeFileSync(
+      piSettings(home),
+      JSON.stringify({ extensions: [join(home, "old", "install", "pi", "index.ts")] }),
+    );
+
+    // When
+    applyHost("pi", input(), options());
+
+    // Then
+    expect(JSON.parse(read(piSettings(home))).extensions).toEqual([piExtension(REPO)]);
+  });
+
+  it("should create the launch entry private, like every other host config", () => {
+    // Given / When
+    applyHost("pi", input(), options());
+
+    // Then
+    expect(statSync(piBridgeConfig(home)).mode & 0o777).toBe(0o600);
   });
 });

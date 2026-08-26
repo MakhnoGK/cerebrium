@@ -6,8 +6,10 @@ discipline, carries the retrieval precedence in context every turn, and is nudge
 [hosts.md](./hosts.md) lists where each one lives per host.
 
 Supported hosts: **Claude Code**, **Codex CLI**, **Antigravity** (CLI and IDE share a config
-root). Adding a host means adding a row to `hosts.md` and its four artifacts here — nothing in
-`src/` changes, because the transport is already agent-agnostic.
+root), and **pi**. Adding a host means adding a row to `hosts.md` and its four artifacts here —
+nothing in `src/` changes, because the transport is already agent-agnostic. pi is the one host
+that carries no MCP client of its own, so its four surfaces are delivered by an extension in
+[`pi/`](./pi/README.md) rather than by four config edits.
 
 ## The rule this setup exists to enforce
 
@@ -143,12 +145,39 @@ command validates `.nvmrc`, opens an in-memory SQLite database before writing co
 that executable automatically. After an NVM upgrade/removal, rerun `nvm use && npm install`
 and then rerun setup.
 
-## 4 — Confirm it actually works
+## 4 — pi
+
+pi has no MCP layer, no managed rules file and no session hook, so one extension is all four
+surfaces. Setup writes two files:
+
+```json
+// ~/.pi/agent/settings.json — pi loads the extension from the working tree
+{ "extensions": ["/ABSOLUTE/PATH/TO/cerebrium/install/pi/index.ts"] }
+```
+
+```json
+// ~/.pi/agent/cerebrium.json — the launch entry an mcpServers block holds elsewhere
+{
+  "command": "/ABSOLUTE/PATH/TO/.nvm/versions/node/v26.x/bin/node",
+  "args": ["/ABSOLUTE/PATH/TO/cerebrium/dist/server.js"],
+  "env": { "MEMORY_DB_PATH": "/ABSOLUTE/PATH/TO/HOME/.cerebrium/memory.db" }
+}
+```
+
+Restart pi (or run `/reload`) afterwards. Verify: `/cerebrium status` reports the store, the
+session id and the tool count, and the memory tools appear as `cerebrium_search`,
+`cerebrium_write`, … — prefixed because pi already owns `write`, `read` and `get`.
+
+[`pi/README.md`](./pi/README.md) documents the options block, the `/cerebrium` command and why
+the session id is filled in for the model rather than requested from it.
+
+## 5 — Confirm it actually works
 
 Registration is not proof. `npm run agent:setup -- --verify` boots the built server over
 stdio against a throwaway store, calls `session_start`, counts the tools it exposes, and
-runs the hook script — the real memory is never opened, and it exits non-zero if any of
-that fails.
+runs the hook script — for pi, whose install has no hook script, it loads the extension under
+`node --experimental-strip-types` and checks it exports a factory. The real memory is never
+opened, and it exits non-zero if any of that fails.
 
 That covers the server. The host's own wiring is worth ten more seconds: in a fresh
 session, ask the agent to call `session_start` and report what came back. A working

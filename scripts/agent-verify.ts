@@ -2,7 +2,14 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { hookScript, serverPath, type HostId, type PlanInput } from "@scripts/agent-hosts";
+import { pathToFileURL } from "node:url";
+import {
+  hookScript,
+  piExtension,
+  serverPath,
+  type HostId,
+  type PlanInput,
+} from "@scripts/agent-hosts";
 
 // Proves the install by exercising it, because a config file that mentions Cerebrium is
 // not evidence that a host can call it. The server smoke runs against a throwaway store
@@ -205,8 +212,54 @@ async function hook(input: PlanInput, host: HostId): Promise<VerifyResult> {
   }
 }
 
+/**
+ * pi has no hook script to run: its whole install is one extension, so the proof is that the
+ * extension's module graph loads. Type stripping is enough because the extension is written
+ * in erasable TypeScript, which is also how pi itself loads it.
+ */
+function piBridge(input: PlanInput): Promise<VerifyResult> {
+  const entry = piExtension(input.repoRoot);
+  if (!existsSync(entry)) {
+    return Promise.resolve({ name: "pi extension", ok: false, detail: `${entry} is missing` });
+  }
+  return new Promise((resolve) => {
+    const child = spawn(
+      input.nodePath,
+      [
+        "--experimental-strip-types",
+        "--no-warnings",
+        "-e",
+        `import(${JSON.stringify(pathToFileURL(entry).href)})` +
+          ".then((m) => process.exit(typeof m.default === 'function' ? 0 : 3))" +
+          ".catch((err) => { console.error(String(err)); process.exit(4); })",
+      ],
+      { cwd: input.repoRoot, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (err) => {
+      resolve({ name: "pi extension", ok: false, detail: `could not load: ${String(err)}` });
+    });
+    child.on("close", (code) => {
+      resolve({
+        name: "pi extension",
+        ok: code === 0,
+        detail:
+          code === 0
+            ? "loads and exports an extension factory"
+            : `failed to load (${stderr.trim().split("\n")[0] ?? `exit ${code}`})`,
+      });
+    });
+  });
+}
+
 export async function verify(input: PlanInput, hosts: readonly HostId[]): Promise<VerifyResult[]> {
   const results = [bundle(input), store(input), await server(input)];
-  for (const host of hosts) results.push(await hook(input, host));
+  for (const host of hosts) {
+    results.push(host === "pi" ? await piBridge(input) : await hook(input, host));
+  }
   return results;
 }

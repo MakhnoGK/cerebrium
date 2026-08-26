@@ -7,10 +7,10 @@ import { ToolName } from "@/presentation/mcp/tools/contracts/tool-name";
 // The apply side consumes the same plan, so "what is missing" and "what gets written"
 // can never disagree.
 
-export const HOSTS = ["claude", "codex", "antigravity"] as const;
+export const HOSTS = ["claude", "codex", "antigravity", "pi"] as const;
 export type HostId = (typeof HOSTS)[number];
 
-export const SURFACES = ["mcp", "skill", "rules", "hook", "permissions"] as const;
+export const SURFACES = ["mcp", "skill", "rules", "hook", "permissions", "extension"] as const;
 export type Surface = (typeof SURFACES)[number];
 
 /** `ok` needs nothing; `manual` cannot be automated and is explained in `detail`. */
@@ -105,6 +105,24 @@ export function skillPath(repoRoot: string): string {
 
 export function hookScript(repoRoot: string): string {
   return join(repoRoot, "install", "hooks", "session-start.mjs");
+}
+
+/** pi has no MCP layer, no managed rules file and no session hook: one extension is all four. */
+export function piExtension(repoRoot: string): string {
+  return join(repoRoot, "install", "pi", "index.ts");
+}
+
+export function piAgentDir(home: string): string {
+  return join(home, ".pi", "agent");
+}
+
+/** The launch entry an `mcpServers` block holds for every other host. */
+export function piBridgeConfig(home: string): string {
+  return join(piAgentDir(home), "cerebrium.json");
+}
+
+export function piSettings(home: string): string {
+  return join(piAgentDir(home), "settings.json");
 }
 
 export function hookCommand(repoRoot: string, host: HostId): string {
@@ -485,10 +503,77 @@ function planAntigravity(input: PlanInput): HostPlan {
   };
 }
 
+const PI_ENTRY_SUFFIX = join("install", "pi", "index.ts");
+
+function piExtensionState(settings: JsonFile, target: string, repoRoot: string): SurfaceState {
+  const entries = settings.value.extensions;
+  const declared = Array.isArray(entries)
+    ? entries.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  if (declared.includes(piExtension(repoRoot))) {
+    return state("extension", "ok", target, "registered against this working tree");
+  }
+  return declared.some((entry) => entry.endsWith(PI_ENTRY_SUFFIX))
+    ? state("extension", "stale", target, "registered from another checkout")
+    : state("extension", "missing", target, "no cerebrium extension in the extensions list");
+}
+
+/** Skill, rules and session start all ride on the extension, so they inherit its verdict. */
+function piDelivered(surface: Surface, extension: SurfaceState, detail: string): SurfaceState {
+  const waiting = "waits on the pi extension registration";
+  return state(
+    surface,
+    extension.status,
+    extension.target,
+    extension.status === "ok" ? detail : waiting,
+  );
+}
+
+function planPi(input: PlanInput): HostPlan {
+  const { home, repoRoot } = input;
+  const settingsPath = piSettings(home);
+  const bridgePath = piBridgeConfig(home);
+
+  const settings = readJson(settingsPath);
+  const bridge = readJson(bridgePath);
+  const extension =
+    settings.state === "conflict"
+      ? jsonConflict("extension", settingsPath)
+      : piExtensionState(settings, settingsPath, repoRoot);
+
+  return {
+    host: "pi",
+    detected: existsSync(join(home, ".pi")) || input.hasCommand("pi"),
+    surfaces: [
+      extension,
+      bridge.state === "conflict"
+        ? jsonConflict("mcp", bridgePath)
+        : mcpState(
+            bridge.state === "missing" ? undefined : bridge.value,
+            bridgePath,
+            repoRoot,
+            input.nodePath,
+          ),
+      piDelivered("skill", extension, "skill/ offered to pi's discovery at session start"),
+      piDelivered("rules", extension, "always-on block chained onto pi's system prompt"),
+      piDelivered(
+        "hook",
+        extension,
+        "session_start called by the extension, id handed to the model",
+      ),
+    ],
+    notes: [
+      "pi ships no MCP client: the extension is the transport, the skill path, the rules and the session hook",
+      "restart pi (or run /reload) after applying, so the new extension is loaded",
+    ],
+  };
+}
+
 const PLANNERS: Record<HostId, (input: PlanInput) => HostPlan> = {
   claude: planClaude,
   codex: planCodex,
   antigravity: planAntigravity,
+  pi: planPi,
 };
 
 export function planHost(host: HostId, input: PlanInput): HostPlan {
@@ -524,7 +609,18 @@ export function discoverEnv(input: PlanInput): Record<string, string> | null {
   if (claude !== null) return claude;
   const antigravity = fromJson(join(home, ".gemini", "config", "mcp_config.json"));
   if (antigravity !== null) return antigravity;
-  return codexEnv(readText(join(home, ".codex", "config.toml")) ?? "");
+  const codex = codexEnv(readText(join(home, ".codex", "config.toml")) ?? "");
+  if (codex !== null) return codex;
+  return piEnv(readJson(piBridgeConfig(home)));
+}
+
+/** pi's launch entry keeps the env at the top level, since the file holds one server. */
+function piEnv(file: JsonFile): Record<string, string> | null {
+  if (file.state !== "valid" || file.value.env === undefined) return null;
+  const env = record(file.value.env);
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 }
 
 /** Reads only the `env` inline table of `[mcp_servers.cerebrium]` — not a TOML parser. */

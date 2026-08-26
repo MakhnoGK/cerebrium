@@ -12,10 +12,14 @@ import {
   extractManagedBlock,
   hookScript,
   pending,
+  piBridgeConfig,
+  piExtension,
+  piSettings,
   planHost,
   serverPath,
   skillPath,
   upsertManagedBlock,
+  type HostId,
   type PlanInput,
   type Surface,
   type SurfaceStatus,
@@ -37,7 +41,7 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
   };
 }
 
-function status(host: "claude" | "codex" | "antigravity", surface: Surface): SurfaceStatus {
+function status(host: HostId, surface: Surface): SurfaceStatus {
   const plan = planHost(host, input());
   return plan.surfaces.find((s) => s.surface === surface)!.status;
 }
@@ -438,6 +442,82 @@ describe("upsertManagedBlock", () => {
   });
 });
 
+describe("pi surfaces", () => {
+  it("should report every surface missing on a home with no pi settings", () => {
+    // Given / When
+    const plan = planHost("pi", input());
+
+    // Then
+    expect(plan.surfaces.map((s) => s.surface)).toEqual([
+      "extension",
+      "mcp",
+      "skill",
+      "rules",
+      "hook",
+    ]);
+    expect(plan.surfaces.every((s) => s.status === "missing")).toBe(true);
+  });
+
+  it("should be ok once settings.json declares this working tree's extension", () => {
+    // Given
+    writeJson(piSettings(home), { extensions: [piExtension(REPO)] });
+
+    // When / Then
+    expect(status("pi", "extension")).toBe("ok");
+  });
+
+  it("should be stale when the declared extension belongs to another checkout", () => {
+    // Given
+    writeJson(piSettings(home), {
+      extensions: [join(home, "elsewhere", "install", "pi", "index.ts")],
+    });
+
+    // When / Then
+    expect(status("pi", "extension")).toBe("stale");
+  });
+
+  it("should let skill, rules and the session hook follow the extension", () => {
+    // Given
+    writeJson(piSettings(home), { extensions: [piExtension(REPO)] });
+
+    // When
+    const plan = planHost("pi", input());
+
+    // Then
+    for (const surface of ["skill", "rules", "hook"] as const) {
+      expect(plan.surfaces.find((s) => s.surface === surface)?.status).toBe("ok");
+    }
+  });
+
+  it("should read the launch entry out of pi's own cerebrium.json", () => {
+    // Given
+    writeJson(piBridgeConfig(home), {
+      command: process.execPath,
+      args: [serverPath(REPO)],
+      env: {},
+    });
+
+    // When / Then
+    expect(status("pi", "mcp")).toBe("ok");
+  });
+
+  it("should be stale when the launch entry points at another bundle", () => {
+    // Given
+    writeJson(piBridgeConfig(home), { command: "node", args: ["/opt/other/dist/server.js"] });
+
+    // When / Then
+    expect(status("pi", "mcp")).toBe("stale");
+  });
+
+  it("should say plainly that pi has no MCP client of its own", () => {
+    // Given / When
+    const plan = planHost("pi", input());
+
+    // Then
+    expect(plan.notes.some((note) => note.includes("no MCP client"))).toBe(true);
+  });
+});
+
 describe("discoverEnv", () => {
   it("should reuse the environment of an already registered host", () => {
     // Given
@@ -461,6 +541,18 @@ describe("discoverEnv", () => {
       join(home, ".codex", "config.toml"),
       `[mcp_servers.cerebrium]\ncommand = "node"\nenv = { MEMORY_DB_PATH = "/db/m.db" }\n`,
     );
+
+    // When / Then
+    expect(discoverEnv(input())).toEqual({ MEMORY_DB_PATH: "/db/m.db" });
+  });
+
+  it("should fall back to pi's launch entry when it is the only registration", () => {
+    // Given
+    writeJson(piBridgeConfig(home), {
+      command: process.execPath,
+      args: [serverPath(REPO)],
+      env: { MEMORY_DB_PATH: "/db/m.db" },
+    });
 
     // When / Then
     expect(discoverEnv(input())).toEqual({ MEMORY_DB_PATH: "/db/m.db" });

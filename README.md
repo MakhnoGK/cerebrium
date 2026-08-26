@@ -369,7 +369,7 @@ and its `~/.cerebrium/models` cache are created on first use — no manual DB se
 **4 — Install the discipline, not just the tools.** An agent handed 18 tools and no
 doctrine calls `write` without searching and fills the store with duplicates. One command
 installs the skill, the always-on retrieval rules and a session-start hook for every agent
-host it finds — Claude Code, Codex CLI and Antigravity:
+host it finds — Claude Code, Codex CLI, Antigravity and pi:
 
 ```bash
 npm run agent:setup            # what each host is missing; writes nothing
@@ -1175,6 +1175,7 @@ surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, a
 | Claude Code | `claude mcp add -s user` | symlink in `~/.claude/skills/` | block in `~/.claude/CLAUDE.md` | `SessionStart` in `~/.claude/settings.json` |
 | Codex CLI | `codex mcp add` | symlink in `~/.codex/skills/` | block in `~/.codex/AGENTS.md` | `SessionStart` in `~/.codex/hooks.json` |
 | Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | global block in `~/.gemini/GEMINI.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
+| pi | *(no MCP client — see below)* | extension offers `skill/` to discovery | extension chains the block onto the system prompt | extension calls `session_start` itself |
 
 The rules block is written between `cerebrium:start`/`cerebrium:end` markers and replaced
 in place on later runs, so the rest of a file you maintain is never touched. Two steps are
@@ -1186,6 +1187,15 @@ Antigravity adds one host-specific surface: explicit Cerebrium permissions in th
 settings. Setup merges the current tool grants into both active configs, preserves unrelated
 entries, and refuses malformed JSON or permission shapes instead of overwriting them.
 
+pi subtracts one: it ships no MCP client at all. Its four surfaces are delivered by a single
+extension loaded from this working tree — `install/pi/`, registered in
+`~/.pi/agent/settings.json`, with the launch entry (`command`/`args`/`env`) in
+`~/.pi/agent/cerebrium.json`. Because the extension owns the transport, it can do what a hook
+cannot: it calls `session_start` before the first turn and hands the model the real
+`session_id` plus the working set, and fills that same id into any later call that omits it.
+Memory tools carry a `cerebrium_` prefix there, since pi already has built-in `write`, `read`
+and `get`. See `install/pi/README.md`.
+
 Setup reads the numeric version in `.nvmrc`, verifies that it is running under that Node, opens
 an in-memory `better-sqlite3` database as a native-addon preflight, and registers the canonical
 absolute Node executable in every MCP host. This avoids GUI and terminal `PATH` differences
@@ -1194,7 +1204,8 @@ silently selecting incompatible Node ABIs. After changing or removing the NVM ve
 
 `npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
 server over stdio against a throwaway store, calls `session_start`, counts the tools and
-runs the hook script. `install/README.md` has the per-host procedure by hand, and
+runs the hook script — or, for pi, loads the extension under `node --experimental-strip-types`
+and checks it exports a factory. `install/README.md` has the per-host procedure by hand, and
 `install/hosts.md` records what was verified on which host version.
 
 `npm run eval:agents` audits persisted Antigravity traces. It emits aggregate tool names and
