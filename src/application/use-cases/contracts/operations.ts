@@ -43,12 +43,21 @@ export interface OperatorSnapshotResult extends TechStats {
     daemon_pid: number | null;
   };
   processes: OperatorProcess[];
+  generation: GenerationReport;
   config: {
     file: ConfigFileReport | null;
     values: Record<string, Record<string, unknown>>;
     provenance: FieldProvenance[];
     ignored: string[];
   };
+}
+
+// The generating backend and what each role will actually be asked to run. A role pointed
+// at another model is visible here before any call is made.
+export interface GenerationReport {
+  provider: string;
+  enabled: boolean;
+  roles: Record<string, unknown>;
 }
 
 export interface OperatorProcess {

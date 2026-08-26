@@ -19,6 +19,8 @@ import {
   SYSTEM_PROMPT,
   taskPrompt,
 } from "@/consolidation/provider";
+import { resolveRoles, type ResolvedRoles } from "@/consolidation/roles";
+import { GenerationRole } from "@/core/vocab";
 
 // Runs a user command, feeding `input` on stdin and resolving with its stdout. Rejects
 // on non-zero exit, timeout, or spawn error.
@@ -32,21 +34,34 @@ export class CommandConsolidator implements ConsolidationProvider {
   readonly name = "command";
   readonly version = "1";
   readonly enabled = true;
-  private readonly runner: CommandRunner;
-  // `reconcile` runs while a `write` waits for it, so it gets the shorter budget.
-  private readonly interactiveRunner: CommandRunner;
+  // One runner per role: each carries that role's deadline, and the role's model travels in
+  // the payload so a user process can route on it too.
+  private readonly runners: Record<GenerationRole, CommandRunner>;
+  private readonly roles: ResolvedRoles;
 
   constructor(opts?: {
+    roles?: ResolvedRoles;
     cmd?: string;
     timeoutMs?: number;
     reconcileTimeoutMs?: number;
     runner?: CommandRunner;
   }) {
-    const cmd = opts?.cmd;
-    const timeoutMs = opts?.timeoutMs ?? 500_000;
-    const reconcileTimeoutMs = opts?.reconcileTimeoutMs ?? 25_000;
-    this.runner = opts?.runner ?? defaultRunner(cmd, timeoutMs);
-    this.interactiveRunner = opts?.runner ?? defaultRunner(cmd, reconcileTimeoutMs);
+    this.roles =
+      opts?.roles ??
+      resolveRoles({
+        url: "",
+        model: "",
+        timeoutMs: opts?.timeoutMs ?? 500_000,
+        reconcileTimeoutMs: opts?.reconcileTimeoutMs ?? 25_000,
+      });
+    this.runners = {
+      [GenerationRole.GENERATE]:
+        opts?.runner ?? defaultRunner(opts?.cmd, this.roles[GenerationRole.GENERATE].timeoutMs),
+      [GenerationRole.RECONCILE]:
+        opts?.runner ?? defaultRunner(opts?.cmd, this.roles[GenerationRole.RECONCILE].timeoutMs),
+      [GenerationRole.ANNOTATE]:
+        opts?.runner ?? defaultRunner(opts?.cmd, this.roles[GenerationRole.ANNOTATE].timeoutMs),
+    };
   }
 
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
@@ -54,35 +69,38 @@ export class CommandConsolidator implements ConsolidationProvider {
       task: "consolidate",
       system: SYSTEM_PROMPT,
       kind: task.kind,
+      model: this.roles[GenerationRole.GENERATE].model,
       project: task.project,
       prompt: taskPrompt(task),
       inputs: task.inputs,
     });
-    return parseResult(await this.runner(input));
+    return parseResult(await this.runners[GenerationRole.GENERATE](input));
   }
 
   async reconcile(task: ReconcileTask): Promise<ReconcileResult> {
     const input = JSON.stringify({
       task: "reconcile",
       system: RECONCILE_SYSTEM_PROMPT,
+      model: this.roles[GenerationRole.RECONCILE].model,
       project: task.project,
       prompt: reconcilePrompt(task),
       draft: task.draft,
       candidates: task.candidates,
     });
-    return parseReconcile(await this.interactiveRunner(input));
+    return parseReconcile(await this.runners[GenerationRole.RECONCILE](input));
   }
 
   async annotate(task: AnnotateTask): Promise<AnnotateResult> {
     const input = JSON.stringify({
       task: "annotate",
       system: ANNOTATE_SYSTEM_PROMPT,
+      model: this.roles[GenerationRole.ANNOTATE].model,
       project: task.project,
       prompt: annotatePrompt(task),
       title: task.title,
       content: task.content,
     });
-    return parseAnnotate(await this.runner(input));
+    return parseAnnotate(await this.runners[GenerationRole.ANNOTATE](input));
   }
 }
 

@@ -72,7 +72,7 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
   index, which is what `restore` exists for.
 - **`stats`** — operational snapshot, no content: embedding queue, content totals, storage,
   daemon/lease health, graph integrity (dangling edges, how many are repairable, stranded
-  nodes — all three should read 0), reranker usage.
+  nodes — all three should read 0), and the generation backend with its per-role models.
 
 Every session/node/candidate id is opaque. Copy it exactly from a Cerebrium response; never
 synthesize one. Stale node references are rejected with the terminal live successor when

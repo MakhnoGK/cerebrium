@@ -110,7 +110,6 @@ eval-retrieval — labelled relevance eval across configuration arms.
   --help     This text.
 
 Examples
-  npm run eval:retrieval -- --arm off:MEMORY_RERANK=off --arm on:MEMORY_RERANK=local
   npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
   npm run eval:retrieval -- --arm flat:MEMORY_USE_WEIGHT=0 --arm usage:MEMORY_USE_WEIGHT=0.25
   npm run eval:retrieval -- --db ~/.cerebrium/memory.db --gold ~/.cerebrium/gold.jsonl

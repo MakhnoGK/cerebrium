@@ -28,7 +28,7 @@ import {
 //     how many edges would link discovery propose per node.
 //
 // Flags: --json, --all-scorers (also run the scorers already rejected by measurement),
-// --cross-encoder (loads the rerank model), --help.
+// --help.
 
 const MERGE_SWEEP = [0.9, 0.905, 0.91, 0.915, 0.92, 0.925, 0.93, 0.935, 0.94, 0.945, 0.95];
 const DENSITY_SWEEP = [0.85, 0.87, 0.89, 0.9, 0.91, 0.92, 0.925, 0.93, 0.94];

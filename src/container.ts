@@ -22,6 +22,7 @@ import {
   LayeredConfigSource,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
+import { resolveRoles } from "@/consolidation/roles";
 import { NoEmbeddingProvider } from "@/embeddings/worker-provider";
 import { configFilePath } from "@/runtime/paths";
 import { registerRemoteKernel } from "@/runtime/remote-kernel";
@@ -162,11 +163,8 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
       const config = c.resolve(ConsolidationConfig);
 
       return createConsolidator(config.provider, {
-        url: config.url,
-        model: config.model,
+        roles: resolveRoles(config, config.roles),
         cmd: config.command ?? undefined,
-        timeoutMs: config.timeoutMs,
-        reconcileTimeoutMs: config.reconcileTimeoutMs,
       });
     }),
   });

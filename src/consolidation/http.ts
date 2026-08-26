@@ -21,6 +21,8 @@ import {
   SYSTEM_PROMPT,
   taskPrompt,
 } from "@/consolidation/provider";
+import { resolveRoles, type ResolvedRoles, type RoleBackend } from "@/consolidation/roles";
+import { GenerationRole } from "@/core/vocab";
 
 export type FetchFn = typeof fetch;
 
@@ -31,9 +33,12 @@ interface ChatResponse {
 // HTTP generation provider, defaulting to a local Ollama `/api/chat` with structured
 // outputs (`format` = the result JSON schema) so the reply parses cleanly, and with the
 // model's reasoning mode off (see `post`). Any transport failure, non-2xx, timeout, or
-// malformed body throws — the caller (daemon) then degrades to `suggest`, exactly like the
-// reranker's graceful fallback. `fetchFn` is injectable so the contract is testable offline
-// without a live model.
+// malformed body throws — the caller (daemon) then degrades to `suggest`. `fetchFn` is
+// injectable so the contract is testable offline without a live model.
+//
+// One instance serves all three roles and each call carries its own role's model, host and
+// deadline: `thinkSupported` is knowledge about a backend, not about a task, so splitting
+// this into an instance per role would relearn it three times.
 // Fallbacks for a directly-constructed adapter (tests). Production values come from
 // ConsolidationConfig via createConsolidator.
 const DEFAULTS = {
@@ -43,47 +48,42 @@ const DEFAULTS = {
   reconcileTimeoutMs: 25_000,
 };
 
-// A budget and the knob that raises it, so a timeout says which one it was.
-interface Deadline {
-  ms: number;
-  env: string;
-}
-
 export class HttpConsolidator implements ConsolidationProvider {
   readonly name = "http";
   readonly version = "1";
   readonly enabled = true;
-  private readonly url: string;
-  private readonly model: string;
-  private readonly generation: Deadline;
-  private readonly interactive: Deadline;
+  private readonly roles: ResolvedRoles;
   private readonly fetchFn: FetchFn;
   // Flipped for the process once a backend rejects the field; see `chat`.
   private thinkSupported = true;
 
   constructor(opts?: {
+    roles?: ResolvedRoles;
     url?: string;
     model?: string;
     timeoutMs?: number;
     reconcileTimeoutMs?: number;
     fetchFn?: FetchFn;
   }) {
-    this.url = opts?.url ?? DEFAULTS.url;
-    this.model = opts?.model ?? DEFAULTS.model;
-    this.generation = {
-      ms: opts?.timeoutMs ?? DEFAULTS.timeoutMs,
-      env: "MEMORY_CONSOLIDATE_TIMEOUT_MS",
-    };
-    this.interactive = {
-      ms: opts?.reconcileTimeoutMs ?? DEFAULTS.reconcileTimeoutMs,
-      env: "MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS",
-    };
+    this.roles =
+      opts?.roles ??
+      resolveRoles({
+        url: opts?.url ?? DEFAULTS.url,
+        model: opts?.model ?? DEFAULTS.model,
+        timeoutMs: opts?.timeoutMs ?? DEFAULTS.timeoutMs,
+        reconcileTimeoutMs: opts?.reconcileTimeoutMs ?? DEFAULTS.reconcileTimeoutMs,
+      });
     this.fetchFn = opts?.fetchFn ?? fetch;
   }
 
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
     return parseResult(
-      await this.chat(SYSTEM_PROMPT, taskPrompt(task), RESULT_SCHEMA, this.generation),
+      await this.chat(
+        SYSTEM_PROMPT,
+        taskPrompt(task),
+        RESULT_SCHEMA,
+        this.roles[GenerationRole.GENERATE],
+      ),
     );
   }
 
@@ -93,7 +93,7 @@ export class HttpConsolidator implements ConsolidationProvider {
         RECONCILE_SYSTEM_PROMPT,
         reconcilePrompt(task),
         RECONCILE_SCHEMA,
-        this.interactive,
+        this.roles[GenerationRole.RECONCILE],
       ),
     );
   }
@@ -104,7 +104,7 @@ export class HttpConsolidator implements ConsolidationProvider {
         ANNOTATE_SYSTEM_PROMPT,
         annotatePrompt(task),
         ANNOTATE_SCHEMA,
-        this.generation,
+        this.roles[GenerationRole.ANNOTATE],
       ),
     );
   }
@@ -118,28 +118,29 @@ export class HttpConsolidator implements ConsolidationProvider {
     system: string,
     user: string,
     format: object,
-    deadline: Deadline,
+    backend: RoleBackend,
   ): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-    }, deadline.ms);
+    }, backend.timeoutMs);
     try {
-      let res = await this.post(system, user, format, controller.signal);
+      let res = await this.post(system, user, format, backend, controller.signal);
 
       // A backend that has no reasoning mode rejects the field outright. Retrying once
       // without it, and remembering that for the process, keeps this adapter working
       // against any Ollama-compatible model instead of failing every call on one word.
       if (!res.ok && this.thinkSupported && (await rejectsThinking(res))) {
         this.thinkSupported = false;
-        res = await this.post(system, user, format, controller.signal);
+        res = await this.post(system, user, format, backend, controller.signal);
       }
 
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
 
         throw new Error(
-          `consolidation http provider: HTTP ${String(res.status)}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+          `consolidation http provider (${backend.role} on ${backend.model}): HTTP ${String(res.status)}` +
+            (detail ? `: ${detail.slice(0, 300)}` : ""),
         );
       }
       const body = (await res.json()) as ChatResponse;
@@ -153,7 +154,8 @@ export class HttpConsolidator implements ConsolidationProvider {
       // Naming the timeout is what tells an operator to raise it rather than hunt a bug.
       if (controller.signal.aborted) {
         throw new Error(
-          `consolidation http provider: timed out after ${String(deadline.ms)}ms (${deadline.env})`,
+          `consolidation http provider: ${backend.role} on ${backend.model} timed out after ` +
+            `${String(backend.timeoutMs)}ms (${backend.timeoutKnob})`,
           { cause: err },
         );
       }
@@ -173,13 +175,14 @@ export class HttpConsolidator implements ConsolidationProvider {
     system: string,
     user: string,
     format: object,
+    backend: RoleBackend,
     signal: AbortSignal,
   ): Promise<Response> {
-    return this.fetchFn(this.url, {
+    return this.fetchFn(backend.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: this.model,
+        model: backend.model,
         stream: false,
         format,
         ...(this.thinkSupported ? { think: false } : {}),

@@ -11,8 +11,8 @@ export type GenerationTaskKind = ConsolidationKind.DISTILL | ConsolidationKind.M
 // judgment (`reconcile`), and attribute enrichment (`annotate`). `manual`/`off` report
 // `enabled=false` and are never asked to do any of them (the daemon queues clusters for
 // an agent; the write tool falls back to its advisory `similar_existing` hint; nodes
-// stay un-annotated); real providers (`command`/`http`) run autonomously. Mirrors
-// RerankProvider: the interface is the whole contract, so a new backend is a one-file change.
+// stay un-annotated); real providers (`command`/`http`) run autonomously. The interface is
+// the whole contract, so a new backend is an entry in `BACKENDS` plus a class.
 export interface ConsolidationProvider {
   readonly name: string;
   readonly version: string;

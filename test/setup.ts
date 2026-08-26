@@ -15,7 +15,6 @@ buildContainer({
     new StaticConfigSource({
       MEMORY_DB_PATH: ":memory:",
       MEMORY_EMBED_PROVIDER: "local-null",
-      MEMORY_RERANK: "off",
       MEMORY_CONSOLIDATE: "manual",
     }),
     new EnvConfigSource(),

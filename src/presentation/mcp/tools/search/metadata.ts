@@ -28,10 +28,8 @@ export const metadata = {
     "listed under the kept result as `duplicates:[{id,title,score}]` and the freed slot goes to the next distinct " +
     "hit, so `limit` buys more. Nothing is hidden — a folded node is `get`-able by the id shown there — and two " +
     "nodes joined by `supersedes` never fold into one another. A pair carrying a reviewed `duplicate_of` edge folds " +
-    "regardless of the gate, marked `recorded:true`.Use `mode:'text'` for the cheapest exact Phase-1 behavior. When the " +
-    "`MEMORY_RERANK` reranker is enabled, a local cross-encoder rescoring sharpens the " +
-    "fused hits' precision before graph expansion — it is off by default, never applies " +
-    "to graph neighbors, and never changes which fields a result returns. Code `symbol` mirrors are " +
+    "regardless of the gate, marked `recorded:true`.Use `mode:'text'` for the cheapest exact Phase-1 behavior. " +
+    "Code `symbol` mirrors are " +
     "down-weighted as direct hits so authored and external-mirror knowledge ranks first; ask for them " +
     "explicitly (`types:['symbol']` or `kinds:['mirror']`) to rank them normally. The code index sits in " +
     "its own vector pool, so filtering it out (`kinds` without `mirror`) is not just a post-filter: the " +

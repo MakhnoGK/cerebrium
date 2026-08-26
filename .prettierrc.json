@@ -12,7 +12,7 @@
     "<THIRD_PARTY_MODULES>",
     "^@/domain(/.*)?$",
     "^@/application(/.*)?$",
-    "^@/(db|code|embeddings|rerank|consolidation|runtime)/(.*)$",
+    "^@/(db|code|embeddings|consolidation|runtime)/(.*)$",
     "^@/(core|presentation|tools)/(.*)$",
     "^@/(.*)$",
     "^@test/(.*)$",

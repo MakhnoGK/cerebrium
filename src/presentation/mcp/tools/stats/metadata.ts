@@ -11,10 +11,10 @@ export const metadata = {
     "drain health (embedding provider, whether the background daemon is alive, and the current worker-lease holder); " +
     "graph integrity (edges still pointing at soft-deleted nodes, how many of those are authored edges whose target has " +
     "a live successor, and live nodes stranded off the main graph — all three should read 0); " +
-    "and reranking (the configured reranker, whether it is enabled, and usage counters — how many searches were " +
-    "rerank-eligible, how many actually reranked, and total candidates scored). " +
+    "and generation (the configured backend, whether it generates at all, and what each role — generate, " +
+    "reconcile, annotate — will actually be sent: model, host, deadline, and whether it inherits them). " +
     "Use it to answer 'how many items are in the queue right now', 'is the embedding backlog being worked off', " +
-    "'has anything fallen out of the graph', and 'is the reranker running'.",
+    "'has anything fallen out of the graph', and 'which model will judge my next write'.",
 
   schema: {
     session_id: sessionIdSchema.optional(),
