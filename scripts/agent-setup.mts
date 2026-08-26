@@ -39,7 +39,9 @@ agent-setup — report or install what each agent host needs to use Cerebrium as
   --help       This text.
 
 Core surfaces per host: mcp, skill, rules, hook. Antigravity also has an explicit
-permissions surface for the IDE and CLI configs. See install/hosts.md for locations.
+permissions surface for the IDE and CLI configs; pi has an extension surface instead,
+because it ships no MCP client and one extension delivers all four. See install/hosts.md
+for locations.
 --apply never touches the database, deletes nothing, and edits rules files you own only
 between the cerebrium:start/end markers.
 `;
@@ -96,7 +98,7 @@ function report(
     const status = plan.detected ? "" : "  (not installed on this machine)";
     process.stdout.write(`\n${plan.host}${status}\n`);
     for (const s of plan.surfaces) {
-      process.stdout.write(`  ${GLYPH[s.status]} ${s.surface.padEnd(6)} ${s.detail}\n`);
+      process.stdout.write(`  ${GLYPH[s.status]} ${s.surface.padEnd(9)} ${s.detail}\n`);
       process.stdout.write(`    ${s.target}\n`);
     }
     for (const note of plan.notes) process.stdout.write(`  → ${note}\n`);

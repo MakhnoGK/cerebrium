@@ -21,6 +21,9 @@ import {
   hookCommand,
   hookScript,
   pending,
+  piBridgeConfig,
+  piExtension,
+  piSettings,
   planHost,
   serverPath,
   skillPath,
@@ -319,6 +322,37 @@ function applyAntigravity(input: PlanInput, _opts: ApplyOptions, todo: SurfaceSt
   return out;
 }
 
+const PI_ENTRY_SUFFIX = join("install", "pi", "index.ts");
+
+function applyPi(input: PlanInput, _opts: ApplyOptions, todo: SurfaceState[]): Applied[] {
+  const has = (s: Surface): SurfaceState | undefined => todo.find((t) => t.surface === s);
+  const out: Applied[] = [];
+
+  if (has("extension")) {
+    out.push(
+      updateJson("extension", piSettings(input.home), (file) => {
+        const wanted = piExtension(input.repoRoot);
+        const declared: unknown[] = Array.isArray(file.extensions) ? file.extensions : [];
+        const others = declared.filter(
+          (entry) => typeof entry !== "string" || !entry.endsWith(PI_ENTRY_SUFFIX),
+        );
+        file.extensions = [...others, wanted];
+      }),
+    );
+  }
+  if (has("mcp")) {
+    out.push(
+      updateJson("mcp", piBridgeConfig(input.home), (file) => {
+        const desired = desiredMcp(input.repoRoot, input.env, input.nodePath);
+        file.command = desired.command;
+        file.args = desired.args;
+        file.env = desired.env;
+      }),
+    );
+  }
+  return out;
+}
+
 const APPLIERS: Record<
   HostId,
   (input: PlanInput, opts: ApplyOptions, todo: SurfaceState[]) => Applied[]
@@ -326,6 +360,7 @@ const APPLIERS: Record<
   claude: applyClaude,
   codex: applyCodex,
   antigravity: applyAntigravity,
+  pi: applyPi,
 };
 
 export function applyHost(host: HostId, input: PlanInput, opts: ApplyOptions): Applied[] {

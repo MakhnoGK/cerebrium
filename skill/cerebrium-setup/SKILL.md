@@ -4,8 +4,8 @@ description: >-
   Set up the agent host you are running in to use Cerebrium as durable cross-session memory —
   register the MCP server, install the usage skill, add the always-on retrieval rules, and add
   the session-start hook. Use when asked to install, wire up, configure, verify or repair
-  Cerebrium for this agent (Claude Code, Codex CLI, or Antigravity), or when memory tools are
-  missing in a host that should have them.
+  Cerebrium for this agent (Claude Code, Codex CLI, Antigravity, or pi), or when memory tools
+  are missing in a host that should have them.
 ---
 
 # Installing Cerebrium into an agent host
@@ -25,6 +25,11 @@ Four surfaces, because each covers a gap the others leave:
 A host with only the first one will call `write` without searching and fill the store with
 duplicates. The wiring is the easy half; the doctrine is the point.
 
+How those four are delivered is the host's business, not yours to invent. In pi there is no
+MCP client, no rules file and no hook: all four arrive through one extension registered in
+`~/.pi/agent/settings.json`, and its tools are prefixed `cerebrium_`. `agent:setup` handles
+that host like any other.
+
 ## Procedure
 
 1. **Identify the host you are running in**, and build the bundle the hosts will launch:
@@ -36,9 +41,10 @@ duplicates. The wiring is the easy half; the doctrine is the point.
    [install/README.md](../../install/README.md): Codex's `hooks = true` under `[features]`,
    and Antigravity's per-project rules block. Both are explained in the report itself.
 4. **Verify by calling, not by reading config.** `npm run agent:setup -- --verify` boots the
-   server and calls `session_start` against a throwaway store. Then start a session on the
-   host itself and call `session_start` there — that is the only thing that proves the host's
-   own wiring, and it takes ten seconds.
+   server and calls `session_start` against a throwaway store, and loads pi's extension when
+   that host is in scope. Then start a session on the host itself and call `session_start`
+   there — that is the only thing that proves the host's own wiring, and it takes ten seconds.
+   In pi the session is already open: `/cerebrium status` reports the id it holds.
 5. **If you are in a host none of this covers**, say so and stop rather than inventing a
    layout. [hosts.md](../../install/hosts.md) records what was actually verified per host;
    adding a host means verifying its four surfaces and writing them down there.

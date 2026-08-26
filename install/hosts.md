@@ -2,12 +2,13 @@
 
 What each supported agent host exposes, and which of its surfaces Cerebrium's setup uses.
 Everything here was verified against a live installation on 2026-08-09 — Claude Code, Codex,
-Antigravity IDE 2.5.0, and Antigravity CLI 1.1.11. Re-verify before trusting
-it against a newer host release: these are product surfaces, not standards.
+Antigravity IDE 2.5.0, and Antigravity CLI 1.1.11 — and against pi 0.84.3 on 2026-08-26.
+Re-verify before trusting it against a newer host release: these are product surfaces, not
+standards.
 
 ## The four surfaces
 
-Every host needs the same four things, and all three expose all four:
+Every host needs the same four things, and all four expose all four:
 
 | Surface | What it does | Why it is not optional |
 |---|---|---|
@@ -53,7 +54,7 @@ and the IDE.
 | Hook | `~/.gemini/config/hooks.json` | `PreInvocation` with `injectSteps[].ephemeralMessage` |
 | Permissions | IDE: `~/.gemini/config/config.json`; CLI: `~/.gemini/antigravity-cli/settings.json` | explicit allow entry for each current Cerebrium tool; unrelated grants are preserved |
 
-Every MCP registration uses the canonical absolute Node executable selected by this repo's
+Every MCP registration — including pi's launch entry — uses the canonical absolute Node executable selected by this repo's
 `.nvmrc`, never bare `node`. `better-sqlite3` is ABI-bound: setup checks the current Node against
 `.nvmrc` and opens `:memory:` with the addon before it mutates any host config. Rerun setup after
 changing/removing the NVM version or rebuilding native dependencies.
@@ -69,6 +70,31 @@ Antigravity's IDE and CLI use different permission files, so setup treats permis
 an Antigravity-only fifth surface. The allowlist is explicit and exhaustive: adding a new MCP
 tool breaks type-checking until its permission policy is consciously classified.
 
+## pi
+
+pi is the exception that proves the shape: it has **no MCP client at all**, no rules file it
+manages, and no session hook. What it has is extensions — TypeScript loaded from the working
+tree — so all four surfaces are one artifact, [`install/pi/`](./pi/README.md).
+
+| Surface | Location | Mechanism |
+|---|---|---|
+| MCP | the extension itself | spawns `dist/server.js` over stdio and registers each tool as a pi tool, prefixed `cerebrium_` |
+| Skill | the extension itself | `resources_discover` returns this repo's `skill/` — no symlink, no copy |
+| Rules | the extension itself | `before_agent_start` chains `install/always-on.md` onto pi's system prompt |
+| Hook | the extension itself | calls `session_start` and posts the working set, so the model is handed a real `session_id` |
+| Registration | `~/.pi/agent/settings.json` | `extensions[]` entry pointing at this working tree |
+| Launch entry | `~/.pi/agent/cerebrium.json` | the `command`/`args`/`env` an `mcpServers` block holds elsewhere |
+
+Two consequences worth knowing:
+
+- pi's built-in `write`, `read` and `get` would collide, so every memory tool is registered
+  with a `cerebrium_` prefix. A note appended to the rules block tells the model.
+- pi validates tool arguments against the schema *before* the tool runs, so the omitted
+  `session_id` is filled in `prepareArguments`, not at call time. The id is the one
+  `session_start` returned in this session; the bridge never invents one.
+
+There is no permissions surface: pi has no permission popups to grant.
+
 ## What is deliberately not used
 
 - **Plugins** (Codex marketplaces, Antigravity `plugin.json`) — they bundle a skill, rules and
@@ -82,3 +108,7 @@ tool breaks type-checking until its permission policy is consciously classified.
 A symlinked (or path-declared) skill follows the **working tree**: whatever branch is checked
 out is what every host reads. Switch back to the main line before relying on it, and do not
 leave a half-written `SKILL.md` on a feature branch.
+
+pi inherits this twice over: its extension is loaded from the working tree as source, so a
+branch without `install/pi/` leaves pi with no memory tools at all, and a syntax error there
+is a failed extension load rather than a stale doctrine.
