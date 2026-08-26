@@ -37,6 +37,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function pointer(document: Record<string, unknown>, ref: string): unknown {
+  if (!ref.startsWith("#/")) return undefined;
+  return ref
+    .slice(2)
+    .split("/")
+    .reduce<unknown>((node, segment) => {
+      const key = segment.replace(/~1/g, "/").replace(/~0/g, "~");
+      return isRecord(node) ? node[key] : undefined;
+    }, document);
+}
+
+/**
+ * `link` declares `dst` as `$ref: "#/properties/src"`. Dropping the keyword would leave the
+ * model an argument with no description, so local pointers are inlined before the whitelist
+ * runs. The depth guard is what stops a self-referencing schema from spinning.
+ */
+function inlineRefs(node: unknown, document: Record<string, unknown>, depth = 0): unknown {
+  if (Array.isArray(node)) return node.map((item) => inlineRefs(item, document, depth));
+  if (!isRecord(node)) return node;
+
+  const ref = node.$ref;
+  if (typeof ref === "string" && depth < 8) {
+    const target = pointer(document, ref);
+    if (target !== undefined) {
+      const { $ref: _dropped, ...rest } = node;
+      return inlineRefs({ ...(isRecord(target) ? target : {}), ...rest }, document, depth + 1);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [key, inlineRefs(value, document, depth)]),
+  );
+}
+
 function sanitizeValue(key: string, value: unknown): unknown {
   if (key === "properties" && isRecord(value)) {
     return Object.fromEntries(
@@ -60,7 +93,8 @@ function sanitizeNode(node: unknown): unknown {
 
 /** Providers require an object schema; a tool that declares nothing gets an empty one. */
 export function sanitizeSchema(schema: unknown): Record<string, unknown> {
-  const sanitized = sanitizeNode(schema);
+  const inlined = isRecord(schema) ? inlineRefs(schema, schema) : schema;
+  const sanitized = sanitizeNode(inlined);
   if (!isRecord(sanitized) || sanitized.type !== "object") return { ...EMPTY_SCHEMA };
   return { ...sanitized, properties: isRecord(sanitized.properties) ? sanitized.properties : {} };
 }

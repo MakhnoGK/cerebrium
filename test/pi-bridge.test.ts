@@ -166,6 +166,39 @@ describe("sanitizeSchema", () => {
     // Given / When / Then
     expect(sanitizeSchema(undefined)).toEqual({ type: "object", properties: {} });
   });
+
+  it("should inline a local $ref so the argument keeps its description", () => {
+    // Given
+    const schema = {
+      type: "object",
+      properties: {
+        src: { type: "string", description: "an exact node id" },
+        dst: { $ref: "#/properties/src" },
+      },
+    };
+
+    // When
+    const sanitized = sanitizeSchema(schema);
+
+    // Then
+    expect((sanitized.properties as Record<string, unknown>).dst).toEqual({
+      type: "string",
+      description: "an exact node id",
+    });
+  });
+
+  it("should survive a $ref that points nowhere or at itself", () => {
+    // Given
+    const dangling = { type: "object", properties: { a: { $ref: "#/nope" } } };
+    const cyclic = {
+      type: "object",
+      properties: { a: { $ref: "#/properties/b" }, b: { $ref: "#/properties/a" } },
+    };
+
+    // When / Then
+    expect(sanitizeSchema(dangling).properties).toEqual({ a: {} });
+    expect(() => sanitizeSchema(cyclic)).not.toThrow();
+  });
 });
 
 describe("tool names", () => {
