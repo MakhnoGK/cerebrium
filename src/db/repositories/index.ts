@@ -15,3 +15,12 @@ export { ConsolidationRepo } from "@/db/repositories/consolidation";
 export { ProcessesRepo, type ProcessRow } from "@/db/repositories/processes";
 export { JobsRepo, type JobRow, type SubmitJob } from "@/db/repositories/jobs";
 export { StatsRepo } from "@/db/repositories/stats";
+export {
+  edgeRef,
+  parseEdgeRef,
+  ReviewsRepo,
+  type PendingEdge,
+  type PendingNode,
+  type RecordedDecision,
+  type ReviewScope,
+} from "@/db/repositories/reviews";

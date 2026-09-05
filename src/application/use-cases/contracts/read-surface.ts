@@ -3,6 +3,7 @@ import { JOB_STATUS } from "@/application/use-cases/contracts/jobs";
 import { READ_MIRROR_STATUS } from "@/application/use-cases/contracts/mirror";
 import { OPERATOR_SNAPSHOT, STATS_SNAPSHOT } from "@/application/use-cases/contracts/operations";
 import { FETCH_NODES, LOOKUP_CODE } from "@/application/use-cases/contracts/read";
+import { LIST_REVIEWS } from "@/application/use-cases/contracts/reviews";
 import { SEARCH_MEMORY } from "@/application/use-cases/contracts/search";
 
 // Use-case tokens are symbols, and a symbol cannot cross a worker or socket boundary. This
@@ -16,6 +17,7 @@ export const READ_SURFACE = {
   fetch_nodes: FETCH_NODES,
   lookup_code: LOOKUP_CODE,
   suggest_candidates: SUGGEST_CANDIDATES,
+  list_reviews: LIST_REVIEWS,
   mirror_status: READ_MIRROR_STATUS,
   job_status: JOB_STATUS,
   stats_snapshot: STATS_SNAPSHOT,
