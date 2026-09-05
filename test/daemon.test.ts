@@ -16,7 +16,7 @@ import { ensureDaemon } from "@/runtime/ensure-daemon";
 import { MemoryKind } from "@/core/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { nextIdleState, runDaemon, stepsAside, waitForOwnership } from "@/daemon";
+import { nextIdleState, ownedByAnother, runDaemon, stepsAside, waitForOwnership } from "@/daemon";
 import { DatabaseConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
 
@@ -270,5 +270,69 @@ describe("Stepping aside when the database is already owned", () => {
     // Given / When / Then — no agent installed, or no launchd to ask. Waiting for an
     // owner that will never leave is worse than leaving.
     expect(stepsAside({ resident: true, managedPid: null, pid: 99 })).toBe(true);
+  });
+});
+
+describe("Deciding whether the database already has an owner", () => {
+  const LAUNCHD_PID = 4242;
+  const live = (pid: number): boolean => pid === LAUNCHD_PID;
+  const dead = (): boolean => false;
+  const base = { managesThisDb: true, pid: 99 };
+
+  it("should report an owner whenever the pidfile names a live daemon", () => {
+    // Given / When / Then
+    expect(ownedByAnother({ ...base, pidfileAlive: true, managedPid: null, alive: dead })).toBe(
+      true,
+    );
+  });
+
+  it("should report an owner when the pidfile is stale but launchd still supervises one", () => {
+    // Given / When / Then — the gap that let a stray claim: its own dead predecessor in
+    // the pidfile read as "nobody owns this" while the supervised daemon kept working.
+    expect(
+      ownedByAnother({ ...base, pidfileAlive: false, managedPid: LAUNCHD_PID, alive: live }),
+    ).toBe(true);
+  });
+
+  it("should report no owner when the supervised pid is itself", () => {
+    // Given / When / Then
+    expect(
+      ownedByAnother({
+        ...base,
+        pid: LAUNCHD_PID,
+        pidfileAlive: false,
+        managedPid: LAUNCHD_PID,
+        alive: live,
+      }),
+    ).toBe(false);
+  });
+
+  it("should report no owner when launchd supervises a pid that is gone", () => {
+    // Given / When / Then
+    expect(ownedByAnother({ ...base, pidfileAlive: false, managedPid: 777, alive: live })).toBe(
+      false,
+    );
+  });
+
+  it("should report no owner when the pidfile is stale and launchd manages nothing", () => {
+    // Given / When / Then — the legitimate no-supervisor setup, where a session-spawned
+    // daemon is the only worker there is.
+    expect(ownedByAnother({ ...base, pidfileAlive: false, managedPid: null, alive: live })).toBe(
+      false,
+    );
+  });
+
+  it("should ignore the supervised daemon when it drains a different database", () => {
+    // Given / When / Then — the pidfile is per-database, and the agent only ever drains the
+    // default one for its own $CEREBRIUM_HOME.
+    expect(
+      ownedByAnother({
+        ...base,
+        managesThisDb: false,
+        pidfileAlive: false,
+        managedPid: LAUNCHD_PID,
+        alive: live,
+      }),
+    ).toBe(false);
   });
 });

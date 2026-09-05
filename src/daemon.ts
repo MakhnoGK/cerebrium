@@ -15,10 +15,16 @@ import { NotificationTopic } from "@/application/use-cases";
 import { ConsolidationWorker, EmbeddingWorker, JobWorker } from "@/application/workers";
 import { ConsolidationRepo, EmbeddingQueueRepo, JobsRepo } from "@/db/repositories";
 import { resolveEmbedWorker, WorkerEmbeddingProvider } from "@/embeddings/worker-provider";
-import { clearDaemonPid, isDaemonAlive, writeDaemonPid } from "@/runtime/daemon-pid";
+import {
+  clearDaemonPid,
+  isDaemonAlive,
+  isProcessAlive,
+  writeDaemonPid,
+} from "@/runtime/daemon-pid";
 import { isMainModule } from "@/runtime/is-main";
 import { launchdPid } from "@/runtime/launch-agent";
 import { nodeWorkerFactory, resolveReadWorker } from "@/runtime/node-pool-worker";
+import { defaultDbPath } from "@/runtime/paths";
 import { ReadPool } from "@/runtime/read-pool";
 import { newId } from "@/core/ids";
 import { JobKind } from "@/core/vocab";
@@ -106,6 +112,27 @@ export function stepsAside(opts: {
   pid: number;
 }): boolean {
   return !opts.resident || opts.managedPid !== opts.pid;
+}
+
+// `daemon.pid` is a single slot every daemon overwrites on claim, so a dead pid in it does
+// not mean the database is free: a stray that claimed it and then died leaves the
+// supervised daemon working and unnamed. Ask launchd too — `stepsAside` only ever runs
+// when this reports an owner, so a false here is what lets a stray claim.
+// `managesThisDb` keeps the pidfile's per-database scope: the agent drains the default DB
+// for its own $CEREBRIUM_HOME, and must not shoulder aside a daemon for a different one.
+export function ownedByAnother(opts: {
+  pidfileAlive: boolean;
+  managedPid: number | null;
+  managesThisDb: boolean;
+  pid: number;
+  alive: (pid: number) => boolean;
+}): boolean {
+  if (opts.pidfileAlive) return true;
+  if (!opts.managesThisDb) return false;
+
+  const managed = opts.managedPid;
+
+  return managed !== null && managed !== opts.pid && opts.alive(managed);
 }
 
 export async function waitForOwnership(opts: {
@@ -263,11 +290,19 @@ async function main(): Promise<void> {
     });
   }
 
+  const managedPid = launchdPid();
+
   // Registrations are lazy, so this decides before the DB is ever opened.
-  if (isDaemonAlive(dbPath)) {
-    if (
-      stepsAside({ resident: daemonConfig.resident, managedPid: launchdPid(), pid: process.pid })
-    ) {
+  if (
+    ownedByAnother({
+      pidfileAlive: isDaemonAlive(dbPath),
+      managedPid,
+      managesThisDb: dbPath === defaultDbPath(),
+      pid: process.pid,
+      alive: isProcessAlive,
+    })
+  ) {
+    if (stepsAside({ resident: daemonConfig.resident, managedPid, pid: process.pid })) {
       // Nothing has been claimed yet — no pidfile, no registry row, no lease — so leaving
       // is clean. `return` was not: it ended `main`, not the process, and a stray went on
       // holding a writable handle on the database for as long as the machine was up.
