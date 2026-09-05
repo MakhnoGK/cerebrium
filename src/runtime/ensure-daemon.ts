@@ -13,11 +13,11 @@ export interface EnsureDaemonOptions {
   embedProvider: string;
 }
 
-// The daemon's location relative to this module depends on the build layout: bundled
-// (tsup) the bins are flat siblings in dist/ ("./daemon.js"); running from source
-// (tsx) it is one level up ("../daemon.ts"). Resolve by probing rather than assuming.
-export function resolveDaemonPath(): string {
-  for (const rel of ["./daemon.js", "../daemon.js", "./daemon.ts", "../daemon.ts"]) {
+// A bin's location relative to this module depends on the build layout: bundled (tsup) the
+// bins are flat siblings in dist/ ("./daemon.js"); running from source (tsx) it is one level
+// up ("../daemon.ts"). Resolve by probing rather than assuming.
+function resolveBinPath(name: string): string {
+  for (const rel of [`./${name}.js`, `../${name}.js`, `./${name}.ts`, `../${name}.ts`]) {
     const p = fileURLToPath(new URL(rel, import.meta.url));
 
     if (existsSync(p)) {
@@ -25,7 +25,15 @@ export function resolveDaemonPath(): string {
     }
   }
 
-  return fileURLToPath(new URL("./daemon.js", import.meta.url));
+  return fileURLToPath(new URL(`./${name}.js`, import.meta.url));
+}
+
+export function resolveDaemonPath(): string {
+  return resolveBinPath("daemon");
+}
+
+export function resolveRunnerPath(): string {
+  return resolveBinPath("runner");
 }
 
 // Called on MCP server startup. If no daemon is draining this DB, spawn one
@@ -58,13 +66,5 @@ export function ensureDaemon({ dbPath, embedProvider }: EnsureDaemonOptions): En
 // siblings in dist/, from source they are one level up. The runner hands this path to the
 // agent it spawns, so the agent talks to the same build the runner does.
 export function resolveServerPath(): string {
-  for (const rel of ["./server.js", "../server.js", "./server.ts", "../server.ts"]) {
-    const p = fileURLToPath(new URL(rel, import.meta.url));
-
-    if (existsSync(p)) {
-      return p;
-    }
-  }
-
-  return fileURLToPath(new URL("./server.js", import.meta.url));
+  return resolveBinPath("server");
 }

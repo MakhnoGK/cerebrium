@@ -55,8 +55,13 @@ export const FINISH_JOB = useCaseToken<FinishJobArgs, boolean>("FinishJob");
 export interface EnqueueAgentJobArgs {
   kind: string;
   payload?: Record<string, unknown>;
+  // Set by a caller enqueueing recurring work: nothing is queued when one of this kind is
+  // open or the last finished more recently than this, and the result is null.
+  every_ms?: number;
 }
 
-export type EnqueueAgentJob = UseCase<EnqueueAgentJobArgs, JobRow>;
+export type EnqueueAgentJob = UseCase<EnqueueAgentJobArgs, JobRow | null>;
 
-export const ENQUEUE_AGENT_JOB = useCaseToken<EnqueueAgentJobArgs, JobRow>("EnqueueAgentJob");
+export const ENQUEUE_AGENT_JOB = useCaseToken<EnqueueAgentJobArgs, JobRow | null>(
+  "EnqueueAgentJob",
+);

@@ -71,6 +71,10 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
 
+function positive(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 export function createDaemonMethods(
   container: DependencyContainer,
   identity: DaemonIdentity,
@@ -93,6 +97,7 @@ export function createDaemonMethods(
           typeof params.payload === "object" && params.payload !== null
             ? (params.payload as Record<string, unknown>)
             : {},
+        ...(positive(params.every_ms) === null ? {} : { every_ms: positive(params.every_ms)! }),
       }),
 
     job_claim: (params: Record<string, unknown>) =>

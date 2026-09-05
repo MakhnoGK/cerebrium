@@ -2,21 +2,44 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   daemonLinkPath,
-  isInstallableDaemonPath,
+  isInstallableEntryPath,
   LAUNCH_AGENT_LABEL,
   launchAgentPlistPath,
   launchdPid,
   renderLaunchAgent,
+  RUNNER_AGENT_LABEL,
+  runnerLinkPath,
   stableNodePath,
   type LaunchAgentSpec,
 } from "@/runtime/launch-agent";
 
 const spec: LaunchAgentSpec = {
+  label: LAUNCH_AGENT_LABEL,
   nodePath: "/opt/homebrew/bin/node",
-  daemonPath: "/Users/x/.cerebrium/bin/daemon.js",
-  daemonTarget: "/Users/x/projects/cerebrium/dist/daemon.js",
+  entryPath: "/Users/x/.cerebrium/bin/daemon.js",
+  entryTarget: "/Users/x/projects/cerebrium/dist/daemon.js",
   home: "/Users/x/.cerebrium",
   logPath: "/Users/x/.cerebrium/daemon.log",
+  env: [
+    ["CEREBRIUM_HOME", "/Users/x/.cerebrium"],
+    ["MEMORY_DAEMON_RESIDENT", "1"],
+  ],
+  keepAlive: "always",
+};
+
+const runnerSpec: LaunchAgentSpec = {
+  label: RUNNER_AGENT_LABEL,
+  nodePath: "/opt/homebrew/bin/node",
+  entryPath: "/Users/x/.cerebrium/bin/runner.js",
+  entryTarget: "/Users/x/projects/cerebrium/dist/runner.js",
+  home: "/Users/x/.cerebrium",
+  logPath: "/Users/x/.cerebrium/runner.log",
+  env: [
+    ["CEREBRIUM_HOME", "/Users/x/.cerebrium"],
+    ["PATH", "/opt/homebrew/bin:/usr/bin:/bin"],
+  ],
+  keepAlive: "onFailure",
+  throttleSeconds: 60,
 };
 
 describe("LaunchAgent plist", () => {
@@ -36,7 +59,7 @@ describe("LaunchAgent plist", () => {
 
     // Then
     expect(plist).toContain(`<string>${spec.nodePath}</string>`);
-    expect(plist).toContain(`<string>${spec.daemonPath}</string>`);
+    expect(plist).toContain(`<string>${spec.entryPath}</string>`);
     expect(plist).toContain(`<key>CEREBRIUM_HOME</key>\n      <string>${spec.home}</string>`);
   });
 
@@ -46,7 +69,7 @@ describe("LaunchAgent plist", () => {
 
     // Then
     expect(plist).toContain("<string>/Users/x/.cerebrium/bin/daemon.js</string>");
-    expect(plist).not.toContain(spec.daemonTarget);
+    expect(plist).not.toContain(spec.entryTarget);
   });
 
   it("should place the daemon link under the install root", () => {
@@ -56,7 +79,11 @@ describe("LaunchAgent plist", () => {
 
   it("should escape a path that would otherwise break the XML", () => {
     // Given
-    const hostile = { ...spec, home: "/Users/a&b/<c>/.cerebrium" };
+    const hostile: LaunchAgentSpec = {
+      ...spec,
+      home: "/Users/a&b/<c>/.cerebrium",
+      env: [["CEREBRIUM_HOME", "/Users/a&b/<c>/.cerebrium"]],
+    };
 
     // When
     const plist = renderLaunchAgent(hostile);
@@ -69,8 +96,8 @@ describe("LaunchAgent plist", () => {
   it("should refuse a TypeScript daemon path, which plain node cannot execute", () => {
     // Given / When / Then — running from source resolves src/daemon.ts, and that file
     // exists, so existence is not the check that catches this.
-    expect(isInstallableDaemonPath("/x/dist/daemon.js")).toBe(true);
-    expect(isInstallableDaemonPath("/x/src/daemon.ts")).toBe(false);
+    expect(isInstallableEntryPath("/x/dist/daemon.js")).toBe(true);
+    expect(isInstallableEntryPath("/x/src/daemon.ts")).toBe(false);
   });
 
   it("should place the plist in the per-user LaunchAgents directory", () => {
@@ -78,6 +105,59 @@ describe("LaunchAgent plist", () => {
     expect(launchAgentPlistPath("/Users/x")).toBe(
       join("/Users/x", "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`),
     );
+  });
+
+  it("should give each service its own plist, so installing one cannot overwrite the other", () => {
+    // Given / When / Then
+    expect(launchAgentPlistPath("/Users/x", RUNNER_AGENT_LABEL)).toBe(
+      join("/Users/x", "Library", "LaunchAgents", `${RUNNER_AGENT_LABEL}.plist`),
+    );
+    expect(launchAgentPlistPath("/Users/x", RUNNER_AGENT_LABEL)).not.toBe(
+      launchAgentPlistPath("/Users/x"),
+    );
+  });
+});
+
+describe("Runner LaunchAgent plist", () => {
+  it("should leave a clean exit alone, because a disarmed runner exits 0 at every launch", () => {
+    // Given / When
+    const plist = renderLaunchAgent(runnerSpec);
+
+    // Then — `KeepAlive: true` here would respawn a config-disabled runner forever.
+    expect(plist).toContain("<key>SuccessfulExit</key>\n      <false/>");
+    expect(plist).not.toContain("<key>KeepAlive</key>\n    <true/>");
+  });
+
+  it("should bound how fast a crash-looping runner comes back", () => {
+    // Given / When / Then
+    expect(renderLaunchAgent(runnerSpec)).toContain(
+      "<key>ThrottleInterval</key>\n    <integer>60</integer>",
+    );
+  });
+
+  it("should carry a PATH, because the runner spawns its agent CLI by name", () => {
+    // Given / When
+    const plist = renderLaunchAgent(runnerSpec);
+
+    // Then — launchd's own PATH holds no Homebrew binary, so the spawn would be ENOENT.
+    expect(plist).toContain("<key>PATH</key>");
+    expect(plist).toContain("<string>/opt/homebrew/bin:/usr/bin:/bin</string>");
+  });
+
+  it("should never put the daemon's resident flag on the runner", () => {
+    // Given / When / Then
+    expect(renderLaunchAgent(runnerSpec)).not.toContain("MEMORY_DAEMON_RESIDENT");
+  });
+
+  it("should label itself apart from the daemon and run its own link", () => {
+    // Given / When
+    const plist = renderLaunchAgent(runnerSpec);
+
+    // Then
+    expect(plist).toContain(`<string>${RUNNER_AGENT_LABEL}</string>`);
+    expect(plist).toContain("<string>/Users/x/.cerebrium/bin/runner.js</string>");
+    expect(runnerLinkPath("/Users/x/.cerebrium")).toBe("/Users/x/.cerebrium/bin/runner.js");
+    expect(runnerLinkPath("/Users/x/.cerebrium")).not.toBe(daemonLinkPath("/Users/x/.cerebrium"));
   });
 });
 
@@ -167,6 +247,25 @@ describe("Asking launchd which daemon it manages", () => {
   it("should report the pid launchd supervises", () => {
     // Given / When / Then
     expect(launchdPid(() => PRINTED, 501)).toBe(45190);
+  });
+
+  it("should ask about a named agent when one is given, not always the daemon", () => {
+    // Given
+    const asked: string[] = [];
+
+    // When
+    launchdPid(
+      (command) => {
+        asked.push(command);
+
+        return PRINTED;
+      },
+      501,
+      RUNNER_AGENT_LABEL,
+    );
+
+    // Then
+    expect(asked).toEqual([`launchctl print gui/501/${RUNNER_AGENT_LABEL}`]);
   });
 
   it("should ask about this user's own agent by label", () => {

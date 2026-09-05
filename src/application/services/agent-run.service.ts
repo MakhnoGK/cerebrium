@@ -60,14 +60,20 @@ export class AgentRunService {
   // The mirror of `submit_job`, which accepts only `code.*`: this accepts only `agent.*`.
   // The kernel deliberately does not know which agent tasks exist — that registry lives in
   // the runner — so an unregistered kind is rejected there, when it is claimed, not here.
-  enqueue(kind: string, payload: Record<string, unknown>): JobRow {
+  //
+  // `everyMs` makes the enqueue conditional on the kind being due, and answers null when it
+  // is not. The cadence still belongs to the caller's registry; only the race does not.
+  enqueue(kind: string, payload: Record<string, unknown>, everyMs?: number): JobRow | null {
     if (!kind.startsWith(AGENT_JOB_PREFIX)) {
       throw new Error(`${kind} is not an agent job; kernel work goes through submit_job`);
     }
 
     const now = this.clock.now();
+    const job = { id: newId(), kind, payload, scheduled_for: now, now };
 
-    return this.jobs.submit({ id: newId(), kind, payload, scheduled_for: now, now });
+    return everyMs === undefined
+      ? this.jobs.submit(job)
+      : this.jobs.submitIfDue({ ...job, everyMs });
   }
 
   renew(id: string, owner: string): boolean {
@@ -130,7 +136,7 @@ export class AgentRunService {
       project: "cerebrium",
       session_id: sessionId,
       // No edges: a job id is a queue row, not a node, and pointing an edge at one would
-      // dangle. A task that touches real nodes links to those, and none does yet.
+      // dangle. A task that touches real nodes draws its own edges as it goes.
       ts: now,
     });
   }

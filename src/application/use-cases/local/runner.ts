@@ -47,7 +47,7 @@ export class LocalFinishJob implements FinishJob {
 export class LocalEnqueueAgentJob implements EnqueueAgentJob {
   constructor(private readonly runs: AgentRunService) {}
 
-  invoke(args: EnqueueAgentJobArgs): Promise<JobRow> {
-    return Promise.resolve(this.runs.enqueue(args.kind, args.payload ?? {}));
+  invoke(args: EnqueueAgentJobArgs): Promise<JobRow | null> {
+    return Promise.resolve(this.runs.enqueue(args.kind, args.payload ?? {}, args.every_ms));
   }
 }

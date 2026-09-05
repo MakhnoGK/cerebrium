@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import * as agentRun from "@/runtime/agent-run";
 import * as rpc from "@/runtime/rpc-client";
 import { JobKind } from "@/core/vocab";
-import { runLoop, runOnce } from "@/runner";
+import { runLoop, runOnce, scheduleDue } from "@/runner";
+import { RECURRING_TASKS } from "@/runner/tasks";
 
 const DEPS = {
   socketPath: "/tmp/x.sock",
@@ -199,5 +200,88 @@ describe("runner refuses to spawn blind", () => {
     expect(report.error).toContain("unusable result");
     // The spend still happened and is still recorded.
     expect(report.cost_usd).toBe(0.05);
+  });
+});
+
+describe("runner schedule", () => {
+  it("should ask the daemon to queue every recurring task, with its own cadence", async () => {
+    // Given
+    const calls = harness([]);
+
+    // When
+    await scheduleDue({ socketPath: DEPS.socketPath, log: () => undefined });
+
+    // Then
+    const enqueued = calls.filter((c) => c.method === "job_enqueue");
+
+    expect(enqueued).toHaveLength(RECURRING_TASKS.length);
+
+    for (const task of RECURRING_TASKS) {
+      const sent = enqueued.find((c) => c.params.kind === task.kind);
+
+      expect(sent!.params.every_ms).toBe(task.everyMs);
+    }
+  });
+
+  it("should never send a prompt with the job, only its kind", async () => {
+    // Given
+    const calls = harness([]);
+
+    // When
+    await scheduleDue({ socketPath: DEPS.socketPath, log: () => undefined });
+
+    // Then
+    for (const call of calls.filter((c) => c.method === "job_enqueue")) {
+      expect(Object.keys(call.params).sort()).toEqual(["every_ms", "kind"]);
+    }
+  });
+
+  it("should count nothing as queued when the daemon says the kind is not due", async () => {
+    // Given
+    vi.spyOn(rpc, "rpcCall").mockResolvedValue(null);
+
+    // When
+    const queued = await scheduleDue({ socketPath: DEPS.socketPath, log: () => undefined });
+
+    // Then
+    expect(queued).toBe(0);
+  });
+
+  it("should carry on when the daemon refuses a kind, rather than take the loop down", async () => {
+    // Given
+    const logged: string[] = [];
+
+    vi.spyOn(rpc, "rpcCall").mockRejectedValue(new Error("not an agent job"));
+
+    // When
+    const queued = await scheduleDue({
+      socketPath: DEPS.socketPath,
+      log: (line) => logged.push(line),
+    });
+
+    // Then
+    expect(queued).toBe(0);
+    expect(logged.join(" ")).toContain("could not schedule");
+  });
+
+  it("should schedule before it claims, so a first-ever loop has something to pick up", async () => {
+    // Given
+    const calls = harness([]);
+
+    // When
+    await runLoop({
+      ...DEPS,
+      idleMs: 0,
+      stopped: (() => {
+        let passes = 0;
+
+        return () => passes++ > 0;
+      })(),
+      sleepMs: () => Promise.resolve(),
+    });
+
+    // Then
+    expect(calls[0]!.method).toBe("job_enqueue");
+    expect(calls.some((c) => c.method === "job_claim")).toBe(true);
   });
 });
