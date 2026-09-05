@@ -125,6 +125,8 @@ export enum EventAction {
   CONSOLIDATE_TICK = "consolidate_tick",
   JOB_SUBMIT = "job_submit",
   JOB_STATUS = "job_status",
+  REVIEW_PENDING = "review_pending",
+  REVIEW_RESOLVE = "review_resolve",
   STATS = "stats",
 }
 
@@ -182,3 +184,17 @@ export enum JobKind {
 }
 
 export const AGENT_JOB_PREFIX = "agent.";
+
+// What kind of thing a review decision is about. A `suggest`-posture write lands, so what
+// is reviewed is the artifact it produced, not a proposal to produce one.
+export enum ReviewArtifact {
+  EDGE = "edge",
+  NODE = "node",
+}
+
+// `kept` closes the item and changes nothing. `undone` soft-deletes what was written, the
+// same retirement any other caller performs — nothing here deletes a row.
+export enum ReviewDecision {
+  KEPT = "kept",
+  UNDONE = "undone",
+}

@@ -18,5 +18,7 @@ export enum ToolName {
   CONSOLIDATE_SUGGEST = "consolidate_suggest",
   CONSOLIDATE_APPLY = "consolidate_apply",
   CONSOLIDATE_RETRY = "consolidate_retry",
+  REVIEW_PENDING = "review_pending",
+  REVIEW_RESOLVE = "review_resolve",
   STATS = "stats",
 }

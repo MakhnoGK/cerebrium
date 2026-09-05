@@ -1,4 +1,5 @@
 import { injectable } from "tsyringe";
+import { ReviewService } from "@/application/services/review.service";
 import { SessionNotices } from "@/application/services/session-notices.service";
 import { SessionService } from "@/application/services/session.service";
 import { ConsolidationRepo } from "@/db/repositories/consolidation";
@@ -10,6 +11,7 @@ export class HintsService {
   constructor(
     private readonly sessionsService: SessionService,
     private readonly consolidation: ConsolidationRepo,
+    private readonly reviews: ReviewService,
     private readonly notices: SessionNotices,
     private readonly retrieval: RetrievalConfig,
   ) {}
@@ -21,7 +23,7 @@ export class HintsService {
     const now = new Date().toISOString();
     this.sessionsService.requireSession(sessionId, now);
 
-    return this.backlogHint(sessionId);
+    return [...this.backlogHint(sessionId), ...this.reviewHint(sessionId)];
   }
 
   // Asked for on every tool call, so it is a count rather than a listing, and it stays
@@ -29,13 +31,31 @@ export class HintsService {
   private backlogHint(sessionId: string): string[] {
     const pending = this.consolidation.pendingCandidateCount();
 
-    if (pending === 0 || !this.notices.isNews(sessionId, pending)) {
+    if (pending === 0 || !this.notices.isNews(sessionId, "consolidation", pending)) {
       return [];
     }
 
     return [
       `${String(pending)} consolidation candidate${pending === 1 ? "" : "s"} awaiting review — ` +
         `consolidate_suggest lists them.`,
+    ];
+  }
+
+  // What an unattended writer has put in the store on a `suggest` posture. Separate from the
+  // consolidation backlog because they are different queues: that one holds proposals, this
+  // one holds writes that already landed.
+  private reviewHint(sessionId: string): string[] {
+    if (this.reviews.reviewsNobody()) return [];
+
+    const { total } = this.reviews.pending();
+
+    if (total === 0 || !this.notices.isNews(sessionId, "reviews", total)) {
+      return [];
+    }
+
+    return [
+      `${String(total)} suggested write${total === 1 ? "" : "s"} awaiting review — ` +
+        `review_pending lists them.`,
     ];
   }
 

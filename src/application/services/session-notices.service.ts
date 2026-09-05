@@ -11,13 +11,17 @@ const REMEMBERED_SESSIONS = 64;
 export class SessionNotices {
   private readonly told = new Map<string, number>();
 
-  // True the first time a session sees a figure, and again whenever it changes.
-  isNews(sessionId: string, figure: number): boolean {
-    if (this.told.get(sessionId) === figure) return false;
+  // True the first time a session sees a figure, and again whenever it changes. Keyed by
+  // topic as well as session: two hint sources sharing one slot would each read the other's
+  // figure as news and repeat themselves on every call.
+  isNews(sessionId: string, topic: string, figure: number): boolean {
+    const key = `${sessionId}\u0000${topic}`;
+
+    if (this.told.get(key) === figure) return false;
 
     if (this.told.size >= REMEMBERED_SESSIONS) this.told.clear();
 
-    this.told.set(sessionId, figure);
+    this.told.set(key, figure);
 
     return true;
   }

@@ -11,6 +11,7 @@ import {
 import { REGISTER_SOURCE, UPSERT_MIRRORS } from "@/application/use-cases/contracts/mirror";
 import { INDEX_CODE } from "@/application/use-cases/contracts/operations";
 import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/read-surface";
+import { RESOLVE_REVIEW } from "@/application/use-cases/contracts/reviews";
 import { SESSION_HINTS, START_SESSION } from "@/application/use-cases/contracts/session";
 import { SUBSCRIBE_EVENTS } from "@/application/use-cases/contracts/subscriptions";
 import { RPC_DEADLINE_MS, RpcWork } from "@/core/rpc";
@@ -61,6 +62,15 @@ export const CALL_SURFACE = {
     token: READ_SURFACE.suggest_candidates,
     kind: "read",
     action: EventAction.CONSOLIDATE_SUGGEST,
+    capability: Capability.CONSOLIDATE,
+  },
+  // Reviewing what a `suggest`-posture principal wrote costs `consolidate`, not `read`:
+  // it is the queue that governs whether those writes stand, and a principal that writes
+  // under review must not be able to clear it.
+  list_reviews: {
+    token: READ_SURFACE.list_reviews,
+    kind: "read",
+    action: EventAction.REVIEW_PENDING,
     capability: Capability.CONSOLIDATE,
   },
   mirror_status: {
@@ -154,6 +164,12 @@ export const CALL_SURFACE = {
     token: APPLY_CANDIDATE,
     kind: "write",
     action: EventAction.CONSOLIDATE_APPLY,
+    capability: Capability.CONSOLIDATE,
+  },
+  resolve_review: {
+    token: RESOLVE_REVIEW,
+    kind: "write",
+    action: EventAction.REVIEW_RESOLVE,
     capability: Capability.CONSOLIDATE,
   },
   retry_candidate: {
