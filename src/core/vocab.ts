@@ -178,6 +178,7 @@ export enum JobKind {
   CODE_INDEX = "code.index",
   // Claimed only by the runner host, never by the daemon — see AGENT_JOB_PREFIX.
   AGENT_SELFTEST = "agent.selftest",
+  AGENT_DOCUMENTS = "agent.documents",
 }
 
 export const AGENT_JOB_PREFIX = "agent.";

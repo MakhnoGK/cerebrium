@@ -166,7 +166,7 @@ describe("AgentRunService.enqueue", () => {
     const env = setup();
 
     // When
-    const job = service().enqueue(JobKind.AGENT_SELFTEST, { why: "verification" });
+    const job = service().enqueue(JobKind.AGENT_SELFTEST, { why: "verification" })!;
 
     // Then
     expect(job.state).toBe(JobState.PENDING);
@@ -185,12 +185,88 @@ describe("AgentRunService.enqueue", () => {
   it("should be claimable by the runner as soon as it is queued", () => {
     // Given
     setup();
-    const job = service().enqueue(JobKind.AGENT_SELFTEST, {});
+    const job = service().enqueue(JobKind.AGENT_SELFTEST, {})!;
 
     // When
     const claimed = service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // Then
     expect(claimed?.id).toBe(job.id);
+  });
+});
+
+describe("AgentRunService.enqueue on a cadence", () => {
+  const HOUR = 3_600_000;
+
+  it("should queue recurring work when the kind has never run", () => {
+    // Given
+    setup();
+
+    // When
+    const job = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+
+    // Then
+    expect(job).not.toBeNull();
+    expect(job!.kind).toBe(JobKind.AGENT_DOCUMENTS);
+  });
+
+  it("should queue nothing while one of its kind is still open", () => {
+    // Given
+    setup();
+    const first = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+
+    // When
+    const second = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+
+    // Then
+    expect(first).not.toBeNull();
+    expect(second).toBeNull();
+  });
+
+  it("should queue nothing when the last run ended more recently than the cadence", async () => {
+    // Given
+    const env = setup();
+    const first = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR)!;
+    const claimed = service().claim([JobKind.AGENT_DOCUMENTS], OWNER)!;
+
+    await service().finish(claimed.id, OWNER, REPORT);
+
+    // When
+    const second = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+
+    // Then
+    expect(env.jobs.byId(first.id)!.ended_at).not.toBeNull();
+    expect(second).toBeNull();
+  });
+
+  it("should queue again once the cadence has elapsed since the last run ended", async () => {
+    // Given
+    const env = setup();
+    const first = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR)!;
+    const claimed = service().claim([JobKind.AGENT_DOCUMENTS], OWNER)!;
+
+    await service().finish(claimed.id, OWNER, REPORT);
+    env.db
+      .prepare("UPDATE jobs SET ended_at = ? WHERE id = ?")
+      .run("2020-01-01T00:00:00.000Z", first.id);
+
+    // When
+    const second = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+
+    // Then
+    expect(second).not.toBeNull();
+    expect(second!.id).not.toBe(first.id);
+  });
+
+  it("should still queue unconditionally when no cadence is named, which is what --once does", () => {
+    // Given
+    setup();
+    service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+
+    // When
+    const forced = service().enqueue(JobKind.AGENT_DOCUMENTS, {});
+
+    // Then
+    expect(forced).not.toBeNull();
   });
 });

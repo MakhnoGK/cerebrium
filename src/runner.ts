@@ -8,7 +8,7 @@ import { rpcCall } from "@/runtime/rpc-client";
 import { newId } from "@/core/ids";
 import { buildContainer } from "@/container";
 import { DaemonConfig, DatabaseConfig, RunnerConfig } from "@/infrastructure/config";
-import { TASK_KINDS, taskFor, type TaskContext } from "@/runner/tasks";
+import { RECURRING_TASKS, TASK_KINDS, taskFor, type TaskContext } from "@/runner/tasks";
 
 // The runner host. A second supervised process, sibling to the daemon and holding no
 // database: it reaches the store only over the socket, and only through the three job
@@ -27,6 +27,11 @@ interface JobRow {
 const RENEW_MS = 300_000;
 
 type Call = (method: string, params: Record<string, unknown>) => Promise<unknown>;
+
+const callFor =
+  (socketPath: string): Call =>
+  (method, params) =>
+    rpcCall({ socketPath, timeoutMs: 30_000 }, method, params);
 
 // Closing a job that never got as far as spawning. Still reported rather than abandoned, so
 // the lease is released now instead of at expiry.
@@ -71,8 +76,7 @@ export async function runOnce(deps: {
   maxBudgetUsd: number;
   log: (line: string) => void;
 }): Promise<"ran" | "idle"> {
-  const call = (method: string, params: Record<string, unknown>) =>
-    rpcCall({ socketPath: deps.socketPath, timeoutMs: 30_000 }, method, params);
+  const call = callFor(deps.socketPath);
 
   const job = (await call("job_claim", {
     kinds: [...TASK_KINDS],
@@ -179,6 +183,36 @@ export async function runOnce(deps: {
   return "ran";
 }
 
+// Recurring tasks enqueue themselves. The kernel deliberately does not know which agent
+// tasks exist, so the cadence lives beside the registry that does — and whether a kind is
+// due is settled inside the daemon's own insert, which is what stops two runners, or a
+// runner racing an operator's `--once`, from queueing the same work twice.
+export async function scheduleDue(deps: {
+  socketPath: string;
+  log: (line: string) => void;
+}): Promise<number> {
+  const call = callFor(deps.socketPath);
+  let queued = 0;
+
+  for (const task of RECURRING_TASKS) {
+    const enqueued = (await call("job_enqueue", {
+      kind: task.kind,
+      every_ms: task.everyMs,
+    }).catch((err: unknown) => {
+      deps.log(`could not schedule ${task.kind}: ${(err as Error).message}`);
+
+      return null;
+    })) as { id: string } | null;
+
+    if (enqueued !== null) {
+      queued++;
+      deps.log(`scheduled ${task.kind} as ${enqueued.id}`);
+    }
+  }
+
+  return queued;
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export async function runLoop(
@@ -193,6 +227,12 @@ export async function runLoop(
   // Strictly one at a time. Concurrency here would multiply spend against a budget shared
   // with the owner's own interactive sessions, which is the scarce resource — not money.
   while (!deps.stopped()) {
+    await scheduleDue(deps).catch((err: unknown) => {
+      deps.log(`scheduler error: ${(err as Error).message}`);
+
+      return 0;
+    });
+
     const did = await runOnce(deps).catch((err: unknown) => {
       deps.log(`runner error: ${(err as Error).message}`);
 
@@ -209,6 +249,7 @@ const USAGE = `cerebrium-runner [--once <kind>]
   --once <kind>    enqueue one job of that kind, run it in the foreground, exit
 
   Registered tasks: ${TASK_KINDS.join(", ")}
+  Scheduled by the loop: ${RECURRING_TASKS.map((t) => t.kind).join(", ") || "(none)"}
 
 --once ignores runner.enabled on purpose: it is how an operator verifies the runner or
 triggers a task deliberately, and it runs exactly one job and stops. The loop is what
@@ -264,9 +305,15 @@ async function main(): Promise<void> {
   };
 
   if (once !== null) {
-    const job = (await rpcCall({ socketPath: deps.socketPath, timeoutMs: 30_000 }, "job_enqueue", {
-      kind: once,
-    })) as { id: string };
+    const job = (await callFor(deps.socketPath)("job_enqueue", { kind: once })) as {
+      id: string;
+    } | null;
+
+    if (job === null) {
+      deps.log(`${once} was not queued`);
+
+      return;
+    }
 
     deps.log(`enqueued ${once} as ${job.id}`);
 

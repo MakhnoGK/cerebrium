@@ -196,6 +196,31 @@ export class JobsRepo extends BaseRepo {
     );
   }
 
+  // Recurring work that enqueues itself: skipped while one of its kind is open, and while
+  // the last one ended less than `everyMs` ago. The whole decision sits inside one
+  // transaction because the alternative is a check-then-submit across a socket, where two
+  // schedulers both read "due" and both insert.
+  submitIfDue(job: SubmitJob & { everyMs: number }): JobRow | null {
+    return this.tx(() => {
+      if (this.hasOpen(job.kind)) return null;
+
+      const last = this.db
+        .prepare(
+          `SELECT ended_at FROM jobs
+            WHERE kind = ? AND ended_at IS NOT NULL
+            ORDER BY ended_at DESC
+            LIMIT 1`,
+        )
+        .get(job.kind) as { ended_at: string } | undefined;
+
+      if (last !== undefined && Date.parse(job.now) - Date.parse(last.ended_at) < job.everyMs) {
+        return null;
+      }
+
+      return this.submit(job);
+    });
+  }
+
   recent(opts: { kind?: string; limit: number }): JobRow[] {
     const where = opts.kind === undefined ? "" : "WHERE kind = ?";
     const params = opts.kind === undefined ? [] : [opts.kind];
