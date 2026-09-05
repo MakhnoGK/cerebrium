@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DENIED_TOOLS } from "@/runtime/agent-run";
 import { AGENT_JOB_PREFIX, JobKind } from "@/core/vocab";
-import { parseReply, RECURRING_TASKS, TASK_KINDS, taskFor } from "@/runner/tasks";
+import { candidateQuery, parseReply, RECURRING_TASKS, TASK_KINDS, taskFor } from "@/runner/tasks";
 
 describe("agent task registry", () => {
   it("should namespace every task under the agent prefix the daemon refuses to claim", () => {
@@ -213,5 +213,43 @@ describe("reading the model's reply", () => {
     // Given / When / Then
     expect(parseReply("I could not do that.")).toBeNull();
     expect(parseReply("")).toBeNull();
+  });
+});
+
+describe("spreading the documents task over the store", () => {
+  it("should ask a different thing on consecutive days", () => {
+    // Given / When / Then — a fixed query pins the candidate set, and the model then works
+    // the same note every run.
+    expect(candidateQuery(0)).not.toBe(candidateQuery(1));
+    expect(candidateQuery(1)).not.toBe(candidateQuery(2));
+  });
+
+  it("should come back round rather than run out", () => {
+    // Given
+    const seen = new Set(Array.from({ length: 40 }, (_, day) => candidateQuery(day)));
+
+    // When / Then
+    expect(seen.size).toBeGreaterThan(1);
+    expect(candidateQuery(0)).toBe(candidateQuery(seen.size));
+  });
+
+  it("should never index out of the list, whatever the day number", () => {
+    // Given / When / Then — a clock skewed before the epoch yields a negative day.
+    for (const day of [-1, -7, -1000, 0, 999999]) {
+      expect(typeof candidateQuery(day)).toBe("string");
+      expect(candidateQuery(day).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("should tell the run to leave an already-covered note alone", async () => {
+    // Given
+    const call = () =>
+      Promise.resolve({ results: [{ id: "01M0SC2N7PZBQ7JE7VY7AQ5YAQ", title: "a note" }] });
+
+    // When
+    const prompt = await taskFor(JobKind.AGENT_DOCUMENTS)!.prompt({ call }, {});
+
+    // Then
+    expect(prompt).toContain("NO `documents` edge yet");
   });
 });

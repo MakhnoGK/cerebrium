@@ -104,8 +104,25 @@ const SELFTEST: AgentTask = {
   },
 };
 
-const CANDIDATE_QUERY =
-  "how this code works, why it is shaped this way, the gotcha a later editor hits";
+// A fixed query returns a fixed candidate set, and the model then picks the same note every
+// run: the first two live runs drew four edges off one note between them.
+const CANDIDATE_QUERIES: readonly string[] = [
+  "how this code works, why it is shaped this way, the gotcha a later editor hits",
+  "a trap in the runtime that bit us, and the ordering constraint behind it",
+  "what a service does when it fails, and what it does instead of failing",
+  "how the store is read: ranking, retrieval, and what the query actually matches",
+  "the daemon, its lifetime, and what supervises it",
+  "a schema or migration decision and what it made impossible afterwards",
+  "how one process talks to another here, and what the boundary refuses",
+];
+
+export function candidateQuery(dayIndex: number): string {
+  const size = CANDIDATE_QUERIES.length;
+
+  return CANDIDATE_QUERIES[((dayIndex % size) + size) % size]!;
+}
+
+const DAY_MS = 86_400_000;
 
 const MAX_EDGES = 3;
 
@@ -135,7 +152,7 @@ const DOCUMENTS: AgentTask = {
   everyMs: 86_400_000,
   prompt: async (ctx) => {
     const found = (await ctx.call("search_memory", {
-      query: CANDIDATE_QUERY,
+      query: candidateQuery(Math.floor(Date.now() / DAY_MS)),
       project: "cerebrium",
       kinds: ["semantic"],
       types: ["fact", "howto", "decision"],
@@ -159,6 +176,8 @@ const DOCUMENTS: AgentTask = {
       "Steps:",
       "1. Call session_start with project 'cerebrium'. Keep the session_id it returns.",
       "2. Pick ONE note from the candidates below and call get on it. Read what it claims.",
+      "   Prefer a note carrying NO `documents` edge yet. A note that already has one has",
+      "   been covered; move to the next candidate rather than hanging more edges off it.",
       "3. Find the code it describes: call search with types ['symbol'] and a query drawn",
       "   from the note's own subject. Never invent an id — use only ids a tool returned.",
       "4. The get in step 2 listed that note's existing edges. If the symbol is already",
