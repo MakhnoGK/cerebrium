@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CALL_SURFACE, NotificationTopic, type CallName } from "@/application/use-cases";
-import { EdgeType, MemoryKind } from "@/core/vocab";
+import { EdgeType, MemoryKind, ReviewArtifact, ReviewDecision } from "@/core/vocab";
 
 // Argument validation for the socket edge. The MCP layer validates its own edge with zod
 // schemas; this is the same guarantee for the other one, rather than the use cases being
@@ -97,6 +97,17 @@ const SCHEMAS = {
   }),
   invalidate_memory: session.extend({ id: ulid, superseded_by: ulid.optional() }),
   restore_memory: session.extend({ id: ulid }),
+  list_reviews: z.object({
+    session_id: ulid.optional(),
+    artifact: z.nativeEnum(ReviewArtifact).optional(),
+    limit: z.number().int().positive().optional(),
+  }),
+  resolve_review: session.extend({
+    artifact: z.nativeEnum(ReviewArtifact),
+    ref: z.string().min(1),
+    decision: z.nativeEnum(ReviewDecision),
+    note: z.string().optional(),
+  }),
   link_nodes: session.extend({
     src: ulid,
     dst: ulid,

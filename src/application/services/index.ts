@@ -16,6 +16,7 @@ export { PrincipalPolicyService } from "@/application/services/principal-policy.
 export { PrincipalQuotaService } from "@/application/services/principal-quota.service";
 export { isRevoked, PrincipalTrustService } from "@/application/services/principal-trust.service";
 export { NodeReferenceService } from "@/application/services/node-reference.service";
+export { ReviewService } from "@/application/services/review.service";
 export {
   type LiveProcess,
   ProcessRegistryService,

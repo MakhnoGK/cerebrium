@@ -118,6 +118,8 @@ const ALL_TOOLS = [
   "mirror_status",
   "mirror_upsert",
   "restore",
+  "review_pending",
+  "review_resolve",
   "search",
   "session_start",
   "source_register",
@@ -127,7 +129,7 @@ const ALL_TOOLS = [
 ];
 
 describe("MCP server wiring", () => {
-  it("should expose all twenty tools when a client connects", async () => {
+  it("should expose every registered tool when a client connects", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
 

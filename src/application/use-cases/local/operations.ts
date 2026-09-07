@@ -14,6 +14,7 @@ import {
   DaemonService,
   EmbeddingService,
   ProcessRegistryService,
+  ReviewService,
 } from "@/application/services";
 import {
   INDEX_CODE,
@@ -58,6 +59,7 @@ export class LocalStatsSnapshot implements StatsSnapshot {
     private readonly processes: ProcessRegistryService,
     private readonly config: ConfigRegistry,
     private readonly consolidation: ConsolidationConfig,
+    private readonly reviews: ReviewService,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
@@ -75,6 +77,7 @@ export class LocalStatsSnapshot implements StatsSnapshot {
         daemon_pid: this.daemon.readDaemonPid(),
       },
       generation: generationReport(this.consolidator, this.consolidation),
+      review: reviewReport(this.reviews),
       // The registry and the ignored-config channel, compact: which processes are up and
       // whether any variable was set but unusable. Values themselves stay out — an agent
       // should not pay tokens for the whole config table (`cerebrium-stats` prints it).
@@ -101,6 +104,7 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
     private readonly processes: ProcessRegistryService,
     private readonly config: ConfigRegistry,
     private readonly consolidation: ConsolidationConfig,
+    private readonly reviews: ReviewService,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
@@ -130,6 +134,7 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
         model_error: row.model_error,
       })),
       generation: generationReport(this.consolidator, this.consolidation),
+      review: reviewReport(this.reviews),
       config: {
         file: this.file,
         values: effective.values,
@@ -150,5 +155,19 @@ function generationReport(
     provider: `${consolidator.name}@${consolidator.version}`,
     enabled: consolidator.enabled,
     roles: describeRoles(resolveRoles(config, config.roles)),
+  };
+}
+
+// Who writes under review and what is waiting. Reported even when nobody does, because
+// "no queue" and "an empty queue" are different operational facts.
+function reviewReport(reviews: ReviewService): Record<string, unknown> {
+  const scope = reviews.scope();
+  const pending = reviews.pending();
+
+  return {
+    reviewing: { mode: scope.mode, principals: [...scope.principals] },
+    pending_edges: pending.edges,
+    pending_nodes: pending.nodes,
+    pending_total: pending.total,
   };
 }

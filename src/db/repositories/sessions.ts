@@ -23,6 +23,16 @@ export class SessionsRepo extends BaseRepo {
       .run(id, project, ts, ts, writer.client, writer.version, principal_id);
   }
 
+  // Who a session belongs to. Attribution goes through the session because that is where
+  // the handshake recorded it; `ClientIdentity` holds the identity of the process, which is
+  // not the same thing once one daemon serves several callers.
+  principalOf(id: string): string | null {
+    const row = this.db.prepare("SELECT principal_id FROM sessions WHERE id = ?").get(id) as
+      { principal_id: string | null } | undefined;
+
+    return row?.principal_id ?? null;
+  }
+
   touchExisting(id: string, ts: string): boolean {
     return (
       this.db.prepare("UPDATE sessions SET last_seen = ? WHERE id = ?").run(ts, id).changes === 1

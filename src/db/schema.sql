@@ -329,3 +329,16 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS jobs_claimable ON jobs (state, scheduled_for);
 CREATE INDEX IF NOT EXISTS jobs_kind_state ON jobs (kind, state);
+
+CREATE TABLE IF NOT EXISTS review_decisions (
+  artifact_kind TEXT NOT NULL,
+  artifact_ref TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  decided_at TEXT NOT NULL,
+  decided_by TEXT,
+  note TEXT,
+  PRIMARY KEY (artifact_kind, artifact_ref)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS review_decisions_at ON review_decisions (decided_at);
+CREATE INDEX IF NOT EXISTS edges_provenance_live ON edges (provenance, invalidated_at);

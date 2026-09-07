@@ -69,6 +69,8 @@ const ANTIGRAVITY_PERMISSION_POLICY: Record<ToolName, PermissionPolicy> = {
   [ToolName.CONSOLIDATE_SUGGEST]: "allow",
   [ToolName.CONSOLIDATE_APPLY]: "allow",
   [ToolName.CONSOLIDATE_RETRY]: "allow",
+  [ToolName.REVIEW_PENDING]: "allow",
+  [ToolName.REVIEW_RESOLVE]: "allow",
   [ToolName.STATS]: "allow",
 };
 
