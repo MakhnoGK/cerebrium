@@ -38,6 +38,9 @@ const BY_EXT: Record<string, LangDef> = {
   // tree-sitter-wasms' Lua build mis-parses every file after the first one in a
   // process; src/code/vendor/README.md has the detail.
   ".lua": { lang: "lua", wasm: "tree-sitter-lua.wasm", vendored: true },
+  // X-Ray/S.T.A.L.K.E.R. game logic is Lua under a different extension: the engine
+  // loads gamedata/scripts/*.script through its own Lua VM.
+  ".script": { lang: "lua", wasm: "tree-sitter-lua.wasm", vendored: true },
 };
 
 export function langForPath(path: string): LangDef | undefined {

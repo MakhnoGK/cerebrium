@@ -55,4 +55,17 @@ describe("Grammar stability across repeated parses", () => {
     ]);
     tree.delete();
   });
+  it("should parse an X-Ray .script file with the same vendored Lua grammar", async () => {
+    // Given
+    const def = langForPath("bind_stalker.script")!;
+    const source = "local M = {}\n\nfunction M.on_spawn(obj)\n  return obj\nend\n\nreturn M\n";
+
+    // When
+    const tree = await parse(def.wasm, source, def.vendored);
+
+    // Then
+    expect(def.lang).toBe("lua");
+    expect(tree.rootNode.hasError).toBe(false);
+    tree.delete();
+  });
 });
