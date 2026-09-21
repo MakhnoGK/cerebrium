@@ -53,7 +53,7 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
 - **`checkpoint`** — call BEFORE ending a substantial work block: summary, decisions
   (with reasons), open threads, touched node ids — so the next session resumes cleanly.
 - **`code_index`** — index/refresh a repo into `symbol` mirror nodes + code edges
-  (TS/TSX/JS/PHP/Rust). Run after pulling/changing a repo. Incremental (per-file hash-gate);
+  (TS/TSX/JS/PHP/Rust/C/C++/Lua). Run after pulling/changing a repo. Incremental (per-file hash-gate);
   returns a compact summary, never code. Pass `repo` (a configured `MEMORY_CODE_ROOTS`
   name — `cerebrium` is wired) or `path` (any directory). Indexing runs in-process in
   the one server (no second writer, so never index via a shell/hook).
@@ -96,7 +96,7 @@ and exact source-by-id, far cheaper than reading or grepping whole files:
   source slice, not the whole file.
 
 Reserve `Read`/`Grep` for where the mirror can't help or can't be trusted:
-1. **Coverage** — files the index doesn't cover: non-`TS/TSX/JS/PHP/Rust` (configs, SQL, docs,
+1. **Coverage** — files the index doesn't cover: non-`TS/TSX/JS/PHP/Rust/C/C++/Lua` (configs, SQL, docs,
    YAML), or a repo not wired into `MEMORY_CODE_ROOTS`.
 2. **Editing** — the moment I'm about to change a file. `Edit` needs a fresh `Read` and
    disk is authoritative; never edit from the mirror.

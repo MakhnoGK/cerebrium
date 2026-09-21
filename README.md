@@ -691,11 +691,28 @@ does not violate the single-writer invariant (that is about who writes the *DB*)
 
 - **Supported languages:** TypeScript (`.ts`/`.mts`/`.cts`), TSX (`.tsx`),
   JavaScript (`.js`/`.jsx`/`.mjs`/`.cjs`), PHP (`.php` — classes, traits, interfaces,
-  enums, functions, methods, consts), and Rust (`.rs` — structs, enums, traits, impl
+  enums, functions, methods, consts), Rust (`.rs` — structs, enums, traits, impl
   blocks with their methods, free functions, consts/statics, type aliases, macros, and
-  nested `mod`s). The language registry (`src/code/languages.ts`) is a small map and the
-  extractor dispatches per language, so adding Python/Go later is a new grammar + a
-  handler, not a rewrite. Files with no known grammar are skipped and counted.
+  nested `mod`s), C (`.c`/`.h` — structs, unions, enums, typedefs, functions and their
+  prototypes, `#define` macros), C++ (`.cpp`/`.cc`/`.cxx`/`.hpp`/`.hh`/`.hxx`/`.ipp`/
+  `.tpp`/`.inl` — namespaces, classes, structs, methods (including out-of-line
+  `Foo::bar` definitions), enums, `using` aliases, templates and free functions), and
+  Lua (`.lua` — table methods in both `M.f` and `M:f` form, local and global functions,
+  function-valued bindings, and locals as consts). The language registry
+  (`src/code/languages.ts`) is a small map and the extractor dispatches per language, so
+  adding Python/Go later is a new grammar + a handler, not a rewrite. Files with no known
+  grammar are skipped and counted.
+- **Grammars come from `tree-sitter-wasms`, with one vendored exception.** Its Lua
+  build carries an external scanner whose state survives a parse, so in a process that
+  parses more than one Lua file only the first comes out correct — everything after it
+  gains spurious `ERROR` nodes and silently loses symbols. A working build of the same
+  grammar is committed at `src/code/vendor/tree-sitter-lua.wasm` (48 KB, provenance and
+  update steps in that directory's README) and `LangDef.vendored` routes the loader to
+  it. `test/code-parser.test.ts` re-parses every language four times so a future grammar
+  bump cannot quietly reintroduce this.
+- **Headers are parsed with the C++ grammar.** `.h` is ambiguous across C, C++ and
+  Objective-C; the C++ grammar accepts nearly all C, while the C grammar turns every
+  `class` in a C++ header into an `ERROR` node. `.h` symbols are still labelled `c`.
 - **`symbol` mirror nodes** (`memory_kind='mirror'`, `type='symbol'`, `origin='repo'`)
   are *derived from source, not authored*: `write`/`update` on them are rejected. Each
   node's content is a compact **summary** (one-line signature + first doc-comment
@@ -733,6 +750,12 @@ does not violate the single-writer invariant (that is about who writes the *DB*)
   module tree both need config outside a single file, out of scope), so they and their
   calls (`Foo::bar()`/`$this->m()`, Rust `foo()`/`x.m()`/`Foo::bar()`) resolve **by symbol
   name repo-wide** — looser than TS, and ambiguous on duplicate names (first wins).
+  C/C++ `#include "…"` (resolved against the including file's directory and the repo
+  root; `<system>` headers dropped) and Lua `require("a.b")` (resolved against the repo
+  root, `a/b.lua` then `a/b/init.lua`) name a whole file rather than a binding list, so
+  a callee that is not same-file is looked up **by name in the included/required files
+  only** — more precise than the repo-wide fallback, and it gets no repo-wide fallback
+  of its own.
 - **The payoff:** write a semantic decision/gotcha about code and `link` it to a symbol
   with a `documents` edge — a later `search` for that topic surfaces the symbol via
   graph expansion (`via:{edge:'documents'}`), straight from note to code.
@@ -1255,7 +1278,7 @@ WAL mode (already on) is required for Litestream.
   is an `IMMEDIATE` transaction wrapped in busy-retry — so several session processes can
   share one SQLite file without lockstep writes.
 - **In-process code indexing.** tree-sitter (WASM, no external process) mirrors
-  TypeScript / JavaScript / PHP / Rust symbols into the graph, incrementally via a per-file
+  TypeScript / JavaScript / PHP / Rust / C / C++ / Lua symbols into the graph, incrementally via a per-file
   content-hash gate, with `defines` / `imports` / best-effort `calls` edges. Link a semantic
   note to a symbol and a later search resurfaces the code by meaning via graph expansion.
 - **Credential-free external mirrors.** The agent curates decision-worthy records from tools

@@ -306,6 +306,161 @@ describe("Indexer Rust support", () => {
   });
 });
 
+const C_CRYPTO = `/* Hash a token. */
+char *hash_token(const char *input);
+`;
+const C_AUTH = `#include <stdlib.h>
+#include "util/crypto.h"
+
+/* Auth business logic. */
+struct AuthService {
+    int seen;
+};
+
+/* Validate a set of login credentials. */
+int auth_validate(struct AuthService *svc, const char *pw) {
+    return hash_token(pw) != NULL;
+}
+`;
+
+describe("Indexer C support", () => {
+  it("should index C and resolve a quoted include and its calls into the included header", async () => {
+    // Given
+    const { db } = setup();
+    write("src/util/crypto.h", C_CRYPTO);
+    write("src/auth.c", C_AUTH);
+
+    // When
+    const res = await index();
+
+    // Then
+    expect(res.files_indexed).toBe(4); // 2 TS + 2 C
+
+    const idOf = (q: string) =>
+      (db.prepare("SELECT node_id FROM symbols WHERE qualified = ?").get(q) as { node_id: string })
+        .node_id;
+    const authMod = idOf("src/auth.c");
+    const cryptoMod = idOf("src/util/crypto.h");
+    const hashToken = idOf("src/util/crypto.h:hash_token");
+    const validate = idOf("src/auth.c:auth_validate");
+
+    const edge = (src: string, dst: string, type: string) =>
+      db
+        .prepare(
+          "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
+        )
+        .get(src, dst, type);
+    expect(edge(authMod, cryptoMod, "imports")).toBeTruthy(); // #include "util/crypto.h"
+    expect(edge(validate, hashToken, "calls")).toBeTruthy(); // resolved through the include
+  });
+});
+
+const CPP_CRYPTO = `#pragma once
+#include <string>
+
+/// Hash a token.
+std::string hash_token(const std::string &input);
+`;
+const CPP_AUTH = `#include "util/crypto.hpp"
+
+namespace app {
+
+/// Auth business logic.
+class AuthService {
+public:
+    bool validate(const std::string &pw) {
+        return !hash_token(pw).empty();
+    }
+};
+
+}
+`;
+
+describe("Indexer C++ support", () => {
+  it("should index C++ and resolve a quoted include and a namespaced method's calls into the header", async () => {
+    // Given
+    const { db } = setup();
+    write("src/util/crypto.hpp", CPP_CRYPTO);
+    write("src/auth.cpp", CPP_AUTH);
+
+    // When
+    const res = await index();
+
+    // Then
+    expect(res.files_indexed).toBe(4); // 2 TS + 2 C++
+
+    const idOf = (q: string) =>
+      (db.prepare("SELECT node_id FROM symbols WHERE qualified = ?").get(q) as { node_id: string })
+        .node_id;
+    const authMod = idOf("src/auth.cpp");
+    const cryptoMod = idOf("src/util/crypto.hpp");
+    const hashToken = idOf("src/util/crypto.hpp:hash_token");
+    const validate = idOf("src/auth.cpp:app::AuthService.validate");
+
+    const edge = (src: string, dst: string, type: string) =>
+      db
+        .prepare(
+          "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
+        )
+        .get(src, dst, type);
+    expect(edge(authMod, cryptoMod, "imports")).toBeTruthy(); // #include "util/crypto.hpp"
+    expect(edge(validate, hashToken, "calls")).toBeTruthy(); // resolved through the include
+  });
+});
+
+const LUA_CRYPTO = `local M = {}
+
+--- Hash a token.
+function M.hash_token(input)
+  return input
+end
+
+return M
+`;
+const LUA_AUTH = `local crypto = require("util.crypto")
+
+local AuthService = {}
+
+--- Validate a set of login credentials.
+function AuthService.validate(pw)
+  return crypto.hash_token(pw) ~= ""
+end
+
+return AuthService
+`;
+
+describe("Indexer Lua support", () => {
+  it("should index Lua and resolve a require to its module file and the dotted call into it", async () => {
+    // Given
+    const { db } = setup();
+    write("util/crypto.lua", LUA_CRYPTO);
+    write("auth.lua", LUA_AUTH);
+
+    // When
+    const res = await index();
+
+    // Then
+    expect(res.files_indexed).toBe(4); // 2 TS + 2 Lua
+
+    const idOf = (q: string) =>
+      (db.prepare("SELECT node_id FROM symbols WHERE qualified = ?").get(q) as { node_id: string })
+        .node_id;
+    const authMod = idOf("auth.lua");
+    const cryptoMod = idOf("util/crypto.lua");
+    const hashToken = idOf("util/crypto.lua:M.hash_token");
+    const validate = idOf("auth.lua:AuthService.validate");
+
+    const edge = (src: string, dst: string, type: string) =>
+      db
+        .prepare(
+          "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
+        )
+        .get(src, dst, type);
+    expect(edge(authMod, cryptoMod, "imports")).toBeTruthy(); // require("util.crypto")
+    expect(edge(validate, hashToken, "calls")).toBeTruthy(); // crypto.hash_token(pw), through the require
+  });
+});
+
 describe("Indexer walk filters", () => {
   it("should skip node_modules, dist, and .gitignore'd paths when walking", async () => {
     // Given

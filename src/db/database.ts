@@ -18,6 +18,7 @@ export function openDatabase(dbPath = defaultDbPath()): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("busy_timeout = 15000");
   db.pragma("foreign_keys = ON");
+  tunePageCache(db);
 
   // sqlite-vec must load before a migration creates the chunk_vec vec0 table.
   sqliteVec.load(db);
@@ -35,8 +36,20 @@ export function openDatabase(dbPath = defaultDbPath()): Database.Database {
 export function openDatabaseReadonly(dbPath = defaultDbPath()): Database.Database {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   db.pragma("busy_timeout = 5000");
+  tunePageCache(db);
   sqliteVec.load(db);
   return db;
+}
+
+// SQLite defaults to a 2MB page cache and no mmap, which on a store this size turns every
+// index scan into a stream of pread syscalls. better-sqlite3 is synchronous, so those block
+// whatever thread the statement runs on.
+// mmap_size is a ceiling, not a reservation: pages are shared through the OS page cache, so
+// the read pool's connections do not each pay for it.
+function tunePageCache(db: Database.Database): void {
+  db.pragma("cache_size = -65536");
+  db.pragma("mmap_size = 1073741824");
+  db.pragma("temp_store = MEMORY");
 }
 
 function runMigrations(db: Database.Database): void {

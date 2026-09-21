@@ -6,3 +6,6 @@ mkdirSync("dist", { recursive: true });
 if (existsSync("src/db/migrations")) {
   cpSync("src/db/migrations", "dist/migrations", { recursive: true });
 }
+if (existsSync("src/code/vendor")) {
+  cpSync("src/code/vendor", "dist/vendor", { recursive: true });
+}

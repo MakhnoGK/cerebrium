@@ -74,11 +74,14 @@ function docFromComment(comment: Node): string | null {
       .trim()
       .replace(/^\/\*+/, "")
       .replace(/\*+\/$/, "")
+      .replace(/^-{2,}\[=*\[/, "") // Lua long comment (`--[[ … ]]`)
+      .replace(/\]=*\]$/, "")
       .split("\n")
       .map((l) =>
         l
           .replace(/^\s*\*+\s?/, "")
           .replace(/^\s*\/\/+\s?/, "")
+          .replace(/^\s*-{2,}\s?/, "")
           .replace(/^!\s?/, "") // Rust inner-doc marker (`//!` / `/*!`)
           .trim(),
       )
@@ -91,6 +94,18 @@ function docFor(node: Node): string | null {
   const prev = node.previousSibling;
   if (prev?.type !== "comment") return null;
   return docFromComment(prev);
+}
+
+// Same, for grammars that emit one `comment` node per line (`///`, `--`): walk to the
+// top of the consecutive run and read its first line.
+function docForRun(node: Node): string | null {
+  let prev = node.previousSibling;
+  let first: Node | null = null;
+  while (prev?.type === "comment") {
+    first = prev;
+    prev = prev.previousSibling;
+  }
+  return first ? docFromComment(first) : null;
 }
 
 function summaryOf(signature: string, doc: string | null): string {
@@ -300,6 +315,8 @@ export function extractFile(
 ): FileExtract {
   if (lang === "php") return extractPhp(repo, path, source, root);
   if (lang === "rust") return extractRust(repo, path, source, root);
+  if (lang === "c" || lang === "cpp") return extractCxx(repo, path, source, root);
+  if (lang === "lua") return extractLua(repo, path, source, root);
   return extractTsJs(repo, path, source, root);
 }
 
@@ -715,6 +732,485 @@ function extractRust(repo: string, path: string, source: string, root: Node): Fi
     symbols: ctx.symbols,
     defines: ctx.defines,
     imports,
+    calls: ctx.calls,
+    moduleExternalId: moduleExt,
+  };
+}
+
+// ---- C / C++ ---------------------------------------------------------------
+
+function pushModule(ctx: Ctx, source: string, root: Node, fileDoc: string | null): string {
+  const ext = stableSymbolId(ctx.repo, ctx.path, ctx.path, "module");
+  const signature = `module ${ctx.path}`;
+  ctx.symbols.push({
+    external_id: ext,
+    symbol_kind: "module",
+    name: posix.basename(ctx.path),
+    qualified: ctx.path,
+    signature,
+    summary: summaryOf(signature, fileDoc),
+    start_line: 1,
+    end_line: root.endPosition.row + 1,
+    code_hash: sha24(source),
+    source,
+  });
+  ctx.seenExt.add(ext);
+  return ext;
+}
+
+// A C++ member can be declared in a class body and defined out of line in the same
+// file, which walks the same `defines` pair twice.
+function dedupeDefines(defines: { src: string; dst: string }[]): { src: string; dst: string }[] {
+  const seen = new Set<string>();
+  return defines.filter((d) => {
+    const key = `${d.src}\0${d.dst}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// A declarator nests around the name it declares: `char *f(int)` parses as
+// pointer_declarator -> function_declarator -> identifier.
+function declaratorChain(node: Node | null): Node[] {
+  const out: Node[] = [];
+  for (let cur = node; cur; cur = cur.childForFieldName("declarator")) out.push(cur);
+  return out;
+}
+
+const CXX_NAME_TYPES = new Set([
+  "identifier",
+  "type_identifier",
+  "field_identifier",
+  "qualified_identifier",
+  "operator_name",
+  "destructor_name",
+]);
+
+const CXX_RECORD_TYPES = new Set(["class_specifier", "struct_specifier", "union_specifier"]);
+
+// Items a `template <…>` or a preprocessor conditional may wrap.
+const CXX_NESTED_TYPES = new Set([
+  ...CXX_RECORD_TYPES,
+  "enum_specifier",
+  "function_definition",
+  "declaration",
+  "field_declaration",
+  "type_definition",
+  "alias_declaration",
+]);
+
+const CXX_CONDITIONALS = new Set([
+  "preproc_if",
+  "preproc_ifdef",
+  "preproc_else",
+  "preproc_elif",
+  "preproc_elifdef",
+]);
+
+function declaredName(chain: Node[]): Node | null {
+  const last = chain[chain.length - 1];
+  return last && CXX_NAME_TYPES.has(last.type) ? last : null;
+}
+
+// `app::AuthService::issue` -> scope ['app','AuthService'], name 'issue'.
+function splitQualifiedCxx(node: Node): { scope: string[]; name: string } {
+  const scope: string[] = [];
+  let cur: Node | null = node;
+  while (cur?.type === "qualified_identifier") {
+    const s = cur.childForFieldName("scope");
+    if (s) scope.push(s.text);
+    cur = cur.childForFieldName("name");
+  }
+  return { scope, name: cur?.text ?? node.text };
+}
+
+function calleeCxx(fn: Node): string | null {
+  switch (fn.type) {
+    case "identifier":
+      return fn.text;
+    case "field_expression":
+      return fn.childForFieldName("field")?.text ?? null;
+    case "qualified_identifier":
+      return splitQualifiedCxx(fn).name;
+    case "template_function":
+      return fn.childForFieldName("name")?.text ?? null;
+    default:
+      return null;
+  }
+}
+
+function collectCallsCxx(ctx: Ctx, srcQualified: string, body: Node | null): void {
+  if (!body) return;
+  for (const call of body.descendantsOfType("call_expression")) {
+    if (!call) continue;
+    const fn = call.childForFieldName("function");
+    if (!fn) continue;
+    const callee = calleeCxx(fn);
+    if (callee) ctx.calls.push({ srcQualified, callee });
+  }
+}
+
+// `#include "util/crypto.h"` is resolved against the including file's directory and
+// against the repo root; `<system>` headers carry no repo path and are dropped.
+function includeCandidates(fromPath: string, spec: string): string[] {
+  const rel = posix.normalize(posix.join(posix.dirname(fromPath), spec));
+  const fromRoot = posix.normalize(spec);
+  return [...new Set([rel, fromRoot])].filter((p) => !p.startsWith("."));
+}
+
+function handleInclude(node: Node, fromPath: string): ImportRef | null {
+  const path = node.childForFieldName("path");
+  if (path?.type !== "string_literal") return null;
+  const spec = path.text.slice(1, -1);
+  const candidatePaths = includeCandidates(fromPath, spec);
+  if (!candidatePaths.length) return null;
+  return { name: spec, candidatePaths, namespace: true };
+}
+
+// The container symbol for an out-of-line `Foo::bar()` definition, when `Foo` is
+// declared in this same file.
+function recordExtFor(ctx: Ctx, qualified: string): string | null {
+  for (const kind of ["class", "struct"]) {
+    const ext = stableSymbolId(ctx.repo, ctx.path, qualified, kind);
+    if (ctx.seenExt.has(ext)) return ext;
+  }
+  return null;
+}
+
+interface CxxScope {
+  containerExt: string;
+  prefix: string; // namespace/class path, e.g. `app::AuthService::`
+}
+
+function handleCxxMethod(ctx: Ctx, node: Node, scope: CxxScope, ownerQualified: string): void {
+  const chain = declaratorChain(node.childForFieldName("declarator"));
+  if (!chain.some((n) => n.type === "function_declarator")) return; // data member
+  const nameNode = declaredName(chain);
+  if (!nameNode) return;
+  const { name } = splitQualifiedCxx(nameNode);
+  const body = node.childForFieldName("body");
+  const qualified = `${ownerQualified}.${name}`;
+  const ext = push(ctx, "method", name, qualified, node, body, docForRun(node));
+  ctx.defines.push({ src: scope.containerExt, dst: ext });
+  collectCallsCxx(ctx, qualified, body);
+}
+
+function handleCxxRecord(ctx: Ctx, node: Node, scope: CxxScope): void {
+  const name = node.childForFieldName("name")?.text;
+  if (!name) return;
+  const body = node.childForFieldName("body");
+  const kind = node.type === "class_specifier" ? "class" : "struct";
+  const qualified = `${ctx.path}:${scope.prefix}${name}`;
+  const ext = push(ctx, kind, name, qualified, node, body, docForRun(node));
+  ctx.defines.push({ src: scope.containerExt, dst: ext });
+  if (!body) return;
+  const inner: CxxScope = { containerExt: ext, prefix: `${scope.prefix}${name}::` };
+  for (const member of named(body)) {
+    if (member.type === "function_definition" || member.type === "field_declaration") {
+      handleCxxMethod(ctx, member, inner, qualified);
+    } else {
+      handleCxxItem(ctx, member, inner);
+    }
+  }
+}
+
+function handleCxxItem(ctx: Ctx, node: Node, scope: CxxScope): void {
+  const doc = docForRun(node);
+  const qual = (name: string): string => `${ctx.path}:${scope.prefix}${name}`;
+  const simple = (kind: string, name: string | undefined, body: Node | null): void => {
+    if (!name) return;
+    const ext = push(ctx, kind, name, qual(name), node, body, doc);
+    ctx.defines.push({ src: scope.containerExt, dst: ext });
+  };
+
+  switch (node.type) {
+    case "template_declaration": {
+      const inner = named(node).find((c) => CXX_NESTED_TYPES.has(c.type));
+      if (inner) handleCxxItem(ctx, inner, scope);
+      return;
+    }
+    case "linkage_specification": {
+      const body = node.childForFieldName("body");
+      if (body) for (const c of named(body)) handleCxxItem(ctx, c, scope);
+      return;
+    }
+    case "namespace_definition": {
+      const name = node.childForFieldName("name")?.text;
+      const body = node.childForFieldName("body");
+      if (!body) return;
+      if (!name) {
+        for (const c of named(body)) handleCxxItem(ctx, c, scope);
+        return;
+      }
+      const ext = push(ctx, "namespace", name, qual(name), node, body, doc);
+      ctx.defines.push({ src: scope.containerExt, dst: ext });
+      const inner: CxxScope = { containerExt: ext, prefix: `${scope.prefix}${name}::` };
+      for (const c of named(body)) handleCxxItem(ctx, c, inner);
+      return;
+    }
+    case "class_specifier":
+    case "struct_specifier":
+    case "union_specifier":
+      handleCxxRecord(ctx, node, scope);
+      return;
+    case "enum_specifier":
+      simple("enum", node.childForFieldName("name")?.text, node.childForFieldName("body"));
+      return;
+    case "alias_declaration":
+      simple("type", node.childForFieldName("name")?.text, null);
+      return;
+    case "type_definition": {
+      const nameNode = declaredName(declaratorChain(node.childForFieldName("declarator")));
+      if (!nameNode) return;
+      // `typedef struct { … } Foo;` — the record is anonymous, so the typedef names it.
+      const aliased = node.childForFieldName("type");
+      const kind =
+        aliased && CXX_RECORD_TYPES.has(aliased.type) && aliased.childForFieldName("body")
+          ? "struct"
+          : "type";
+      simple(kind, nameNode.text, null);
+      return;
+    }
+    case "preproc_def":
+    case "preproc_function_def":
+      simple("macro", node.childForFieldName("name")?.text, null);
+      return;
+    case "function_definition": {
+      const nameNode = declaredName(declaratorChain(node.childForFieldName("declarator")));
+      if (!nameNode) return;
+      const { scope: owner, name } = splitQualifiedCxx(nameNode);
+      const body = node.childForFieldName("body");
+      if (!owner.length) {
+        const ext = push(ctx, "function", name, qual(name), node, body, doc);
+        ctx.defines.push({ src: scope.containerExt, dst: ext });
+        collectCallsCxx(ctx, qual(name), body);
+        return;
+      }
+      const ownerQualified = qual(owner.join("::"));
+      const qualified = `${ownerQualified}.${name}`;
+      const ext = push(ctx, "method", name, qualified, node, body, doc);
+      ctx.defines.push({ src: recordExtFor(ctx, ownerQualified) ?? scope.containerExt, dst: ext });
+      collectCallsCxx(ctx, qualified, body);
+      return;
+    }
+    case "declaration":
+    case "field_declaration": {
+      for (const child of named(node)) {
+        if (CXX_RECORD_TYPES.has(child.type) || child.type === "enum_specifier") {
+          handleCxxItem(ctx, child, scope); // `struct Foo { … } instance;`
+        }
+      }
+      for (const declarator of node.childrenForFieldName("declarator")) {
+        if (!declarator) continue;
+        const chain = declaratorChain(declarator);
+        const nameNode = declaredName(chain);
+        if (!nameNode) continue;
+        const isFn = chain.some((n) => n.type === "function_declarator");
+        const { scope: owner, name } = splitQualifiedCxx(nameNode);
+        const qualified = owner.length ? `${qual(owner.join("::"))}.${name}` : qual(name);
+        const ext = push(ctx, isFn ? "function" : "const", name, qualified, node, null, doc);
+        ctx.defines.push({ src: scope.containerExt, dst: ext });
+      }
+      return;
+    }
+    case "expression_statement":
+      collectCallsCxx(ctx, ctx.path, node); // top-level call attributed to the module
+      return;
+  }
+}
+
+function extractCxx(repo: string, path: string, source: string, root: Node): FileExtract {
+  const ctx: Ctx = { repo, path, symbols: [], defines: [], calls: [], seenExt: new Set() };
+  const first = root.namedChild(0);
+  const moduleExt = pushModule(
+    ctx,
+    source,
+    root,
+    first?.type === "comment" ? docFromComment(first) : null,
+  );
+
+  const imports: ImportRef[] = [];
+  const scope: CxxScope = { containerExt: moduleExt, prefix: "" };
+
+  const visit = (node: Node, guard: string | null): void => {
+    for (const child of named(node)) {
+      if (child.type === "preproc_include") {
+        const ref = handleInclude(child, path);
+        if (ref) imports.push(ref);
+      } else if (CXX_CONDITIONALS.has(child.type)) {
+        visit(child, child.childForFieldName("name")?.text ?? null);
+      } else if (child.type === "preproc_def" && child.childForFieldName("name")?.text === guard) {
+        continue; // the `#ifndef FOO_H / #define FOO_H` include guard, not a real macro
+      } else {
+        handleCxxItem(ctx, child, scope);
+      }
+    }
+  };
+  visit(root, null);
+
+  return {
+    symbols: ctx.symbols,
+    defines: dedupeDefines(ctx.defines),
+    imports,
+    calls: ctx.calls,
+    moduleExternalId: moduleExt,
+  };
+}
+
+// ---- Lua -------------------------------------------------------------------
+
+// The three shapes a Lua name takes: `f`, `M.f`, `M:f`.
+function luaTarget(node: Node): { table: string | null; name: string } | null {
+  if (node.type === "identifier") return { table: null, name: node.text };
+  if (node.type !== "dot_index_expression" && node.type !== "method_index_expression") return null;
+  const name = node.childForFieldName("field")?.text ?? node.childForFieldName("method")?.text;
+  return name ? { table: node.childForFieldName("table")?.text ?? null, name } : null;
+}
+
+function calleeLua(call: Node): string | null {
+  const name = call.childForFieldName("name");
+  return name ? (luaTarget(name)?.name ?? null) : null;
+}
+
+function collectCallsLua(ctx: Ctx, srcQualified: string, body: Node | null): void {
+  if (!body) return;
+  for (const call of body.descendantsOfType("function_call")) {
+    if (!call) continue;
+    const callee = calleeLua(call);
+    if (callee) ctx.calls.push({ srcQualified, callee });
+  }
+}
+
+// Lua resolves `require("a.b")` against the package path, not against the requiring
+// file, so candidates are repo-root-relative.
+function requireCandidates(spec: string): string[] {
+  const base = posix.normalize(spec.replace(/\./g, "/"));
+  if (base.startsWith(".")) return [];
+  return [`${base}.lua`, `${base}/init.lua`];
+}
+
+function luaStringValue(node: Node): string | null {
+  const quoted = /^(['"])([\s\S]*)\1$/.exec(node.text);
+  if (quoted) return quoted[2] ?? null;
+  const long = /^\[=*\[([\s\S]*)\]=*\]$/.exec(node.text);
+  return long ? (long[1] ?? null) : null;
+}
+
+// Every `require("…")` in the file, wherever it sits — a Lua module binding is an
+// ordinary local, so no declaration form is worth privileging.
+function luaImports(root: Node): ImportRef[] {
+  const refs: ImportRef[] = [];
+  for (const call of root.descendantsOfType("function_call")) {
+    if (!call || calleeLua(call) !== "require") continue;
+    const literal = call.childForFieldName("arguments")?.descendantsOfType("string")[0];
+    const spec = literal ? luaStringValue(literal) : null;
+    if (!spec) continue;
+    const candidatePaths = requireCandidates(spec);
+    if (candidatePaths.length) refs.push({ name: spec, candidatePaths, namespace: true });
+  }
+  return refs;
+}
+
+function luaTableExt(ctx: Ctx, qualified: string): string | null {
+  const ext = stableSymbolId(ctx.repo, ctx.path, qualified, "const");
+  return ctx.seenExt.has(ext) ? ext : null;
+}
+
+function pushLuaFunction(
+  ctx: Ctx,
+  node: Node,
+  target: { table: string | null; name: string },
+  body: Node | null,
+  moduleExt: string,
+  doc: string | null,
+): void {
+  if (!target.table) {
+    const qualified = `${ctx.path}:${target.name}`;
+    const ext = push(ctx, "function", target.name, qualified, node, body, doc);
+    ctx.defines.push({ src: moduleExt, dst: ext });
+    collectCallsLua(ctx, qualified, body);
+    return;
+  }
+  const ownerQualified = `${ctx.path}:${target.table}`;
+  const qualified = `${ownerQualified}.${target.name}`;
+  const ext = push(ctx, "method", target.name, qualified, node, body, doc);
+  ctx.defines.push({ src: luaTableExt(ctx, ownerQualified) ?? moduleExt, dst: ext });
+  collectCallsLua(ctx, qualified, body);
+}
+
+// `local x = <expr>` / `M.x = <expr>`: a function-valued initializer becomes a
+// function/method symbol, a `require` call is an import (collected separately) and
+// yields no symbol, anything else is a `const`.
+function luaBindings(
+  ctx: Ctx,
+  stmt: Node,
+  assign: Node,
+  moduleExt: string,
+  doc: string | null,
+): void {
+  const targets = named(assign).find((c) => c.type === "variable_list");
+  if (!targets) return;
+  const values = named(assign).find((c) => c.type === "expression_list");
+  const exprs = values ? named(values) : [];
+
+  named(targets).forEach((v, i) => {
+    const target = luaTarget(v);
+    if (!target) return;
+    const value = exprs[i] ?? null;
+    if (value?.type === "function_call" && calleeLua(value) === "require") return;
+    if (value?.type === "function_definition") {
+      pushLuaFunction(ctx, stmt, target, value.childForFieldName("body"), moduleExt, doc);
+      return;
+    }
+    const qualified = target.table
+      ? `${ctx.path}:${target.table}.${target.name}`
+      : `${ctx.path}:${target.name}`;
+    const ext = push(ctx, "const", target.name, qualified, stmt, null, doc);
+    ctx.defines.push({ src: moduleExt, dst: ext });
+  });
+}
+
+function luaTopLevel(ctx: Ctx, stmt: Node, moduleExt: string): void {
+  const doc = docForRun(stmt);
+  switch (stmt.type) {
+    case "function_declaration": {
+      const nameNode = stmt.childForFieldName("name");
+      const target = nameNode ? luaTarget(nameNode) : null;
+      if (!target) return;
+      pushLuaFunction(ctx, stmt, target, stmt.childForFieldName("body"), moduleExt, doc);
+      return;
+    }
+    case "variable_declaration": {
+      const assign = named(stmt).find((c) => c.type === "assignment_statement");
+      if (assign) luaBindings(ctx, stmt, assign, moduleExt, doc);
+      return;
+    }
+    case "assignment_statement":
+      luaBindings(ctx, stmt, stmt, moduleExt, doc);
+      return;
+    case "function_call":
+      collectCallsLua(ctx, ctx.path, stmt); // top-level call attributed to the module
+      return;
+  }
+}
+
+function extractLua(repo: string, path: string, source: string, root: Node): FileExtract {
+  const ctx: Ctx = { repo, path, symbols: [], defines: [], calls: [], seenExt: new Set() };
+  const first = root.namedChild(0);
+  const moduleExt = pushModule(
+    ctx,
+    source,
+    root,
+    first?.type === "comment" ? docFromComment(first) : null,
+  );
+
+  for (const stmt of named(root)) luaTopLevel(ctx, stmt, moduleExt);
+
+  return {
+    symbols: ctx.symbols,
+    defines: dedupeDefines(ctx.defines),
+    imports: luaImports(root),
     calls: ctx.calls,
     moduleExternalId: moduleExt,
   };
