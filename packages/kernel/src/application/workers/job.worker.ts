@@ -1,9 +1,9 @@
 import { inject, injectable } from "tsyringe";
 import { JobKind } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { JOBS_REPO_TOKEN, type JobRow, type JobsRepo } from "@/domain/ports/storage";
 import { CodeIndexService } from "@/application/services/code-index.service";
 import { SessionService } from "@/application/services/session.service";
-import { JobsRepo, type JobRow } from "@/db/repositories";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 
@@ -51,7 +51,7 @@ export class JobWorker {
 
   private readonly handlers: Record<string, Handler> = {
     [JobKind.CODE_INDEX]: async (payload, sessionId) => {
-      const targets = this.indexer.resolveTargets({
+      const targets = await this.indexer.resolveTargets({
         repo: typeof payload.repo === "string" ? payload.repo : undefined,
         path: typeof payload.path === "string" ? payload.path : undefined,
       });
@@ -66,7 +66,7 @@ export class JobWorker {
   };
 
   constructor(
-    private readonly jobs: JobsRepo,
+    @inject(JOBS_REPO_TOKEN) private readonly jobs: JobsRepo,
     private readonly indexer: CodeIndexService,
     private readonly sessions: SessionService,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
@@ -82,8 +82,8 @@ export class JobWorker {
 
   // Reopens whatever a previous process left running. Same lesson as the sweep's abandoned
   // runs: only the process that starts next can say a job nobody holds is not in progress.
-  reconcile(): number {
-    return this.jobs.reconcileAbandoned(
+  async reconcile(): Promise<number> {
+    return await this.jobs.reconcileAbandoned(
       this.clock.now(),
       "the job runner exited before the job finished",
     );
@@ -100,7 +100,7 @@ export class JobWorker {
         break;
       }
 
-      const job = this.jobs.claim({
+      const job = await this.jobs.claim({
         kinds: this.kinds,
         owner: this.ownerId,
         now: this.clock.now(),
@@ -124,7 +124,12 @@ export class JobWorker {
     if (handler === undefined) {
       // Claimed a kind this build cannot run — only reachable if `handlers` and the claim
       // list ever drift. Fail it rather than hold the lease until it expires.
-      this.jobs.fail(job.id, this.ownerId, `no handler for job kind ${job.kind}`, this.clock.now());
+      await this.jobs.fail(
+        job.id,
+        this.ownerId,
+        `no handler for job kind ${job.kind}`,
+        this.clock.now(),
+      );
 
       return false;
     }
@@ -133,7 +138,7 @@ export class JobWorker {
     // timer rather than between steps. Without it the row looks abandoned mid-run and a
     // second consumer starts the same work.
     const renew = setInterval(() => {
-      this.jobs.renew(job.id, this.ownerId, this.clock.now(), LEASE_MS);
+      void this.jobs.renew(job.id, this.ownerId, this.clock.now(), LEASE_MS);
     }, RENEW_MS);
 
     renew.unref();
@@ -141,15 +146,15 @@ export class JobWorker {
     const sessionId = newId();
 
     try {
-      this.sessions.startSession(sessionId, null, this.clock.now(), JOB_WRITER);
+      await this.sessions.startSession(sessionId, null, this.clock.now(), JOB_WRITER);
 
       const outcome = await handler(this.payloadOf(job), sessionId);
 
-      this.jobs.succeed(job.id, this.ownerId, outcome, this.clock.now());
+      await this.jobs.succeed(job.id, this.ownerId, outcome, this.clock.now());
 
       return true;
     } catch (err) {
-      this.jobs.fail(job.id, this.ownerId, errorText(err), this.clock.now());
+      await this.jobs.fail(job.id, this.ownerId, errorText(err), this.clock.now());
 
       return false;
     } finally {

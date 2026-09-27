@@ -77,13 +77,13 @@ async function queueThree(env: TestEnv): Promise<string[]> {
     }
 
     ids.push(
-      env.consolidation.insertCandidate({
+      (await env.consolidation.insertCandidate({
         kind: ConsolidationKind.MERGE,
         member_ids: members,
         canonical_id: members[0]!,
         score: 0.95 - i / 100,
         detected_at: START,
-      })!,
+      }))!,
     );
   }
 
@@ -131,10 +131,11 @@ describe("Consolidation worker lease", () => {
 
     // Then
     expect(r.proposals_backfilled).toBe(1);
-    expect(ids.slice(1).map((id) => env.consolidation.getCandidate(id)!.proposal)).toEqual([
-      null,
-      null,
-    ]);
+    expect(
+      await Promise.all(
+        ids.slice(1).map(async (id) => (await env.consolidation.getCandidate(id))!.proposal),
+      ),
+    ).toEqual([null, null]);
     expect(leaseExpiry(env)).toBeUndefined();
   });
 });

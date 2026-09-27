@@ -63,21 +63,21 @@ describe("Proposal backfill (manual -> provider upgrade)", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const a = await mk(s, "Alpha");
     const b = await mk(s, "Beta");
-    const id = env.consolidation.insertCandidate({
+    const id = (await env.consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: [a, b],
       canonical_id: a,
       score: 0.95,
       detected_at: "2026-01-01T00:00:00.000Z",
-    })!;
-    expect(env.consolidation.getCandidate(id)!.proposal).toBeNull();
+    }))!;
+    expect((await env.consolidation.getCandidate(id))!.proposal).toBeNull();
 
     // When
     const r = await container.resolve(ConsolidationWorker).tick();
 
     // Then
     expect(r.proposals_backfilled).toBe(1);
-    expect(env.consolidation.getCandidate(id)!.proposal).toMatchObject({
+    expect((await env.consolidation.getCandidate(id))!.proposal).toMatchObject({
       recommendation: "apply",
       title: "Drafted",
       summary: "S",
@@ -91,13 +91,13 @@ describe("Proposal backfill (manual -> provider upgrade)", () => {
     const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const a = await mk(s, "crm-backend deps");
     const b = await mk(s, "chat-socket deps");
-    const id = env.consolidation.insertCandidate({
+    const id = (await env.consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: [a, b],
       canonical_id: a,
       score: 0.93,
       detected_at: "2026-01-01T00:00:00.000Z",
-    })!;
+    }))!;
 
     // When
     const r = await container.resolve(ConsolidationWorker).tick();
@@ -105,28 +105,30 @@ describe("Proposal backfill (manual -> provider upgrade)", () => {
     // Then
     expect(r.rejected).toBe(1);
     expect(r.proposals_backfilled).toBe(0);
-    const cand = env.consolidation.getCandidate(id)!;
+    const cand = (await env.consolidation.getCandidate(id))!;
     expect(cand.status).toBe("dismissed"); // no longer clutters the Review inbox
     expect(cand.proposal?.recommendation).toBe("reject");
     expect(cand.proposal?.reason).toMatch(/different services/);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
+    ).toHaveLength(0);
   });
 
   it("should backfill nothing when the provider is the manual/disabled default", async () => {
     // Given
     const env = setup(); // default consolidator is manual (enabled=false)
-    const id = env.consolidation.insertCandidate({
+    const id = (await env.consolidation.insertCandidate({
       kind: ConsolidationKind.DISTILL,
       member_ids: ["x", "y", "z"],
       score: 0.9,
       detected_at: "2026-01-01T00:00:00.000Z",
-    })!;
+    }))!;
 
     // When
     const r = await container.resolve(ConsolidationWorker).tick();
 
     // Then
     expect(r.proposals_backfilled).toBe(0);
-    expect(env.consolidation.getCandidate(id)!.proposal).toBeNull();
+    expect((await env.consolidation.getCandidate(id))!.proposal).toBeNull();
   });
 });

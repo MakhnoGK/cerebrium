@@ -72,7 +72,7 @@ function poolCount(env: TestEnv, pool: "chunk_vec" | "code_vec"): number {
 
 // Drains everything the write and index paths enqueued, so both pools are populated.
 async function drain(env: TestEnv): Promise<void> {
-  for (let i = 0; i < 200 && env.queue.embeddingStats().backlog > 0; i++) {
+  for (let i = 0; i < 200 && (await env.queue.embeddingStats()).backlog > 0; i++) {
     await env.worker.tick();
   }
 }
@@ -88,7 +88,7 @@ describe("Vector pool routing", () => {
     const env = setup();
     const s = await session();
     await writeFact(s, "Retention policy");
-    env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
+    await env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
 
     // When
     await drain(env);
@@ -120,18 +120,18 @@ describe("Vector pool routing", () => {
       cap: 50,
     };
     const q = await query(env, "retention policy");
-    const before = env.search.vectorSearch(q, opts).map((r) => r.id);
+    const before = (await env.search.vectorSearch(q, opts)).map((r) => r.id);
     expect(before.length).toBe(5);
 
     // When — three times VEC_K worth of code arrives, which in one shared pool would
     // have displaced most of these five from the k=200 over-fetch.
-    env.code.applyFileIndex(
+    await env.code.applyFileIndex(
       fileInput(Array.from({ length: 600 }, (_, i) => sym(`fn${i}`, `function fn${i}() {}`))),
     );
     await drain(env);
 
     // Then
-    expect(env.search.vectorSearch(q, opts).map((r) => r.id)).toEqual(before);
+    expect((await env.search.vectorSearch(q, opts)).map((r) => r.id)).toEqual(before);
   });
 
   it("should still reach code symbols when the query asks for them by type", async () => {
@@ -139,11 +139,11 @@ describe("Vector pool routing", () => {
     const env = setup();
     const s = await session();
     await writeFact(s, "Retention policy");
-    env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
+    await env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
     await drain(env);
 
     // When
-    const rows = env.search.vectorSearch(await query(env, "validate"), {
+    const rows = await env.search.vectorSearch(await query(env, "validate"), {
       types: [SYMBOL_TYPE],
       history: false,
       cap: 50,
@@ -159,14 +159,14 @@ describe("Vector pool routing", () => {
     const env = setup();
     const s = await session();
     await writeFact(s, "Retention policy");
-    env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
+    await env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
     await drain(env);
 
     // When
     const kinds = new Set(
-      env.search
-        .vectorSearch(await query(env, "retention"), { history: false, cap: 50 })
-        .map((r) => r.memory_kind),
+      (
+        await env.search.vectorSearch(await query(env, "retention"), { history: false, cap: 50 })
+      ).map((r) => r.memory_kind),
     );
 
     // Then
@@ -183,7 +183,7 @@ describe("Vector pool routing", () => {
     await drain(env);
 
     // When
-    const rows = env.search.vectorSearch(await query(env, "anything at all"), {
+    const rows = await env.search.vectorSearch(await query(env, "anything at all"), {
       kinds: [MemoryKind.SEMANTIC],
       history: false,
       cap: 100,
@@ -198,12 +198,12 @@ describe("Vector pool routing", () => {
     const env = setup();
     const s = await session();
     const fact = await writeFact(s, "Retention policy");
-    env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
+    await env.code.applyFileIndex(fileInput([sym("validate", "function validate() {}")]));
     await drain(env);
     const symbols = symbolNodeIds(env);
 
     // When
-    const vectors = env.search.vectorsFor([fact.id, ...symbols]);
+    const vectors = await env.search.vectorsFor([fact.id, ...symbols]);
 
     // Then
     expect(vectors.has(fact.id)).toBe(true);

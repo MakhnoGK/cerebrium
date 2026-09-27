@@ -1,3 +1,4 @@
+import { type JobRow } from "@/domain/ports/storage";
 import { AgentRunService } from "@/application/services/agent-run.service";
 import {
   CLAIM_JOB,
@@ -14,14 +15,13 @@ import {
   type RenewJob,
   type RenewJobArgs,
 } from "@/application/use-cases/contracts";
-import type { JobRow } from "@/db/repositories";
 
 @useCase(CLAIM_JOB)
 export class LocalClaimJob implements ClaimJob {
   constructor(private readonly runs: AgentRunService) {}
 
-  invoke(args: ClaimJobArgs): Promise<JobRow | null> {
-    return Promise.resolve(this.runs.claim(args.kinds, args.owner));
+  async invoke(args: ClaimJobArgs): Promise<JobRow | null> {
+    return Promise.resolve(await this.runs.claim(args.kinds, args.owner));
   }
 }
 
@@ -29,8 +29,8 @@ export class LocalClaimJob implements ClaimJob {
 export class LocalRenewJob implements RenewJob {
   constructor(private readonly runs: AgentRunService) {}
 
-  invoke(args: RenewJobArgs): Promise<boolean> {
-    return Promise.resolve(this.runs.renew(args.id, args.owner));
+  async invoke(args: RenewJobArgs): Promise<boolean> {
+    return Promise.resolve(await this.runs.renew(args.id, args.owner));
   }
 }
 
@@ -47,7 +47,7 @@ export class LocalFinishJob implements FinishJob {
 export class LocalEnqueueAgentJob implements EnqueueAgentJob {
   constructor(private readonly runs: AgentRunService) {}
 
-  invoke(args: EnqueueAgentJobArgs): Promise<JobRow | null> {
-    return Promise.resolve(this.runs.enqueue(args.kind, args.payload ?? {}, args.every_ms));
+  async invoke(args: EnqueueAgentJobArgs): Promise<JobRow | null> {
+    return Promise.resolve(await this.runs.enqueue(args.kind, args.payload ?? {}, args.every_ms));
   }
 }

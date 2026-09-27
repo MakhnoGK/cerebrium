@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import "reflect-metadata";
 import type Database from "better-sqlite3";
-import { SearchRepo } from "@/db/repositories";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { SEARCH_REPO_TOKEN, type SearchRepo } from "@/domain/ports/storage";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
 import { buildContainer } from "@/container";
@@ -163,7 +163,7 @@ function main(): Promise<void> {
   const dbPath = container.resolve(DatabaseConfig).path;
   const retrieval = container.resolve(RetrievalConfig);
   const thresholds = container.resolve(ConsolidationThresholdsConfig);
-  const searchRepo = container.resolve(SearchRepo);
+  const searchRepo = container.resolve<SearchRepo>(SEARCH_REPO_TOKEN);
 
   const asJson = process.argv.includes("--json");
   const allScorers = process.argv.includes("--all-scorers");
@@ -198,9 +198,9 @@ async function report(opts: {
   const stats = scorers.map(({ name, scored }) => scorerStats(name, scored));
   const sweep = thresholdSweep(pairs, MERGE_SWEEP);
   const fidelity = storedVsRecomputed(pairs, vectors);
-  const dedup = dedupDensity(db, opts.searchRepo, vectors, DENSITY_SWEEP);
+  const dedup = await dedupDensity(db, opts.searchRepo, vectors, DENSITY_SWEEP);
   const link = linkDensity(db, vectors, DENSITY_SWEEP);
-  const lexical = lexicalDensity(db, opts.searchRepo, LEXICAL_SWEEP);
+  const lexical = await lexicalDensity(db, opts.searchRepo, LEXICAL_SWEEP);
 
   const firstChunk = loadFirstChunkVectors(db);
   const prov = loadProvenance(db);
@@ -637,11 +637,11 @@ function thresholdSweep(pairs: Pair[], sweep: number[]): SweepRow[] {
 // Replays the write tool's *lexical fallback* — the path taken when nothing is embedded
 // yet. Same probe text, same FTS candidates, same Jaccard, so the gate it suggests is on
 // the scale the fallback actually produces rather than the cosine scale it used to share.
-function lexicalDensity(
+async function lexicalDensity(
   db: Database.Database,
   searchRepo: SearchRepo,
   sweep: number[],
-): LexicalRow[] {
+): Promise<LexicalRow[]> {
   const nodes = db
     .prepare(
       `SELECT n.id AS id, n.project AS project FROM nodes n
@@ -660,15 +660,16 @@ function lexicalDensity(
     if (!match) continue;
 
     const probeTokens = tokenSet(probe);
-    const scores = searchRepo
-      .search({
+    const scores = (
+      await searchRepo.search({
         match,
         project: node.project ?? undefined,
         kinds: ["semantic"],
         history: false,
         cap: DEDUP_CANDIDATES,
       })
-      .rows.filter((r) => r.id !== node.id)
+    ).rows
+      .filter((r) => r.id !== node.id)
       .map((r) => jaccard(probeTokens, tokenSet(`${r.title} ${r.content}`)));
     perProbe.push(scores);
   }
@@ -688,12 +689,12 @@ function lexicalDensity(
 // Replays the write tool's probe for every live semantic node: its own seed vector as the
 // query, the same filters and cap, itself excluded. Uses SearchRepo, so the measurement
 // inherits the production post-filter behaviour rather than an idealised version of it.
-function dedupDensity(
+async function dedupDensity(
   db: Database.Database,
   searchRepo: SearchRepo,
   vectors: Map<string, NodeVectors>,
   sweep: number[],
-): DedupRow[] {
+): Promise<DedupRow[]> {
   const probes = db
     .prepare(
       `SELECT n.id AS id, n.project AS project FROM nodes n
@@ -705,13 +706,14 @@ function dedupDensity(
   for (const probe of probes) {
     const seed = vectors.get(probe.id)?.seed;
     if (!seed) continue;
-    const hits = searchRepo
-      .vectorSearch([...seed], {
+    const hits = (
+      await searchRepo.vectorSearch([...seed], {
         project: probe.project ?? undefined,
         kinds: ["semantic"],
         history: false,
         cap: DEDUP_CANDIDATES,
       })
+    )
       .filter((r) => r.id !== probe.id)
       .map((r) => 1 - r.distance);
     perProbe.push(hits);

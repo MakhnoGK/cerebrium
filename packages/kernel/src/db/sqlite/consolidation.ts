@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { injectable } from "tsyringe";
 import type {
   ConsolidationCandidate,
@@ -6,12 +5,17 @@ import type {
   NewCandidate,
 } from "@cerebrium/contracts/types";
 import { ConsolidationKind, ConsolidationStatus, MemoryKind } from "@cerebrium/contracts/vocab";
-import type {
-  ConsolidationReporter,
-  ConsolidationTickResult,
-} from "@/domain/ports/consolidation-reporter";
-import { BaseRepo } from "@/db/repositories/base";
-import { LATEST_REVISION } from "@/db/repositories/internal";
+import type { ConsolidationTickResult } from "@/domain/ports/consolidation-reporter";
+import {
+  candidateHash,
+  pairKey,
+  type ConsolidationRepo,
+  type DuplicatePair,
+  type ResolvedStatus,
+  type SweepSeed,
+} from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
+import { LATEST_REVISION } from "@/db/sqlite/internal";
 import { newId } from "@/core/ids";
 
 // The consolidation queue aggregate. Detection (in the daemon's
@@ -23,21 +27,6 @@ import { newId } from "@/core/ids";
 
 const CANDIDATE_COLS =
   "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by, attempts, last_error";
-
-export interface SweepSeed {
-  id: string;
-  kind: MemoryKind;
-  ordinal: number;
-}
-
-export interface DuplicatePair {
-  member_ids: string[];
-  canonical_id: string;
-  project: string | null;
-  score: number;
-  same_session: boolean;
-  youngest_created_at: string;
-}
 
 interface Provenance {
   session: string;
@@ -60,20 +49,6 @@ interface CandidateRow {
   last_error: string | null;
 }
 
-// Idempotency key: a cluster is the same regardless of member order, so hash the
-// kind with the sorted ids. Re-detecting an existing cluster (pending, applied, or
-// dismissed) collides on UNIQUE(member_hash) and is ignored — never re-proposed.
-export function candidateHash(kind: ConsolidationKind, memberIds: string[]): string {
-  const key = `${kind}\0${[...memberIds].sort().join("\0")}`;
-  return createHash("sha256").update(key).digest("hex").slice(0, 24);
-}
-
-// Canonical orientation for a symmetric pair, so (a,b) and (b,a) dedupe to one key and
-// one stored edge (graph expansion via neighborsOf is symmetric, so one direction suffices).
-export function pairKey(a: string, b: string): string {
-  return a < b ? `${a}\0${b}` : `${b}\0${a}`;
-}
-
 function toCandidate(r: CandidateRow): ConsolidationCandidate {
   return {
     id: r.id,
@@ -93,10 +68,10 @@ function toCandidate(r: CandidateRow): ConsolidationCandidate {
 }
 
 @injectable()
-export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter {
+export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRepo {
   // Enqueue a detected candidate. Idempotent by (kind, members): a duplicate hash is
   // ignored and returns null (no new row); otherwise returns the new candidate's id.
-  insertCandidate(input: NewCandidate): string | null {
+  async insertCandidate(input: NewCandidate): Promise<string | null> {
     const id = newId();
     const hash = candidateHash(input.kind, input.member_ids);
     const info = this.tx(() =>
@@ -124,7 +99,11 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // True if a candidate for this exact cluster already exists in any status — so
   // detection can skip the work before building a proposal.
-  candidateExists(kind: ConsolidationKind, memberIds: string[]): boolean {
+  async candidateExists(kind: ConsolidationKind, memberIds: string[]): Promise<boolean> {
+    return this.candidateExistsNow(kind, memberIds);
+  }
+
+  private candidateExistsNow(kind: ConsolidationKind, memberIds: string[]): boolean {
     const row = this.db
       .prepare("SELECT 1 FROM consolidation_candidates WHERE member_hash = ?")
       .get(candidateHash(kind, memberIds));
@@ -135,7 +114,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // Pending distill/merge candidates that still need a *judged* proposal — either none
   // at all, or one drafted before the provider produced recommendations. The backlog a
   // newly-enabled provider backfills (e.g. after switching manual -> http).
-  pendingNeedingProposal(limit: number): ConsolidationCandidate[] {
+  async pendingNeedingProposal(limit: number): Promise<ConsolidationCandidate[]> {
     return (
       this.db
         .prepare(
@@ -150,7 +129,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Attach (or overwrite) a generated proposal on a still-pending candidate. A queue-row
   // write, not a content revision. No-op once the candidate is resolved.
-  setCandidateProposal(id: string, proposal: ConsolidationProposal): boolean {
+  async setCandidateProposal(id: string, proposal: ConsolidationProposal): Promise<boolean> {
     const info = this.tx(() =>
       this.db
         .prepare(
@@ -161,7 +140,11 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     return info.changes > 0;
   }
 
-  getCandidate(id: string): ConsolidationCandidate | undefined {
+  async getCandidate(id: string): Promise<ConsolidationCandidate | undefined> {
+    return this.getCandidateNow(id);
+  }
+
+  private getCandidateNow(id: string): ConsolidationCandidate | undefined {
     const r = this.db
       .prepare(`SELECT ${CANDIDATE_COLS} FROM consolidation_candidates WHERE id = ?`)
       .get(id) as CandidateRow | undefined;
@@ -172,7 +155,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // keyset cursor over a non-total order skips or repeats rows at every page boundary.
   // How many candidates are waiting for a decision. Counted rather than listed: this is
   // asked on every tool call.
-  pendingCandidateCount(): number {
+  async pendingCandidateCount(): Promise<number> {
     return (
       this.db
         .prepare("SELECT COUNT(*) AS n FROM consolidation_candidates WHERE status = 'pending'")
@@ -182,19 +165,22 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   private static readonly PENDING_ORDER = "ORDER BY score DESC, detected_at ASC, id ASC";
 
-  pendingCandidates(opts?: { kind?: ConsolidationKind; limit?: number }): ConsolidationCandidate[] {
+  async pendingCandidates(opts?: {
+    kind?: ConsolidationKind;
+    limit?: number;
+  }): Promise<ConsolidationCandidate[]> {
     const limit = opts?.limit ?? 50;
     const rows = opts?.kind
       ? (this.db
           .prepare(
             `SELECT ${CANDIDATE_COLS} FROM consolidation_candidates
-             WHERE status = 'pending' AND kind = ? ${ConsolidationRepo.PENDING_ORDER} LIMIT ?`,
+             WHERE status = 'pending' AND kind = ? ${SqliteConsolidationRepo.PENDING_ORDER} LIMIT ?`,
           )
           .all(opts.kind, limit) as CandidateRow[])
       : (this.db
           .prepare(
             `SELECT ${CANDIDATE_COLS} FROM consolidation_candidates
-             WHERE status = 'pending' ${ConsolidationRepo.PENDING_ORDER} LIMIT ?`,
+             WHERE status = 'pending' ${SqliteConsolidationRepo.PENDING_ORDER} LIMIT ?`,
           )
           .all(limit) as CandidateRow[]);
     return rows.map(toCandidate);
@@ -203,11 +189,11 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // One page of the pending queue in that same total order, starting strictly after
   // `after` when given. The comparison is spelled out rather than done with a row value
   // because the sort mixes directions: score descends while the tiebreakers ascend.
-  pendingCandidatePage(opts: {
+  async pendingCandidatePage(opts: {
     kind?: ConsolidationKind;
     limit: number;
     after?: { score: number; detected_at: string; id: string };
-  }): ConsolidationCandidate[] {
+  }): Promise<ConsolidationCandidate[]> {
     const where = ["status = 'pending'"];
     const params: unknown[] = [];
 
@@ -235,7 +221,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     const rows = this.db
       .prepare(
         `SELECT ${CANDIDATE_COLS} FROM consolidation_candidates
-         WHERE ${where.join(" AND ")} ${ConsolidationRepo.PENDING_ORDER} LIMIT ?`,
+         WHERE ${where.join(" AND ")} ${SqliteConsolidationRepo.PENDING_ORDER} LIMIT ?`,
       )
       .all(...params, opts.limit) as CandidateRow[];
 
@@ -334,7 +320,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // The seed set for one sweep: newest embedded semantic nodes, then embedded episodics
   // with no live edge. `ordinal` is the seed's position within its own kind, which is what
   // lets one scan serve two stages with different batch budgets.
-  sweepSeeds(limit: number): SweepSeed[] {
+  async sweepSeeds(limit: number): Promise<SweepSeed[]> {
     return [
       ...this.linkableNodes(limit).map((id, ordinal) => ({
         id,
@@ -350,10 +336,10 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   }
 
   // One seed's semantic neighbours above `minScore`, as similarity rather than distance.
-  neighboursOf(
+  async neighboursOf(
     seedId: string,
     opts: { minScore: number; k?: number; capPerNode?: number },
-  ): { id: string; score: number }[] {
+  ): Promise<{ id: string; score: number }[]> {
     return this.nearestSemantic(seedId, opts.k ?? 20, opts.capPerNode ?? 10)
       .map((nb) => ({ id: nb.id, score: 1 - nb.distance }))
       .filter((nb) => nb.score >= opts.minScore);
@@ -361,7 +347,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Every `similar_to` pair already stored, invalidated ones included: a pair retired by
   // the degree cap must not be rediscovered on the next sweep and added back.
-  storedSimilarPairs(): Set<string> {
+  async storedSimilarPairs(): Promise<Set<string>> {
     return new Set(
       (
         this.db.prepare("SELECT src, dst FROM edges WHERE type = 'similar_to'").all() as {
@@ -379,7 +365,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Live similar_to degree of each id, counted over the same graph search expansion and
   // the UI see: live edges between live non-mirror nodes.
-  linkDegrees(ids: string[]): Map<string, number> {
+  async linkDegrees(ids: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>(ids.map((id) => [id, 0]));
 
     if (!ids.length) {
@@ -410,7 +396,10 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // endpoints, worst first. The either-endpoint rule is what keeps every node's own best
   // neighbors: a strict per-node cut would strand a node whose best links are not
   // reciprocated, which is how nodes fall out of the graph entirely.
-  overCapSimilarLinks(opts: { maxDegree: number; limit: number }): { src: string; dst: string }[] {
+  async overCapSimilarLinks(opts: {
+    maxDegree: number;
+    limit: number;
+  }): Promise<{ src: string; dst: string }[]> {
     return this.db
       .prepare(
         `WITH live AS (
@@ -449,7 +438,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Content of specific nodes (latest revision), in the given order — the inputs the
   // provider distills. Skips ids that no longer exist.
-  candidateInputs(ids: string[]): { id: string; title: string; content: string }[] {
+  async candidateInputs(ids: string[]): Promise<{ id: string; title: string; content: string }[]> {
     const stmt = this.db.prepare(
       `SELECT n.title AS title,
               (SELECT content FROM revisions WHERE node_id = n.id ORDER BY rev DESC LIMIT 1) AS content
@@ -519,14 +508,14 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // Connected components (over the >= minScore similarity graph) of eligible episodics,
   // keeping only components of at least minCluster. `score` is the mean similarity of
   // the edges that formed the component.
-  staleEpisodicClusters(opts: {
+  async staleEpisodicClusters(opts: {
     minScore: number;
     minCluster: number;
     cutoff: string;
     limit: number;
     k?: number;
     capPerNode?: number;
-  }): { project: string | null; member_ids: string[]; score: number }[] {
+  }): Promise<{ project: string | null; member_ids: string[]; score: number }[]> {
     const k = opts.k ?? 20;
     const cap = opts.capPerNode ?? 10;
     const eligible = this.eligibleEpisodics(opts.cutoff, opts.limit);
@@ -606,12 +595,12 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // One duplicate pair, built from a neighbour hit the sweep already found. Null when the
   // two are already related by `supersedes`, or when the pair is a candidate already —
   // both cheap, and both ahead of the four lookups the pair itself costs.
-  duplicatePairFor(a: string, b: string, score: number): DuplicatePair | null {
+  async duplicatePairFor(a: string, b: string, score: number): Promise<DuplicatePair | null> {
     if (this.hasSupersedes(a, b)) return null;
 
     const [x, y] = a < b ? [a, b] : [b, a];
 
-    if (this.candidateExists(ConsolidationKind.MERGE, [x, y])) return null;
+    if (this.candidateExistsNow(ConsolidationKind.MERGE, [x, y])) return null;
 
     const { survivor } = this.chooseSurvivor(a, b);
     const project = (
@@ -639,7 +628,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Symbols that a citation may resolve to: name, the node it is, and the repo it came
   // from, so a note can be held to its own project's code.
-  citableSymbols(): { name: string; node_id: string; repo: string }[] {
+  async citableSymbols(): Promise<{ name: string; node_id: string; repo: string }[]> {
     return this.db
       .prepare(
         `SELECT sy.name AS name, sy.node_id AS node_id, sy.repo AS repo
@@ -651,7 +640,9 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Every live authored node with its current body, which is both the text the citations
   // are read from and the titles the wikilinks resolve against.
-  authoredBodies(): { id: string; title: string; project: string | null; content: string }[] {
+  async authoredBodies(): Promise<
+    { id: string; title: string; project: string | null; content: string }[]
+  > {
     return this.db
       .prepare(
         `WITH current AS (
@@ -671,13 +662,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Revisions are append-only, so this changes if and only if a body or a title arrived
   // since the last look — and only those can make a new wikilink resolvable.
-  revisionCount(): number {
+  async revisionCount(): Promise<number> {
     return (this.db.prepare("SELECT COUNT(*) AS n FROM revisions").get() as { n: number }).n;
   }
 
   // Titles of retired authored nodes, so a wikilink naming one can be followed to
   // whatever superseded it. Titles only — the bodies are not read.
-  retiredAuthoredTitles(): { id: string; title: string }[] {
+  async retiredAuthoredTitles(): Promise<{ id: string; title: string }[]> {
     return this.db
       .prepare(
         `SELECT id, title FROM nodes
@@ -690,7 +681,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Advances on every code index run. `code_files` is only ever written by indexing, so
   // an unchanged watermark means no symbol can have been orphaned since the last look.
-  codeIndexWatermark(): string | null {
+  async codeIndexWatermark(): Promise<string | null> {
     return (
       this.db.prepare("SELECT MAX(indexed_at) AS at FROM code_repos").get() as {
         at: string | null;
@@ -707,7 +698,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // row — `removeFile` deletes it alongside the invalidation — so they look exactly like
   // orphans, and pruning them would retire a whole repo for being unmounted or moved rather
   // than for being deleted. Caller decides which repos those are; this layer touches no disk.
-  deadMirrorNodes(limit: number, unreachable: readonly string[] = []): string[] {
+  async deadMirrorNodes(limit: number, unreachable: readonly string[] = []): Promise<string[]> {
     const holes = unreachable.map(() => "?").join(",");
     const skip = unreachable.length ? `AND sy.repo NOT IN (${holes})` : "";
 
@@ -734,9 +725,11 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // (annotation reads only title+content). Newest first, so freshly-written nodes are
   // enriched before they are likely to be searched. A later `update` bumps the rev, whose
   // new (node_id, rev) is again absent here, so the node is naturally re-annotated.
-  unannotatedSemantic(
+  async unannotatedSemantic(
     limit: number,
-  ): { id: string; rev: number; title: string; content: string; project: string | null }[] {
+  ): Promise<
+    { id: string; rev: number; title: string; content: string; project: string | null }[]
+  > {
     return this.db
       .prepare(
         `SELECT n.id AS id, lr.rev AS rev, n.title AS title, lr.content AS content, n.project AS project
@@ -757,12 +750,12 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
 
   // Move a candidate off 'pending'. A queue-state write, not a content revision, so
   // it updates in place. No-op (returns false) if the id is unknown or already resolved.
-  resolveCandidate(
+  async resolveCandidate(
     id: string,
     status: Exclude<ConsolidationStatus, "pending">,
     resolvedBy: string,
     ts: string,
-  ): boolean {
+  ): Promise<boolean> {
     const info = this.tx(() =>
       this.db
         .prepare(
@@ -778,13 +771,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
   // when the sweep performs the same act the queued candidate was asking a person to
   // approve. Without this a posture switched from `suggest` to `auto` leaves its old queue
   // pending forever, since nothing will ever apply a row whose work is already done.
-  resolvePendingByMembers(
+  async resolvePendingByMembers(
     kind: ConsolidationKind,
     memberIds: string[],
     status: Exclude<ConsolidationStatus, "pending">,
     resolvedBy: string,
     ts: string,
-  ): boolean {
+  ): Promise<boolean> {
     const info = this.tx(() =>
       this.db
         .prepare(
@@ -797,22 +790,17 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     return info.changes > 0;
   }
 
-  resolveCandidateAtomically(
+  async resolveCandidateAtomically(
     id: string,
     resolvedBy: string,
     ts: string,
-    operation: (
-      candidate: ConsolidationCandidate,
-    ) => Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>,
-  ): {
-    candidate: ConsolidationCandidate;
-    status: Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>;
-  } | null {
-    return this.tx(() => {
-      const candidate = this.getCandidate(id);
+    operation: (candidate: ConsolidationCandidate) => Promise<ResolvedStatus>,
+  ): Promise<{ candidate: ConsolidationCandidate; status: ResolvedStatus } | null> {
+    return this.txAsync(async () => {
+      const candidate = this.getCandidateNow(id);
       if (candidate?.status !== ConsolidationStatus.PENDING) return null;
 
-      const status = operation(candidate);
+      const status = await operation(candidate);
       const info = this.db
         .prepare(
           `UPDATE consolidation_candidates SET status = ?, resolved_at = ?, resolved_by = ?
@@ -824,7 +812,8 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       return { candidate, status };
     });
   }
-  reportTick(runId: string, result: ConsolidationTickResult): void {
+
+  async reportTick(runId: string, result: ConsolidationTickResult): Promise<void> {
     this.db
       .prepare(
         `INSERT INTO consolidation_runs (
@@ -898,7 +887,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       });
   }
 
-  closeRun(runId: string, at: string, reason: string): void {
+  async closeRun(runId: string, at: string, reason: string): Promise<void> {
     this.db
       .prepare(
         `UPDATE consolidation_runs
@@ -909,7 +898,7 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
       .run(at, at, reason, runId);
   }
 
-  closeAbandonedRuns(reason: string): number {
+  async closeAbandonedRuns(reason: string): Promise<number> {
     // `ended_at = updated_at`, not now: the last instant the sweep reported is when it
     // actually stopped, and "now" would claim it ran until this process started.
     const info = this.db
@@ -924,13 +913,13 @@ export class ConsolidationRepo extends BaseRepo implements ConsolidationReporter
     return info.changes;
   }
 
-  clearCandidateProposal(id: string, error: string | null): void {
+  async clearCandidateProposal(id: string, error: string | null): Promise<void> {
     this.db
       .prepare("UPDATE consolidation_candidates SET proposal = NULL, last_error = ? WHERE id = ?")
       .run(error, id);
   }
 
-  reopenCandidate(id: string): void {
+  async reopenCandidate(id: string): Promise<void> {
     this.db
       .prepare(
         "UPDATE consolidation_candidates SET status = 'pending', attempts = attempts + 1 WHERE id = ?",

@@ -1,6 +1,6 @@
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
+import { EMBEDDING_QUEUE_REPO_TOKEN, type EmbeddingQueueRepo } from "@/domain/ports/storage";
 import { DaemonService } from "@/application/services/daemon.service";
-import { EmbeddingQueueRepo } from "@/db/repositories";
 
 // A single writer only ever adds one node to the queue, so only flag a genuine
 // backlog — not the routine one-behind state right after a writer.
@@ -10,11 +10,11 @@ const BACKLOG_NOTE_THRESHOLD = 20;
 export class EmbeddingService {
   constructor(
     private readonly daemonService: DaemonService,
-    private readonly embeddingQueue: EmbeddingQueueRepo,
+    @inject(EMBEDDING_QUEUE_REPO_TOKEN) private readonly embeddingQueue: EmbeddingQueueRepo,
   ) {}
 
-  getEmbeddingNotes() {
-    const { backlog, parked } = this.embeddingQueue.embeddingStats();
+  async getEmbeddingNotes() {
+    const { backlog, parked } = await this.embeddingQueue.embeddingStats();
     const notes: string[] = [];
 
     if (parked > 0) {

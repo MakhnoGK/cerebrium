@@ -1,5 +1,6 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import {
   RESTORE_MEMORY,
   useCase,
@@ -7,19 +8,18 @@ import {
   type RestoreMemory,
   type RestoreMemoryArgs,
 } from "@/application/use-cases/contracts";
-import { NodesRepo } from "@/db/repositories";
 
 @useCase(RESTORE_MEMORY)
 export class LocalRestoreMemory implements RestoreMemory {
   constructor(
-    private readonly nodes: NodesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   async invoke(args: RestoreMemoryArgs): Promise<EnvelopeResult> {
     if (!(await this.nodes.exists(args.id))) throw new Error(`node ${args.id} does not exist.`);
 
-    const prov = this.nodes.nodeOrigin(args.id);
+    const prov = await this.nodes.nodeOrigin(args.id);
 
     if (prov?.memory_kind === "mirror" && prov.origin === "repo") {
       throw new Error(
@@ -27,7 +27,7 @@ export class LocalRestoreMemory implements RestoreMemory {
       );
     }
 
-    const restored = this.nodes.restoreNode(args.id, {
+    const restored = await this.nodes.restoreNode(args.id, {
       ts: this.clock.now(),
       session_id: args.session_id,
     });
@@ -38,6 +38,6 @@ export class LocalRestoreMemory implements RestoreMemory {
       );
     }
 
-    return { envelope: this.nodes.envelope(args.id)! };
+    return { envelope: (await this.nodes.envelope(args.id))! };
   }
 }

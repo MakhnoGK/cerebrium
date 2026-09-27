@@ -6,7 +6,7 @@ import {
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
 import { HintsService, MemoryService } from "@/application/services";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { estimateTokens } from "@/core/tokens";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { buildContainer } from "@/container";
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
 
   // Same read-only discipline as eval-retrieval: no session row, no events row.
   root.register(HintsService, {
-    useValue: { getUnknownSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
+    useValue: { getSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
   });
 
   const db = root.resolve<Database.Database>(DB_TOKEN);
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
   // The working set is the other list-shaped payload, and the one every session pays for.
   // Read through the service, not `session_start` — the tool mints a session row, which a
   // read-only run must not do.
-  const set = root.resolve(MemoryService).getWorkingSet(undefined) as unknown as {
+  const set = (await root.resolve(MemoryService).getWorkingSet(undefined)) as unknown as {
     semantic?: Row[];
     recent?: Row[];
     tasks?: Row[];

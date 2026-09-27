@@ -4,8 +4,13 @@ import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationKind, EdgeType, MemoryKind, Posture } from "@cerebrium/contracts/vocab";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
+import {
+  CODE_REPO_TOKEN,
+  CONSOLIDATION_REPO_TOKEN,
+  type CodeRepo,
+  type ConsolidationRepo,
+} from "@/domain/ports/storage";
 import { ConsolidationWorker } from "@/application/workers";
-import { CodeRepo, ConsolidationRepo } from "@/db/repositories";
 import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
 import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
@@ -46,8 +51,10 @@ function withDocumentsPosture(posture: Posture): void {
   });
 }
 
-function symbolId(name: string): string {
-  return container.resolve(CodeRepo).findSymbolsByName(name, "demo-repo", 1)[0]!.envelope.id;
+async function symbolId(name: string): Promise<string> {
+  return (
+    await container.resolve<CodeRepo>(CODE_REPO_TOKEN).findSymbolsByName(name, "demo-repo", 1)
+  )[0]!.envelope.id;
 }
 
 afterEach(() => {
@@ -77,8 +84,8 @@ describe("Proposing note-to-code citations", () => {
     expect(candidates()).toEqual([
       {
         kind: ConsolidationKind.DOCUMENTS,
-        member_ids: JSON.stringify([id, symbolId("hashToken")]),
-        canonical_id: symbolId("hashToken"),
+        member_ids: JSON.stringify([id, await symbolId("hashToken")]),
+        canonical_id: await symbolId("hashToken"),
       },
     ]);
   });
@@ -141,7 +148,7 @@ describe("Proposing note-to-code citations", () => {
     // Then
     const edge = env.db
       .prepare("SELECT type FROM edges WHERE src = ? AND dst = ? AND invalidated_at IS NULL")
-      .get(id, symbolId("hashToken")) as { type: string } | undefined;
+      .get(id, await symbolId("hashToken")) as { type: string } | undefined;
 
     expect(edge?.type).toBe(EdgeType.DOCUMENTS);
   });
@@ -164,7 +171,7 @@ describe("Applying note-to-code citations directly", () => {
         .prepare(
           "SELECT provenance FROM edges WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL",
         )
-        .get(id, symbolId("hashToken"), EdgeType.DOCUMENTS),
+        .get(id, await symbolId("hashToken"), EdgeType.DOCUMENTS),
     ).toEqual({ provenance: "system" });
   });
 
@@ -174,13 +181,15 @@ describe("Applying note-to-code citations directly", () => {
     withDocumentsPosture(Posture.AUTO);
 
     const id = await note("the token check goes through `hashToken` before anything else");
-    const queued = container.resolve(ConsolidationRepo).insertCandidate({
-      kind: ConsolidationKind.DOCUMENTS,
-      member_ids: [id, symbolId("hashToken")],
-      canonical_id: symbolId("hashToken"),
-      score: 1,
-      detected_at: new Date(0).toISOString(),
-    });
+    const queued = await container
+      .resolve<ConsolidationRepo>(CONSOLIDATION_REPO_TOKEN)
+      .insertCandidate({
+        kind: ConsolidationKind.DOCUMENTS,
+        member_ids: [id, await symbolId("hashToken")],
+        canonical_id: await symbolId("hashToken"),
+        score: 1,
+        detected_at: new Date(0).toISOString(),
+      });
 
     expect(queued).not.toBeNull();
 

@@ -41,16 +41,21 @@ export class LocalStartSession implements StartSession {
     private readonly embeddings: EmbeddingService,
   ) {}
 
-  invoke(args: StartSessionArgs): Promise<StartSessionResult> {
+  async invoke(args: StartSessionArgs): Promise<StartSessionResult> {
     const session_id = ulid();
 
-    this.sessions.startSession(session_id, args.project, new Date().toISOString(), args.client);
+    await this.sessions.startSession(
+      session_id,
+      args.project,
+      new Date().toISOString(),
+      args.client,
+    );
 
     return Promise.resolve({
       session_id,
       project: args.project,
-      working_set: this.memory.getWorkingSet(args.project ?? undefined),
-      notes: this.embeddings.getEmbeddingNotes(),
+      working_set: await this.memory.getWorkingSet(args.project ?? undefined),
+      notes: await this.embeddings.getEmbeddingNotes(),
     });
   }
 }
@@ -59,8 +64,8 @@ export class LocalStartSession implements StartSession {
 export class LocalTouchSession implements TouchSession {
   constructor(private readonly sessions: SessionService) {}
 
-  invoke(args: TouchSessionArgs): Promise<Record<string, never>> {
-    this.sessions.requireSession(args.session_id, new Date().toISOString());
+  async invoke(args: TouchSessionArgs): Promise<Record<string, never>> {
+    await this.sessions.requireSession(args.session_id, new Date().toISOString());
 
     return Promise.resolve({});
   }
@@ -70,8 +75,8 @@ export class LocalTouchSession implements TouchSession {
 export class LocalRecordEvents implements RecordEvents {
   constructor(private readonly eventLog: EventLogService) {}
 
-  invoke(args: RecordEventsArgs): Promise<Record<string, never>> {
-    this.eventLog.record(args.events);
+  async invoke(args: RecordEventsArgs): Promise<Record<string, never>> {
+    await this.eventLog.record(args.events);
 
     return Promise.resolve({});
   }

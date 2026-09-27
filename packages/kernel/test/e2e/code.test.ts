@@ -76,7 +76,7 @@ describe("Code indexing end-to-end", () => {
     // 1. index the repo
     const stats = (await t.codeIndex.invoke({ session_id: s, path: root })) as { repo: string };
     const repoName = stats.repo;
-    const validateId = env.code.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id;
+    const validateId = (await env.code.findSymbolsByName("validate", repoName, 1))[0]!.envelope.id;
 
     // 2. FTS-findable immediately, before any embedding runs
     expect(
@@ -143,7 +143,9 @@ describe("Code indexing end-to-end", () => {
     env.clock.advanceDays(1);
     await t.codeIndex.invoke({ session_id: s, path: root });
 
-    expect(env.code.findSymbolsByName("validate", repoName, 1)[0]!.envelope.id).toBe(validateId); // stable id
+    expect((await env.code.findSymbolsByName("validate", repoName, 1))[0]!.envelope.id).toBe(
+      validateId,
+    ); // stable id
     const edge = env.db
       .prepare(
         "SELECT dst FROM edges WHERE src = ? AND type = 'documents' AND invalidated_at IS NULL",

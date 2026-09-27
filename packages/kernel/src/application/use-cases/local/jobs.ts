@@ -1,6 +1,7 @@
 import { inject } from "tsyringe";
 import { principalIdOf } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { JOBS_REPO_TOKEN, type JobRow, type JobsRepo } from "@/domain/ports/storage";
 import { UnsubmittableJobKindError } from "@/application/errors";
 import {
   isSubmittableKind,
@@ -16,7 +17,6 @@ import {
   type SubmitJobArgs,
   type SubmitJobResult,
 } from "@/application/use-cases/contracts";
-import { JobsRepo, type JobRow } from "@/db/repositories";
 import { ClientIdentity } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 
@@ -56,12 +56,12 @@ function envelope(row: JobRow): JobEnvelope {
 @useCase(SUBMIT_JOB)
 export class LocalSubmitJob implements SubmitJob {
   constructor(
-    private readonly jobs: JobsRepo,
+    @inject(JOBS_REPO_TOKEN) private readonly jobs: JobsRepo,
     private readonly identity: ClientIdentity,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
-  invoke(args: SubmitJobArgs): Promise<SubmitJobResult> {
+  async invoke(args: SubmitJobArgs): Promise<SubmitJobResult> {
     // Rejected rather than thrown: the contract is a promise, and a caller that reaches for
     // `.catch` instead of `try` must not get a synchronous throw through the gap.
     if (!isSubmittableKind(args.kind)) {
@@ -72,7 +72,7 @@ export class LocalSubmitJob implements SubmitJob {
 
     return Promise.resolve({
       job: envelope(
-        this.jobs.submit({
+        await this.jobs.submit({
           id: newId(),
           kind: args.kind,
           payload: args.payload ?? {},
@@ -87,11 +87,11 @@ export class LocalSubmitJob implements SubmitJob {
 
 @useCase(JOB_STATUS)
 export class LocalJobStatus implements JobStatus {
-  constructor(private readonly jobs: JobsRepo) {}
+  constructor(@inject(JOBS_REPO_TOKEN) private readonly jobs: JobsRepo) {}
 
-  invoke(args: JobStatusArgs): Promise<JobStatusResult> {
+  async invoke(args: JobStatusArgs): Promise<JobStatusResult> {
     if (args.id !== undefined) {
-      const row = this.jobs.byId(args.id);
+      const row = await this.jobs.byId(args.id);
 
       return Promise.resolve({ jobs: row === null ? [] : [envelope(row)] });
     }
@@ -99,7 +99,7 @@ export class LocalJobStatus implements JobStatus {
     const limit = Math.min(args.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
     return Promise.resolve({
-      jobs: this.jobs.recent({ kind: args.kind, limit }).map(envelope),
+      jobs: (await this.jobs.recent({ kind: args.kind, limit })).map(envelope),
     });
   }
 }

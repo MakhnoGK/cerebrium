@@ -7,7 +7,7 @@ import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, type TestEnv } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/025_normalize_edge_timestamps.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/025_normalize_edge_timestamps.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 

@@ -75,7 +75,7 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(r.merge_suggested).toBe(1);
-    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
     expect(cand!.member_ids).toEqual([a, b].sort());
     expect([a, b]).toContain(cand!.canonical_id);
   });
@@ -85,7 +85,7 @@ describe("Semantic dedup / merge", () => {
     const env = setup();
     const { s, a, b } = await seedDupes(env);
     await container.resolve(ConsolidationWorker).tick();
-    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
     const survivor = cand!.canonical_id!;
     const loser = [a, b].find((id) => id !== survivor)!;
 
@@ -98,10 +98,10 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(applied.status).toBe("applied");
-    expect(env.nodes.envelope(survivor)!.invalidated).toBe(false);
-    expect(env.nodes.envelope(loser)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(survivor))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(loser))!.invalidated).toBe(false);
     expect(
-      env.edges.edgesOf(loser).some((e) => e.id === survivor && e.edge === "duplicate_of"),
+      (await env.edges.edgesOf(loser)).some((e) => e.id === survivor && e.edge === "duplicate_of"),
     ).toBe(true);
   });
 
@@ -110,7 +110,7 @@ describe("Semantic dedup / merge", () => {
     const env = setup();
     const { s, a, b } = await seedDupes(env);
     await container.resolve(ConsolidationWorker).tick();
-    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
     const survivor = cand!.canonical_id!;
     const loser = [a, b].find((id) => id !== survivor)!;
 
@@ -138,16 +138,16 @@ describe("Semantic dedup / merge", () => {
       limit: 10,
     })) as { results: Envelope[] };
     expect(normal.results.some((r) => r.id === loser)).toBe(false);
-    expect(env.nodes.envelope(survivor)!.invalidated).toBe(false);
-    expect(env.nodes.envelope(loser)!.invalidated).toBe(true);
+    expect((await env.nodes.envelope(survivor))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(loser))!.invalidated).toBe(true);
 
     // the loser's references edge now hangs off the survivor, plus a supersedes edge.
-    expect(env.edges.edgesOf(survivor).some((e) => e.id === third && e.edge === "references")).toBe(
-      true,
-    );
-    expect(env.edges.edgesOf(survivor).some((e) => e.id === loser && e.edge === "supersedes")).toBe(
-      true,
-    );
+    expect(
+      (await env.edges.edgesOf(survivor)).some((e) => e.id === third && e.edge === "references"),
+    ).toBe(true);
+    expect(
+      (await env.edges.edgesOf(survivor)).some((e) => e.id === loser && e.edge === "supersedes"),
+    ).toBe(true);
   });
 
   it("should record duplicate_of without destroying either node when auto", async () => {
@@ -161,12 +161,15 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(r.merged).toBe(1);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
-    expect(env.nodes.envelope(a)!.invalidated).toBe(false);
-    expect(env.nodes.envelope(b)!.invalidated).toBe(false);
-    const recorded = [a, b].filter((id) =>
-      env.edges.edgesOf(id).some((e) => e.edge === "duplicate_of"),
-    );
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
+    ).toHaveLength(0);
+    expect((await env.nodes.envelope(a))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(b))!.invalidated).toBe(false);
+    const recorded = [];
+    for (const id of [a, b]) {
+      if ((await env.edges.edgesOf(id)).some((e) => e.edge === "duplicate_of")) recorded.push(id);
+    }
     expect(recorded).toHaveLength(2);
   });
 
@@ -176,20 +179,20 @@ describe("Semantic dedup / merge", () => {
     const loser = await mk(s, "Shared loser", SHARED);
     const first = await mk(s, "First survivor", `${SHARED} first`);
     const second = await mk(s, "Second survivor", `${SHARED} second`);
-    const firstCandidate = env.consolidation.insertCandidate({
+    const firstCandidate = (await env.consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: [first, loser],
       canonical_id: first,
       score: 0.99,
       detected_at: env.clock.t,
-    })!;
-    const secondCandidate = env.consolidation.insertCandidate({
+    }))!;
+    const secondCandidate = (await env.consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: [second, loser],
       canonical_id: second,
       score: 0.98,
       detected_at: env.clock.t,
-    })!;
+    }))!;
     const apply = container.resolve(ConsolidateApplyTool);
 
     const firstResult = (await apply.invoke({
@@ -207,13 +210,13 @@ describe("Semantic dedup / merge", () => {
 
     expect(firstResult.status).toBe("applied");
     expect(secondResult.status).toBe("dismissed");
-    expect(env.nodes.envelope(loser)!.invalidated).toBe(true);
-    expect(env.nodes.envelope(first)!.invalidated).toBe(false);
-    expect(env.nodes.envelope(second)!.invalidated).toBe(false);
-    expect(env.consolidation.getCandidate(secondCandidate)!.status).toBe("dismissed");
-    expect(env.edges.edgesOf(second).some((e) => e.id === loser && e.edge === "supersedes")).toBe(
-      false,
-    );
+    expect((await env.nodes.envelope(loser))!.invalidated).toBe(true);
+    expect((await env.nodes.envelope(first))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(second))!.invalidated).toBe(false);
+    expect((await env.consolidation.getCandidate(secondCandidate))!.status).toBe("dismissed");
+    expect(
+      (await env.edges.edgesOf(second)).some((e) => e.id === loser && e.edge === "supersedes"),
+    ).toBe(false);
   });
 
   it("should delay a pair one session wrote inside the burst window rather than proposing it", async () => {
@@ -230,7 +233,9 @@ describe("Semantic dedup / merge", () => {
     // Then
     expect(r.merge_delayed).toBe(1);
     expect(r.merge_suggested).toBe(0);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
+    ).toHaveLength(0);
   });
 
   it("should propose the same pair on a later sweep once it has aged out of the burst", async () => {
@@ -281,6 +286,8 @@ describe("Semantic dedup / merge", () => {
 
     // Then
     expect(r.merge_suggested).toBe(0);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
+    ).toHaveLength(0);
   });
 });

@@ -18,7 +18,7 @@ import { setup, type TestEnv } from "@test/helpers";
 const requireCjs = createRequire(import.meta.url);
 const migration = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../src/db/migrations/010_node_usage.cjs",
+  "../src/db/sqlite/migrations/010_node_usage.cjs",
 );
 
 let env: TestEnv;

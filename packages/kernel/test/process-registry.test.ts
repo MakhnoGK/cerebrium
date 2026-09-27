@@ -2,8 +2,8 @@ import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import { PROCESS_PROBE_TOKEN, type ProcessProbe } from "@/domain/ports/process-probe";
+import { PROCESSES_REPO_TOKEN, type ProcessesRepo, type ProcessRow } from "@/domain/ports/storage";
 import { ProcessRegistryService } from "@/application/services";
-import { ProcessesRepo, type ProcessRow } from "@/db/repositories";
 import { setup } from "@test/helpers";
 
 function row(overrides: Partial<ProcessRow> = {}): ProcessRow {
@@ -29,59 +29,62 @@ describe("ProcessesRepo", () => {
 
   beforeEach(() => {
     setup();
-    repo = container.resolve(ProcessesRepo);
+    repo = container.resolve<ProcessesRepo>(PROCESSES_REPO_TOKEN);
   });
 
-  it("should publish a process with its resolved configuration", () => {
+  it("should publish a process with its resolved configuration", async () => {
     // Given / When
-    repo.publish(row());
+    await repo.publish(row());
 
     // Then
-    expect(repo.list()).toEqual([row()]);
+    expect(await repo.list()).toEqual([row()]);
   });
 
-  it("should keep one row per pid, because a pid is reused after the process dies", () => {
+  it("should keep one row per pid, because a pid is reused after the process dies", async () => {
     // Given
-    repo.publish(row({ id: "01JPROCESS0000000000000001", role: "daemon" }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000001", role: "daemon" }));
 
     // When
-    repo.publish(row({ id: "01JPROCESS0000000000000002", role: "server" }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000002", role: "server" }));
 
     // Then
-    expect(repo.list()).toHaveLength(1);
-    expect(repo.list()[0]).toMatchObject({ id: "01JPROCESS0000000000000002", role: "server" });
+    expect(await repo.list()).toHaveLength(1);
+    expect((await repo.list())[0]).toMatchObject({
+      id: "01JPROCESS0000000000000002",
+      role: "server",
+    });
   });
 
-  it("should hold one row per live process side by side", () => {
+  it("should hold one row per live process side by side", async () => {
     // Given / When
-    repo.publish(row({ id: "01JPROCESS0000000000000001", pid: 1, role: "server" }));
-    repo.publish(row({ id: "01JPROCESS0000000000000002", pid: 2, role: "daemon" }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000001", pid: 1, role: "server" }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000002", pid: 2, role: "daemon" }));
 
     // Then
-    expect(repo.list().map((p) => p.role)).toEqual(["server", "daemon"]);
+    expect((await repo.list()).map((p) => p.role)).toEqual(["server", "daemon"]);
   });
 
-  it("should retire the ids it is given and leave the rest", () => {
+  it("should retire the ids it is given and leave the rest", async () => {
     // Given
-    repo.publish(row({ id: "01JPROCESS0000000000000001", pid: 1 }));
-    repo.publish(row({ id: "01JPROCESS0000000000000002", pid: 2 }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000001", pid: 1 }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000002", pid: 2 }));
 
     // When
-    repo.retire(["01JPROCESS0000000000000001"]);
+    await repo.retire(["01JPROCESS0000000000000001"]);
 
     // Then
-    expect(repo.list().map((p) => p.id)).toEqual(["01JPROCESS0000000000000002"]);
+    expect((await repo.list()).map((p) => p.id)).toEqual(["01JPROCESS0000000000000002"]);
   });
 
-  it("should tolerate an empty retire list", () => {
+  it("should tolerate an empty retire list", async () => {
     // Given
-    repo.publish(row());
+    await repo.publish(row());
 
     // When
-    repo.retire([]);
+    await repo.retire([]);
 
     // Then
-    expect(repo.list()).toHaveLength(1);
+    expect(await repo.list()).toHaveLength(1);
   });
 });
 
@@ -107,45 +110,45 @@ describe("Model state on a process row", () => {
 
   beforeEach(() => {
     setup();
-    repo = container.resolve(ProcessesRepo);
+    repo = container.resolve<ProcessesRepo>(PROCESSES_REPO_TOKEN);
   });
 
-  it("should publish a row with no model state, since warming finishes later", () => {
+  it("should publish a row with no model state, since warming finishes later", async () => {
     // Given / When
-    repo.publish(row());
+    await repo.publish(row());
 
     // Then — a reader between publish and warm sees the process up with no model yet.
-    const [stored] = repo.list();
+    const [stored] = await repo.list();
     expect(stored).toMatchObject({ model_state: null, model_ms: null, model_error: null });
   });
 
-  it("should record a successful warm-up against the row", () => {
+  it("should record a successful warm-up against the row", async () => {
     // Given
-    repo.publish(row({ role: "daemon" }));
+    await repo.publish(row({ role: "daemon" }));
 
     // When
-    container
+    await container
       .resolve(ProcessRegistryService)
       .recordModel("01JPROCESS0000000000000001", { state: "ready", ms: 624 });
 
     // Then
-    const [stored] = repo.list();
+    const [stored] = await repo.list();
     expect(stored).toMatchObject({ model_state: "ready", model_ms: 624, model_error: null });
   });
 
-  it("should keep the reason a warm-up failed, so a broken daemon is not silently up", () => {
+  it("should keep the reason a warm-up failed, so a broken daemon is not silently up", async () => {
     // Given
-    repo.publish(row({ role: "daemon" }));
+    await repo.publish(row({ role: "daemon" }));
 
     // When
-    container.resolve(ProcessRegistryService).recordModel("01JPROCESS0000000000000001", {
+    await container.resolve(ProcessRegistryService).recordModel("01JPROCESS0000000000000001", {
       state: "failed",
       ms: 90,
       error: "no such file: model.onnx",
     });
 
     // Then
-    const [stored] = repo.list();
+    const [stored] = await repo.list();
     expect(stored).toMatchObject({
       model_state: "failed",
       model_ms: 90,
@@ -153,18 +156,18 @@ describe("Model state on a process row", () => {
     });
   });
 
-  it("should leave other processes' rows alone", () => {
+  it("should leave other processes' rows alone", async () => {
     // Given
-    repo.publish(row({ id: "01JPROCESS0000000000000001", role: "server", pid: 1 }));
-    repo.publish(row({ id: "01JPROCESS0000000000000002", role: "daemon", pid: 2 }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000001", role: "server", pid: 1 }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000002", role: "daemon", pid: 2 }));
 
     // When
-    container
+    await container
       .resolve(ProcessRegistryService)
       .recordModel("01JPROCESS0000000000000002", { state: "ready", ms: 5 });
 
     // Then
-    const byRole = new Map(repo.list().map((r) => [r.role, r.model_state]));
+    const byRole = new Map((await repo.list()).map((r) => [r.role, r.model_state]));
     expect(byRole.get("server")).toBeNull();
     expect(byRole.get("daemon")).toBe("ready");
   });
@@ -175,10 +178,10 @@ describe("ProcessRegistryService", () => {
 
   beforeEach(() => {
     setup();
-    repo = container.resolve(ProcessesRepo);
+    repo = container.resolve<ProcessesRepo>(PROCESSES_REPO_TOKEN);
   });
 
-  it("should publish this process with the config file it loaded", () => {
+  it("should publish this process with the config file it loaded", async () => {
     // Given
     const service = registry({
       self: 900,
@@ -186,10 +189,10 @@ describe("ProcessRegistryService", () => {
     });
 
     // When
-    service.publish("server");
+    await service.publish("server");
 
     // Then
-    expect(repo.list()[0]).toMatchObject({
+    expect((await repo.list())[0]).toMatchObject({
       role: "server",
       pid: 900,
       config_file: "/opt/brain/config.json",
@@ -197,71 +200,66 @@ describe("ProcessRegistryService", () => {
     });
   });
 
-  it("should record a pinned source as such rather than inventing a file", () => {
+  it("should record a pinned source as such rather than inventing a file", async () => {
     // Given / When
-    registry({ self: 900, file: null }).publish("cli");
+    await registry({ self: 900, file: null }).publish("cli");
 
     // Then
-    expect(repo.list()[0]).toMatchObject({ config_file: null, config_state: "pinned" });
+    expect((await repo.list())[0]).toMatchObject({ config_file: null, config_state: "pinned" });
   });
 
-  it("should publish the resolved config values, not just the paths", () => {
+  it("should publish the resolved config values, not just the paths", async () => {
     // Given / When
-    registry({ self: 900 }).publish("server");
+    await registry({ self: 900 }).publish("server");
 
     // Then
-    const published = JSON.parse(repo.list()[0]!.config_json);
+    const published = JSON.parse((await repo.list())[0]!.config_json);
     expect(published.database.path).toBe(":memory:");
     expect(published.retrieval).toBeDefined();
   });
 
-  it("should mark a row whose process is gone as not alive", () => {
+  it("should mark a row whose process is gone as not alive", async () => {
     // Given
-    repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111 }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111 }));
 
     // When
-    const listed = registry({ self: 900, live: [] }).list();
+    const listed = await registry({ self: 900, live: [] }).list();
 
     // Then
     expect(listed[0]).toMatchObject({ pid: 111, alive: false });
   });
 
-  it("should sweep dead rows when a new process publishes, so a crash leaves no ghost", () => {
+  it("should sweep dead rows when a new process publishes, so a crash leaves no ghost", async () => {
     // Given
-    repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111, role: "daemon" }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111, role: "daemon" }));
 
     // When
-    registry({ self: 900, live: [900] }).publish("server");
+    await registry({ self: 900, live: [900] }).publish("server");
 
     // Then
-    expect(repo.list().map((p) => p.pid)).toEqual([900]);
+    expect((await repo.list()).map((p) => p.pid)).toEqual([900]);
   });
 
-  it("should keep a live foreign process while sweeping", () => {
+  it("should keep a live foreign process while sweeping", async () => {
     // Given
-    repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111, role: "daemon" }));
+    await repo.publish(row({ id: "01JPROCESS0000000000000009", pid: 111, role: "daemon" }));
 
     // When
-    registry({ self: 900, live: [111] }).publish("server");
+    await registry({ self: 900, live: [111] }).publish("server");
 
     // Then
-    expect(
-      repo
-        .list()
-        .map((p) => p.pid)
-        .sort(),
-    ).toEqual([111, 900]);
+    expect((await repo.list()).map((p) => p.pid).sort()).toEqual([111, 900]);
   });
 
-  it("should retire the row it published", () => {
+  it("should retire the row it published", async () => {
     // Given
     const service = registry({ self: 900, live: [900] });
-    const id = service.publish("server");
+    const id = await service.publish("server");
 
     // When
-    service.retire(id);
+    await service.retire(id);
 
     // Then
-    expect(repo.list()).toEqual([]);
+    expect(await repo.list()).toEqual([]);
   });
 });

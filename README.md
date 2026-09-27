@@ -42,7 +42,7 @@ The kernel keeps clean-architecture layers, no ORM, and one directory per MCP to
 packages/kernel/src/
   core/            pure primitives — ids, tokens, chunking, FTS, wikilinks (no I/O)
   domain/ports/    interfaces the inner layers own — Clock, Embedding/Consolidation
-                   providers, and the declarative config mechanism
+                   providers, the storage ports, and the declarative config mechanism
   application/     use-cases/ (the seam every delivery layer resolves: contracts +
                               local implementations)
                    retrieval/ (the ranking model: fusion, PageRank, decay, diversify)
@@ -50,7 +50,7 @@ packages/kernel/src/
                              code index, event log, model warm-up)
                    workers/  (embedding drain, consolidation sweep)
                    errors/   (typed errors a use case throws)
-  db/              SQLite: migrations, per-aggregate repositories, schema snapshot
+  db/              sqlite/ (the storage adapter: migrations, repositories, schema snapshot)
   infrastructure/  config sections + the environment source and registry
   embeddings/      pluggable embedding providers
   code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
@@ -78,8 +78,9 @@ is a build constraint rather than a convention.
 The two background workers are application services that happen to run on a timer, so they
 live in `application/workers/` rather than beside the adapters they drive.
 
-All SQL lives in `packages/kernel/src/db/repositories/*`; consumers inject the specific repositories they
-need and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
+Storage is reached through async ports (`packages/kernel/src/domain/ports/storage/*`); all SQL lives in
+the SQLite adapter under `packages/kernel/src/db/sqlite/*`, consumers inject the specific ports they
+need, and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
 once in `packages/contracts/src/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
 contract and invariants are in [`CLAUDE.md`](CLAUDE.md).
 
@@ -1291,7 +1292,7 @@ secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
 - **Layering enforced by the build, not by discipline.** Dependencies point inward
   (`core` → `domain/ports` → `application` → adapters → `presentation`), and the direction
   is checked by lint rather than trusted to review — a wrong-way import fails `npm run check`.
-  Providers are ports with swappable adapters, so changing how embeddings or
+  Providers and storage are ports with swappable adapters, so changing how embeddings or
   consolidation are produced is an entry in a registry plus a class.
 - **Configuration as declarative, injectable sections.** A setting is declared once —
   default, validation and env name together — and injected where it is used, so adding one

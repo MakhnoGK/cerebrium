@@ -83,7 +83,7 @@ describe("RestoreTool", () => {
       reason: "revised",
     });
     const referrer = await writeFact(s, "referrer");
-    env.edges.insertEdge(referrer, id, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, id, EdgeType.REFERENCES, "agent", s, env.clock.t);
     await t.invalidate.invoke({ session_id: s, id, reason: "retired in error" });
 
     // When
@@ -134,7 +134,7 @@ describe("RestoreTool", () => {
     const referrer = await writeFact(s, "referrer");
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
     await t.invalidate.invoke({
       session_id: s,
       id: doomed,

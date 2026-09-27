@@ -5,7 +5,7 @@ import {
   EmbeddingRole,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import { EmbeddingQueueRepo } from "@/db/repositories";
+import { EMBEDDING_QUEUE_REPO_TOKEN, type EmbeddingQueueRepo } from "@/domain/ports/storage";
 import { newId } from "@/core/ids";
 
 const EMBED_LEASE = "embedding";
@@ -39,7 +39,7 @@ export class EmbeddingWorker {
   private running = false;
 
   constructor(
-    private readonly embeddingQueue: EmbeddingQueueRepo,
+    @inject(EMBEDDING_QUEUE_REPO_TOKEN) private readonly embeddingQueue: EmbeddingQueueRepo,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(WORKER_OPTIONS_TOKEN) opts: WorkerOptions = {},
@@ -54,8 +54,8 @@ export class EmbeddingWorker {
     this.leaseTtlMs = opts.leaseTtlMs ?? Math.max(this.intervalMs * 20, 60_000);
   }
 
-  start(): void {
-    this.reconcile();
+  async start(): Promise<void> {
+    await this.reconcile();
 
     if (this.timer) {
       return;
@@ -85,8 +85,8 @@ export class EmbeddingWorker {
     await this.embeddingQueue.releaseWorkerLease(EMBED_LEASE, this.ownerId);
   }
 
-  reconcile(): void {
-    this.embeddingQueue.reconcilePending(this.now());
+  async reconcile(): Promise<void> {
+    await this.embeddingQueue.reconcilePending(this.now());
   }
 
   // One batch across queued nodes. Deterministic and side-effecting: tests call it
@@ -107,20 +107,20 @@ export class EmbeddingWorker {
       return { embedded: 0, failed: 0 };
     }
 
-    const candidates = this.embeddingQueue
-      .queueRows(this.batchSize * 4)
-      .filter((r) => this.eligible(r.attempts, r.enqueued_at, now));
+    const candidates = (await this.embeddingQueue.queueRows(this.batchSize * 4)).filter((r) =>
+      this.eligible(r.attempts, r.enqueued_at, now),
+    );
 
     if (!candidates.length) {
       return { embedded: 0, failed: 0 };
     }
 
     const nodeIds = candidates.map((c) => c.node_id);
-    const chunks = this.embeddingQueue.unembeddedChunks(nodeIds, this.batchSize);
+    const chunks = await this.embeddingQueue.unembeddedChunks(nodeIds, this.batchSize);
 
     if (!chunks.length) {
       for (const id of nodeIds) {
-        this.embeddingQueue.finalizeNode(id, now);
+        await this.embeddingQueue.finalizeNode(id, now);
       }
 
       return { embedded: 0, failed: 0 };
@@ -136,7 +136,7 @@ export class EmbeddingWorker {
     } catch (err) {
       const involved = [...new Set(chunks.map((c) => c.node_id))];
 
-      this.embeddingQueue.recordEmbeddingFailure(
+      await this.embeddingQueue.recordEmbeddingFailure(
         involved,
         (err as Error).message || String(err),
         this.now(),
@@ -155,7 +155,7 @@ export class EmbeddingWorker {
 
     const batch = [...byNode].map(([nodeId, items]) => ({ nodeId, items }));
 
-    this.embeddingQueue.commitBatchEmbeddings(
+    await this.embeddingQueue.commitBatchEmbeddings(
       batch,
       this.provider.name,
       this.provider.version,
@@ -164,7 +164,7 @@ export class EmbeddingWorker {
 
     for (const id of nodeIds) {
       if (!byNode.has(id)) {
-        this.embeddingQueue.finalizeNode(id, now);
+        await this.embeddingQueue.finalizeNode(id, now);
       }
     }
 

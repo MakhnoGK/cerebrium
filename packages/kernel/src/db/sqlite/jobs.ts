@@ -1,35 +1,7 @@
 import { injectable } from "tsyringe";
 import { JobState, TERMINAL_JOB_STATES } from "@cerebrium/contracts/vocab";
-import { BaseRepo } from "@/db/repositories/base";
-
-export interface JobRow {
-  id: string;
-  kind: string;
-  payload_json: string;
-  state: string;
-  scheduled_for: string;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  attempts: number;
-  max_attempts: number;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  ended_at: string | null;
-  result_json: string | null;
-  last_error: string | null;
-  submitted_by: string | null;
-}
-
-export interface SubmitJob {
-  id: string;
-  kind: string;
-  payload: unknown;
-  scheduled_for: string;
-  now: string;
-  max_attempts?: number;
-  submitted_by?: string | null;
-}
+import type { JobRow, JobsRepo, SubmitJob } from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
 
 const TERMINAL = TERMINAL_JOB_STATES.map((s) => `'${s}'`).join(", ");
 
@@ -37,8 +9,12 @@ const TERMINAL = TERMINAL_JOB_STATES.map((s) => `'${s}'`).join(", ");
 // and against a consumer that came back from the dead: claims are conditional on the row
 // still being claimable, and completions on the caller still holding the lease.
 @injectable()
-export class JobsRepo extends BaseRepo {
-  submit(job: SubmitJob): JobRow {
+export class SqliteJobsRepo extends BaseRepo implements JobsRepo {
+  async submit(job: SubmitJob): Promise<JobRow> {
+    return this.submitNow(job);
+  }
+
+  private submitNow(job: SubmitJob): JobRow {
     this.tx(() => {
       this.db
         .prepare(
@@ -60,10 +36,14 @@ export class JobsRepo extends BaseRepo {
         );
     });
 
-    return this.byId(job.id)!;
+    return this.byIdNow(job.id)!;
   }
 
-  byId(id: string): JobRow | null {
+  async byId(id: string): Promise<JobRow | null> {
+    return this.byIdNow(id);
+  }
+
+  private byIdNow(id: string): JobRow | null {
     return (
       (this.db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as JobRow | undefined) ?? null
     );
@@ -76,7 +56,12 @@ export class JobsRepo extends BaseRepo {
   // A `running` row whose lease has expired is claimable again. That is the crash path — the
   // consumer died without reporting — and it is why the lease exists per row rather than one
   // lease for the whole queue.
-  claim(opts: { kinds: string[]; owner: string; now: string; leaseMs: number }): JobRow | null {
+  async claim(opts: {
+    kinds: string[];
+    owner: string;
+    now: string;
+    leaseMs: number;
+  }): Promise<JobRow | null> {
     if (!opts.kinds.length) return null;
 
     const placeholders = opts.kinds.map(() => "?").join(", ");
@@ -121,13 +106,13 @@ export class JobsRepo extends BaseRepo {
           opts.now,
         );
 
-      return claimed.changes === 0 ? null : this.byId(candidate.id);
+      return claimed.changes === 0 ? null : this.byIdNow(candidate.id);
     });
   }
 
   // Extend the lease of a job still being worked on. A long job must not have its row
   // stolen just because it is slow — a full code index is minutes.
-  renew(id: string, owner: string, now: string, leaseMs: number): boolean {
+  async renew(id: string, owner: string, now: string, leaseMs: number): Promise<boolean> {
     const expires = new Date(Date.parse(now) + leaseMs).toISOString();
 
     return this.tx(
@@ -141,7 +126,7 @@ export class JobsRepo extends BaseRepo {
     );
   }
 
-  succeed(id: string, owner: string, result: unknown, now: string): boolean {
+  async succeed(id: string, owner: string, result: unknown, now: string): Promise<boolean> {
     return this.finish(id, owner, now, {
       state: JobState.DONE,
       result: JSON.stringify(result ?? null),
@@ -152,8 +137,8 @@ export class JobsRepo extends BaseRepo {
   // A failure that has attempts left goes back to `pending` for the next consumer; one that
   // has exhausted them is terminal. `attempts` was already incremented by the claim, so the
   // decision is readable from the row itself rather than from a counter held in the worker.
-  fail(id: string, owner: string, error: string, now: string): boolean {
-    const row = this.byId(id);
+  async fail(id: string, owner: string, error: string, now: string): Promise<boolean> {
+    const row = this.byIdNow(id);
 
     if (row === null) return false;
 
@@ -172,7 +157,7 @@ export class JobsRepo extends BaseRepo {
         );
   }
 
-  cancel(id: string, now: string): boolean {
+  async cancel(id: string, now: string): Promise<boolean> {
     return this.tx(
       () =>
         this.db
@@ -188,7 +173,11 @@ export class JobsRepo extends BaseRepo {
 
   // True when a job of this kind is already queued or in flight, so the scheduler does not
   // pile a second copy of recurring maintenance on top of one that is still running.
-  hasOpen(kind: string): boolean {
+  async hasOpen(kind: string): Promise<boolean> {
+    return this.hasOpenNow(kind);
+  }
+
+  private hasOpenNow(kind: string): boolean {
     return (
       this.db
         .prepare(`SELECT 1 FROM jobs WHERE kind = ? AND state NOT IN (${TERMINAL}) LIMIT 1`)
@@ -200,9 +189,9 @@ export class JobsRepo extends BaseRepo {
   // the last one ended less than `everyMs` ago. The whole decision sits inside one
   // transaction because the alternative is a check-then-submit across a socket, where two
   // schedulers both read "due" and both insert.
-  submitIfDue(job: SubmitJob & { everyMs: number }): JobRow | null {
+  async submitIfDue(job: SubmitJob & { everyMs: number }): Promise<JobRow | null> {
     return this.tx(() => {
-      if (this.hasOpen(job.kind)) return null;
+      if (this.hasOpenNow(job.kind)) return null;
 
       const last = this.db
         .prepare(
@@ -217,11 +206,11 @@ export class JobsRepo extends BaseRepo {
         return null;
       }
 
-      return this.submit(job);
+      return this.submitNow(job);
     });
   }
 
-  recent(opts: { kind?: string; limit: number }): JobRow[] {
+  async recent(opts: { kind?: string; limit: number }): Promise<JobRow[]> {
     const where = opts.kind === undefined ? "" : "WHERE kind = ?";
     const params = opts.kind === undefined ? [] : [opts.kind];
 
@@ -230,7 +219,7 @@ export class JobsRepo extends BaseRepo {
       .all(...params, opts.limit) as JobRow[];
   }
 
-  counts(): Record<string, number> {
+  async counts(): Promise<Record<string, number>> {
     const rows = this.db.prepare("SELECT state, COUNT(*) n FROM jobs GROUP BY state").all() as {
       state: string;
       n: number;
@@ -242,7 +231,7 @@ export class JobsRepo extends BaseRepo {
   // Boot recovery, the same lesson `closeAbandonedRuns` taught: a consumer killed outright
   // leaves a `running` row that nobody will ever report on, and only the process starting
   // next can say so. Returns how many were reopened or retired.
-  reconcileAbandoned(now: string, error: string): number {
+  async reconcileAbandoned(now: string, error: string): Promise<number> {
     return this.tx(() => {
       const retired = this.db
         .prepare(

@@ -33,7 +33,8 @@ async function corpus(
   const stats = (await container.resolve(CodeIndexTool).invoke({ session_id: s, path: root })) as {
     repo: string;
   };
-  const symbol = env.code.findSymbolsByName("deployPipeline", stats.repo, 1)[0]!.envelope.id;
+  const symbol = (await env.code.findSymbolsByName("deployPipeline", stats.repo, 1))[0]!.envelope
+    .id;
   const write = container.resolve(WriteTool);
   const strong = (
     (await write.invoke({

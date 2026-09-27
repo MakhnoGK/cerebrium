@@ -1,59 +1,14 @@
 import { injectable } from "tsyringe";
 import { MemoryKind, ReviewArtifact, type ReviewDecision } from "@cerebrium/contracts/vocab";
-import { BaseRepo } from "@/db/repositories/base";
-
-// Which principals' writes are under review. `only` lists them; `except` is everyone but
-// the listed ones, which is what a deployment whose DEFAULT profile is `suggest` needs —
-// there is no table of principals to enumerate, only the ones config names.
-export interface ReviewScope {
-  mode: "only" | "except";
-  principals: readonly string[];
-}
-
-export interface ReviewNodeStub {
-  id: string;
-  type: string;
-  title: string;
-}
-
-export interface PendingEdge {
-  ref: string;
-  edge_type: string;
-  at: string;
-  principal: string | null;
-  src: ReviewNodeStub;
-  dst: ReviewNodeStub;
-}
-
-export interface PendingNode {
-  ref: string;
-  at: string;
-  principal: string | null;
-  node: ReviewNodeStub;
-}
-
-export interface RecordedDecision {
-  artifact: ReviewArtifact;
-  ref: string;
-  decision: ReviewDecision;
-  decided_at: string;
-  decided_by: string | null;
-  note: string | null;
-}
-
-export const EDGE_REF_SEPARATOR = "|";
-
-export function edgeRef(src: string, dst: string, type: string): string {
-  return [src, dst, type].join(EDGE_REF_SEPARATOR);
-}
-
-export function parseEdgeRef(ref: string): { src: string; dst: string; type: string } | null {
-  const parts = ref.split(EDGE_REF_SEPARATOR);
-
-  return parts.length === 3 && parts.every((p) => p.length > 0)
-    ? { src: parts[0]!, dst: parts[1]!, type: parts[2]! }
-    : null;
-}
+import {
+  edgeRef,
+  type PendingEdge,
+  type PendingNode,
+  type RecordedDecision,
+  type ReviewScope,
+  type ReviewsRepo,
+} from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
 
 interface EdgeRow {
   src: string;
@@ -81,7 +36,7 @@ interface NodeRow {
 // and no decision row names it". Nothing has to be enqueued when a write happens, so a
 // posture flipped on after the fact still surfaces what came before it.
 @injectable()
-export class ReviewsRepo extends BaseRepo {
+export class SqliteReviewsRepo extends BaseRepo implements ReviewsRepo {
   private scopeClause(scope: ReviewScope, column: string): { sql: string; params: string[] } {
     const list = [...scope.principals];
 
@@ -101,7 +56,7 @@ export class ReviewsRepo extends BaseRepo {
     };
   }
 
-  pendingEdges(scope: ReviewScope, limit: number): PendingEdge[] {
+  async pendingEdges(scope: ReviewScope, limit: number): Promise<PendingEdge[]> {
     const { sql, params } = this.scopeClause(scope, "s.principal_id");
 
     const rows = this.db
@@ -136,7 +91,7 @@ export class ReviewsRepo extends BaseRepo {
     }));
   }
 
-  pendingNodes(scope: ReviewScope, limit: number): PendingNode[] {
+  async pendingNodes(scope: ReviewScope, limit: number): Promise<PendingNode[]> {
     const { sql, params } = this.scopeClause(scope, "s.principal_id");
 
     const rows = this.db
@@ -166,7 +121,7 @@ export class ReviewsRepo extends BaseRepo {
 
   // One statement rather than two round trips: this is asked for on every tool call that
   // renders session hints.
-  pendingCount(scope: ReviewScope): { edges: number; nodes: number } {
+  async pendingCount(scope: ReviewScope): Promise<{ edges: number; nodes: number }> {
     const { sql, params } = this.scopeClause(scope, "s.principal_id");
 
     const row = this.db
@@ -200,7 +155,7 @@ export class ReviewsRepo extends BaseRepo {
     return { edges: row.edges, nodes: row.nodes };
   }
 
-  decisionFor(artifact: ReviewArtifact, ref: string): RecordedDecision | null {
+  async decisionFor(artifact: ReviewArtifact, ref: string): Promise<RecordedDecision | null> {
     const row = this.db
       .prepare(
         `SELECT artifact_kind, artifact_ref, decision, decided_at, decided_by, note
@@ -229,7 +184,7 @@ export class ReviewsRepo extends BaseRepo {
         };
   }
 
-  record(entry: RecordedDecision): void {
+  async record(entry: RecordedDecision): Promise<void> {
     this.tx(() => {
       this.db
         .prepare(
@@ -253,7 +208,7 @@ export class ReviewsRepo extends BaseRepo {
     });
   }
 
-  counts(): Record<string, number> {
+  async counts(): Promise<Record<string, number>> {
     const rows = this.db
       .prepare("SELECT decision, COUNT(*) n FROM review_decisions GROUP BY decision")
       .all() as { decision: string; n: number }[];

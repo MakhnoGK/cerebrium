@@ -44,13 +44,13 @@ async function queueOne(env: TestEnv): Promise<string> {
     members.push(node.id);
   }
 
-  return env.consolidation.insertCandidate({
+  return (await env.consolidation.insertCandidate({
     kind: ConsolidationKind.MERGE,
     member_ids: members,
     canonical_id: members[0]!,
     score: 0.95,
     detected_at: "2026-01-01T00:00:00.000Z",
-  })!;
+  }))!;
 }
 
 afterEach(() => {
@@ -72,7 +72,7 @@ describe("Generation failure reporting", () => {
     expect(r.last_error).toBe(TIMED_OUT);
 
     // Degradation is unchanged: the candidate survives, bare, for the next sweep.
-    const cand = env.consolidation.getCandidate(id)!;
+    const cand = (await env.consolidation.getCandidate(id))!;
     expect(cand.proposal).toBeNull();
     expect(cand.status).toBe(ConsolidationStatus.PENDING);
     expect(r.proposals_backfilled).toBe(0);

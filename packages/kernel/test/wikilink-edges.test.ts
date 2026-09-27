@@ -1,8 +1,13 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
+import {
+  EDGES_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  type EdgesRepo,
+  type NodesRepo,
+} from "@/domain/ports/storage";
 import { ConsolidationWorker } from "@/application/workers";
-import { EdgesRepo, NodesRepo } from "@/db/repositories";
 import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
@@ -163,8 +168,8 @@ describe("Wikilinks as edges", () => {
       reason: "split in two",
       superseded_by: first,
     });
-    container
-      .resolve(EdgesRepo)
+    await container
+      .resolve<EdgesRepo>(EDGES_REPO_TOKEN)
       .insertEdge(second, old, EdgeType.SUPERSEDES, "agent", session, "2026-01-01T00:00:00.000Z");
 
     // When
@@ -184,7 +189,7 @@ describe("Wikilinks as edges", () => {
     expect((await worker.tick()).wikilinks_dangling).toBe(1);
 
     // When — the node carrying it is retired, which adds no revision
-    container.resolve(NodesRepo).invalidateNode(lonely, {
+    await container.resolve<NodesRepo>(NODES_REPO_TOKEN).invalidateNode(lonely, {
       ts: "2026-02-01T00:00:00.000Z",
       session_id: session,
     });

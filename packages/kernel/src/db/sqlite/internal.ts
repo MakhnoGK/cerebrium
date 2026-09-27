@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
-import type { EnrichedRow } from "@cerebrium/contracts/types";
-import { CODE_ORIGIN, MemoryKind } from "@cerebrium/contracts/vocab";
-import { MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
+import type { EnrichedRow, NeighborStub } from "@cerebrium/contracts/types";
+import { CODE_ORIGIN, EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
+import { MAX_EMBED_ATTEMPTS } from "@/db/sqlite/base";
 import { chunkContent } from "@/core/chunk";
 
 // Cross-aggregate primitives shared by the node-write path (NodesRepo), the code
@@ -165,6 +165,86 @@ export function dropVector(db: Database.Database, chunkId: string): void {
   }
   db.prepare("DELETE FROM chunk_fts WHERE chunk_id = ?").run(chunkId);
   db.prepare("DELETE FROM embedding_meta WHERE chunk_id = ?").run(chunkId);
+}
+
+// Revive a previously-invalidated edge of the same (src,dst,type); otherwise insert.
+export function insertEdge(
+  db: Database.Database,
+  src: string,
+  dst: string,
+  type: EdgeType,
+  provenance: "agent" | "system",
+  session_id: string,
+  ts: string,
+  weight = 1.0,
+): void {
+  db.prepare(
+    `INSERT INTO edges (src, dst, type, provenance, weight, valid_from, session_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(src, dst, type) DO UPDATE SET
+       invalidated_at = NULL, valid_from = excluded.valid_from,
+       weight = excluded.weight, provenance = excluded.provenance`,
+  ).run(src, dst, type, provenance, weight, ts, session_id);
+}
+
+// Soft-delete one edge. insertEdge revives an invalidated (src,dst,type) on conflict,
+// so a retired edge comes back only if something deliberately re-inserts it.
+export function invalidateEdge(
+  db: Database.Database,
+  src: string,
+  dst: string,
+  type: EdgeType,
+  ts: string,
+): void {
+  db.prepare(
+    `UPDATE edges SET invalidated_at = ?
+     WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL`,
+  ).run(ts, src, dst, type);
+}
+
+export function invalidateSystemSimilaritiesOf(
+  db: Database.Database,
+  id: string,
+  ts: string,
+): number {
+  return db
+    .prepare(
+      `UPDATE edges SET invalidated_at = @ts
+       WHERE invalidated_at IS NULL AND type = @type AND provenance = 'system'
+         AND (src = @id OR dst = @id)`,
+    )
+    .run({ id, ts, type: EdgeType.SIMILAR_TO }).changes;
+}
+
+export function edgesOf(db: Database.Database, id: string): NeighborStub[] {
+  const out = db
+    .prepare(
+      `SELECT e.type AS edge, n.id, n.type, n.title FROM edges e
+       JOIN nodes n ON n.id = e.dst WHERE e.src = ? AND e.invalidated_at IS NULL`,
+    )
+    .all(id) as { edge: string; id: string; type: string; title: string }[];
+  const inc = db
+    .prepare(
+      `SELECT e.type AS edge, n.id, n.type, n.title FROM edges e
+       JOIN nodes n ON n.id = e.src WHERE e.dst = ? AND e.invalidated_at IS NULL`,
+    )
+    .all(id) as { edge: string; id: string; type: string; title: string }[];
+  return [
+    ...out.map((r) => ({
+      id: r.id,
+      type: r.type,
+      title: r.title,
+      edge: r.edge,
+      direction: "out" as const,
+    })),
+    ...inc.map((r) => ({
+      id: r.id,
+      type: r.type,
+      title: r.title,
+      edge: r.edge,
+      direction: "in" as const,
+    })),
+  ];
 }
 
 export { MAX_EMBED_ATTEMPTS };

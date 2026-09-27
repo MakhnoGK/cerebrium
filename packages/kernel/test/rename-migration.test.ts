@@ -10,7 +10,7 @@ import { stableSymbolId } from "@/code/extract";
 import { setup } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/006_rename_third_brain_to_cerebrium.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/006_rename_third_brain_to_cerebrium.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -38,7 +38,7 @@ describe("Migration 006: rename third-brain -> cerebrium", () => {
       "a.ts": "export function alpha() { return beta(); }\nfunction beta() {}\n",
     });
     await index("third-brain", oldRoot);
-    code.setRepoProvenance("third-brain", oldRoot, "main", "deadbee", false, clock.t);
+    await code.setRepoProvenance("third-brain", oldRoot, "main", "deadbee", false, clock.t);
 
     const otherRoot = tmpRepo({ "b.ts": "export function gamma() {}\n" });
     await index("other-app", otherRoot);
@@ -79,7 +79,7 @@ describe("Migration 006: rename third-brain -> cerebrium", () => {
     ).toEqual({ c: 0 });
 
     // Then — code_repos row moved to the new name and root (resolved from the repo layout).
-    const expectedRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const expectedRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
     expect(
       db.prepare("SELECT repo, root FROM code_repos WHERE repo = 'cerebrium'").get(),
     ).toMatchObject({

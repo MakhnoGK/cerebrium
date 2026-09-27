@@ -1,5 +1,5 @@
 -- cerebrium schema — DERIVED, human-readable snapshot of the current end state.
--- NEVER executed at runtime: migrations (src/db/migrations/000_baseline -> NNN) are the
+-- NEVER executed at runtime: migrations (src/db/sqlite/migrations/000_baseline -> NNN) are the
 -- single source of truth; a fresh DB is built entirely by running them in order. This
 -- file exists so the schema is reviewable in one place; a drift-guard test asserts it
 -- stays byte-equivalent (normalized) to the schema the migrations actually build. When

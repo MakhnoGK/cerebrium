@@ -1,15 +1,22 @@
 import { injectable } from "tsyringe";
 import type { Neighbor, NeighborStub } from "@cerebrium/contracts/types";
 import { EdgeType } from "@cerebrium/contracts/vocab";
-import { BaseRepo } from "@/db/repositories/base";
-import { enrichedByIds } from "@/db/repositories/internal";
+import type { EdgesRepo, SubgraphEdge } from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
+import {
+  edgesOf,
+  enrichedByIds,
+  insertEdge,
+  invalidateEdge,
+  invalidateSystemSimilaritiesOf,
+} from "@/db/sqlite/internal";
 
 // The typed knowledge graph: edge writes and graph reads (1-hop expansion,
 // supersession lookups). Depends only on the shared enriched-row read helper, so it
 // has no dependency on the other aggregate repos.
 @injectable()
-export class EdgesRepo extends BaseRepo {
-  insertEdge(
+export class SqliteEdgesRepo extends BaseRepo implements EdgesRepo {
+  async insertEdge(
     src: string,
     dst: string,
     type: EdgeType,
@@ -17,39 +24,30 @@ export class EdgesRepo extends BaseRepo {
     session_id: string,
     ts: string,
     weight = 1.0,
-  ): void {
-    // Revive a previously-invalidated edge of the same (src,dst,type); otherwise insert.
-    this.db
-      .prepare(
-        `INSERT INTO edges (src, dst, type, provenance, weight, valid_from, session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(src, dst, type) DO UPDATE SET
-           invalidated_at = NULL, valid_from = excluded.valid_from,
-           weight = excluded.weight, provenance = excluded.provenance`,
-      )
-      .run(src, dst, type, provenance, weight, ts, session_id);
+  ): Promise<void> {
+    insertEdge(this.db, src, dst, type, provenance, session_id, ts, weight);
   }
 
-  insertSystemSimilarityIfLive(
+  async insertSystemSimilarityIfLive(
     src: string,
     dst: string,
     session_id: string,
     ts: string,
     weight: number,
-  ): boolean {
+  ): Promise<boolean> {
     return this.insertSystemEdgeIfLive(EdgeType.SIMILAR_TO, src, dst, session_id, ts, weight);
   }
 
   // `duplicate_of` points from the duplicate to the node that represents it, so retrieval
   // knows which one keeps the slot. Both endpoints stay live — this records the
   // relationship instead of collapsing it.
-  insertDuplicateOfIfLive(
+  async insertDuplicateOfIfLive(
     duplicate: string,
     representative: string,
     session_id: string,
     ts: string,
     weight: number,
-  ): boolean {
+  ): Promise<boolean> {
     return this.insertSystemEdgeIfLive(
       EdgeType.DUPLICATE_OF,
       duplicate,
@@ -64,12 +62,12 @@ export class EdgesRepo extends BaseRepo {
   // it deliberately will not do: overwrite the provenance of an edge somebody authored,
   // revive one that was retired, or add a second edge between a pair that is already
   // connected — graph expansion weights by edge, so restating a known link only skews it.
-  insertSystemReferenceIfUnconnected(
+  async insertSystemReferenceIfUnconnected(
     src: string,
     dst: string,
     session_id: string,
     ts: string,
-  ): boolean {
+  ): Promise<boolean> {
     return this.tx(() => {
       const info = this.db
         .prepare(
@@ -92,7 +90,7 @@ export class EdgesRepo extends BaseRepo {
 
   // Whether anything already relates these two, in either direction and of any type. Used
   // before proposing or deriving a link, so a known relationship is not restated.
-  pairIsConnected(a: string, b: string): boolean {
+  async pairIsConnected(a: string, b: string): Promise<boolean> {
     return (
       this.db
         .prepare(
@@ -106,12 +104,12 @@ export class EdgesRepo extends BaseRepo {
   }
 
   // A note -> symbol citation, approved from the review queue.
-  insertSystemDocumentsIfLive(
+  async insertSystemDocumentsIfLive(
     note: string,
     symbol: string,
     session_id: string,
     ts: string,
-  ): boolean {
+  ): Promise<boolean> {
     return this.insertSystemEdgeIfLive(EdgeType.DOCUMENTS, note, symbol, session_id, ts, 1.0);
   }
 
@@ -140,63 +138,20 @@ export class EdgesRepo extends BaseRepo {
     });
   }
 
-  invalidateSystemSimilaritiesOf(id: string, ts: string): number {
-    return this.tx(
-      () =>
-        this.db
-          .prepare(
-            `UPDATE edges SET invalidated_at = @ts
-             WHERE invalidated_at IS NULL AND type = @type AND provenance = 'system'
-               AND (src = @id OR dst = @id)`,
-          )
-          .run({ id, ts, type: EdgeType.SIMILAR_TO }).changes,
-    );
+  async invalidateSystemSimilaritiesOf(id: string, ts: string): Promise<number> {
+    return this.tx(() => invalidateSystemSimilaritiesOf(this.db, id, ts));
   }
 
-  // Soft-delete one edge. insertEdge revives an invalidated (src,dst,type) on conflict,
-  // so a retired edge comes back only if something deliberately re-inserts it.
-  invalidateEdge(src: string, dst: string, type: EdgeType, ts: string): void {
-    this.db
-      .prepare(
-        `UPDATE edges SET invalidated_at = ?
-         WHERE src = ? AND dst = ? AND type = ? AND invalidated_at IS NULL`,
-      )
-      .run(ts, src, dst, type);
+  async invalidateEdge(src: string, dst: string, type: EdgeType, ts: string): Promise<void> {
+    invalidateEdge(this.db, src, dst, type, ts);
   }
 
-  edgesOf(id: string): NeighborStub[] {
-    const out = this.db
-      .prepare(
-        `SELECT e.type AS edge, n.id, n.type, n.title FROM edges e
-         JOIN nodes n ON n.id = e.dst WHERE e.src = ? AND e.invalidated_at IS NULL`,
-      )
-      .all(id) as { edge: string; id: string; type: string; title: string }[];
-    const inc = this.db
-      .prepare(
-        `SELECT e.type AS edge, n.id, n.type, n.title FROM edges e
-         JOIN nodes n ON n.id = e.src WHERE e.dst = ? AND e.invalidated_at IS NULL`,
-      )
-      .all(id) as { edge: string; id: string; type: string; title: string }[];
-    return [
-      ...out.map((r) => ({
-        id: r.id,
-        type: r.type,
-        title: r.title,
-        edge: r.edge,
-        direction: "out" as const,
-      })),
-      ...inc.map((r) => ({
-        id: r.id,
-        type: r.type,
-        title: r.title,
-        edge: r.edge,
-        direction: "in" as const,
-      })),
-    ];
+  async edgesOf(id: string): Promise<NeighborStub[]> {
+    return edgesOf(this.db, id);
   }
 
   // 1-hop valid neighbors of the given nodes, over valid edges, neighbor valid only.
-  neighborsOf(parentIds: string[]): Neighbor[] {
+  async neighborsOf(parentIds: string[]): Promise<Neighbor[]> {
     if (!parentIds.length) return [];
     const ph = parentIds.map(() => "?").join(",");
     const edges = this.db
@@ -230,10 +185,10 @@ export class EdgesRepo extends BaseRepo {
   // returned with their stored `weight`, which plain 1-hop expansion never read. Traversal
   // is undirected: an edge relates its endpoints regardless of which way it was written.
   // `cap` bounds the node set (nearest first), so a hub can't turn one query into a scan.
-  subgraphFrom(
+  async subgraphFrom(
     seedIds: string[],
     opts: { depth: number; cap: number; types: string[]; asOf?: string; validAt?: string },
-  ): { src: string; dst: string; type: EdgeType; weight: number }[] {
+  ): Promise<SubgraphEdge[]> {
     if (!seedIds.length || !opts.types.length) return [];
 
     // Named parameters throughout: the type list appears in three clauses and the as-of
@@ -302,16 +257,11 @@ export class EdgesRepo extends BaseRepo {
          WHERE ${edgeLive} AND e.type IN (${typePh})
            AND e.dst IN (SELECT id FROM frontier)`,
       )
-      .all(params) as {
-      src: string;
-      dst: string;
-      type: EdgeType;
-      weight: number;
-    }[];
+      .all(params) as SubgraphEdge[];
   }
 
   // For context_notes: which of these (invalidated) nodes were superseded, by whom, when.
-  supersededInfo(ids: string[]): Map<string, { by: string; at: string }> {
+  async supersededInfo(ids: string[]): Promise<Map<string, { by: string; at: string }>> {
     const map = new Map<string, { by: string; at: string }>();
     if (!ids.length) return map;
     const ph = ids.map(() => "?").join(",");
@@ -330,11 +280,11 @@ export class EdgesRepo extends BaseRepo {
   // Unordered `a|b` keys for every pair among `ids` joined by a live `supersedes` edge.
   // Unlike `supersededInfo` this does not require the superseded node to be invalidated —
   // a normal search never shows those, and the pairs that matter here are both live.
-  supersedesPairs(ids: string[]): Set<string> {
+  async supersedesPairs(ids: string[]): Promise<Set<string>> {
     return this.pairsOfType(EdgeType.SUPERSEDES, ids);
   }
 
-  duplicatePairs(ids: string[]): Set<string> {
+  async duplicatePairs(ids: string[]): Promise<Set<string>> {
     return this.pairsOfType(EdgeType.DUPLICATE_OF, ids);
   }
 
@@ -359,7 +309,7 @@ export class EdgesRepo extends BaseRepo {
     return out;
   }
 
-  liveSuccessorsOf(id: string): string[] {
+  async liveSuccessorsOf(id: string): Promise<string[]> {
     return (
       this.db
         .prepare(

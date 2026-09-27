@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type CodeRepo } from "@/domain/ports/storage";
 import type { FileExtract } from "@/code/extract";
 import { compileIgnore } from "@/code/ignore";
 import { langForPath } from "@/code/languages";
-import type { CodeRepo } from "@/db/repositories";
 
 // Directories never worth walking, independent of .gitignore.
 const SKIP_DIRS = new Set([
@@ -125,14 +125,14 @@ function pathNameKey(path: string, name: string): string {
   return `${path}\0${name}`;
 }
 
-export function buildResolver(code: CodeRepo, name: string): Resolver {
+export async function buildResolver(code: CodeRepo, name: string): Promise<Resolver> {
   const r: Resolver = {
     byQualified: new Map(),
     byPathName: new Map(),
     moduleByPath: new Map(),
     byName: new Map(),
   };
-  for (const e of code.repoSymbolDirectory(name)) {
+  for (const e of await code.repoSymbolDirectory(name)) {
     if (!r.byQualified.has(e.qualified)) r.byQualified.set(e.qualified, e.node_id);
     const key = pathNameKey(e.path, e.name);
     if (!r.byPathName.has(key)) r.byPathName.set(key, e.node_id);

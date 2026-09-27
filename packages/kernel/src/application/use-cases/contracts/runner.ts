@@ -1,5 +1,5 @@
+import { type JobRow } from "@/domain/ports/storage";
 import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/use-case";
-import type { JobRow } from "@/db/repositories";
 
 // The runner host's side of the queue. These have tokens like any other use case, but they
 // are deliberately NOT on `CALL_SURFACE`: claiming and reporting a job is operational, and

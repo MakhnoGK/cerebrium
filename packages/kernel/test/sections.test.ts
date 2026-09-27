@@ -64,7 +64,7 @@ describe("ChunksRepo.sections", () => {
     const node = await write("Ranking model", BODY);
 
     // When
-    const outline = env.chunks.sections(node.id);
+    const outline = await env.chunks.sections(node.id);
 
     // Then
     expect(outline.map((s) => s.section)).toEqual([
@@ -86,7 +86,7 @@ describe("ChunksRepo.sections", () => {
     );
 
     // When
-    const outline = env.chunks.sections(node.id);
+    const outline = await env.chunks.sections(node.id);
     const notes = outline.filter((s) => s.section === "H2: Notes");
 
     // Then
@@ -94,9 +94,9 @@ describe("ChunksRepo.sections", () => {
     expect(notes[0]!.chars).toBeGreaterThan("## Notes\nfirst pass".length);
   });
 
-  it("should report no sections when the node has no live chunks", () => {
+  it("should report no sections when the node has no live chunks", async () => {
     // Given / When
-    const outline = env.chunks.sections("01JZZZZZZZZZZZZZZZZZZZZZZZ");
+    const outline = await env.chunks.sections("01JZZZZZZZZZZZZZZZZZZZZZZZ");
 
     // Then
     expect(outline).toEqual([]);

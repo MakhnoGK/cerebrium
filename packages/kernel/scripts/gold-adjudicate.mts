@@ -6,7 +6,7 @@ import type Database from "better-sqlite3";
 import { container as root } from "tsyringe";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { HintsService } from "@/application/services/hints.service";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
@@ -184,7 +184,7 @@ async function main(): Promise<void> {
   // not write a byte, so the hint source is stubbed and the tool is invoked below the audit
   // decorator that would otherwise log an event.
   container.register(HintsService, {
-    useValue: { getUnknownSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
+    useValue: { getSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
   });
 
   const db = container.resolve<Database.Database>(DB_TOKEN);

@@ -184,7 +184,7 @@ describe("runDaemon loop", () => {
       title: "drain me",
       content: "a fact with enough words to make a chunk worth embedding",
     });
-    expect(env.queue.embeddingStats().backlog).toBe(1);
+    expect((await env.queue.embeddingStats()).backlog).toBe(1);
 
     // When
     let clock = 0;
@@ -195,7 +195,7 @@ describe("runDaemon loop", () => {
     });
 
     // Then
-    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect((await env.queue.embeddingStats()).backlog).toBe(0);
   });
 
   it("should keep running past the idle threshold when resident", async () => {

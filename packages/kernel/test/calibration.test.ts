@@ -129,7 +129,9 @@ describe("Merge gate boundary", () => {
 
     // Then
     expect(r.merge_suggested).toBe(0);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(0);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
+    ).toHaveLength(0);
   });
 
   it("should propose a merge when the pair sits just above mergeSim", async () => {

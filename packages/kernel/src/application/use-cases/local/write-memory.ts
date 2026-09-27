@@ -6,6 +6,7 @@ import {
   EmbeddingRole,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
+import { SEARCH_REPO_TOKEN, type SearchRepo } from "@/domain/ports/storage";
 import { jaccard, tokenSet } from "@/application/retrieval";
 import {
   ConsolidationService,
@@ -21,7 +22,6 @@ import {
   type WriteMemoryArgs,
   type WriteMemoryResult,
 } from "@/application/use-cases/contracts";
-import { SearchRepo } from "@/db/repositories";
 import { chunkContent } from "@/core/chunk";
 import { toFtsMatch } from "@/core/fts";
 import {
@@ -45,7 +45,7 @@ export class LocalWriteMemory implements WriteMemory {
     private readonly embeddingsService: EmbeddingService,
     private readonly nodeService: NodeService,
     private readonly consolidationService: ConsolidationService,
-    private readonly search: SearchRepo,
+    @inject(SEARCH_REPO_TOKEN) private readonly search: SearchRepo,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly embeddings: EmbeddingProvider,
     private readonly posture: ConsolidationPostureConfig,
     private readonly retrieval: RetrievalConfig,
@@ -91,7 +91,7 @@ export class LocalWriteMemory implements WriteMemory {
       : null;
 
     const notes = [
-      ...this.embeddingsService.getEmbeddingNotes(),
+      ...(await this.embeddingsService.getEmbeddingNotes()),
       ...this.hints.getLongBodyNotes(args.content),
     ];
 
@@ -122,7 +122,7 @@ export class LocalWriteMemory implements WriteMemory {
       const [qvec] = await this.embeddings.embed([probe], EmbeddingRole.QUERY);
 
       if (qvec) {
-        scored = this.search.vectorSearch(qvec, opts).map((r) => ({
+        scored = (await this.search.vectorSearch(qvec, opts)).map((r) => ({
           id: r.id,
           title: r.title,
           summary: deriveSummary(r.content),
@@ -143,21 +143,21 @@ export class LocalWriteMemory implements WriteMemory {
         if (match) {
           const probeTokens = tokenSet(probe);
 
-          scored = this.search
-            .search({
+          scored = (
+            await this.search.search({
               match,
               project: args.project ?? undefined,
               kinds: ["semantic"],
               history: false,
               cap: DEDUP_CANDIDATES,
             })
-            .rows.map((r) => ({
-              id: r.id,
-              title: r.title,
-              summary: deriveSummary(r.content),
-              score: jaccard(probeTokens, tokenSet(`${r.title} ${r.content}`)),
-              suggestion: "consider update or link + invalidate instead",
-            }));
+          ).rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            summary: deriveSummary(r.content),
+            score: jaccard(probeTokens, tokenSet(`${r.title} ${r.content}`)),
+            suggestion: "consider update or link + invalidate instead",
+          }));
         }
       }
 

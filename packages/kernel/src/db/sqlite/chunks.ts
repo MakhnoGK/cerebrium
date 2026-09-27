@@ -1,13 +1,14 @@
 import { injectable } from "tsyringe";
 import type { NodeSection } from "@cerebrium/contracts/types";
-import { BaseRepo } from "@/db/repositories/base";
+import type { ChunksRepo } from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
 import { matchesSection, sectionName } from "@/core/chunk";
 
 // Read side of the chunk aggregate: a node's addressable outline and the text behind
 // named sections. Chunking itself is a write-path concern and stays in `internal.ts`;
 // the kNN join over chunk vectors stays in `search.ts`. Read-only — no transactions.
 @injectable()
-export class ChunksRepo extends BaseRepo {
+export class SqliteChunksRepo extends BaseRepo implements ChunksRepo {
   private liveChunks(nodeId: string): { heading_path: string | null; text: string }[] {
     return this.db
       .prepare(
@@ -21,7 +22,7 @@ export class ChunksRepo extends BaseRepo {
   // The outline: one entry per distinct heading path, in body order, with the size of
   // everything filed under it. A heading that recurs later in the body folds into its
   // first entry, so a name always addresses the same text `sectionText` would return.
-  sections(nodeId: string): NodeSection[] {
+  async sections(nodeId: string): Promise<NodeSection[]> {
     const order: string[] = [];
     const chars = new Map<string, number>();
 
@@ -38,10 +39,10 @@ export class ChunksRepo extends BaseRepo {
 
   // Text of every live chunk under the requested sections, in body order. `missing`
   // names the requests that addressed nothing, so the caller can say which.
-  sectionText(
+  async sectionText(
     nodeId: string,
     requested: string[],
-  ): { text: string; matched: string[]; missing: string[] } {
+  ): Promise<{ text: string; matched: string[]; missing: string[] }> {
     const chunks = this.liveChunks(nodeId);
     const matched = new Set<string>();
     const kept: string[] = [];

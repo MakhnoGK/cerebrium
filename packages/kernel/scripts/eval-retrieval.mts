@@ -21,7 +21,7 @@ import {
 } from "@/domain/ports/embedding-provider";
 import { HintsService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { matchesSection, sectionName } from "@/core/chunk";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -449,7 +449,7 @@ async function runArm(
   // is invoked directly, below the audit decorator that would otherwise log an event.
   if (shared.readonly) {
     scope.register(HintsService, {
-      useValue: { getUnknownSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
+      useValue: { getSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
     });
   }
 

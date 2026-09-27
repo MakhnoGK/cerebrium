@@ -3,10 +3,16 @@ import type Database from "better-sqlite3";
 import { inject, injectable } from "tsyringe";
 import type { TechStats } from "@cerebrium/contracts/types";
 import { EdgeType, JobKind, MemoryKind } from "@cerebrium/contracts/vocab";
-import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
-import { CodeRepo } from "@/db/repositories/code";
-import { EmbeddingQueueRepo } from "@/db/repositories/embedding-queue";
-import { JobsRepo } from "@/db/repositories/jobs";
+import {
+  CODE_REPO_TOKEN,
+  EMBEDDING_QUEUE_REPO_TOKEN,
+  JOBS_REPO_TOKEN,
+  type CodeRepo,
+  type EmbeddingQueueRepo,
+  type JobsRepo,
+  type StatsRepo,
+} from "@/domain/ports/storage";
+import { BaseRepo, DB_TOKEN } from "@/db/sqlite/base";
 
 function walBytes(dbPath: string): number {
   if (dbPath === ":memory:" || !dbPath) return 0;
@@ -20,38 +26,38 @@ function walBytes(dbPath: string): number {
 // Aggregate counters for the session working set (`stats`) and the deep operational
 // snapshot (`techStats`). Composes the queue and code repos for their sub-counts.
 @injectable()
-export class StatsRepo extends BaseRepo {
+export class SqliteStatsRepo extends BaseRepo implements StatsRepo {
   constructor(
     @inject(DB_TOKEN) db: Database.Database,
-    private readonly queue: EmbeddingQueueRepo,
-    private readonly code: CodeRepo,
-    private readonly jobs: JobsRepo,
+    @inject(EMBEDDING_QUEUE_REPO_TOKEN) private readonly queue: EmbeddingQueueRepo,
+    @inject(CODE_REPO_TOKEN) private readonly code: CodeRepo,
+    @inject(JOBS_REPO_TOKEN) private readonly jobs: JobsRepo,
   ) {
     super(db);
   }
 
-  stats(): {
+  async stats(): Promise<{
     nodes_by_kind: Record<string, number>;
     last_activity: string | null;
     embedding: { backlog: number; parked: number };
-  } {
+  }> {
     const rows = this.db
       .prepare("SELECT memory_kind, COUNT(*) AS c FROM nodes GROUP BY memory_kind")
       .all() as { memory_kind: string; c: number }[];
     const nodes_by_kind: Record<string, number> = { episodic: 0, semantic: 0, mirror: 0 };
     for (const r of rows) nodes_by_kind[r.memory_kind] = r.c;
     const last = this.db.prepare("SELECT MAX(ts) AS t FROM events").get() as { t: string | null };
-    return { nodes_by_kind, last_activity: last.t, embedding: this.queue.embeddingStats() };
+    return { nodes_by_kind, last_activity: last.t, embedding: await this.queue.embeddingStats() };
   }
 
-  dbPath(): string {
+  async dbPath(): Promise<string> {
     return this.db.name;
   }
 
   // Deep operational snapshot for the `stats` tool + CLI. All cheap counts and
   // pragmas — no scan of node content. `now` is used only to decide whether the
   // embedding lease is currently held (drain is alive).
-  techStats(now: string): TechStats {
+  async techStats(now: string): Promise<TechStats> {
     // A typed one-row query helper; the caller supplies the row shape at each call.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
     const one = <T>(sql: string, ...params: unknown[]) => this.db.prepare(sql).get(...params) as T;
@@ -66,7 +72,7 @@ export class StatsRepo extends BaseRepo {
       nodes_total += r.c;
     }
 
-    const { backlog, parked } = this.queue.embeddingStats();
+    const { backlog, parked } = await this.queue.embeddingStats();
     const queueAgg = one<{ total: number; with_errors: number | null; oldest: string | null }>(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN last_error IS NOT NULL THEN 1 ELSE 0 END) AS with_errors,
@@ -176,20 +182,20 @@ export class StatsRepo extends BaseRepo {
         sweep_lease_owner: sweepLease?.owner ?? null,
         sweep_lease_expires_at: sweepLease?.expires_at ?? null,
       },
-      jobs: this.jobStats(),
-      code_repos: this.code.allRepoProvenance(),
+      jobs: await this.jobStats(),
+      code_repos: await this.code.allRepoProvenance(),
       last_activity: one<{ t: string | null }>("SELECT MAX(ts) AS t FROM events").t,
     };
   }
 
-  private jobStats(): TechStats["jobs"] {
-    const [last] = this.jobs.recent({ kind: JobKind.CODE_INDEX, limit: 1 });
+  private async jobStats(): Promise<TechStats["jobs"]> {
+    const [last] = await this.jobs.recent({ kind: JobKind.CODE_INDEX, limit: 1 });
 
     return {
-      by_state: this.jobs.counts(),
+      by_state: await this.jobs.counts(),
       last_code_index_at: last?.ended_at ?? null,
       last_code_index_error: last?.last_error ?? null,
-      code_index_open: this.jobs.hasOpen(JobKind.CODE_INDEX),
+      code_index_open: await this.jobs.hasOpen(JobKind.CODE_INDEX),
     };
   }
 

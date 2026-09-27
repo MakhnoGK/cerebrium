@@ -1,11 +1,7 @@
 import { singleton } from "tsyringe";
+import { UNKNOWN_WRITER, type Writer } from "@/domain/writer";
 
-export interface Writer {
-  client: string | null;
-  version: string | null;
-}
-
-export const UNKNOWN_WRITER: Writer = { client: null, version: null };
+export { UNKNOWN_WRITER, type Writer };
 
 // Who is writing: the MCP `initialize` handshake names external clients, internal
 // writers name themselves. Populated once per process, before any tool call.

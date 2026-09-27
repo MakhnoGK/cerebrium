@@ -2,8 +2,8 @@ import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import { PROCESS_PROBE_TOKEN, type ProcessProbe } from "@/domain/ports/process-probe";
+import { PROCESSES_REPO_TOKEN, type ProcessesRepo, type ProcessRow } from "@/domain/ports/storage";
 import type { WarmupOutcome } from "@/application/services/model-warmup.service";
-import { ProcessesRepo, type ProcessRow } from "@/db/repositories";
 import { newId } from "@/core/ids";
 import { ConfigRegistry, DatabaseConfig } from "@/infrastructure/config";
 
@@ -16,7 +16,7 @@ export interface LiveProcess extends ProcessRow {
 @injectable()
 export class ProcessRegistryService {
   constructor(
-    private readonly processes: ProcessesRepo,
+    @inject(PROCESSES_REPO_TOKEN) private readonly processes: ProcessesRepo,
     private readonly config: ConfigRegistry,
     private readonly database: DatabaseConfig,
     @inject(CONFIG_FILE_TOKEN) private readonly configFile: ConfigFileReport | null,
@@ -26,10 +26,10 @@ export class ProcessRegistryService {
 
   // Called once at host startup. Also sweeps rows whose process is gone, so a crashed
   // host (no chance to retire itself) cannot leave a permanent ghost in the registry.
-  publish(role: string): string {
+  async publish(role: string): Promise<string> {
     const id = newId();
 
-    this.processes.publish({
+    await this.processes.publish({
       id,
       role,
       pid: this.probe.self(),
@@ -41,27 +41,27 @@ export class ProcessRegistryService {
       config_json: JSON.stringify(this.config.effective().values),
     });
 
-    this.sweepDead();
+    await this.sweepDead();
 
     return id;
   }
 
-  recordModel(id: string, outcome: WarmupOutcome): void {
-    this.processes.recordModel(id, outcome.state, outcome.ms, outcome.error ?? null);
+  async recordModel(id: string, outcome: WarmupOutcome): Promise<void> {
+    await this.processes.recordModel(id, outcome.state, outcome.ms, outcome.error ?? null);
   }
 
-  retire(id: string): void {
-    this.processes.retire([id]);
+  async retire(id: string): Promise<void> {
+    await this.processes.retire([id]);
   }
 
-  list(): LiveProcess[] {
-    return this.processes.list().map((row) => ({ ...row, alive: this.isAlive(row) }));
+  async list(): Promise<LiveProcess[]> {
+    return (await this.processes.list()).map((row) => ({ ...row, alive: this.isAlive(row) }));
   }
 
-  private sweepDead(): void {
-    const dead = this.processes.list().filter((row) => !this.isAlive(row));
+  private async sweepDead(): Promise<void> {
+    const dead = (await this.processes.list()).filter((row) => !this.isAlive(row));
 
-    this.processes.retire(dead.map((row) => row.id));
+    await this.processes.retire(dead.map((row) => row.id));
   }
 
   private isAlive(row: ProcessRow): boolean {

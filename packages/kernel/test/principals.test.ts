@@ -2,12 +2,12 @@ import { createRequire } from "node:module";
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { PrincipalKind, UNATTRIBUTED_PRINCIPAL } from "@cerebrium/contracts/vocab";
+import { PRINCIPALS_REPO_TOKEN, type PrincipalsRepo } from "@/domain/ports/storage";
 import { CallPipeline } from "@/application/call-pipeline";
-import { PrincipalsRepo } from "@/db/repositories";
 import { setup, type TestEnv } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/024_principals.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/024_principals.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -42,7 +42,9 @@ describe("Principals", () => {
 
     // Then
     expect(principalOf(session)).toBe("claude-code");
-    expect(container.resolve(PrincipalsRepo).find("claude-code")).toMatchObject({
+    expect(
+      await container.resolve<PrincipalsRepo>(PRINCIPALS_REPO_TOKEN).find("claude-code"),
+    ).toMatchObject({
       id: "claude-code",
       kind: PrincipalKind.AGENT,
     });
@@ -55,7 +57,7 @@ describe("Principals", () => {
 
     // Then
     expect(principalOf(first)).toBe(principalOf(second));
-    expect(container.resolve(PrincipalsRepo).list()).toHaveLength(1);
+    expect(await container.resolve<PrincipalsRepo>(PRINCIPALS_REPO_TOKEN).list()).toHaveLength(1);
   });
 
   it("should resolve a host that never named itself to a principal that can still be addressed", async () => {
@@ -64,7 +66,9 @@ describe("Principals", () => {
 
     // Then
     expect(principalOf(session)).toBe(UNATTRIBUTED_PRINCIPAL);
-    expect(container.resolve(PrincipalsRepo).find(UNATTRIBUTED_PRINCIPAL)).toMatchObject({
+    expect(
+      await container.resolve<PrincipalsRepo>(PRINCIPALS_REPO_TOKEN).find(UNATTRIBUTED_PRINCIPAL),
+    ).toMatchObject({
       kind: PrincipalKind.UNATTRIBUTED,
     });
   });
@@ -75,9 +79,9 @@ describe("Principals", () => {
     await startSession("antigravity-client");
 
     // Then
-    const repo = container.resolve(PrincipalsRepo);
-    expect(repo.find("cerebrium-consolidation")?.kind).toBe(PrincipalKind.SYSTEM);
-    expect(repo.find("antigravity-client")?.kind).toBe(PrincipalKind.AGENT);
+    const repo = container.resolve<PrincipalsRepo>(PRINCIPALS_REPO_TOKEN);
+    expect((await repo.find("cerebrium-consolidation"))?.kind).toBe(PrincipalKind.SYSTEM);
+    expect((await repo.find("antigravity-client"))?.kind).toBe(PrincipalKind.AGENT);
   });
 });
 
@@ -118,7 +122,7 @@ describe("Principal backfill", () => {
     expect(principalOf("01CCCCCCCCCCCCCCCCCCCCCCCC")).toBe(UNATTRIBUTED_PRINCIPAL);
   });
 
-  it("should date a backfilled principal from the sessions it is inferred from", () => {
+  it("should date a backfilled principal from the sessions it is inferred from", async () => {
     // Given
     env.db
       .prepare(
@@ -145,7 +149,9 @@ describe("Principal backfill", () => {
     up(env.db);
 
     // Then
-    expect(container.resolve(PrincipalsRepo).find("codex-mcp-client")).toMatchObject({
+    expect(
+      await container.resolve<PrincipalsRepo>(PRINCIPALS_REPO_TOKEN).find("codex-mcp-client"),
+    ).toMatchObject({
       created_at: "2026-07-14T00:00:00.000Z",
       last_seen: "2026-08-15T00:00:00.000Z",
     });

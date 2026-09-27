@@ -23,8 +23,13 @@ function runs(env: TestEnv): RunRow[] {
     .all() as RunRow[];
 }
 
-function openRun(env: TestEnv, id: string, at: string, error: string | null = null): void {
-  env.consolidation.reportTick(id, {
+async function openRun(
+  env: TestEnv,
+  id: string,
+  at: string,
+  error: string | null = null,
+): Promise<void> {
+  await env.consolidation.reportTick(id, {
     started_at: at,
     ended_at: null,
     stage: "merge",
@@ -88,18 +93,18 @@ describe("A sweep the process abandons", () => {
     expect(row?.last_error).toBe("the daemon stopped mid-sweep");
   });
 
-  it("should be closed at the last instant it reported when only the next process can say so", () => {
+  it("should be closed at the last instant it reported when only the next process can say so", async () => {
     // Given — a row left open by a process that was killed outright, plus one that ended
     // properly and must not be touched.
     const env = setup({ start: START });
-    openRun(env, "01AAAAAAAAAAAAAAAAAAAAAAAA", START);
+    await openRun(env, "01AAAAAAAAAAAAAAAAAAAAAAAA", START);
     env.clock.advanceMs(60_000);
-    env.consolidation.closeRun("01BBBBBBBBBBBBBBBBBBBBBBBB", env.clock.now(), "unrelated");
-    openRun(env, "01BBBBBBBBBBBBBBBBBBBBBBBB", START);
+    await env.consolidation.closeRun("01BBBBBBBBBBBBBBBBBBBBBBBB", env.clock.now(), "unrelated");
+    await openRun(env, "01BBBBBBBBBBBBBBBBBBBBBBBB", START);
     const openedAt = runs(env).find((r) => r.id === "01AAAAAAAAAAAAAAAAAAAAAAAA")!.updated_at;
 
     // When
-    const closed = env.consolidation.closeAbandonedRuns(REASON);
+    const closed = await env.consolidation.closeAbandonedRuns(REASON);
 
     // Then — `ended_at` is when the sweep last reported, not when this process started.
     expect(closed).toBe(2);
@@ -108,29 +113,33 @@ describe("A sweep the process abandons", () => {
     expect(row.ended_at).toBe(openedAt);
     expect(row.stage).toBe("interrupted");
     expect(row.last_error).toBe(REASON);
-    expect(env.consolidation.closeAbandonedRuns(REASON)).toBe(0);
+    expect(await env.consolidation.closeAbandonedRuns(REASON)).toBe(0);
   });
 
-  it("should keep the error a stage already recorded rather than stamping over it", () => {
+  it("should keep the error a stage already recorded rather than stamping over it", async () => {
     // Given
     const env = setup({ start: START });
-    openRun(env, "01CCCCCCCCCCCCCCCCCCCCCCCC", START, "generation failed");
+    await openRun(env, "01CCCCCCCCCCCCCCCCCCCCCCCC", START, "generation failed");
 
     // When
-    env.consolidation.closeAbandonedRuns(REASON);
+    await env.consolidation.closeAbandonedRuns(REASON);
 
     // Then
     expect(runs(env)[0]?.last_error).toBe("generation failed");
   });
 
-  it("should stay closed when a tick that outlived its own close reports again", () => {
+  it("should stay closed when a tick that outlived its own close reports again", async () => {
     // Given
     const env = setup({ start: START });
-    openRun(env, "01DDDDDDDDDDDDDDDDDDDDDDDD", START);
-    env.consolidation.closeRun("01DDDDDDDDDDDDDDDDDDDDDDDD", START, "the daemon stopped mid-sweep");
+    await openRun(env, "01DDDDDDDDDDDDDDDDDDDDDDDD", START);
+    await env.consolidation.closeRun(
+      "01DDDDDDDDDDDDDDDDDDDDDDDD",
+      START,
+      "the daemon stopped mid-sweep",
+    );
 
     // When — the abandoned tick reaches its next stage report before the process dies.
-    openRun(env, "01DDDDDDDDDDDDDDDDDDDDDDDD", START);
+    await openRun(env, "01DDDDDDDDDDDDDDDDDDDDDDDD", START);
 
     // Then
     const [row] = runs(env);
@@ -140,13 +149,13 @@ describe("A sweep the process abandons", () => {
 });
 
 describe("Whether a sweep is running", () => {
-  it("should come from the lease, not from a run row left open", () => {
+  it("should come from the lease, not from a run row left open", async () => {
     // Given
     const env = setup({ start: START });
-    openRun(env, "01EEEEEEEEEEEEEEEEEEEEEEEE", START);
+    await openRun(env, "01EEEEEEEEEEEEEEEEEEEEEEEE", START);
 
     // Then — an open row is not a running sweep.
-    expect(env.stats.techStats(env.clock.now()).consolidation.sweep_running).toBe(false);
+    expect((await env.stats.techStats(env.clock.now())).consolidation.sweep_running).toBe(false);
 
     // When
     env.db
@@ -154,7 +163,7 @@ describe("Whether a sweep is running", () => {
       .run("consolidation", "owner-1", "2026-01-01T00:10:00.000Z");
 
     // Then
-    const held = env.stats.techStats(env.clock.now()).consolidation;
+    const held = (await env.stats.techStats(env.clock.now())).consolidation;
     expect(held.sweep_running).toBe(true);
     expect(held.sweep_lease_owner).toBe("owner-1");
 
@@ -162,6 +171,6 @@ describe("Whether a sweep is running", () => {
     env.clock.advanceMs(600_000);
 
     // Then
-    expect(env.stats.techStats(env.clock.now()).consolidation.sweep_running).toBe(false);
+    expect((await env.stats.techStats(env.clock.now())).consolidation.sweep_running).toBe(false);
   });
 });

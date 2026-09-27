@@ -185,7 +185,7 @@ describe("Read-time fold", () => {
     const env = setup({ provider: provider() });
     container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "0.93" }) });
     const { s, twin, outlier } = await twinsAndOutlier(env);
-    env.edges.insertDuplicateOfIfLive(outlier, twin, s, env.clock.now(), 0.5);
+    await env.edges.insertDuplicateOfIfLive(outlier, twin, s, env.clock.now(), 0.5);
 
     // When
     const res = (await search(s, 10)) as {
@@ -204,7 +204,7 @@ describe("Read-time fold", () => {
     const env = setup({ provider: provider() });
     container.register(RetrievalConfig, { useValue: config({ MEMORY_FOLD_SIM: "1" }) });
     const { s, twin, outlier } = await twinsAndOutlier(env);
-    env.edges.insertDuplicateOfIfLive(outlier, twin, s, env.clock.now(), 0.5);
+    await env.edges.insertDuplicateOfIfLive(outlier, twin, s, env.clock.now(), 0.5);
 
     // When
     const slots = ids(await search(s, 10));

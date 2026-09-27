@@ -11,8 +11,8 @@ import {
   ConsolidationRecommendation,
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
-import { openDatabase } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
+import { openDatabase } from "@/db/sqlite/database";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { Server } from "@/presentation/mcp/server";
 import { sessionIdDescription } from "@/presentation/mcp/tools/contracts";

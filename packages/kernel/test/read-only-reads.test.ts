@@ -11,8 +11,8 @@ import {
   type ReadName,
   type UseCase,
 } from "@/application/use-cases";
-import { openDatabase } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
+import { openDatabase } from "@/db/sqlite/database";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { buildContainer } from "@/container";

@@ -1,4 +1,6 @@
+import { inject } from "tsyringe";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import { NodeReferenceService } from "@/application/services";
 import {
   RECORD_CHECKPOINT,
@@ -7,18 +9,17 @@ import {
   type RecordCheckpoint,
   type RecordCheckpointArgs,
 } from "@/application/use-cases/contracts";
-import { NodesRepo } from "@/db/repositories";
 
 @useCase(RECORD_CHECKPOINT)
 export class LocalRecordCheckpoint implements RecordCheckpoint {
   constructor(
     private readonly references: NodeReferenceService,
-    private readonly nodes: NodesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
   ) {}
 
   async invoke(args: RecordCheckpointArgs): Promise<EnvelopeResult> {
     for (const id of args.touched_node_ids ?? []) {
-      this.references.requireLive(id, "touched node");
+      await this.references.requireLive(id, "touched node");
     }
 
     return {

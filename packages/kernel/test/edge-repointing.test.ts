@@ -37,10 +37,10 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const referrer = await writeFact(s, "referrer");
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, {
+    await env.nodes.invalidateNode(doomed, {
       ts: env.clock.t,
       superseded_by: successor,
       session_id: s,
@@ -50,7 +50,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const edges = liveEdges(env.db);
     expect(edges).toContainEqual({ src: referrer, dst: successor, type: EdgeType.REFERENCES });
     expect(edges).not.toContainEqual({ src: referrer, dst: doomed, type: EdgeType.REFERENCES });
-    expect(env.stats.techStats(env.clock.t).graph.dangling_edges).toBe(0);
+    expect((await env.stats.techStats(env.clock.t)).graph.dangling_edges).toBe(0);
   });
 
   it("should drop the edge rather than create a self-loop when the referrer is the successor", async () => {
@@ -59,10 +59,10 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const s = await session();
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(successor, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(successor, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, {
+    await env.nodes.invalidateNode(doomed, {
       ts: env.clock.t,
       superseded_by: successor,
       session_id: s,
@@ -81,11 +81,11 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
     const other = await writeFact(s, "other");
-    env.edges.insertEdge(referrer, doomed, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
-    env.edges.insertEdge(doomed, other, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
-    env.edges.insertEdge(referrer, other, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    await env.edges.insertEdge(referrer, doomed, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    await env.edges.insertEdge(doomed, other, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    await env.edges.insertEdge(referrer, other, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
 
-    env.nodes.invalidateNode(doomed, {
+    await env.nodes.invalidateNode(doomed, {
       ts: env.clock.t,
       superseded_by: successor,
       session_id: s,
@@ -104,10 +104,10 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const s = await session();
     const referrer = await writeFact(s, "referrer");
     const doomed = await writeFact(s, "doomed");
-    env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+    await env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
 
     // Then
     expect(liveEdges(env.db)).toContainEqual({
@@ -125,15 +125,15 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const spoke = await writeFact(s, "spoke");
     const doomed = await writeFact(s, "doomed");
     const island = await writeFact(s, "island");
-    env.edges.insertEdge(hub, spoke, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    env.edges.insertEdge(hub, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    env.edges.insertEdge(island, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(hub, spoke, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(hub, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(island, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, superseded_by: hub, session_id: s });
+    await env.nodes.invalidateNode(doomed, { ts: env.clock.t, superseded_by: hub, session_id: s });
 
     // Then
-    expect(env.stats.techStats(env.clock.t).graph.detached_nodes).toBe(0);
+    expect((await env.stats.techStats(env.clock.t)).graph.detached_nodes).toBe(0);
   });
 
   it("should be a no-op on the merge path, which re-points before it invalidates", async () => {
@@ -143,10 +143,10 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const referrer = await writeFact(s, "referrer");
     const loser = await writeFact(s, "loser");
     const survivor = await writeFact(s, "survivor");
-    env.edges.insertEdge(referrer, loser, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, loser, EdgeType.REFERENCES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.applyMerge({
+    await env.nodes.applyMerge({
       survivorId: survivor,
       loserId: loser,
       session_id: s,
@@ -169,11 +169,19 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     const doomed = await writeFact(s, "doomed");
     const first = await writeFact(s, "first successor");
     const second = await writeFact(s, "second successor");
-    env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, superseded_by: first, session_id: s });
+    await env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.nodes.invalidateNode(doomed, {
+      ts: env.clock.t,
+      superseded_by: first,
+      session_id: s,
+    });
 
     // When
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, superseded_by: second, session_id: s });
+    await env.nodes.invalidateNode(doomed, {
+      ts: env.clock.t,
+      superseded_by: second,
+      session_id: s,
+    });
 
     // Then
     const edges = liveEdges(env.db);

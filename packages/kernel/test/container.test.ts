@@ -7,15 +7,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import type { EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { STATS_REPO_TOKEN, type StatsRepo } from "@/domain/ports/storage";
 import {
   ConsolidationWorker,
   EmbeddingWorker,
   WORKER_OPTIONS_TOKEN,
   type WorkerOptions,
 } from "@/application/workers";
-import { openDatabase } from "@/db/database";
-import { StatsRepo } from "@/db/repositories";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
+import { openDatabase } from "@/db/sqlite/database";
 import { nowIso } from "@/core/ids";
 import { Server } from "@/presentation/mcp/server";
 import { buildContainer, KERNEL_TOKENS, type HostRole } from "@/container";
@@ -103,7 +103,7 @@ describe("Host role parity", () => {
     }
   });
 
-  it("should resolve what each role actually hosts", () => {
+  it("should resolve what each role actually hosts", async () => {
     // Given / When / Then
     expect(build("server", ON_FILE).resolve(Server)).toBeDefined();
 
@@ -111,9 +111,10 @@ describe("Host role parity", () => {
     expect(daemon.resolve(EmbeddingWorker)).toBeDefined();
     expect(daemon.resolve(ConsolidationWorker)).toBeDefined();
 
-    expect(build("cli", ON_FILE).resolve(StatsRepo).techStats(nowIso()).content.nodes_total).toBe(
-      0,
-    );
+    expect(
+      (await build("cli", ON_FILE).resolve<StatsRepo>(STATS_REPO_TOKEN).techStats(nowIso())).content
+        .nodes_total,
+    ).toBe(0);
   });
 
   it("should refuse a write through the database the cli role resolves", () => {

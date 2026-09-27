@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { afterEach, describe, expect, it } from "vitest";
-import { openDatabase } from "@/db/database";
+import { openDatabase } from "@/db/sqlite/database";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const schemaSql = readFileSync(join(here, "../src/db/schema.sql"), "utf8");
+const schemaSql = readFileSync(join(here, "../src/db/sqlite/schema.sql"), "utf8");
 
 const MIGRATION_IDS = [
   "000_baseline.sql",

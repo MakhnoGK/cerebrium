@@ -1,6 +1,7 @@
 import { inject } from "tsyringe";
 import { SYSTEM_EDGE_TYPES } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { EDGES_REPO_TOKEN, type EdgesRepo } from "@/domain/ports/storage";
 import { EmbeddingService, NodeReferenceService } from "@/application/services";
 import {
   LINK_NODES,
@@ -9,18 +10,17 @@ import {
   type LinkNodesArgs,
   type LinkNodesResult,
 } from "@/application/use-cases/contracts";
-import { EdgesRepo } from "@/db/repositories";
 
 @useCase(LINK_NODES)
 export class LocalLinkNodes implements LinkNodes {
   constructor(
     private readonly embeddings: EmbeddingService,
     private readonly references: NodeReferenceService,
-    private readonly edges: EdgesRepo,
+    @inject(EDGES_REPO_TOKEN) private readonly edges: EdgesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
-  invoke(args: LinkNodesArgs): Promise<LinkNodesResult> {
+  async invoke(args: LinkNodesArgs): Promise<LinkNodesResult> {
     if ((SYSTEM_EDGE_TYPES as readonly string[]).includes(args.type)) {
       throw new Error(
         `'${args.type}' edges are created by the system, not via link. Use another edge type.`,
@@ -28,12 +28,12 @@ export class LocalLinkNodes implements LinkNodes {
     }
 
     if (args.src === args.dst) throw new Error("cannot link a node to itself.");
-    this.references.requireLive(args.src, "src node");
-    this.references.requireLive(args.dst, "dst node");
+    await this.references.requireLive(args.src, "src node");
+    await this.references.requireLive(args.dst, "dst node");
 
     const weight = args.weight ?? 1.0;
 
-    this.edges.insertEdge(
+    await this.edges.insertEdge(
       args.src,
       args.dst,
       args.type,
@@ -48,7 +48,7 @@ export class LocalLinkNodes implements LinkNodes {
       dst: args.dst,
       type: args.type,
       weight,
-      notes: this.embeddings.getEmbeddingNotes(),
+      notes: await this.embeddings.getEmbeddingNotes(),
     });
   }
 }

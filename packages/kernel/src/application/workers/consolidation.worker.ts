@@ -20,17 +20,24 @@ import {
   type ConsolidationReporter,
   type ConsolidationTickResult,
 } from "@/domain/ports/consolidation-reporter";
+import {
+  CODE_REPO_TOKEN,
+  CONSOLIDATION_REPO_TOKEN,
+  EDGES_REPO_TOKEN,
+  EMBEDDING_QUEUE_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  pairKey,
+  type CodeRepo,
+  type ConsolidationRepo,
+  type DuplicatePair,
+  type EdgesRepo,
+  type EmbeddingQueueRepo,
+  type NodesRepo,
+  type SweepSeed,
+} from "@/domain/ports/storage";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
-import {
-  CodeRepo,
-  ConsolidationRepo,
-  EdgesRepo,
-  EmbeddingQueueRepo,
-  NodesRepo,
-} from "@/db/repositories";
-import { pairKey, type DuplicatePair, type SweepSeed } from "@/db/repositories/consolidation";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 import {
@@ -143,11 +150,11 @@ export class ConsolidationWorker {
     @inject(CONSOLIDATION_REPORTER_TOKEN)
     private readonly reporter: ConsolidationReporter,
 
-    private readonly queueRepo: EmbeddingQueueRepo,
-    private readonly consolidationRepo: ConsolidationRepo,
-    private readonly edgesRepo: EdgesRepo,
-    private readonly codeRepo: CodeRepo,
-    private readonly nodesRepo: NodesRepo,
+    @inject(EMBEDDING_QUEUE_REPO_TOKEN) private readonly queueRepo: EmbeddingQueueRepo,
+    @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidationRepo: ConsolidationRepo,
+    @inject(EDGES_REPO_TOKEN) private readonly edgesRepo: EdgesRepo,
+    @inject(CODE_REPO_TOKEN) private readonly codeRepo: CodeRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodesRepo: NodesRepo,
 
     private readonly sessionService: SessionService,
     private readonly nodeReferences: NodeReferenceService,
@@ -171,7 +178,7 @@ export class ConsolidationWorker {
     this.currentRun = null;
 
     if (abandoned !== null) {
-      this.reporter.closeRun(abandoned, this.now(), "the daemon stopped mid-sweep");
+      await this.reporter.closeRun(abandoned, this.now(), "the daemon stopped mid-sweep");
     }
 
     await this.queueRepo.releaseWorkerLease(CONSOLIDATION_LEASE, this.ownerId);
@@ -190,7 +197,7 @@ export class ConsolidationWorker {
 
     this.stageMark = { stage, at };
     result.stage = stage;
-    this.reporter.reportTick(runId, result);
+    await this.reporter.reportTick(runId, result);
   }
 
   // `shouldYield` is checked between stages, which is where the sweep already pauses to
@@ -229,7 +236,7 @@ export class ConsolidationWorker {
 
     this.currentRun = runId;
 
-    this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
+    await this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
 
     this.stageMark = null;
 
@@ -308,7 +315,7 @@ export class ConsolidationWorker {
       return false;
     }
 
-    return this.queueRepo.holdWorkerLease(
+    return await this.queueRepo.holdWorkerLease(
       CONSOLIDATION_LEASE,
       this.ownerId,
       this.config.leaseTtlMs,
@@ -361,12 +368,12 @@ export class ConsolidationWorker {
     const out: NeighbourPair[] = [];
     const breath = breather(this.batch.msPerBreath);
 
-    for (const seed of this.consolidationRepo.sweepSeeds(budget)) {
+    for (const seed of await this.consolidationRepo.sweepSeeds(budget)) {
       // Each seed is a synchronous vector search, so a whole pass would hold the event
       // loop and the socket with it. The daemon serves reads on this thread.
       await breath();
 
-      for (const nb of this.consolidationRepo.neighboursOf(seed.id, {
+      for (const nb of await this.consolidationRepo.neighboursOf(seed.id, {
         minScore: this.thresholds.sim,
       })) {
         const key = pairKey(seed.id, nb.id);
@@ -395,13 +402,13 @@ export class ConsolidationWorker {
       return;
     }
 
-    const stored = this.consolidationRepo.storedSimilarPairs();
+    const stored = await this.consolidationRepo.storedSimilarPairs();
     const pairs = neighbours
       .filter((n) => n.seed.ordinal < this.batch.link && !stored.has(pairKey(n.src, n.dst)))
       .sort((a, b) => b.score - a.score);
 
     const maxDegree = this.thresholds.maxLinkDegree;
-    const degrees = this.consolidationRepo.linkDegrees([
+    const degrees = await this.consolidationRepo.linkDegrees([
       ...new Set(pairs.flatMap((p) => [p.src, p.dst])),
     ]);
     const breath = breather(this.batch.msPerBreath);
@@ -420,7 +427,7 @@ export class ConsolidationWorker {
       degrees.set(p.dst, dstDegree + 1);
 
       if (posture === Posture.AUTO) {
-        const inserted = this.edgesRepo.insertSystemSimilarityIfLive(
+        const inserted = await this.edgesRepo.insertSystemSimilarityIfLive(
           p.src,
           p.dst,
           this.ownerId,
@@ -431,7 +438,7 @@ export class ConsolidationWorker {
           result.links_added++;
         }
       } else {
-        const id = this.consolidationRepo.insertCandidate({
+        const id = await this.consolidationRepo.insertCandidate({
           kind: ConsolidationKind.LINK,
           member_ids: [p.src, p.dst],
           canonical_id: p.dst,
@@ -453,8 +460,8 @@ export class ConsolidationWorker {
   // `[[wikilink]]` to another note, and a `backticked` symbol name from this project's own
   // code. Both need every live body, so they share the read and the watermark.
   private async resolveCitations(now: string, result: ConsolidationTickResult): Promise<void> {
-    const revisions = this.consolidationRepo.revisionCount();
-    const codeIndex = this.consolidationRepo.codeIndexWatermark();
+    const revisions = await this.consolidationRepo.revisionCount();
+    const codeIndex = await this.consolidationRepo.codeIndexWatermark();
 
     if (
       this.lastCitationScan?.revisions === revisions &&
@@ -465,17 +472,17 @@ export class ConsolidationWorker {
       return;
     }
 
-    const bodies = this.consolidationRepo.authoredBodies();
+    const bodies = await this.consolidationRepo.authoredBodies();
     const live = slugIndexOf(bodies);
-    const retired = slugIndexOf(this.consolidationRepo.retiredAuthoredTitles());
-    const symbols = this.citableSymbolIndex();
+    const retired = slugIndexOf(await this.consolidationRepo.retiredAuthoredTitles());
+    const symbols = await this.citableSymbolIndex();
     const breath = breather(this.batch.msPerBreath);
 
     for (const row of bodies) {
       await breath();
 
       for (const target of wikilinkTargets(row.content)) {
-        const dst = this.wikilinkTarget(live, retired, target);
+        const dst = await this.wikilinkTarget(live, retired, target);
 
         if (dst === null) {
           result.wikilinks_dangling++;
@@ -484,12 +491,14 @@ export class ConsolidationWorker {
 
         if (dst === row.id) continue;
 
-        if (this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, dst, this.ownerId, now)) {
+        if (
+          await this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, dst, this.ownerId, now)
+        ) {
           result.wikilinks_linked++;
         }
       }
 
-      this.proposeDocuments(now, result, symbols, row);
+      await this.proposeDocuments(now, result, symbols, row);
     }
 
     this.lastCitationScan = { revisions, codeIndex, dangling: result.wikilinks_dangling };
@@ -497,16 +506,15 @@ export class ConsolidationWorker {
 
   // Cited symbols, by name, excluding repos whose root is gone: a detached repo cannot be
   // checked against source, so nothing new should be linked into it.
-  private citableSymbolIndex(): Map<string, { node_id: string; repo: string }[]> {
+  private async citableSymbolIndex(): Promise<Map<string, { node_id: string; repo: string }[]>> {
     const attached = new Set(
-      this.codeRepo
-        .allRepoProvenance()
+      (await this.codeRepo.allRepoProvenance())
         .filter((provenance) => !provenance.detached)
         .map((provenance) => provenance.repo),
     );
     const index = new Map<string, { node_id: string; repo: string }[]>();
 
-    for (const symbol of this.consolidationRepo.citableSymbols()) {
+    for (const symbol of await this.consolidationRepo.citableSymbols()) {
       if (!attached.has(symbol.repo)) continue;
 
       index.set(symbol.name, [...(index.get(symbol.name) ?? []), symbol]);
@@ -517,12 +525,12 @@ export class ConsolidationWorker {
 
   // Proposed, never applied: the citation is authored but which symbol it means is
   // inferred, and a wrong edge would be in the graph for good.
-  private proposeDocuments(
+  private async proposeDocuments(
     now: string,
     result: ConsolidationTickResult,
     symbols: Map<string, { node_id: string; repo: string }[]>,
     row: { id: string; project: string | null; content: string },
-  ): void {
+  ): Promise<void> {
     const posture = this.posture.documents;
 
     if (posture === Posture.OFF) {
@@ -542,12 +550,12 @@ export class ConsolidationWorker {
 
       const symbol = [...targets][0]!;
 
-      if (this.edgesRepo.pairIsConnected(row.id, symbol)) continue;
+      if (await this.edgesRepo.pairIsConnected(row.id, symbol)) continue;
 
       if (posture === Posture.AUTO) {
-        if (this.edgesRepo.insertSystemDocumentsIfLive(row.id, symbol, this.ownerId, now)) {
+        if (await this.edgesRepo.insertSystemDocumentsIfLive(row.id, symbol, this.ownerId, now)) {
           result.documents_linked++;
-          this.consolidationRepo.resolvePendingByMembers(
+          await this.consolidationRepo.resolvePendingByMembers(
             ConsolidationKind.DOCUMENTS,
             [row.id, symbol],
             ConsolidationStatus.APPLIED,
@@ -559,7 +567,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const id = this.consolidationRepo.insertCandidate({
+      const id = await this.consolidationRepo.insertCandidate({
         kind: ConsolidationKind.DOCUMENTS,
         member_ids: [row.id, symbol],
         canonical_id: symbol,
@@ -574,7 +582,11 @@ export class ConsolidationWorker {
   // A wikilink written before a supersede still names the retired title, so a target that
   // no longer resolves live is followed forward — the same move `invalidate` makes when it
   // repoints a retired node's referrers. More than one successor is not a guess to make.
-  private wikilinkTarget(live: SlugIndex, retired: SlugIndex, target: string): string | null {
+  private async wikilinkTarget(
+    live: SlugIndex,
+    retired: SlugIndex,
+    target: string,
+  ): Promise<string | null> {
     const hit = resolveTarget(live, target);
 
     if (hit.kind === "exact" || hit.kind === "prefix") return hit.id;
@@ -584,7 +596,7 @@ export class ConsolidationWorker {
 
     if (gone.kind !== "exact" && gone.kind !== "prefix") return null;
 
-    const successors = this.nodeReferences.terminalLiveSuccessors(gone.id);
+    const successors = await this.nodeReferences.terminalLiveSuccessors(gone.id);
 
     return successors.length === 1 ? successors[0]! : null;
   }
@@ -597,7 +609,7 @@ export class ConsolidationWorker {
       return;
     }
 
-    const stale = this.consolidationRepo.overCapSimilarLinks({
+    const stale = await this.consolidationRepo.overCapSimilarLinks({
       maxDegree: this.thresholds.maxLinkDegree,
       limit: this.batch.linkPrune,
     });
@@ -606,7 +618,7 @@ export class ConsolidationWorker {
     for (const edge of stale) {
       await breath();
 
-      this.edgesRepo.invalidateEdge(edge.src, edge.dst, EdgeType.SIMILAR_TO, now);
+      await this.edgesRepo.invalidateEdge(edge.src, edge.dst, EdgeType.SIMILAR_TO, now);
       result.links_pruned++;
     }
   }
@@ -625,7 +637,7 @@ export class ConsolidationWorker {
     const cutoff = new Date(
       Date.parse(now) - this.thresholds.minAgeDays * 86_400_000,
     ).toISOString();
-    const clusters = this.consolidationRepo.staleEpisodicClusters({
+    const clusters = await this.consolidationRepo.staleEpisodicClusters({
       minScore: this.thresholds.sim,
       minCluster: this.thresholds.minCluster,
       cutoff,
@@ -636,7 +648,9 @@ export class ConsolidationWorker {
     for (const cluster of clusters) {
       await breath();
 
-      if (this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)) {
+      if (
+        await this.consolidationRepo.candidateExists(ConsolidationKind.DISTILL, cluster.member_ids)
+      ) {
         continue;
       }
 
@@ -648,7 +662,7 @@ export class ConsolidationWorker {
         {
           kind: ConsolidationKind.DISTILL,
           project: cluster.project,
-          inputs: this.consolidationRepo.candidateInputs(cluster.member_ids),
+          inputs: await this.consolidationRepo.candidateInputs(cluster.member_ids),
         },
         result,
       );
@@ -656,7 +670,7 @@ export class ConsolidationWorker {
       // Provider judged these not worth consolidating -> record a dismissed candidate
       // (with the reason) so it is auditable and never re-proposed.
       if (gen?.recommendation === ConsolidationRecommendation.REJECT) {
-        const id = this.consolidationRepo.insertCandidate({
+        const id = await this.consolidationRepo.insertCandidate({
           kind: ConsolidationKind.DISTILL,
           project: cluster.project,
           member_ids: cluster.member_ids,
@@ -666,7 +680,7 @@ export class ConsolidationWorker {
         });
 
         if (id) {
-          this.consolidationRepo.resolveCandidate(
+          await this.consolidationRepo.resolveCandidate(
             id,
             ConsolidationStatus.DISMISSED,
             this.ownerId,
@@ -679,7 +693,7 @@ export class ConsolidationWorker {
       }
 
       if (posture === Posture.AUTO && gen) {
-        this.nodesRepo.applyDistillation({
+        await this.nodesRepo.applyDistillation({
           title: gen.title,
           content: gen.body,
           project: cluster.project,
@@ -693,7 +707,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const id = this.consolidationRepo.insertCandidate({
+      const id = await this.consolidationRepo.insertCandidate({
         kind: ConsolidationKind.DISTILL,
         project: cluster.project,
         member_ids: cluster.member_ids,
@@ -746,7 +760,7 @@ export class ConsolidationWorker {
     for (const hit of hits) {
       await breath();
 
-      const pair = this.consolidationRepo.duplicatePairFor(hit.src, hit.dst, hit.score);
+      const pair = await this.consolidationRepo.duplicatePairFor(hit.src, hit.dst, hit.score);
 
       if (pair === null) {
         continue;
@@ -774,14 +788,14 @@ export class ConsolidationWorker {
         {
           kind: ConsolidationKind.MERGE,
           project: pair.project,
-          inputs: this.consolidationRepo.candidateInputs(pair.member_ids),
+          inputs: await this.consolidationRepo.candidateInputs(pair.member_ids),
         },
         result,
       );
 
       // Provider judged these distinct (not a true duplicate) -> dismiss with the reason.
       if (gen?.recommendation === ConsolidationRecommendation.REJECT) {
-        const id = this.consolidationRepo.insertCandidate({
+        const id = await this.consolidationRepo.insertCandidate({
           kind: ConsolidationKind.MERGE,
           project: pair.project,
           member_ids: pair.member_ids,
@@ -792,7 +806,7 @@ export class ConsolidationWorker {
         });
 
         if (id) {
-          this.consolidationRepo.resolveCandidate(
+          await this.consolidationRepo.resolveCandidate(
             id,
             ConsolidationStatus.DISMISSED,
             this.ownerId,
@@ -808,7 +822,7 @@ export class ConsolidationWorker {
       // both nodes live, so an 88.3%-precision judge costs a ranking nudge, not a node.
       // Collapsing two nodes into one is `consolidate_apply` with `collapse`, by hand.
       if (posture === Posture.AUTO) {
-        const recorded = this.edgesRepo.insertDuplicateOfIfLive(
+        const recorded = await this.edgesRepo.insertDuplicateOfIfLive(
           loser,
           pair.canonical_id,
           this.ownerId,
@@ -823,7 +837,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const id = this.consolidationRepo.insertCandidate({
+      const id = await this.consolidationRepo.insertCandidate({
         kind: ConsolidationKind.MERGE,
         project: pair.project,
         member_ids: pair.member_ids,
@@ -848,7 +862,7 @@ export class ConsolidationWorker {
       return;
     }
 
-    for (const cand of this.consolidationRepo.pendingNeedingProposal(this.batch.backfill)) {
+    for (const cand of await this.consolidationRepo.pendingNeedingProposal(this.batch.backfill)) {
       if (!(await this.holdLease())) {
         return;
       }
@@ -857,7 +871,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const inputs = this.consolidationRepo.candidateInputs(cand.member_ids);
+      const inputs = await this.consolidationRepo.candidateInputs(cand.member_ids);
 
       if (!inputs.length) {
         continue;
@@ -872,12 +886,12 @@ export class ConsolidationWorker {
         continue; // generation failed -> leave for a later sweep
       }
 
-      this.consolidationRepo.setCandidateProposal(cand.id, gen);
+      await this.consolidationRepo.setCandidateProposal(cand.id, gen);
 
       // Store the verdict either way; auto-dismiss the ones judged not worth consolidating,
       // so the Review inbox surfaces only genuine duplicates.
       if (gen.recommendation === ConsolidationRecommendation.REJECT) {
-        this.consolidationRepo.resolveCandidate(
+        await this.consolidationRepo.resolveCandidate(
           cand.id,
           ConsolidationStatus.DISMISSED,
           this.ownerId,
@@ -896,9 +910,8 @@ export class ConsolidationWorker {
   // Repos whose root is no longer on disk. Their symbols cannot be re-verified against
   // source, but neither were they deleted from it — the checkout moved, the volume is
   // unmounted, or the remembered root is stale — so the prune must leave them alone.
-  private unreachableRepos(): string[] {
-    return this.codeRepo
-      .storedRepoRoots()
+  private async unreachableRepos(): Promise<string[]> {
+    return (await this.codeRepo.storedRepoRoots())
       .filter((repo) => !existsSync(repo.root))
       .map((repo) => repo.name);
   }
@@ -910,13 +923,16 @@ export class ConsolidationWorker {
       return;
     }
 
-    const watermark = this.consolidationRepo.codeIndexWatermark();
+    const watermark = await this.consolidationRepo.codeIndexWatermark();
 
     if (this.lastOrphanScan?.clean === true && this.lastOrphanScan.watermark === watermark) {
       return;
     }
 
-    const dead = this.consolidationRepo.deadMirrorNodes(this.batch.prune, this.unreachableRepos());
+    const dead = await this.consolidationRepo.deadMirrorNodes(
+      this.batch.prune,
+      await this.unreachableRepos(),
+    );
 
     // Not clean means the batch limit may have truncated the list, so the next sweep looks
     // again whatever the watermark says.
@@ -928,10 +944,10 @@ export class ConsolidationWorker {
       await breath();
 
       if (posture === Posture.AUTO) {
-        this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
+        await this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
         result.pruned++;
       } else {
-        const cid = this.consolidationRepo.insertCandidate({
+        const cid = await this.consolidationRepo.insertCandidate({
           kind: ConsolidationKind.PRUNE,
           member_ids: [id],
           score: 1,
@@ -955,7 +971,7 @@ export class ConsolidationWorker {
       return;
     }
 
-    for (const node of this.consolidationRepo.unannotatedSemantic(this.batch.annotate)) {
+    for (const node of await this.consolidationRepo.unannotatedSemantic(this.batch.annotate)) {
       if (!(await this.holdLease())) {
         return;
       }
@@ -975,7 +991,7 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const ok = this.nodesRepo.applyAnnotation({
+      const ok = await this.nodesRepo.applyAnnotation({
         nodeId: node.id,
         rev: node.rev,
         annotationsJson: JSON.stringify(a),

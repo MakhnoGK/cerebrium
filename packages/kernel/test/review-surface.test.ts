@@ -8,10 +8,10 @@ import {
   ReviewArtifact,
   ReviewDecision,
 } from "@cerebrium/contracts/vocab";
+import { edgeRef } from "@/domain/ports/storage";
 import { CallPipeline } from "@/application/call-pipeline";
 import { ReviewService } from "@/application/services";
 import { CALL_SURFACE, callCapability } from "@/application/use-cases";
-import { edgeRef } from "@/db/repositories";
 import {
   NEUTRAL_WEIGHT,
   OPEN_PROFILE,
@@ -150,13 +150,13 @@ describe("who is under review", () => {
     expect(reviews().scope().principals).not.toContain("partial");
   });
 
-  it("should review nobody when no principal writes on suggest", () => {
+  it("should review nobody when no principal writes on suggest", async () => {
     // Given
     policy({ [RUNNER]: profile({ write: Posture.AUTO }) });
 
     // When / Then
     expect(reviews().reviewsNobody()).toBe(true);
-    expect(reviews().pending()).toEqual({ edges: 0, nodes: 0, total: 0 });
+    expect(await reviews().pending()).toEqual({ edges: 0, nodes: 0, total: 0 });
   });
 });
 
@@ -211,7 +211,7 @@ describe("the review queue", () => {
     );
 
     // When / Then
-    expect(reviews().pending()).toMatchObject({ nodes: 1, total: 1 });
+    expect(await reviews().pending()).toMatchObject({ nodes: 1, total: 1 });
   });
 
   it("should leave out a system edge, which no agent authored", async () => {
@@ -220,7 +220,7 @@ describe("the review queue", () => {
     const src = await note(human, "One");
     const dst = await note(human, "Two");
 
-    env.edges.insertSystemSimilarityIfLive(src, dst, human, env.clock.now(), 0.9);
+    await env.edges.insertSystemSimilarityIfLive(src, dst, human, env.clock.now(), 0.9);
 
     // When / Then — provenance, not authorship, is what the queue filters on.
     expect(await pending()).toEqual([]);
@@ -302,7 +302,7 @@ describe("resolving a review", () => {
 
     // Then
     expect(result.undone).toBe(true);
-    expect(env.nodes.referenceState(written.envelope.id)).toBe("invalidated");
+    expect(await env.nodes.referenceState(written.envelope.id)).toBe("invalidated");
   });
 
   it("should record the decision without moving a retirement someone else already made", async () => {

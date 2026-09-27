@@ -2,7 +2,8 @@ import { injectable } from "tsyringe";
 import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@cerebrium/contracts/types";
 import { toEnvelope } from "@cerebrium/contracts/types";
 import { MemoryKind, SYMBOL_TYPE } from "@cerebrium/contracts/vocab";
-import { BaseRepo } from "@/db/repositories/base";
+import type { SearchRepo } from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
 import {
   AUTHORED_VEC,
   CODE_VEC,
@@ -10,7 +11,7 @@ import {
   enrichedByIds,
   LATEST_REVISION,
   type VectorPool,
-} from "@/db/repositories/internal";
+} from "@/db/sqlite/internal";
 
 // KNN over-fetch per pool: pull this many nearest chunks, then filter + collapse to the
 // best chunk per node. The two pools carry different budgets because they are different
@@ -25,8 +26,8 @@ const CODE_VEC_K = 200;
 // Read-side retrieval: full-text (bm25), vector KNN, and the session working-set
 // queries. Read-only — no transactions.
 @injectable()
-export class SearchRepo extends BaseRepo {
-  vectorSearch(
+export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
+  async vectorSearch(
     embedding: number[],
     opts: {
       project?: string;
@@ -37,7 +38,7 @@ export class SearchRepo extends BaseRepo {
       asOf?: string;
       validAt?: string;
     },
-  ): VectorRow[] {
+  ): Promise<VectorRow[]> {
     const where: string[] = ["c.stale = 0"];
     const params: Record<string, unknown> = {
       q: JSON.stringify(embedding),
@@ -129,7 +130,7 @@ export class SearchRepo extends BaseRepo {
     return [AUTHORED_VEC, CODE_VEC];
   }
 
-  search(opts: {
+  async search(opts: {
     match: string;
     project?: string;
     kinds?: string[];
@@ -138,7 +139,7 @@ export class SearchRepo extends BaseRepo {
     cap: number;
     asOf?: string;
     validAt?: string;
-  }): { rows: SearchRow[]; total: number } {
+  }): Promise<{ rows: SearchRow[]; total: number }> {
     const where: string[] = ["node_fts MATCH @match"];
     const params: Record<string, unknown> = { match: opts.match };
     if (opts.project !== undefined) {
@@ -203,7 +204,10 @@ export class SearchRepo extends BaseRepo {
 
   // Rows for ids the graph surfaced — the same shape the two candidate branches return, so
   // graph hits go through the identical scoring and envelope path.
-  rowsFor(ids: string[], opts: { asOf?: string; validAt?: string } = {}): EnrichedRow[] {
+  async rowsFor(
+    ids: string[],
+    opts: { asOf?: string; validAt?: string } = {},
+  ): Promise<EnrichedRow[]> {
     if (!ids.length) return [];
 
     if (opts.asOf === undefined && opts.validAt === undefined) {
@@ -236,7 +240,7 @@ export class SearchRepo extends BaseRepo {
   // kNN uses. Nodes whose chunks are still queued for embedding are simply absent. Ids come
   // from a finished search and may span both pools, so each is queried in turn rather than
   // unioned: a UNION would make the planner scan a 126k-row vec0 table for a handful of ids.
-  vectorsFor(ids: string[]): Map<string, Float32Array> {
+  async vectorsFor(ids: string[]): Promise<Map<string, Float32Array>> {
     const out = new Map<string, Float32Array>();
 
     if (!ids.length) return out;
@@ -267,10 +271,10 @@ export class SearchRepo extends BaseRepo {
 
   // Best FTS match chunk per node, using the section-level chunk_fts index. Allows FTS hits
   // to provide a token-efficient snippet and section name, same as the vector path.
-  bestFtsChunksFor(
+  async bestFtsChunksFor(
     ids: string[],
     match: string,
-  ): Map<string, { chunk_text: string; chunk_heading: string | null }> {
+  ): Promise<Map<string, { chunk_text: string; chunk_heading: string | null }>> {
     const out = new Map<string, { chunk_text: string; chunk_heading: string | null }>();
     if (!ids.length) return out;
 
@@ -299,7 +303,7 @@ export class SearchRepo extends BaseRepo {
     return " AND n.project = @project";
   }
 
-  validSemantic(project: string | undefined, limit: number): Envelope[] {
+  async validSemantic(project: string | undefined, limit: number): Promise<Envelope[]> {
     const params: Record<string, unknown> = { limit };
     const clause = this.projectClause(project, params);
     return (
@@ -312,10 +316,10 @@ export class SearchRepo extends BaseRepo {
     ).map(toEnvelope);
   }
 
-  lastCheckpoints(
+  async lastCheckpoints(
     project: string | undefined,
     limit: number,
-  ): { envelope: Envelope; content: string }[] {
+  ): Promise<{ envelope: Envelope; content: string }[]> {
     const params: Record<string, unknown> = { limit };
     const clause = this.projectClause(project, params);
     return (
@@ -328,7 +332,7 @@ export class SearchRepo extends BaseRepo {
     ).map((r) => ({ envelope: toEnvelope(r), content: r.content }));
   }
 
-  validTasks(project: string | undefined, limit: number): Envelope[] {
+  async validTasks(project: string | undefined, limit: number): Promise<Envelope[]> {
     const params: Record<string, unknown> = { limit };
     const clause = this.projectClause(project, params);
     return (
@@ -341,7 +345,7 @@ export class SearchRepo extends BaseRepo {
     ).map(toEnvelope);
   }
 
-  recentValid(project: string | undefined, limit: number): Envelope[] {
+  async recentValid(project: string | undefined, limit: number): Promise<Envelope[]> {
     const params: Record<string, unknown> = { limit };
     const clause = this.projectClause(project, params);
     // Exclude code mirrors: the orient view is authored memory, not the (potentially

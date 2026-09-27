@@ -1,6 +1,7 @@
 import { inject } from "tsyringe";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import { HintsService } from "@/application/services";
 import {
   UPDATE_MEMORY,
@@ -9,7 +10,6 @@ import {
   type UpdateMemoryArgs,
   type UpdateMemoryResult,
 } from "@/application/use-cases/contracts";
-import { NodesRepo } from "@/db/repositories";
 
 const MAX_CONTENT = 50_000;
 
@@ -17,12 +17,12 @@ const MAX_CONTENT = 50_000;
 export class LocalUpdateMemory implements UpdateMemory {
   constructor(
     private readonly hints: HintsService,
-    private readonly nodes: NodesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
-  invoke(args: UpdateMemoryArgs): Promise<UpdateMemoryResult> {
-    const current = this.nodes.envelope(args.id);
+  async invoke(args: UpdateMemoryArgs): Promise<UpdateMemoryResult> {
+    const current = await this.nodes.envelope(args.id);
 
     if (!current) throw new Error(`node ${args.id} does not exist.`);
     if (current.kind === MemoryKind.EPISODIC) {
@@ -60,15 +60,15 @@ export class LocalUpdateMemory implements UpdateMemory {
     }
 
     if (touchesWindow) {
-      this.nodes.setEventWindow(args.id, window);
+      await this.nodes.setEventWindow(args.id, window);
     }
 
     // The event window is node metadata, not content, so correcting it alone does not mint
     // a revision — there is no new body to keep.
     const envelope =
       args.content === undefined && args.title === undefined
-        ? this.nodes.envelope(args.id)!
-        : this.nodes.addRevision(args.id, {
+        ? (await this.nodes.envelope(args.id))!
+        : await this.nodes.addRevision(args.id, {
             content: args.content,
             title: args.title,
             session_id: args.session_id,

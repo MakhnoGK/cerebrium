@@ -7,7 +7,7 @@ import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/017_retire_stale_similarities.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/017_retire_stale_similarities.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -32,13 +32,13 @@ describe("Migration 017: retire stale similarities", () => {
     const liveB = await writeFact(sessionId, "live b");
     const deadA = await writeFact(sessionId, "dead a");
     const deadB = await writeFact(sessionId, "dead b");
-    env.nodes.invalidateNode(deadA, { ts: env.clock.t, session_id: sessionId });
-    env.nodes.invalidateNode(deadB, { ts: env.clock.t, session_id: sessionId });
-    env.edges.insertEdge(liveA, deadA, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
-    env.edges.insertEdge(deadA, liveB, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
-    env.edges.insertEdge(deadA, deadB, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
-    env.edges.insertEdge(liveA, liveB, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
-    env.edges.insertEdge(liveB, deadB, EdgeType.SIMILAR_TO, "agent", sessionId, env.clock.t);
+    await env.nodes.invalidateNode(deadA, { ts: env.clock.t, session_id: sessionId });
+    await env.nodes.invalidateNode(deadB, { ts: env.clock.t, session_id: sessionId });
+    await env.edges.insertEdge(liveA, deadA, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
+    await env.edges.insertEdge(deadA, liveB, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
+    await env.edges.insertEdge(deadA, deadB, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
+    await env.edges.insertEdge(liveA, liveB, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
+    await env.edges.insertEdge(liveB, deadB, EdgeType.SIMILAR_TO, "agent", sessionId, env.clock.t);
 
     up(env.db);
 
@@ -58,8 +58,8 @@ describe("Migration 017: retire stale similarities", () => {
     const sessionId = (await container.resolve(SessionStartTool).invoke({})).session_id;
     const live = await writeFact(sessionId, "live");
     const dead = await writeFact(sessionId, "dead");
-    env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: sessionId });
-    env.edges.insertEdge(live, dead, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
+    await env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: sessionId });
+    await env.edges.insertEdge(live, dead, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
 
     up(env.db);
     const once = env.db.prepare("SELECT * FROM edges ORDER BY src, dst, type").all();

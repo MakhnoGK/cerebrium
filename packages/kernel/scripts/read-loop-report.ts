@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import "reflect-metadata";
 import type Database from "better-sqlite3";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { buildContainer } from "@/container";
 import { DatabaseConfig } from "@/infrastructure/config";
 

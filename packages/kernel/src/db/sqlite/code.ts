@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
-import type Database from "better-sqlite3";
-import { inject, injectable } from "tsyringe";
+import { injectable } from "tsyringe";
 import type {
   ExtractedSymbol,
   FileIndexInput,
@@ -12,32 +11,31 @@ import type {
 } from "@cerebrium/contracts/types";
 import { toEnvelope } from "@cerebrium/contracts/types";
 import { EdgeType } from "@cerebrium/contracts/vocab";
-import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
-import { EdgesRepo } from "@/db/repositories/edges";
-import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
+import type { CodeRepo } from "@/domain/ports/storage";
+import { BaseRepo } from "@/db/sqlite/base";
+import {
+  edgesOf,
+  enrichedById,
+  ftsPut,
+  insertEdge,
+  insertRevision,
+  syncChunks,
+} from "@/db/sqlite/internal";
 import { newId } from "@/core/ids";
 
 // The code mirror: symbol nodes + their facet rows, per-file hash gate,
 // incremental index application, cross-file edge resolution, structural lookups, and
-// per-repo provenance. Symbol writes reuse the shared node-write primitives; edges
-// are delegated to EdgesRepo.
+// per-repo provenance. Symbol and edge writes reuse the shared primitives in internal.ts.
 @injectable()
-export class CodeRepo extends BaseRepo {
-  constructor(
-    @inject(DB_TOKEN) db: Database.Database,
-    private readonly edges: EdgesRepo,
-  ) {
-    super(db);
-  }
-
-  codeFileHash(repo: string, path: string): string | undefined {
+export class SqliteCodeRepo extends BaseRepo implements CodeRepo {
+  async codeFileHash(repo: string, path: string): Promise<string | undefined> {
     const row = this.db
       .prepare("SELECT hash FROM code_files WHERE repo = ? AND path = ?")
       .get(repo, path) as { hash: string } | undefined;
     return row?.hash;
   }
 
-  listCodeFilePaths(repo: string): string[] {
+  async listCodeFilePaths(repo: string): Promise<string[]> {
     return (
       this.db.prepare("SELECT path FROM code_files WHERE repo = ?").all(repo) as { path: string }[]
     ).map((r) => r.path);
@@ -117,7 +115,7 @@ export class CodeRepo extends BaseRepo {
   // transaction, so a crash mid-repo leaves a consistent partial index (the next
   // run resumes by hash-gate). Cross-file `imports`/`calls` edges are resolved in a
   // second pass once every file's symbols exist (see rebuildResolvedEdges).
-  applyFileIndex(input: FileIndexInput): FileIndexResult {
+  async applyFileIndex(input: FileIndexInput): Promise<FileIndexResult> {
     const result: FileIndexResult = { added: 0, updated: 0, invalidated: 0, edges: 0 };
     this.tx(() => {
       const prior = this.db
@@ -175,7 +173,7 @@ export class CodeRepo extends BaseRepo {
         const src = nodeByExt.get(d.src);
         const dst = nodeByExt.get(d.dst);
         if (src && dst) {
-          this.edges.insertEdge(src, dst, EdgeType.DEFINES, "system", input.session_id, input.ts);
+          insertEdge(this.db, src, dst, EdgeType.DEFINES, "system", input.session_id, input.ts);
           result.edges++;
         }
       }
@@ -215,7 +213,7 @@ export class CodeRepo extends BaseRepo {
 
   // Live (non-invalidated) symbols for a repo — the directory used to resolve
   // cross-file imports/calls once every file's symbols exist.
-  repoSymbolDirectory(repo: string): SymbolDirEntry[] {
+  async repoSymbolDirectory(repo: string): Promise<SymbolDirEntry[]> {
     return this.db
       .prepare(
         `SELECT s.node_id AS node_id, s.path AS path, s.name AS name, s.qualified AS qualified,
@@ -228,14 +226,14 @@ export class CodeRepo extends BaseRepo {
 
   // Pass 2 of indexing: replace a file's `imports`/`calls` edges with a freshly
   // resolved set. Only called for files (re)indexed this run — incremental.
-  rebuildResolvedEdges(
+  async rebuildResolvedEdges(
     repo: string,
     path: string,
     type: EdgeType,
     pairs: { src: string; dst: string }[],
     session_id: string,
     ts: string,
-  ): number {
+  ): Promise<number> {
     let n = 0;
     this.tx(() => {
       this.invalidateFileEdges(repo, path, type, ts);
@@ -244,7 +242,7 @@ export class CodeRepo extends BaseRepo {
         const key = `${p.src} ${p.dst}`;
         if (p.src === p.dst || seen.has(key)) continue;
         seen.add(key);
-        this.edges.insertEdge(p.src, p.dst, type, "system", session_id, ts);
+        insertEdge(this.db, p.src, p.dst, type, "system", session_id, ts);
         n++;
       }
     });
@@ -253,7 +251,7 @@ export class CodeRepo extends BaseRepo {
 
   // Whole-repo sweep: a file gone from disk -> invalidate its symbol nodes (never
   // deleted; history + documents edges survive) and drop the code_files bookkeeping.
-  removeFile(repo: string, path: string, ts: string): number {
+  async removeFile(repo: string, path: string, ts: string): Promise<number> {
     let invalidated = 0;
     this.tx(() => {
       const ids = this.fileSymbolNodeIds(repo, path);
@@ -266,7 +264,11 @@ export class CodeRepo extends BaseRepo {
     return invalidated;
   }
 
-  symbolDetail(nodeId: string): (SymbolFacets & { source: string }) | undefined {
+  async symbolDetail(nodeId: string): Promise<(SymbolFacets & { source: string }) | undefined> {
+    return this.symbolDetailNow(nodeId);
+  }
+
+  private symbolDetailNow(nodeId: string): (SymbolFacets & { source: string }) | undefined {
     return this.db
       .prepare(
         `SELECT repo, path, lang, symbol_kind, name, qualified, signature, start_line, end_line, source
@@ -277,15 +279,19 @@ export class CodeRepo extends BaseRepo {
 
   private symbolLookup(nodeId: string): SymbolLookup | undefined {
     const row = enrichedById(this.db, nodeId);
-    const detail = this.symbolDetail(nodeId);
+    const detail = this.symbolDetailNow(nodeId);
     if (!row || !detail) return undefined;
     const { source: _source, ...facets } = detail;
     const structural = new Set([EdgeType.DEFINES, "calls", "imports"]);
-    const neighbors = this.edges.edgesOf(nodeId).filter((e) => structural.has(e.edge));
+    const neighbors = edgesOf(this.db, nodeId).filter((e) => structural.has(e.edge));
     return { envelope: toEnvelope(row), facets, neighbors };
   }
 
-  findSymbolsByName(name: string, repo: string | undefined, limit: number): SymbolLookup[] {
+  async findSymbolsByName(
+    name: string,
+    repo: string | undefined,
+    limit: number,
+  ): Promise<SymbolLookup[]> {
     const params: unknown[] = [name, name];
     let clause = "(s.name = ? OR s.qualified = ?)";
     if (repo !== undefined) {
@@ -304,7 +310,11 @@ export class CodeRepo extends BaseRepo {
     return ids.map((id) => this.symbolLookup(id)).filter((x): x is SymbolLookup => x !== undefined);
   }
 
-  findSymbolsInFile(repo: string | undefined, path: string, limit: number): SymbolLookup[] {
+  async findSymbolsInFile(
+    repo: string | undefined,
+    path: string,
+    limit: number,
+  ): Promise<SymbolLookup[]> {
     const params: unknown[] = [path, `%/${path}`];
     // Match an exact repo-relative path, or a path suffix so callers can pass a bare
     // file name / partial path without knowing the repo root layout.
@@ -328,14 +338,14 @@ export class CodeRepo extends BaseRepo {
   // Record which root/branch/commit an index run reflected. Rewritten every run so
   // it stays accurate despite the per-file hash-gate. `root` lets a later run resolve
   // the repo by name without MEMORY_CODE_ROOTS. Informational for branch/commit/dirty.
-  setRepoProvenance(
+  async setRepoProvenance(
     repo: string,
     root: string | null,
     branch: string | null,
     commit: string | null,
     dirty: boolean,
     ts: string,
-  ): void {
+  ): Promise<void> {
     this.tx(() => {
       this.db
         .prepare(
@@ -347,19 +357,23 @@ export class CodeRepo extends BaseRepo {
     });
   }
 
-  repoProvenance(repo: string): RepoProvenance | undefined {
-    return this.allRepoProvenance().find((r) => r.repo === repo);
+  async repoProvenance(repo: string): Promise<RepoProvenance | undefined> {
+    return this.provenanceRows().find((r) => r.repo === repo);
   }
 
   // Repos remembered from a prior index-by-path, as index targets. Lets code_index
   // resolve a repo by name when MEMORY_CODE_ROOTS doesn't define it.
-  storedRepoRoots(): { name: string; root: string }[] {
-    return this.allRepoProvenance()
+  async storedRepoRoots(): Promise<{ name: string; root: string }[]> {
+    return this.provenanceRows()
       .filter((r): r is RepoProvenance & { root: string } => !!r.root)
       .map((r) => ({ name: r.repo, root: r.root }));
   }
 
-  allRepoProvenance(): RepoProvenance[] {
+  async allRepoProvenance(): Promise<RepoProvenance[]> {
+    return this.provenanceRows();
+  }
+
+  private provenanceRows(): RepoProvenance[] {
     // Read-only inspection (stats CLI) may hit a DB that a new-build writer hasn't
     // migrated yet — tolerate the table, or the `root` column, being absent.
     if (

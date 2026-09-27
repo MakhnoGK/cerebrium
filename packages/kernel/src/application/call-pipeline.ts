@@ -141,7 +141,7 @@ export class CallPipeline {
     // A pooled read runs on a read-only handle, so the use accounting `get` owes its
     // nodes is settled here instead.
     if (read === "fetch_nodes") {
-      this.uses.recordUse(usedIds(result), this.clock.now());
+      await this.uses.recordUse(usedIds(result), this.clock.now());
     }
 
     return result;

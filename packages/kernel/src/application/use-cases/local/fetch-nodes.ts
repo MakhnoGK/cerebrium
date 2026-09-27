@@ -1,5 +1,13 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  CHUNKS_REPO_TOKEN,
+  CODE_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  type ChunksRepo,
+  type CodeRepo,
+  type NodesRepo,
+} from "@/domain/ports/storage";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
 import {
   FETCH_NODES,
@@ -8,14 +16,13 @@ import {
   type FetchNodesArgs,
   type FetchNodesResult,
 } from "@/application/use-cases/contracts";
-import { ChunksRepo, CodeRepo, NodesRepo } from "@/db/repositories";
 
 @useCase(FETCH_NODES)
 export class LocalFetchNodes implements FetchNodes {
   constructor(
-    private readonly nodes: NodesRepo,
-    private readonly code: CodeRepo,
-    private readonly chunks: ChunksRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
+    @inject(CODE_REPO_TOKEN) private readonly code: CodeRepo,
+    @inject(CHUNKS_REPO_TOKEN) private readonly chunks: ChunksRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
   ) {}
@@ -38,7 +45,7 @@ export class LocalFetchNodes implements FetchNodes {
 
       // Under as_of the node has to have existed and still been valid then; a node that was
       // not yet written, or already invalidated, is simply absent from that view.
-      const past = args.as_of === undefined ? undefined : this.nodes.stateAt(id, args.as_of);
+      const past = args.as_of === undefined ? undefined : await this.nodes.stateAt(id, args.as_of);
 
       if (args.as_of !== undefined && !past) {
         not_found.push(id);
@@ -52,7 +59,7 @@ export class LocalFetchNodes implements FetchNodes {
       };
 
       if (full.envelope.type === "symbol") {
-        const detail = this.code.symbolDetail(id);
+        const detail = await this.code.symbolDetail(id);
 
         if (detail) {
           // For a code mirror, `get` is the sanctioned place to return the raw source
@@ -63,7 +70,7 @@ export class LocalFetchNodes implements FetchNodes {
         }
       }
 
-      const window = this.nodes.eventWindow(id);
+      const window = await this.nodes.eventWindow(id);
 
       if (window?.event_from != null) node.event_from = window.event_from;
       if (window?.event_to != null) node.event_to = window.event_to;
@@ -74,7 +81,7 @@ export class LocalFetchNodes implements FetchNodes {
       }
 
       if (args.rev !== undefined) {
-        const old = this.nodes.revisionContent(id, args.rev);
+        const old = await this.nodes.revisionContent(id, args.rev);
 
         if (old === undefined) {
           throw new Error(`node ${id} has no revision ${args.rev}.`);
@@ -85,18 +92,18 @@ export class LocalFetchNodes implements FetchNodes {
       }
 
       if (args.include_revisions) {
-        node.revisions = this.nodes.listRevisions(id);
+        node.revisions = await this.nodes.listRevisions(id);
       }
 
       if (narrowing) {
-        this.narrow(node, id, args.sections);
+        await this.narrow(node, id, args.sections);
       }
 
       nodes.push(node);
       used.push(id);
     }
 
-    this.uses.recordUse(used, this.clock.now());
+    await this.uses.recordUse(used, this.clock.now());
 
     return { nodes, not_found, used };
   }
@@ -132,8 +139,12 @@ export class LocalFetchNodes implements FetchNodes {
     }
   }
 
-  private narrow(node: Record<string, unknown>, id: string, sections?: string[]): void {
-    const outline = this.chunks.sections(id);
+  private async narrow(
+    node: Record<string, unknown>,
+    id: string,
+    sections?: string[],
+  ): Promise<void> {
+    const outline = await this.chunks.sections(id);
 
     node.outline = outline;
     // Whatever is asked for, it is a slice of the body; the raw source of a code
@@ -146,7 +157,7 @@ export class LocalFetchNodes implements FetchNodes {
       return;
     }
 
-    const picked = this.chunks.sectionText(id, sections);
+    const picked = await this.chunks.sectionText(id, sections);
 
     if (picked.missing.length) {
       const available = outline.map((s) => s.section);
