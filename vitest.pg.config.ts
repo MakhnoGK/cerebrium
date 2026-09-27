@@ -14,6 +14,8 @@ export default mergeConfig(
     test: {
       exclude: ["**/node_modules/**", ...sqliteOnly],
       env: { CEREBRIUM_TEST_BACKEND: "postgres" },
+      testTimeout: 30_000,
+      hookTimeout: 60_000,
     },
   }),
 );
