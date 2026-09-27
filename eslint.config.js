@@ -2,8 +2,76 @@ import js from "@eslint/js";
 import prettierRecommended from "eslint-plugin-prettier/recommended";
 import tseslint from "typescript-eslint";
 
+const TS = ["**/*.ts", "**/*.mts"];
+const within = (...dirs) => dirs.flatMap((dir) => TS.map((glob) => `${dir}/${glob}`));
+
+// Path aliases are the import contract. A parent-relative import resolves differently per
+// tool (tsc, vitest, each IDE's language server) and is what makes modules "not found" in
+// some editors. Sibling `./…` imports stay legal — they never cross a folder.
+const PARENT_RELATIVE = {
+  group: ["../*", "../**"],
+  message:
+    "Use a path alias instead of a parent-relative import: '@/…' inside the kernel, '@cerebrium/…' from an app, '@test/…' for kernel test helpers.",
+};
+const CONTRACTS_BOUNDARY = {
+  group: ["@/*", "@cerebrium/kernel/*", "@host/*", "@plugin/*", "@test/*", "@scripts/*"],
+  message: "contracts are the wire both sides share — they depend on nothing else in the repo.",
+};
+const KERNEL_BOUNDARY = {
+  group: ["@host/*", "@plugin/*", "@cerebrium/kernel/*"],
+  message: "the kernel may not depend on an app, and names its own modules as '@/…'.",
+};
+const HOST_BOUNDARY = {
+  group: ["@/*", "@plugin/*"],
+  message: "the host reaches the kernel as '@cerebrium/kernel/…' and may not depend on the plugin.",
+};
+const PLUGIN_BOUNDARY = {
+  group: ["@/*", "@host/*"],
+  message: "the plugin reaches the kernel as '@cerebrium/kernel/…' and may not depend on the host.",
+};
+const CORE_INWARD = {
+  group: [
+    "@/application/*",
+    "@/presentation/*",
+    "@/tools/*",
+    "@/db/*",
+    "@/code/*",
+    "@/embeddings/*",
+    "@/rerank/*",
+    "@/consolidation/*",
+    "@/runtime/*",
+    "@/infrastructure/*",
+  ],
+  message: "core/domain are the innermost layers — they may not import outward.",
+};
+const NO_DELIVERY = {
+  group: ["@/presentation/*", "@/tools/*"],
+  message: "delivery is the outermost layer — depend on @/application or @/domain/ports instead.",
+};
+const DELIVERY_VIA_USE_CASES = {
+  group: [
+    "@/db/*",
+    "@/application/services/*",
+    "@/application/services",
+    "@/application/retrieval",
+    "@/application/retrieval/*",
+    "@/code/*",
+    "@/embeddings/*",
+    "@/consolidation/*",
+  ],
+  message:
+    "delivery may not reach the kernel directly — resolve a use-case token from @/application/use-cases instead.",
+};
+
+// Each block names every pattern that applies to its files: a later block's rule replaces an
+// earlier one for the same file rather than adding to it.
+const restrict = (...patterns) => ({
+  "@typescript-eslint/no-restricted-imports": ["error", { patterns }],
+});
+const KERNEL = "packages/kernel/src";
+
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", ".tmp", "coverage", "test/fixtures"] },
+  { ignores: ["dist", "**/node_modules", ".tmp", "coverage", "**/test/fixtures"] },
   js.configs.recommended,
   {
     files: ["**/*.ts", "**/*.mts"],
@@ -39,31 +107,14 @@ export default tseslint.config(
       ],
     },
   },
-  {
-    // Path aliases are the import contract: `@/…` for src, `@test/…` for test. A
-    // parent-relative import resolves differently per tool (tsc, vitest, each IDE's
-    // language server) and is what makes modules "not found" in some editors. Sibling
-    // `./…` imports stay legal — they never cross a folder, so no alias applies.
-    files: ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mts"],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["../*", "../**"],
-              message:
-                "Use a path alias instead of a parent-relative import: '@/…' for src, '@test/…' for test.",
-            },
-          ],
-        },
-      ],
-    },
-  },
+  { files: within("packages/contracts"), rules: restrict(PARENT_RELATIVE, CONTRACTS_BOUNDARY) },
+  { files: within("packages/kernel"), rules: restrict(PARENT_RELATIVE, KERNEL_BOUNDARY) },
+  { files: within("apps/host"), rules: restrict(PARENT_RELATIVE, HOST_BOUNDARY) },
+  { files: within("apps/plugin"), rules: restrict(PARENT_RELATIVE, PLUGIN_BOUNDARY) },
   {
     // Tests exercise error paths and cast raw rows freely; keep the strong async and
     // any rules, relax the ones that only add ceremony to fixtures.
-    files: ["test/**/*.ts"],
+    files: ["**/test/**/*.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
@@ -91,83 +142,25 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/core/**/*.ts", "src/domain/**/*.ts"],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: [
-                "@/application/*",
-                "@/presentation/*",
-                "@/tools/*",
-                "@/db/*",
-                "@/code/*",
-                "@/embeddings/*",
-                "@/rerank/*",
-                "@/consolidation/*",
-                "@/runtime/*",
-                "@/infrastructure/*",
-              ],
-              message: "core/domain are the innermost layers — they may not import outward.",
-            },
-          ],
-        },
-      ],
-    },
+    files: within(`${KERNEL}/core`, `${KERNEL}/domain`),
+    rules: restrict(PARENT_RELATIVE, KERNEL_BOUNDARY, CORE_INWARD),
   },
   {
-    files: [
-      "src/application/**/*.ts",
-      "src/db/**/*.ts",
-      "src/code/**/*.ts",
-      "src/embeddings/**/*.ts",
-      "src/rerank/**/*.ts",
-      "src/consolidation/**/*.ts",
-      "src/runtime/**/*.ts",
-      "src/infrastructure/**/*.ts",
-    ],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/presentation/*", "@/tools/*"],
-              message:
-                "delivery is the outermost layer — depend on @/application or @/domain/ports instead.",
-            },
-          ],
-        },
-      ],
-    },
+    files: within(
+      `${KERNEL}/application`,
+      `${KERNEL}/db`,
+      `${KERNEL}/code`,
+      `${KERNEL}/embeddings`,
+      `${KERNEL}/rerank`,
+      `${KERNEL}/consolidation`,
+      `${KERNEL}/runtime`,
+      `${KERNEL}/infrastructure`,
+    ),
+    rules: restrict(PARENT_RELATIVE, KERNEL_BOUNDARY, NO_DELIVERY),
   },
   {
-    files: ["src/presentation/**/*.ts"],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: [
-                "@/db/*",
-                "@/application/services/*",
-                "@/application/services",
-                "@/application/retrieval",
-                "@/application/retrieval/*",
-                "@/code/*",
-                "@/embeddings/*",
-                "@/consolidation/*",
-              ],
-              message:
-                "delivery may not reach the kernel directly — resolve a use-case token from @/application/use-cases instead.",
-            },
-          ],
-        },
-      ],
-    },
+    files: within(`${KERNEL}/presentation`),
+    rules: restrict(PARENT_RELATIVE, KERNEL_BOUNDARY, DELIVERY_VIA_USE_CASES),
   },
   prettierRecommended,
 );

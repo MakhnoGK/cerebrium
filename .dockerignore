@@ -4,4 +4,13 @@
 !tsconfig.json
 !tsup.config.ts
 !scripts/copy-assets.mjs
-!src/**
+!packages/contracts/package.json
+!packages/contracts/src
+!packages/kernel/package.json
+!packages/kernel/src
+!apps/host/package.json
+!apps/host/src
+!apps/plugin/package.json
+!apps/plugin/src
+!apps/dashboard-api/package.json
+!apps/dashboard-web/package.json

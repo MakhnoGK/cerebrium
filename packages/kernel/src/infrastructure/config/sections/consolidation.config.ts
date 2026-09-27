@@ -1,0 +1,109 @@
+import { Posture } from "@cerebrium/contracts/vocab";
+import {
+  configSection,
+  custom,
+  enumOf,
+  int,
+  nullableStr,
+  num,
+  SectionOf,
+  str,
+} from "@/domain/ports/config";
+import { parseRoleOverrides, type RoleOverrides } from "@/consolidation/roles";
+
+// Provider selection and transport. `manual` (default) detects and queues candidates but
+// never generates, which is what keeps the suite offline.
+// `timeoutMs` is sized from measured generation times on the reference local model, not
+// picked: decode dominates (prompt eval averages 1.5 s; the response runs 600–1200 tokens
+// at ~19.5 t/s), and a timeout near that band silently discards proposals, since a cut-off
+// generation is indistinguishable from a provider with nothing to say.
+// `reconcileTimeoutMs` is the same knob for the one generation call that happens on an
+// interactive path: a `write` waits for it before answering, and its verdict is advisory,
+// so it is bounded well under the RPC deadline for a write and degrades to no advice.
+// `leaseTtlMs` must outlive a single generation call: the worker renews the lease between
+// clusters, so anything shorter reads as expired to every observer mid-sweep.
+@configSection()
+export class ConsolidationConfig extends SectionOf("consolidation", {
+  provider: str("manual").env("MEMORY_CONSOLIDATE"),
+  url: str("http://127.0.0.1:11434/api/chat").env("MEMORY_CONSOLIDATE_URL"),
+  model: str("gemma4:12b-it-qat").env("MEMORY_CONSOLIDATE_MODEL"),
+  command: nullableStr(null).env("MEMORY_CONSOLIDATE_CMD"),
+  timeoutMs: int(500_000).positive().env("MEMORY_CONSOLIDATE_TIMEOUT_MS"),
+  reconcileTimeoutMs: int(25_000).positive().env("MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS"),
+  leaseTtlMs: int(600_000).positive().env("MEMORY_CONSOLIDATE_LEASE_TTL_MS"),
+  intervalMs: int(300_000).nonNegative().env("MEMORY_CONSOLIDATE_INTERVAL_MS"),
+  // Per-role overrides of the three settings above, keyed by GenerationRole. A role names a
+  // model, a host and a deadline; anything it leaves out it inherits, so a config that names
+  // no role runs exactly as one model with the two deadlines. Measured 2026-08-24 on the
+  // reference host: the same 12B answers `annotate` in ~19s and an interactive `reconcile`
+  // anywhere from 2.7s to 46s against its 25s cap, because prompt eval dominates and is
+  // prefix-cache dependent — which is what a per-role model is for.
+  roles: custom<RoleOverrides>({}, parseRoleOverrides).env("MEMORY_CONSOLIDATE_ROLES"),
+}) {}
+
+// Per-behaviour posture. Balanced defaults: `auto` for the cheap and reversible
+// behaviours, `suggest` for the destructive ones.
+@configSection()
+export class ConsolidationPostureConfig extends SectionOf("consolidation.posture", {
+  links: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_LINKS"),
+  linkPrune: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_LINK_PRUNE"),
+  distill: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_DISTILL"),
+  merge: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_MERGE"),
+  prune: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_PRUNE"),
+  annotate: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_ANNOTATE"),
+  reconcile: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_RECONCILE"),
+  // `auto` because the ambiguity is already resolved before a citation is ever proposed:
+  // a backticked name is only taken when it matches exactly one symbol inside the note's
+  // own project, and the edge it writes is additive and soft-reversible.
+  documents: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_DOCUMENTS"),
+}) {}
+
+// `mergeSim` is deliberately higher than the write-time dedup probe so merge stays
+// conservative; `minCluster` below 2 is not a cluster. Both similarity gates are
+// calibrated against a real store by `npm run calibrate:report` — `sim` from a target
+// edges-per-node density — and both are specific to the embedding model in use.
+//
+// ⚠️ `mergeSim` is NOT calibratable on this store, measured 2026-08-21 over 440 labelled
+// pairs (237 applied / 203 dismissed): cosine ranks the two classes at AUC 0.504, dead
+// chance, with applied 0.932±0.009 against dismissed 0.933±0.010. Precision is flat near
+// 0.5 across the whole sweep and FALLS as the gate rises (0.553 at 0.925, 0.444 at 0.950),
+// so raising it buys no precision and only cuts recall. The number therefore controls
+// volume, not correctness: what separates a duplicate from a series here is the generation
+// judge, and the knob for its cost is `batch.backfill` (measured ~22s per judged pair). `maxLinkDegree` is a degree cap, not a
+// similarity gate: it is read from the store's observed similar_to degree distribution.
+// `mergeBurstMs` is the burst window: a pair one session wrote inside it is a series its
+// writer meant to keep apart, not a duplication, so merge detection lets it age instead
+// of proposing it. Measured 2026-08-09 at 7/7 wrong merges blocked for 19% of correct
+// ones delayed by a sweep. 0 disables the rule.
+@configSection()
+export class ConsolidationThresholdsConfig extends SectionOf("consolidation.thresholds", {
+  sim: num(0.9).range(0, 1).env("MEMORY_CONSOLIDATE_SIM"),
+  mergeSim: num(0.925).range(0, 1).env("MEMORY_CONSOLIDATE_MERGE_SIM"),
+  minAgeDays: int(14).nonNegative().env("MEMORY_CONSOLIDATE_MIN_AGE_DAYS"),
+  minCluster: int(3).min(2).env("MEMORY_CONSOLIDATE_MIN_CLUSTER"),
+  mergeBurstMs: int(3_600_000).nonNegative().env("MEMORY_CONSOLIDATE_MERGE_BURST_MS"),
+  maxLinkDegree: int(5).positive().env("MEMORY_CONSOLIDATE_MAX_LINK_DEGREE"),
+}) {}
+
+// Per-sweep ceilings; each bounds the work (and generation calls) in one tick.
+@configSection()
+export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
+  link: int(200).positive().env("MEMORY_CONSOLIDATE_LINK_BATCH"),
+  linkPrune: int(200).positive().env("MEMORY_CONSOLIDATE_LINK_PRUNE_BATCH"),
+  distill: int(200).positive().env("MEMORY_CONSOLIDATE_DISTILL_BATCH"),
+  merge: int(200).positive().env("MEMORY_CONSOLIDATE_MERGE_BATCH"),
+  prune: int(200).positive().env("MEMORY_CONSOLIDATE_PRUNE_BATCH"),
+  annotate: int(50).positive().env("MEMORY_CONSOLIDATE_ANNOTATE_BATCH"),
+  backfill: int(10).positive().env("MEMORY_CONSOLIDATE_BACKFILL_BATCH"),
+  // Note->symbol citations acted on per sweep. This caps the writes, not the work: the scan
+  // walks every authored body and every backticked name regardless, so the ceiling only
+  // decides how many of the resolved pairs get an edge. Each one is an insert plus a queue
+  // update, measured as noise against a 2-6s citations stage, and none of it reaches a
+  // generating provider.
+  documents: int(100).positive().env("MEMORY_CONSOLIDATE_DOCUMENTS_BATCH"),
+  // Wall-clock a loop may hold the thread before handing it back, in every loop the sweep
+  // runs. This is the bound on how long a waiting client can be blocked, and the RPC
+  // deadline it has to stay under is 3000ms. Lower trades sweep throughput for read
+  // latency; 0 breathes on every item.
+  msPerBreath: int(50).nonNegative().env("MEMORY_CONSOLIDATE_MS_PER_BREATH"),
+}) {}

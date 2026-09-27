@@ -5,4 +5,4 @@ coverage
 package-lock.json
 *.md
 *.sql
-test/fixtures
+**/test/fixtures

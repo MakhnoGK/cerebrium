@@ -60,6 +60,7 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
+          file: apps/host/Dockerfile
           platforms: linux/arm64
           push: true
           build-args: CEREBRIUM_VERSION=${{ needs.version.outputs.version }}
@@ -130,7 +131,7 @@ jobs:
         run: ssh host uname -a
       - name: Upload release files
         run: |
-          tar -C deploy/host -czf - . |
+          tar -C apps/host/deploy -czf - . |
             ssh host "mkdir -p cerebrium-host/releases/$VERSION && tar -xzf - -C cerebrium-host/releases/$VERSION"
       - name: Deploy
         env:
