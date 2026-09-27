@@ -1261,6 +1261,14 @@ dbs:
 `litestream restore -o memory.db s3://my-memory-backups/cerebrium`.
 WAL mode (already on) is required for Litestream.
 
+## Host release
+
+Every merge to `main` that passes CI is tagged `vYYYY.MM.DD.N`, built into
+`ghcr.io/makhnogk/cerebrium`, published as a GitHub Release and deployed to the host over
+Tailscale. The image runs the daemon with `CEREBRIUM_HOME=/data`; the container is healthy
+once `dist/healthcheck.js` sees the model loaded. Layout, rollback and the required
+secrets are in [deploy/host/README.md](deploy/host/README.md).
+
 
 ## Engineering highlights
 

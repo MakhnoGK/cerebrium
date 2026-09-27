@@ -20,6 +20,7 @@ export default defineConfig({
     "src/service-cli.ts",
     "src/read-worker.ts",
     "src/embed-worker.ts",
+    "src/healthcheck.ts",
   ],
   format: ["esm"],
   platform: "node",
