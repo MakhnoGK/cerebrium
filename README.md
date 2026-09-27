@@ -13,8 +13,7 @@ It distinguishes **episodic** memory (write-once records of *what happened*, rel
 decaying with age) from **semantic** memory (durable facts, maintained through
 revisions). Search is hybrid — FTS5 bm25 and vector KNN fused with Reciprocal Rank
 Fusion, re-scored by a memory model, then expanded one hop over the graph — with an
-asynchronous embedding pipeline drained by a background daemon, in-process tree-sitter code indexing, credential-free external-source
-mirrors, and a consolidation sweep that distils episodic memory into semantic knowledge.
+asynchronous embedding pipeline drained by a background daemon, in-process tree-sitter code indexing, and a consolidation sweep that distils episodic memory into semantic knowledge.
 
 A personal R&D project exploring long-term memory for agents, used daily with Claude Code.
 
@@ -266,7 +265,7 @@ unless `history:true`), then optionally expands the graph.
 - **Two vector pools.** The KNN runs before any filter, so one shared table meant the
   code index — which outnumbers authored memory by ~100:1 — consumed the entire
   over-fetch and an authored-only search saw a fraction of its own nodes. `chunk_vec`
-  holds authored memory plus curated external mirrors, `code_vec` holds the code-symbol
+  holds authored memory (plus any legacy external mirror records), `code_vec` holds the code-symbol
   index, and a query sweeps only the pools it can return from: `types:['symbol']` reads
   code alone, a `kinds` filter without `mirror` reads authored alone, anything else reads
   both and merges by distance. The budgets differ with the sizes — 1000 for the authored
@@ -505,7 +504,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_DEDUP_THRESHOLD` | `0.92` | Cosine similarity above which a write reports `similar_existing`. Calibrated, not chosen — see below. |
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
 | `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
-| `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored/external-mirror knowledge ranks first; bypassed when the query asks for symbols). |
+| `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_MMR_LAMBDA` | `0.85` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. Calibrated against the gold set — see *Calibrating the ranking constants*. |
 | `MEMORY_FOLD_SIM` | `0.93` | Raw first-chunk cosine at which a result folds under one already kept instead of taking its own slot; `1.0` is off. **Its own scale** — not comparable to `MEMORY_DEDUP_THRESHOLD` or `MEMORY_CONSOLIDATE_MERGE_SIM`, which score a seed chunk against the nearest one. Measured by the fold arm of `calibrate:report`. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
@@ -669,9 +668,6 @@ node, and candidate id as opaque and never invent or transform one.
 | `checkpoint` | Before ending a work block: writes an episodic checkpoint (Summary / Decisions / Open threads) linked to touched nodes, so the next session picks up where you left off. |
 | `code_index` | Index/refresh source repos into `symbol` mirror nodes + code edges. Incremental (per-file hash-gate); run after pulling/changing a repo. Returns a compact per-repo summary, never code. |
 | `code_lookup` | Exact structural code lookup: by `name` (simple/qualified) or `file`, returning symbol envelopes + `defines`/`calls`/`imports` neighbor stubs. Raw source via `get`. |
-| `source_register` | Register/update an external mirror source for this deployment (`id`, `kind`, optional `project`/`freshness_hours`/`recipe`). Stores no credentials; the registry is empty by default. |
-| `mirror_upsert` | Upsert curated external records into `mirror` nodes for a registered source. Idempotent by `(source, native_id)`; supply decision-worthy records only, never bulk. Compact count envelope + affected node ids. |
-| `mirror_status` | List registered sources with freshness (last sync, hours stale, `stale`, live node count). `session_start` also surfaces stale sources. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. Paged: pass `page_size` and feed `next_cursor` back until it is absent (`limit` alone still returns one unpaged batch). |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
 | `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), generation (the backend, whether it generates at all, and the resolved model/host/deadline per role), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
@@ -789,39 +785,15 @@ anchored & directory-only patterns, `*`/`**`/`?` globs, nested `.gitignore` file
 binaries and files > 1 MB. Auto-refresh on `git pull` is not wired up — re-run
 `code_index` after changes.
 
-## External mirrors
+## External mirrors (removed)
 
-Cerebrium can mirror curated records from the external tools an agent already has MCP access
-to — GitLab, Jira/Confluence, Notion, Sentry, Grafana, Slack, TestRail, Tableau, Amplitude —
-into `mirror` nodes, so they're searchable and linkable alongside the notes that explain them.
-
-The design is **source-agnostic and credential-free**: the kernel never connects to an
-external service and hard-codes no source. The *agent* fetches with the source's own MCP
-tools and writes the results in; a deployment with a different toolset just registers
-different sources, with no change to `packages/kernel/src/`.
-
-- **Registry (`mirror_sources`), empty by default.** `source_register` adds a per-deployment
-  source instance (`id` e.g. `grafana-prod`, `kind` e.g. `grafana`, optional `project`,
-  `freshness_hours`, `recipe`). A fresh clone has no sources and every tool still works.
-- **Curated upsert.** `mirror_upsert { source_id, items }` writes decision-worthy records —
-  each a compact markdown summary you compose, plus optional `url`/`facets`. Idempotent by
-  `(source, native_id)`: identical content is a no-op, changed content adds a revision. It is
-  **not** a bulk import; mirroring a whole channel would poison retrieval.
-- **Open vocab.** A mirror node's `type` (`incident`, `thread`, `chart`, …) is free-form —
-  a new source or record type needs no migration (same as `symbols.symbol_kind`). Nodes are
-  ordinary `mirror` rows (`origin`=kind, `external_id`=`sha256(source_id\0native_id)`); the
-  deep-link URL + facet JSON live in `mirror_records` and are returned only by `get`.
-- **Freshness hook.** `mirror_status` reports each source's last sync + whether it's `stale`
-  (enabled, past its `freshness_hours`, or never synced); `session_start` surfaces stale
-  sources so the agent knows what to re-sync.
-- **Retire + link.** Retire a stale record with `invalidate` (external mirrors are
-  agent-curated; code symbols stay indexer-only). The payoff is `link`: draw
-  `documents`/`references`/`relates_to` from a semantic note to a mirror record (or between
-  records across sources), and a later `search` surfaces it via graph expansion.
-
-Per-source **recipes** — how the agent fetches and maps each source — live in
-`docs/mirrors/*.md` (a template + a worked `grafana-prod` example + stubs for the rest). They
-are documentation the agent follows, not code the kernel runs.
+Cerebrium used to mirror curated records from external tools (GitLab, Jira, Sentry, Grafana, …)
+through `source_register` / `mirror_upsert` / `mirror_status`, with a `mirror_sources` registry
+and `stale_sources` in `session_start`. All of that is gone. A store that used it keeps its
+rows — `mirror_sources`, `mirror_records` and the `mirror` nodes themselves (`origin` = the
+source kind) — because nothing is ever hard-deleted; they stay searchable and can be linked or
+invalidated, but nothing writes them any more. Knowledge worth keeping from an external tool
+goes into an ordinary `semantic` node with the deep link in its body.
 
 ## Consolidation
 
@@ -830,7 +802,7 @@ The `cerebrium-daemon` runs a background consolidation sweep (under its own
 into durable knowledge:
 
 - **Knowledge-first ranking** — code `symbol` mirrors are down-weighted as direct
-  search hits (`MEMORY_SYMBOL_WEIGHT`) so authored and external-mirror knowledge
+  search hits (`MEMORY_SYMBOL_WEIGHT`) so authored knowledge
   ranks first; a query that asks for symbols (`types:['symbol']`/`kinds:['mirror']`)
   bypasses the penalty.
 - **Link discovery** — writes system `similar_to` edges between highly similar
@@ -1205,7 +1177,7 @@ ln -s "$PWD/skill/cerebrium" ~/.claude/skills/cerebrium   # or ~/.codex/skills/�
 
 **Link, never copy.** A copy stops tracking the repository the moment it is made, and
 that is not hypothetical: the installed copy once sat four tools behind for three weeks,
-so an agent reading it did not know external mirrors existed. The tradeoff is that a
+so an agent reading it did not know four of its tools existed. The tradeoff is that a
 symlink follows the *working tree* — whatever branch is checked out is what every host
 reads, so switch back to the main line before relying on it.
 
@@ -1312,10 +1284,6 @@ secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
   TypeScript / JavaScript / PHP / Rust / C / C++ / Lua symbols into the graph, incrementally via a per-file
   content-hash gate, with `defines` / `imports` / best-effort `calls` edges. Link a semantic
   note to a symbol and a later search resurfaces the code by meaning via graph expansion.
-- **Credential-free external mirrors.** The agent curates decision-worthy records from tools
-  it already has MCP access to (GitLab, Jira, Sentry, Grafana, Notion, …) into searchable
-  `mirror` nodes. The kernel connects to nothing, stores no credentials, and hard-codes no
-  source — a different deployment just registers different sources, no code change.
 - **Background consolidation.** Link discovery, episodic->semantic distillation, dedup/merge,
   and dead-mirror pruning run in the daemon, each with an independent `off`/`suggest`/`auto`
   posture. Generation is a pluggable adapter (`manual`/`command`/`http`), and the default

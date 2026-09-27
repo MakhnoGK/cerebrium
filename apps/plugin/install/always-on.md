@@ -43,9 +43,6 @@ know this?". Anything durable you then learn from code, an issue tracker, or the
   `supersedes`/`relates_to`); edges drive graph expansion at search time.
 - **`code_index`** / **`code_lookup`** — index a repo into `symbol` mirror nodes; look code up
   structurally by `name` or `file`. Use `search` with `types:['symbol']` for code by meaning.
-- **`source_register`** / **`mirror_upsert`** / **`mirror_status`** — mirror curated external
-  records (issues, incidents, docs) into `mirror` nodes. The server holds no credentials: you
-  fetch with the source's own tools, then upsert. Curate; never bulk-dump.
 - **`consolidate_suggest`** / **`consolidate_apply`** — review and resolve what the background
   sweep queued. **`stats`** — operational snapshot, no content.
 
@@ -68,7 +65,7 @@ is stale (refresh with `code_index`, it is incremental).
 
 **The mirror locates and explains; disk is the source of truth for edits.**
 
-The full usage discipline — good vs bad examples, ranking behavior, mirror recipes — lives in
+The full usage discipline — good vs bad examples, ranking behavior — lives in
 the `cerebrium` skill, which is installed alongside this block.
 
 <!-- cerebrium:end -->

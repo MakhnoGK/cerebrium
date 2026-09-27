@@ -15,12 +15,7 @@ export type WritableKind = MemoryKind.EPISODIC | MemoryKind.SEMANTIC;
 export const WRITABLE_KINDS = [MemoryKind.EPISODIC, MemoryKind.SEMANTIC] as const;
 
 // Legal node types per memory_kind. `mirror` lists only `symbol` (the code index's
-// system-generated type); it stays out of WRITABLE_KINDS (indexer-only). External
-// mirror types (`incident`, `thread`, `chart`, …) are OPEN VOCAB — agent-supplied via
-// `mirror_upsert` and intentionally not enumerated here, so a new source needs no
-// vocab/migration change (like `symbols.symbol_kind`). `mirror_upsert` validates only
-// that `type` is a non-empty string, never against this list. Values stay `string` for
-// that reason: this is a per-kind allow-list, not a closed vocabulary.
+// system-generated type); it stays out of WRITABLE_KINDS (indexer-only).
 export const SYMBOL_TYPE = "symbol";
 
 export const NODE_TYPES: Record<MemoryKind, readonly string[]> = {
@@ -29,9 +24,9 @@ export const NODE_TYPES: Record<MemoryKind, readonly string[]> = {
   [MemoryKind.MIRROR]: [SYMBOL_TYPE],
 };
 
-// `nodes.origin` for the code index. External mirrors carry their source id instead,
-// which is what separates the two vector pools (migration 013): a `mirror` node is only
-// code if its origin is this.
+// `nodes.origin` for the code index. Legacy external mirror nodes carry their source id
+// instead, which is what separates the two vector pools (migration 013): a `mirror` node
+// is only code if its origin is this.
 export const CODE_ORIGIN = "repo";
 
 export enum EdgeType {
@@ -116,9 +111,6 @@ export enum EventAction {
   LINK = "link",
   CODE_INDEX = "code_index",
   CODE_LOOKUP = "code_lookup",
-  SOURCE_REGISTER = "source_register",
-  MIRROR_UPSERT = "mirror_upsert",
-  MIRROR_STATUS = "mirror_status",
   CONSOLIDATE_SUGGEST = "consolidate_suggest",
   CONSOLIDATE_APPLY = "consolidate_apply",
   CONSOLIDATE_RETRY = "consolidate_retry",

@@ -30,7 +30,7 @@ export const metadata = {
     "nodes joined by `supersedes` never fold into one another. A pair carrying a reviewed `duplicate_of` edge folds " +
     "regardless of the gate, marked `recorded:true`.Use `mode:'text'` for the cheapest exact Phase-1 behavior. " +
     "Code `symbol` mirrors are " +
-    "down-weighted as direct hits so authored and external-mirror knowledge ranks first; ask for them " +
+    "down-weighted as direct hits so authored knowledge ranks first; ask for them " +
     "explicitly (`types:['symbol']` or `kinds:['mirror']`) to rank them normally. The code index sits in " +
     "its own vector pool, so filtering it out (`kinds` without `mirror`) is not just a post-filter: the " +
     "vector branch then sweeps authored memory exhaustively rather than spending its candidate budget on " +

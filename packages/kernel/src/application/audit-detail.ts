@@ -94,8 +94,6 @@ function startedDetail(result: unknown): Record<string, unknown> | null {
   };
 }
 
-// An allowlist, not a scan: `stale_sources` also carries an `id`, but a source id is not
-// a node id.
 const SURFACED_SECTIONS = ["tasks", "checkpoints", "semantic", "recent"];
 
 // A use case answers `{envelope:{id},facets,neighbors}` while a delivery layer flattens the

@@ -1,5 +1,4 @@
 import { inject } from "tsyringe";
-import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
 import {
@@ -9,14 +8,13 @@ import {
   type FetchNodesArgs,
   type FetchNodesResult,
 } from "@/application/use-cases/contracts";
-import { ChunksRepo, CodeRepo, MirrorRepo, NodesRepo } from "@/db/repositories";
+import { ChunksRepo, CodeRepo, NodesRepo } from "@/db/repositories";
 
 @useCase(FETCH_NODES)
 export class LocalFetchNodes implements FetchNodes {
   constructor(
     private readonly nodes: NodesRepo,
     private readonly code: CodeRepo,
-    private readonly mirror: MirrorRepo,
     private readonly chunks: ChunksRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
@@ -62,22 +60,6 @@ export class LocalFetchNodes implements FetchNodes {
           const { source, ...facets } = detail;
           node.symbol = facets;
           node.source = source;
-        }
-      } else if (full.envelope.kind === MemoryKind.MIRROR) {
-        // For an external mirror, `get` also carries the source back-reference, the
-        // deep-link URL, and the opaque facet metadata (search returns envelopes only).
-        const rec = this.mirror.mirrorRecord(id);
-
-        if (rec) {
-          node.mirror = { source_id: rec.source_id, native_id: rec.native_id };
-
-          if (rec.url != null) {
-            node.url = rec.url;
-          }
-
-          if (rec.facets != null) {
-            node.facets = rec.facets;
-          }
         }
       }
 

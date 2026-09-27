@@ -60,7 +60,6 @@ const SCHEMAS = {
     limit: z.number().int().positive().optional(),
     ...page,
   }),
-  mirror_status: z.object({ session_id: ulid.optional(), source_id: z.string().optional() }),
   job_status: z.object({
     session_id: ulid.optional(),
     id: ulid.optional(),
@@ -121,20 +120,6 @@ const SCHEMAS = {
     open_threads: z.array(z.string()).optional(),
     project: z.string().optional(),
     touched_node_ids: z.array(ulid).optional(),
-  }),
-  register_source: z.object({
-    session_id: ulid.optional(),
-    id: z.string().min(1),
-    kind: z.string().min(1),
-    label: z.string().optional(),
-    project: z.string().optional(),
-    freshness_hours: z.number().optional(),
-    recipe: z.string().optional(),
-    enabled: z.boolean().optional(),
-  }),
-  upsert_mirrors: session.extend({
-    source_id: z.string().min(1),
-    items: z.array(z.record(z.unknown())).min(1),
   }),
   apply_candidate: session.extend({
     id: ulid,

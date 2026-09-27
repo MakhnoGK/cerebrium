@@ -149,35 +149,13 @@ BAD:  write a semantic node describing what AuthService.validate does (that's a 
       let the indexer own it; only record insight the code itself doesn't state).
 ```
 
-## External mirrors
+## Records from external tools
 
-The kernel can mirror curated records from external tools (GitLab, Jira/Confluence, Notion,
-Sentry, Grafana, Slack, TestRail, Tableau, Amplitude) into `mirror` nodes, so they're
-searchable and linkable next to the notes that explain them. **The kernel is source-agnostic
-and holds no credentials** — *you* fetch with the source's own MCP tools, then write.
-
-- **Register a source once** with `source_register` (`id` like `grafana-prod`, `kind` like
-  `grafana`, optional `freshness_hours`). The registry is per-deployment and empty by default.
-- **Sync when stale.** `session_start` lists `stale_sources` (and `mirror_status` shows all
-  sources' freshness). Fetch the curated subset, then `mirror_upsert { source_id, items }`.
-  Idempotent by `(source, native_id)`.
-- **Curate — never bulk.** Mirror decision-worthy records only (the canvas where a decision
-  landed, the incident that mattered), not whole channels or every event. `content` is a
-  compact summary you compose. Per-source recipes live in `docs/mirrors/*.md`.
-- **Retire** a stale record with `invalidate` on its node id (external mirrors are yours to
-  retire; code symbols are not).
-- **Link is the payoff** — draw `documents`/`references`/`relates_to` from a semantic note to a
-  mirror record (or between records across sources); a later search surfaces the record via
-  graph expansion.
-
-Mirror nodes are still **mirrors**: don't `write`/`update` them by hand — re-sync with
-`mirror_upsert`.
-
-```
-GOOD: session_start shows grafana-prod stale -> fetch active incidents via the Grafana MCP ->
-      mirror_upsert incidents -> write a decision about the fix -> link documents -> the incident.
-BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieval).
-```
+Cerebrium no longer mirrors external tools (GitLab, Jira, Sentry, Grafana, …). When something
+you fetched with a source's own MCP tools is worth keeping, distill it into a normal `semantic`
+node and put the deep link in its body. An older store may still hold external `mirror` records
+from before the removal: treat them as read-only history — cite them, `link` to them, or
+`invalidate` a stale one, but never try to re-sync them.
 
 ## Tools at a glance
 
@@ -194,9 +172,6 @@ BAD:  mirror_upsert every message in a Slack channel (bulk dump poisons retrieva
 | `checkpoint` | Before ending work: summary + decisions + open threads + touched ids. |
 | `code_index` | Index/refresh a repo into symbol mirrors. Incremental; run after changes. |
 | `code_lookup` | Structural code lookup by `name`/`file` + defines/calls/imports stubs. |
-| `source_register` | Register/update an external mirror source (per-deployment; no creds). |
-| `mirror_upsert` | Upsert curated external records into mirror nodes. Idempotent, not bulk. |
-| `mirror_status` | List registered sources + freshness (last sync, stale, node count). |
 | `consolidate_suggest` | Review what the background sweep queued: distill/merge/link/prune candidates. |
 | `consolidate_apply` | Resolve a candidate — `apply` or `reject`. Destructive applies on index nodes deserve care; `restore` exists because one already ate a hand-maintained index. |
 | `stats` | Operational snapshot: embedding queue, content totals, storage, daemon health, graph integrity. No content. |

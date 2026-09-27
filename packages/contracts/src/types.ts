@@ -311,62 +311,6 @@ export interface IndexStats {
   root_missing?: true;
 }
 
-// ---- external mirrors ------------------------------------------------------
-
-// A registered external mirror source (a row in `mirror_sources`). `kind` becomes
-// each mirror node's `origin`; `id` is the deployment-local instance (e.g.
-// 'grafana-prod'). Empty registry in a fresh clone -> no active sources.
-export interface MirrorSource {
-  id: string;
-  kind: string;
-  label: string | null;
-  project: string | null;
-  freshness_hours: number | null;
-  recipe: string | null;
-  enabled: boolean;
-  last_synced_at: string | null;
-  registered_at: string;
-}
-
-// A source plus its computed freshness + live node count (for `mirror_status` and
-// the session_start freshness hook). `stale` is only true for an enabled source
-// with a `freshness_hours` threshold that has been exceeded (or never synced).
-export interface MirrorSourceStatus extends MirrorSource {
-  hours_stale: number | null; // null when never synced
-  stale: boolean;
-  node_count: number;
-}
-
-// One curated external record the agent asks to mirror. `content` is a compact
-// markdown summary the agent composed from the source; `url` is a deep link back;
-// `facets` is opaque structured metadata. Idempotent by (source, native_id).
-export interface MirrorItem {
-  native_id: string;
-  type: string;
-  title: string;
-  content: string;
-  url?: string;
-  project?: string;
-  facets?: Record<string, unknown>;
-}
-
-export interface MirrorUpsertResult {
-  source_id: string;
-  added: number;
-  updated: number;
-  unchanged: number;
-  node_ids: string[];
-}
-
-// The per-record facet row (mirror_records) for an external mirror node, returned
-// alongside content by `get`.
-export interface MirrorRecord {
-  source_id: string;
-  native_id: string;
-  url: string | null;
-  facets: Record<string, unknown> | null;
-}
-
 // One row of the `events` audit log: what a caller did, in one session. Callers
 // describe the event; the writer stamps `ts` from the clock.
 export interface EventDraft {

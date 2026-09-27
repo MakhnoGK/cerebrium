@@ -115,14 +115,11 @@ const ALL_TOOLS = [
   "job_status",
   "job_submit",
   "link",
-  "mirror_status",
-  "mirror_upsert",
   "restore",
   "review_pending",
   "review_resolve",
   "search",
   "session_start",
-  "source_register",
   "stats",
   "update",
   "write",
@@ -772,165 +769,6 @@ describe("stats tool", () => {
       await client.callTool({ name: "stats", arguments: {} }),
     );
     expect(res.queue.total).toBe(0);
-  });
-});
-
-describe("source_register tool", () => {
-  it("should return the stored source when a source is registered", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    const res = payload<{ source: { id: string; kind: string } }>(
-      await client.callTool({
-        name: "source_register",
-        arguments: {
-          session_id: sid,
-          id: "grafana-prod",
-          kind: "grafana",
-          label: "Grafana (prod)",
-          project: "acme",
-          freshness_hours: 24,
-        },
-      }),
-    );
-    expect(res.source.id).toBe("grafana-prod");
-    expect(res.source.kind).toBe("grafana");
-  });
-
-  it("should update the source in place when the same id is re-registered", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    const reg = () =>
-      client.callTool({
-        name: "source_register",
-        arguments: { session_id: sid, id: "sentry", kind: "sentry", project: "acme" },
-      });
-    await reg();
-    payload(await reg());
-    const status = payload<{ sources: { id: string }[] }>(
-      await client.callTool({ name: "mirror_status", arguments: { session_id: sid } }),
-    );
-    expect(status.sources.filter((s) => s.id === "sentry")).toHaveLength(1);
-  });
-});
-
-describe("mirror_status tool", () => {
-  it("should return an empty list when no sources are registered", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    const res = payload<{ sources: unknown[] }>(
-      await client.callTool({ name: "mirror_status", arguments: { session_id: sid } }),
-    );
-    expect(res.sources).toEqual([]);
-  });
-
-  it("should report a source as stale when it has never been synced", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    await client.callTool({
-      name: "source_register",
-      arguments: { session_id: sid, id: "grafana-prod", kind: "grafana", freshness_hours: 24 },
-    });
-    const res = payload<{ sources: { id: string; stale: boolean; node_count: number }[] }>(
-      await client.callTool({ name: "mirror_status", arguments: { session_id: sid } }),
-    );
-    expect(res.sources).toHaveLength(1);
-    expect(res.sources[0]).toMatchObject({ id: "grafana-prod", stale: true, node_count: 0 });
-  });
-});
-
-describe("mirror_upsert tool", () => {
-  const INCIDENT = {
-    native_id: "INC-42",
-    type: "incident",
-    title: "Checkout latency spike",
-    content: "p99 checkout latency crossed 2s for 12 minutes; rolled back deploy #918.",
-    url: "https://grafana/incident/42",
-    facets: { severity: "sev2" },
-  };
-
-  async function registerGrafana(client: Client, sid: string, enabled = true): Promise<void> {
-    await client.callTool({
-      name: "source_register",
-      arguments: {
-        session_id: sid,
-        id: "grafana-prod",
-        kind: "grafana",
-        project: "acme",
-        freshness_hours: 24,
-        enabled,
-      },
-    });
-  }
-
-  it("should mirror a curated record and bump the source out of staleness when the source is registered", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    await registerGrafana(client, sid);
-
-    const up = payload<{ added: number; node_ids: string[] }>(
-      await client.callTool({
-        name: "mirror_upsert",
-        arguments: { session_id: sid, source_id: "grafana-prod", items: [INCIDENT] },
-      }),
-    );
-    expect(up.added).toBe(1);
-
-    const got = payload<{
-      nodes: { url?: string; facets?: unknown; mirror?: { source_id: string } }[];
-    }>(
-      await client.callTool({
-        name: "get",
-        arguments: { session_id: sid, ids: [up.node_ids[0]!] },
-      }),
-    );
-    expect(got.nodes[0]!.url).toBe(INCIDENT.url);
-    expect(got.nodes[0]!.facets).toEqual(INCIDENT.facets);
-    expect(got.nodes[0]!.mirror?.source_id).toBe("grafana-prod");
-
-    const status = payload<{ sources: { stale: boolean; node_count: number }[] }>(
-      await client.callTool({ name: "mirror_status", arguments: { session_id: sid } }),
-    );
-    expect(status.sources[0]).toMatchObject({ stale: false, node_count: 1 });
-  });
-
-  it("should treat a re-synced identical record as unchanged when upserted twice", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    await registerGrafana(client, sid);
-    const args = { session_id: sid, source_id: "grafana-prod", items: [INCIDENT] };
-    await client.callTool({ name: "mirror_upsert", arguments: args });
-    const again = payload<{ added: number; unchanged: number }>(
-      await client.callTool({ name: "mirror_upsert", arguments: args }),
-    );
-    expect(again.added).toBe(0);
-    expect(again.unchanged).toBe(1);
-  });
-
-  it("should error actionably when the source is not registered", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    const res = asError(
-      await client.callTool({
-        name: "mirror_upsert",
-        arguments: { session_id: sid, source_id: "nope", items: [INCIDENT] },
-      }),
-    );
-    expect(res.isError).toBe(true);
-    expect(res.text).toMatch(/source_register/);
-  });
-
-  it("should error when the source is registered but disabled", async () => {
-    const client = await connect();
-    const sid = await startSession(client, "acme");
-    await registerGrafana(client, sid, false);
-    const res = asError(
-      await client.callTool({
-        name: "mirror_upsert",
-        arguments: { session_id: sid, source_id: "grafana-prod", items: [INCIDENT] },
-      }),
-    );
-    expect(res.isError).toBe(true);
-    expect(res.text).toMatch(/disabled/);
   });
 });
 

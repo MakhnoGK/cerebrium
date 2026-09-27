@@ -10,7 +10,6 @@ import {
   UPDATE_MEMORY,
   WRITE_MEMORY,
 } from "@/application/use-cases/contracts/memory";
-import { REGISTER_SOURCE, UPSERT_MIRRORS } from "@/application/use-cases/contracts/mirror";
 import { INDEX_CODE } from "@/application/use-cases/contracts/operations";
 import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/read-surface";
 import { RESOLVE_REVIEW } from "@/application/use-cases/contracts/reviews";
@@ -72,12 +71,6 @@ export const CALL_SURFACE = {
     kind: "read",
     action: EventAction.REVIEW_PENDING,
     capability: Capability.CONSOLIDATE,
-  },
-  mirror_status: {
-    token: READ_SURFACE.mirror_status,
-    kind: "read",
-    action: EventAction.MIRROR_STATUS,
-    capability: Capability.READ,
   },
   job_status: {
     token: READ_SURFACE.job_status,
@@ -146,18 +139,6 @@ export const CALL_SURFACE = {
     token: RECORD_CHECKPOINT,
     kind: "write",
     action: EventAction.CHECKPOINT,
-    capability: Capability.WRITE,
-  },
-  register_source: {
-    token: REGISTER_SOURCE,
-    kind: "write",
-    action: EventAction.SOURCE_REGISTER,
-    capability: Capability.ADMIN,
-  },
-  upsert_mirrors: {
-    token: UPSERT_MIRRORS,
-    kind: "write",
-    action: EventAction.MIRROR_UPSERT,
     capability: Capability.WRITE,
   },
   apply_candidate: {

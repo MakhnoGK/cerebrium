@@ -60,24 +60,6 @@ async function writeFact(s: string, title: string): Promise<Envelope> {
   });
 }
 
-function mirrorRecord(env: TestEnv, session_id: string): string {
-  const source = env.mirror.registerSource({ id: "jira", kind: "jira", label: "Jira", ts: TS });
-  const res = env.mirror.upsertMirrors(
-    source,
-    [
-      {
-        native_id: "AB-1",
-        type: "issue",
-        title: "AB-1 payment retries",
-        content: "the retry ladder for failed payments, decided in the payments sync",
-      },
-    ],
-    session_id,
-    TS,
-  );
-  return res.node_ids[0]!;
-}
-
 function symbolNodeIds(env: TestEnv): string[] {
   return (env.db.prepare("SELECT node_id FROM symbols").all() as { node_id: string }[]).map(
     (r) => r.node_id,
@@ -122,26 +104,6 @@ describe("Vector pool routing", () => {
       )
       .get() as { c: number };
     expect(misplaced.c).toBe(0);
-  });
-
-  it("should keep a curated external mirror in chunk_vec when it is embedded", async () => {
-    // Given
-    const env = setup();
-    const s = await session();
-    const id = mirrorRecord(env, s);
-
-    // When
-    await drain(env);
-
-    // Then
-    const inAuthored = env.db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM chunk_vec v JOIN chunks c ON c.id = v.chunk_id
-         WHERE c.node_id = ?`,
-      )
-      .get(id) as { c: number };
-    expect(inAuthored.c).toBeGreaterThan(0);
-    expect(poolCount(env, "code_vec")).toBe(0);
   });
 
   it("should return the same authored candidates however much code is indexed", async () => {
