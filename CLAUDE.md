@@ -58,12 +58,6 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
 - **`code_lookup`** — exact structural code lookup by `name` or `file`, returning symbol
   envelopes + `defines`/`calls`/`imports` neighbor stubs. Use `search` with
   `types:['symbol']` for code-by-meaning; `get` a symbol id for its raw source.
-- **`source_register` / `mirror_upsert` / `mirror_status`** — mirror curated records from
-  external tools (Sentry, GitLab, Jira, Notion, Grafana…) into `mirror` nodes so they are
-  searchable and linkable beside the notes that explain them. The server holds **no
-  credentials**: I fetch with the source's own MCP tools, then upsert. `session_start`
-  lists stale sources. Curate — decision-worthy records only, never a bulk dump, which
-  poisons retrieval. The payoff is the `link` from a semantic note to the record.
 - **`consolidate_suggest` / `consolidate_apply` / `consolidate_retry`** — review what the background sweep queued
   (`distill`/`merge`/`link`/`prune`) and resolve it with `apply` or `reject`. If a candidate fails, `retry` bumps it for another attempt. Review
   destructive applies on index nodes with care; one has already eaten a hand-maintained

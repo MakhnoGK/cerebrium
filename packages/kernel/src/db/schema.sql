@@ -204,12 +204,10 @@ CREATE TABLE IF NOT EXISTS code_repos (
   indexed_at TEXT NOT NULL
 );
 
--- Phase 3a: external mirrors. `mirror_sources` is the per-deployment registry of external
--- sources the agent mirrors (catalog + freshness state), empty in a fresh clone and populated
--- at runtime via the `source_register` tool. `mirror_records` holds the per-record
--- back-reference + deep-link URL + opaque facet JSON for `mirror` nodes whose origin != 'repo'
--- (external mirrors are ordinary `nodes` rows; the node revision is the agent-composed
--- summary). A mirror node's `type` is open vocab (no CHECK) so a new source needs no migration.
+-- Phase 3a: external mirrors, since removed. `mirror_sources` (the per-deployment source
+-- registry) and `mirror_records` (per-record back-reference, deep-link URL and facet JSON of
+-- `mirror` nodes whose origin != 'repo') keep the rows written while the feature existed;
+-- nothing writes or reads them any more.
 CREATE TABLE IF NOT EXISTS mirror_sources (
   id              TEXT PRIMARY KEY,
   kind            TEXT NOT NULL,

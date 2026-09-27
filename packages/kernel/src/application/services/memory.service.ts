@@ -1,6 +1,5 @@
-import { inject, injectable } from "tsyringe";
-import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
-import { MirrorRepo, SearchRepo, StatsRepo } from "@/db/repositories";
+import { injectable } from "tsyringe";
+import { SearchRepo, StatsRepo } from "@/db/repositories";
 import { estimateTokensOf } from "@/core/tokens";
 import { RetrievalConfig } from "@/infrastructure/config";
 
@@ -13,29 +12,17 @@ const RECENT_LIMIT = 15;
 export class MemoryService {
   constructor(
     private readonly searchRepo: SearchRepo,
-    private readonly mirrorRepo: MirrorRepo,
     private readonly statsRepo: StatsRepo,
-    @inject(CLOCK_TOKEN) private readonly clock: Clock,
-
     private readonly retrieval: RetrievalConfig,
   ) {}
 
   public getWorkingSet(project: string | undefined) {
-    // Freshness hook: nudge the agent to re-sync external mirror sources that are past
-    // their freshness window. Only registered, enabled, stale sources; omitted entirely
-    // when there are none (a deployment with no sources sees no change).
-    const stale = this.mirrorRepo
-      .sourceStatus(this.clock.now())
-      .filter((s) => s.stale)
-      .map((s) => ({ id: s.id, label: s.label, hours_stale: s.hours_stale }));
-
     return {
       tasks: this.selectWithinBudget(this.searchRepo.validTasks(project, TASK_LIMIT)),
       stats: this.statsRepo.stats(),
       checkpoints: this.selectWithinBudget(
         this.searchRepo.lastCheckpoints(project, CHECKPOINT_LIMIT),
       ),
-      ...(stale.length ? { stale_sources: this.selectWithinBudget(stale) } : {}),
       ...(project
         ? {
             semantic: this.selectWithinBudget(
