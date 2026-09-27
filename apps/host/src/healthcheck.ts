@@ -12,13 +12,20 @@ const TIMEOUT_MS = 5_000;
 export function healthProblem(report: unknown): string | null {
   if (typeof report !== "object" || report === null) return "no health report";
 
-  const { protocol, model } = report as {
+  const { protocol, model, store } = report as {
     protocol?: unknown;
     model?: { state?: unknown; error?: unknown } | null;
+    store?: { backend?: unknown; ready?: unknown; error?: unknown };
   };
 
   if (protocol !== PROTOCOL_VERSION) {
     return `daemon speaks protocol ${String(protocol)}, this build speaks ${String(PROTOCOL_VERSION)}`;
+  }
+
+  if (store !== undefined && store.ready !== true) {
+    const reason = typeof store.error === "string" ? `: ${store.error}` : "";
+
+    return `store ${String(store.backend)} unavailable${reason}`;
   }
 
   if (model === undefined || model === null) return "model still loading";

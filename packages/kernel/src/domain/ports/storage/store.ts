@@ -14,6 +14,8 @@ export interface Store {
   // A path, or a URL with its password removed. Published in the process registry.
   readonly identity: string;
   readonly capabilities: StoreCapabilities;
+  // Resolves when the store answers a trivial query; rejects with why it cannot.
+  ping(): Promise<void>;
   close(): Promise<void>;
 }
 

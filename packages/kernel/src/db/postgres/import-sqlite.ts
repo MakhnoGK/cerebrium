@@ -16,7 +16,12 @@ export interface ImportReport {
 
 export interface VerifyReport {
   ok: boolean;
-  tables: Record<string, { source: number; target: number; hash_match: boolean | null }>;
+  // `target` counts the source's rows found in the target; `target_only` the rows the
+  // target holds that the source does not (its own daemon's session, for one).
+  tables: Record<
+    string,
+    { source: number; target: number; target_only: number; hash_match: boolean | null }
+  >;
 }
 
 const AUTHORED = `n.memory_kind IN ('${MemoryKind.SEMANTIC}', '${MemoryKind.EPISODIC}')`;
@@ -44,6 +49,24 @@ const SOURCE: Record<string, string> = {
 };
 
 const HASHED = ["nodes", "revisions", "node_text", "chunks", "edges", "sessions", "events"];
+
+const KEYS: Record<string, string[]> = {
+  nodes: ["id"],
+  revisions: ["node_id", "rev"],
+  node_text: ["node_id"],
+  chunks: ["id"],
+  edges: ["src", "dst", "type"],
+  sessions: ["id"],
+  principals: ["id"],
+  events: ["id"],
+  revision_annotations: ["node_id", "rev"],
+  consolidation_runs: ["id"],
+  review_decisions: ["artifact_kind", "artifact_ref"],
+};
+
+function keyOf(row: Row, columns: string[]): string {
+  return JSON.stringify(columns.map((c) => row[c]));
+}
 
 type Row = Record<string, unknown>;
 
@@ -301,12 +324,15 @@ export async function verifyImport(
 
   for (const [table, sql] of Object.entries(SOURCE)) {
     const from = source.prepare(sql).all() as Row[];
-    const to = (await target.query(targetSql[table]!)).rows as Row[];
+    const all = (await target.query(targetSql[table]!)).rows as Row[];
     const columns = from.length ? Object.keys(from[0]!) : [];
+    const keys = new Set(from.map((r) => keyOf(r, KEYS[table]!)));
+    const to = all.filter((r) => keys.has(keyOf(r, KEYS[table]!)));
 
     tables[table] = {
       source: from.length,
       target: to.length,
+      target_only: all.length - to.length,
       hash_match: HASHED.includes(table) ? hashRows(from, columns) === hashRows(to, columns) : null,
     };
   }
@@ -325,7 +351,12 @@ export async function verifyImport(
     )
   ).rows[0]!.c;
 
-  tables.chunk_vectors = { source: vectorCount, target: targetVectors, hash_match: null };
+  tables.chunk_vectors = {
+    source: vectorCount,
+    target: Math.min(vectorCount, targetVectors),
+    target_only: Math.max(0, targetVectors - vectorCount),
+    hash_match: null,
+  };
 
   const ok = Object.values(tables).every((t) => t.source === t.target && t.hash_match !== false);
 

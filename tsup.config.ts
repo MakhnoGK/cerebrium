@@ -36,6 +36,7 @@ export default defineConfig({
     "read-worker": "apps/host/src/read-worker.ts",
     "embed-worker": "apps/host/src/embed-worker.ts",
     healthcheck: "apps/host/src/healthcheck.ts",
+    "import-sqlite": "apps/host/src/import-sqlite.ts",
   },
   format: ["esm"],
   platform: "node",

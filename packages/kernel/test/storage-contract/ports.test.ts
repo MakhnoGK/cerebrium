@@ -83,6 +83,11 @@ describeStorage("storage ports", (backend) => {
     expect(store.identity).not.toContain("cerebrium:cerebrium@");
   });
 
+  it("should answer a ping once it is open", async () => {
+    // Given / When / Then
+    await expect(scope.resolve<Store>(STORE_TOKEN).ping()).resolves.toBeUndefined();
+  });
+
   it("should append revisions and keep every earlier body readable", async () => {
     // Given
     const node = await write("Token TTL", "fifteen minutes");

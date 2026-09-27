@@ -3,6 +3,7 @@ export {
   surfaceMethods,
   type DaemonIdentity,
   type ReadDispatch,
+  type StoreHealth,
 } from "@/presentation/rpc/methods";
 export { RpcServer, type RpcMethod, type RpcServerOptions } from "@/presentation/rpc/server";
 export {

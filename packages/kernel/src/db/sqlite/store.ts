@@ -14,6 +14,10 @@ export class SqliteStore implements Store {
     return this.db.name;
   }
 
+  async ping(): Promise<void> {
+    this.db.prepare("SELECT 1").get();
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }
