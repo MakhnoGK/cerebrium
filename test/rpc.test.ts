@@ -370,4 +370,31 @@ describe("Daemon methods", () => {
       pid: 1,
     });
   });
+
+  it("should report the model state on health without reading the store", async () => {
+    // Given
+    const reads: string[] = [];
+    await serve(
+      createDaemonMethods(
+        container,
+        { pid: 3, model: () => ({ state: "ready", ms: 812 }) },
+        (name) => {
+          reads.push(name);
+
+          return Promise.resolve({});
+        },
+      ),
+    );
+
+    // When
+    const health = await rpcCall({ socketPath: SOCKET }, "health");
+
+    // Then
+    expect(health).toEqual({
+      protocol: PROTOCOL_VERSION,
+      pid: 3,
+      model: { state: "ready", ms: 812 },
+    });
+    expect(reads).toEqual([]);
+  });
 });

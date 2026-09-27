@@ -1,0 +1,23 @@
+name: cerebrium
+
+services:
+  daemon:
+    image: ghcr.io/makhnogk/cerebrium:${CEREBRIUM_TAG:?set CEREBRIUM_TAG}
+    restart: unless-stopped
+    environment:
+      MEMORY_JOBS_CODE_INDEX_MS: "0"
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # The first start downloads the embedding model into the volume.
+      start_period: 10m
+      start_interval: 5s
+    stop_grace_period: 30s
+
+volumes:
+  data:
+    name: cerebrium-data
