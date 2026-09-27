@@ -13,6 +13,7 @@ import {
   SEARCH_REPO_TOKEN,
   SESSIONS_REPO_TOKEN,
   STATS_REPO_TOKEN,
+  STORE_TOKEN,
 } from "@/domain/ports/storage";
 import { SqliteChunksRepo } from "@/db/sqlite/chunks";
 import { SqliteCodeRepo } from "@/db/sqlite/code";
@@ -27,6 +28,7 @@ import { SqliteReviewsRepo } from "@/db/sqlite/reviews";
 import { SqliteSearchRepo } from "@/db/sqlite/search";
 import { SqliteSessionsRepo } from "@/db/sqlite/sessions";
 import { SqliteStatsRepo } from "@/db/sqlite/stats";
+import { SqliteStore } from "@/db/sqlite/store";
 
 export { BaseRepo, DB_TOKEN } from "@/db/sqlite/base";
 export {
@@ -43,6 +45,7 @@ export {
   SqliteSearchRepo,
   SqliteSessionsRepo,
   SqliteStatsRepo,
+  SqliteStore,
 };
 
 export function registerSqliteRepositories(c: DependencyContainer): void {
@@ -59,4 +62,5 @@ export function registerSqliteRepositories(c: DependencyContainer): void {
   c.register(SEARCH_REPO_TOKEN, { useClass: SqliteSearchRepo });
   c.register(SESSIONS_REPO_TOKEN, { useClass: SqliteSessionsRepo });
   c.register(STATS_REPO_TOKEN, { useClass: SqliteStatsRepo });
+  c.register(STORE_TOKEN, { useClass: SqliteStore });
 }

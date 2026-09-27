@@ -11,8 +11,6 @@ import {
 } from "@/domain/ports/storage";
 import { ConsolidationWorker, EmbeddingWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -22,6 +20,7 @@ import {
   ConsolidationThresholdsConfig,
   StaticConfigSource,
 } from "@/infrastructure/config";
+import { freshStore } from "@test/helpers";
 
 let edgesRepo: EdgesRepo;
 let consolidationRepo: ConsolidationRepo;
@@ -105,7 +104,7 @@ describe("Similar node link discovery", () => {
   let consolidation: ConsolidationWorker;
 
   beforeEach(() => {
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore();
     container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
 
@@ -198,7 +197,7 @@ describe("Orphan episodic link repair", () => {
   let consolidation: ConsolidationWorker;
 
   beforeEach(() => {
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore();
     container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
 
@@ -250,7 +249,7 @@ describe("Link degree cap", () => {
   let consolidation: ConsolidationWorker;
 
   beforeEach(() => {
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore();
     container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
     container.register(ConsolidationThresholdsConfig, {
@@ -313,7 +312,7 @@ describe("Similar link prune", () => {
   let session: string;
 
   beforeEach(async () => {
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore();
     container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: new LocalNullProvider() });
     // Discovery off: these tests seed the graph by hand so the prune rule is the only

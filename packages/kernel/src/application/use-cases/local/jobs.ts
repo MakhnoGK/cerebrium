@@ -1,7 +1,14 @@
 import { inject } from "tsyringe";
-import { principalIdOf } from "@cerebrium/contracts/vocab";
+import { JobKind, principalIdOf } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
-import { JOBS_REPO_TOKEN, type JobRow, type JobsRepo } from "@/domain/ports/storage";
+import {
+  BackendCapabilityError,
+  JOBS_REPO_TOKEN,
+  STORE_TOKEN,
+  type JobRow,
+  type JobsRepo,
+  type Store,
+} from "@/domain/ports/storage";
 import { UnsubmittableJobKindError } from "@/application/errors";
 import {
   isSubmittableKind,
@@ -59,6 +66,7 @@ export class LocalSubmitJob implements SubmitJob {
     @inject(JOBS_REPO_TOKEN) private readonly jobs: JobsRepo,
     private readonly identity: ClientIdentity,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    @inject(STORE_TOKEN) private readonly store: Store,
   ) {}
 
   async invoke(args: SubmitJobArgs): Promise<SubmitJobResult> {
@@ -66,6 +74,10 @@ export class LocalSubmitJob implements SubmitJob {
     // `.catch` instead of `try` must not get a synchronous throw through the gap.
     if (!isSubmittableKind(args.kind)) {
       return Promise.reject(new UnsubmittableJobKindError(args.kind, SUBMITTABLE_JOB_KINDS));
+    }
+
+    if (args.kind === (JobKind.CODE_INDEX as string) && !this.store.capabilities.codeIndex) {
+      return Promise.reject(new BackendCapabilityError("the code index", this.store.backend));
     }
 
     const now = this.clock.now();

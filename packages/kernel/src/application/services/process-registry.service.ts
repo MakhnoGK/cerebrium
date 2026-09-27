@@ -2,10 +2,16 @@ import { inject, injectable } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import { PROCESS_PROBE_TOKEN, type ProcessProbe } from "@/domain/ports/process-probe";
-import { PROCESSES_REPO_TOKEN, type ProcessesRepo, type ProcessRow } from "@/domain/ports/storage";
+import {
+  PROCESSES_REPO_TOKEN,
+  STORE_TOKEN,
+  type ProcessesRepo,
+  type ProcessRow,
+  type Store,
+} from "@/domain/ports/storage";
 import type { WarmupOutcome } from "@/application/services/model-warmup.service";
 import { newId } from "@/core/ids";
-import { ConfigRegistry, DatabaseConfig } from "@/infrastructure/config";
+import { ConfigRegistry } from "@/infrastructure/config";
 
 export interface LiveProcess extends ProcessRow {
   alive: boolean;
@@ -18,7 +24,7 @@ export class ProcessRegistryService {
   constructor(
     @inject(PROCESSES_REPO_TOKEN) private readonly processes: ProcessesRepo,
     private readonly config: ConfigRegistry,
-    private readonly database: DatabaseConfig,
+    @inject(STORE_TOKEN) private readonly store: Store,
     @inject(CONFIG_FILE_TOKEN) private readonly configFile: ConfigFileReport | null,
     @inject(PROCESS_PROBE_TOKEN) private readonly probe: ProcessProbe,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
@@ -32,10 +38,11 @@ export class ProcessRegistryService {
     await this.processes.publish({
       id,
       role,
+      host: this.probe.host(),
       pid: this.probe.self(),
       started_at: this.clock.now(),
       node_version: process.version,
-      db_path: this.database.path,
+      db_path: this.store.identity,
       config_file: this.configFile?.path ?? null,
       config_state: this.configFile?.state ?? "pinned",
       config_json: JSON.stringify(this.config.effective().values),
@@ -64,7 +71,11 @@ export class ProcessRegistryService {
     await this.processes.retire(dead.map((row) => row.id));
   }
 
+  // Another host's pid cannot be probed from here, so its rows count as alive: only that
+  // host's own processes can retire them.
   private isAlive(row: ProcessRow): boolean {
+    if (row.host !== this.probe.host()) return true;
+
     return row.pid === this.probe.self() || this.probe.alive(row.pid);
   }
 }

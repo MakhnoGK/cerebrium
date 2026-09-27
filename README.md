@@ -50,7 +50,8 @@ packages/kernel/src/
                              code index, event log, model warm-up)
                    workers/  (embedding drain, consolidation sweep)
                    errors/   (typed errors a use case throws)
-  db/              sqlite/ (the storage adapter: migrations, repositories, schema snapshot)
+  db/              sqlite/ (the SQLite adapter: migrations, repositories, schema snapshot)
+                   postgres/ (the Postgres adapter: its baseline, repositories, SQLite importer)
   infrastructure/  config sections + the environment source and registry
   embeddings/      pluggable embedding providers
   code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
@@ -79,8 +80,9 @@ The two background workers are application services that happen to run on a time
 live in `application/workers/` rather than beside the adapters they drive.
 
 Storage is reached through async ports (`packages/kernel/src/domain/ports/storage/*`); all SQL lives in
-the SQLite adapter under `packages/kernel/src/db/sqlite/*`, consumers inject the specific ports they
-need, and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
+the adapters — SQLite under `packages/kernel/src/db/sqlite/*`, Postgres under
+`packages/kernel/src/db/postgres/*` — consumers inject the specific ports they need, and tools
+contain no SQL. Enum-like vocabularies are TypeScript string enums defined
 once in `packages/contracts/src/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
 contract and invariants are in [`CLAUDE.md`](CLAUDE.md).
 
@@ -488,7 +490,11 @@ declared range fails at startup rather than being quietly replaced.
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `CEREBRIUM_HOME` | `~/.cerebrium` | Install root. `config.json`, `memory.db`, `daemon.pid` and `models/` all derive from it. Read before any config tier exists. |
-| `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | SQLite file. `:memory:` for ephemeral. |
+| `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | SQLite file. `:memory:` for ephemeral. Also keys the daemon's pidfile on either backend. |
+| `MEMORY_STORE_BACKEND` | `sqlite` | `sqlite` or `postgres`. See **Postgres backend**. |
+| `MEMORY_PG_URL` | — | Postgres connection URL. Secret: redacted from every config report. |
+| `MEMORY_PG_URL_FILE` | — | A file holding the URL (a container secret), read when `MEMORY_PG_URL` is unset. |
+| `MEMORY_PG_POOL_MAX` | `10` | Connections per process. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
 | `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
 | `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model), `http` (a model served over HTTP, so the daemon holds none), or `local-null` (deterministic, offline, for tests). |
@@ -1237,6 +1243,32 @@ scenario evaluation remains a separate manual step.
 is allowed — see invariant #1 in `CODEX.md` — and measured: two servers doing 120
 interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
 landed and searchable.
+
+## Postgres backend
+
+`MEMORY_STORE_BACKEND=postgres` runs the same kernel on PostgreSQL 18 with two extensions:
+**pgvector** (exact cosine KNN over `chunk_vectors`, one generation of vectors per row of
+`vector_spaces`) and **pg_search** (ParadeDB BM25 for the text branch). The server image is
+`paradedb/paradedb`, which carries both; the database must be created with `--locale=C`.
+
+What differs from SQLite:
+
+- **No code mirror.** `code_index`, `code_lookup` and `job_submit code.index` answer "not
+  available on the postgres backend", and the daemon schedules no index. Authored edges into
+  code carried over from SQLite sit in `code_refs`.
+- **Text ranking is BM25 over a stemmed (english) title and body.** Measured on a snapshot
+  of the live store it scores above FTS5 on the text branch and level with it on hybrid.
+- **Vectors belong to a space.** A provider whose model is not the active space's is refused
+  at commit, so a model swap cannot mix vectors; the queue records why.
+
+Moving a store: `npm run import:sqlite -- --from copy.db --to <url> --verify` copies authored
+memory from a `.backup` of the SQLite file (never the live one), idempotently, and `--verify`
+compares counts and content hashes per table.
+
+Testing: `npm run pg:up` starts a throwaway ParadeDB in podman or docker and prints the
+`CEREBRIUM_TEST_PG_URL` to export; `npm run test:pg` then reruns the suites against it
+(files whose first line is `// sqlite-only:` are skipped), and the storage contract tests in
+`packages/kernel/test/storage-contract/` run on both backends. `npm run pg:down` removes it.
 
 ## Backup (Litestream)
 

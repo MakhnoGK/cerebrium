@@ -128,14 +128,8 @@ export class EmbeddingWorker {
 
     let vectors: number[][];
 
-    try {
-      vectors = await this.provider.embed(
-        chunks.map((c) => c.text),
-        EmbeddingRole.PASSAGE,
-      );
-    } catch (err) {
-      const involved = [...new Set(chunks.map((c) => c.node_id))];
-
+    const involved = [...new Set(chunks.map((c) => c.node_id))];
+    const failed = async (err: unknown) => {
       await this.embeddingQueue.recordEmbeddingFailure(
         involved,
         (err as Error).message || String(err),
@@ -143,6 +137,15 @@ export class EmbeddingWorker {
       );
 
       return { embedded: 0, failed: involved.length };
+    };
+
+    try {
+      vectors = await this.provider.embed(
+        chunks.map((c) => c.text),
+        EmbeddingRole.PASSAGE,
+      );
+    } catch (err) {
+      return failed(err);
     }
 
     const byNode = new Map<string, { chunkId: string; vector: number[] }[]>();
@@ -155,12 +158,16 @@ export class EmbeddingWorker {
 
     const batch = [...byNode].map(([nodeId, items]) => ({ nodeId, items }));
 
-    await this.embeddingQueue.commitBatchEmbeddings(
-      batch,
-      this.provider.name,
-      this.provider.version,
-      this.now(),
-    );
+    try {
+      await this.embeddingQueue.commitBatchEmbeddings(
+        batch,
+        this.provider.name,
+        this.provider.version,
+        this.now(),
+      );
+    } catch (err) {
+      return failed(err);
+    }
 
     for (const id of nodeIds) {
       if (!byNode.has(id)) {

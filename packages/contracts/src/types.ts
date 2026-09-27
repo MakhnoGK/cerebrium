@@ -60,8 +60,9 @@ export interface EnrichedRow {
   last_used_at: string | null;
 }
 
+// Negative, lower is better: a row's share of the best match is `text_rank / best`.
 export interface SearchRow extends EnrichedRow {
-  bm25: number;
+  text_rank: number;
 }
 
 export interface VectorRow extends EnrichedRow {

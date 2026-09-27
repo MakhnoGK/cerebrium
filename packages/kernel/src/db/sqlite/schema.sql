@@ -294,7 +294,8 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
 CREATE TABLE IF NOT EXISTS processes (
   id TEXT PRIMARY KEY,
   role TEXT NOT NULL,
-  pid INTEGER NOT NULL UNIQUE,
+  host TEXT NOT NULL,
+  pid INTEGER NOT NULL,
   started_at TEXT NOT NULL,
   node_version TEXT NOT NULL,
   db_path TEXT NOT NULL,
@@ -303,7 +304,8 @@ CREATE TABLE IF NOT EXISTS processes (
   config_json TEXT NOT NULL,
   model_state TEXT,
   model_ms INTEGER,
-  model_error TEXT
+  model_error TEXT,
+  UNIQUE (host, pid)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS jobs (

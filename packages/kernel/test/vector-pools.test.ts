@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { createHash } from "node:crypto";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";

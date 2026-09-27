@@ -9,6 +9,7 @@
     "@cerebrium/contracts": "*",
     "@cerebrium/kernel": "*",
     "better-sqlite3": "^12.11.1",
+    "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "tsyringe": "^4.10.0"
   }

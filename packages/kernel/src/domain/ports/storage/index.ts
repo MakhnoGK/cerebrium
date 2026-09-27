@@ -51,4 +51,11 @@ export {
 } from "@/domain/ports/storage/search";
 export { SESSIONS_REPO_TOKEN, type SessionsRepo } from "@/domain/ports/storage/sessions";
 export { STATS_REPO_TOKEN, type StatsRepo } from "@/domain/ports/storage/stats";
+export {
+  BackendCapabilityError,
+  STORE_TOKEN,
+  type Store,
+  type StoreBackend,
+  type StoreCapabilities,
+} from "@/domain/ports/storage/store";
 export { STORAGE_TOKENS } from "@/domain/ports/storage/tokens";

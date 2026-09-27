@@ -3,6 +3,7 @@ import {
   bool,
   configSection,
   custom,
+  enumOf,
   int,
   nullableStr,
   num,
@@ -16,6 +17,19 @@ const home = (...parts: string[]): string => join(cerebriumHome(), ...parts);
 @configSection()
 export class DatabaseConfig extends SectionOf("database", {
   path: str(home("memory.db")).env("MEMORY_DB_PATH"),
+}) {}
+
+export const STORE_BACKENDS = { SQLITE: "sqlite", POSTGRES: "postgres" } as const;
+
+// Which store the local kernel opens. `database.path` stays the SQLite file (and the key of
+// the daemon's pidfile) whichever backend is chosen.
+@configSection()
+export class StorageConfig extends SectionOf("storage", {
+  backend: enumOf(STORE_BACKENDS, STORE_BACKENDS.SQLITE).env("MEMORY_STORE_BACKEND"),
+  postgresUrl: nullableStr(null).secret().env("MEMORY_PG_URL"),
+  // A file holding the URL, for a container secret. Read when `postgresUrl` is unset.
+  postgresUrlFile: nullableStr(null).env("MEMORY_PG_URL_FILE"),
+  pgPoolMax: int(10).positive().env("MEMORY_PG_POOL_MAX"),
 }) {}
 
 // The principal this host writes as, pinning what the MCP `initialize` handshake would

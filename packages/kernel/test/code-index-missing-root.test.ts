@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

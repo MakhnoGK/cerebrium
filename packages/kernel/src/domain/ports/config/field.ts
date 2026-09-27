@@ -10,8 +10,19 @@
 
 export abstract class Field<T> {
   private explicitEnv?: string;
+  private sensitive = false;
 
   constructor(readonly fallback: T) {}
+
+  // Kept out of everything that reports the resolved config (`ConfigRegistry.effective`).
+  secret(): this {
+    this.sensitive = true;
+    return this;
+  }
+
+  get isSecret(): boolean {
+    return this.sensitive;
+  }
 
   // Pin a legacy env-var name. Without this the name is derived from the config path,
   // so a new property needs no env bookkeeping at all.

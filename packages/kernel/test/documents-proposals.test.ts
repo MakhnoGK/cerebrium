@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { container } from "tsyringe";

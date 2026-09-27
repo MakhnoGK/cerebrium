@@ -1,6 +1,7 @@
 export interface ProcessRow {
   id: string;
   role: string;
+  host: string;
   pid: number;
   started_at: string;
   node_version: string;

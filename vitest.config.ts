@@ -9,6 +9,7 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
     environment: "node",
     setupFiles: ["packages/kernel/test/setup.ts"],
+    globalSetup: ["packages/kernel/test/pg-global-setup.ts"],
     // Deterministic, offline embeddings for every test (incl. buildCtx-based ones).
     env: { MEMORY_EMBED_PROVIDER: "local-null" },
   },

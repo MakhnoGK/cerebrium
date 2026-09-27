@@ -69,3 +69,38 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:e2e
+
+  test-pg:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: paradedb/paradedb:0.25.10-pg18
+        env:
+          POSTGRES_USER: cerebrium
+          POSTGRES_PASSWORD: cerebrium
+          POSTGRES_DB: cerebrium
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cerebrium"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CEREBRIUM_TEST_PG_URL: postgres://cerebrium:cerebrium@localhost:5432/postgres
+      CEREBRIUM_REQUIRE_PG: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: |
+          psql "$CEREBRIUM_TEST_PG_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+      - run: npm run test:pg

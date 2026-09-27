@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import type BetterSqlite3 from "better-sqlite3";
-import { container } from "tsyringe";
+import { container, type DependencyContainer } from "tsyringe";
 import { ZodRawShape } from "zod";
 import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
 import {
@@ -34,6 +34,7 @@ import {
 } from "@/domain/ports/storage";
 import { PrincipalQuotaService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
+import { PG_TOKEN } from "@/db/postgres/database";
 import { DB_TOKEN } from "@/db/sqlite/base";
 import { openDatabase } from "@/db/sqlite/database";
 import { LocalNullProvider } from "@/embeddings/local-null";
@@ -42,6 +43,7 @@ import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { createConsolidator } from "@/consolidation";
+import { freshPgDatabase, TEST_BACKEND } from "@test/pg";
 
 export interface TestClock extends Clock {
   t: string;
@@ -88,12 +90,12 @@ export function setup(opts?: {
   provider?: EmbeddingProvider;
   consolidator?: ConsolidationProvider;
 }): TestEnv {
-  const db = openDatabase(":memory:");
-  const clock = makeClock(opts?.start ?? "2026-01-01T00:00:00.000Z");
   const provider = opts?.provider ?? new LocalNullProvider();
+  const db = TEST_BACKEND === "postgres" ? usePostgres(provider.name) : openDatabase(":memory:");
+  const clock = makeClock(opts?.start ?? "2026-01-01T00:00:00.000Z");
   const consolidator = opts?.consolidator ?? createConsolidator("manual");
 
-  container.register(DB_TOKEN, { useValue: db });
+  if (TEST_BACKEND === "sqlite") container.register(DB_TOKEN, { useValue: db });
   container.register(CLOCK_TOKEN, { useValue: clock });
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
   container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: consolidator });
@@ -121,6 +123,27 @@ export function setup(opts?: {
     queue: container.resolve<EmbeddingQueueRepo>(EMBEDDING_QUEUE_REPO_TOKEN),
     sessions: container.resolve<SessionsRepo>(SESSIONS_REPO_TOKEN),
   };
+}
+
+// A new, empty store for whatever resolves the kernel from `into`, on either backend.
+export function freshStore(into: DependencyContainer = container, spaceModel = "local-null"): void {
+  if (TEST_BACKEND === "postgres") {
+    into.register(PG_TOKEN, { useValue: freshPgDatabase(spaceModel) });
+  } else {
+    into.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+  }
+}
+
+// On the Postgres run the raw SQLite handle a test reaches for does not exist; touching it
+// fails loudly instead of quietly reading an empty in-memory file.
+function usePostgres(spaceModel: string): BetterSqlite3.Database {
+  container.register(PG_TOKEN, { useValue: freshPgDatabase(spaceModel) });
+
+  return new Proxy({} as BetterSqlite3.Database, {
+    get(_target, key) {
+      throw new Error(`env.db.${String(key)}: no raw SQLite handle on the postgres backend`);
+    },
+  });
 }
 
 type ToolClass<Schema extends ZodRawShape, Response> = new (

@@ -14,10 +14,16 @@ type Infer<S extends SectionSpec> = {
 export const CONFIG_SECTION_TOKEN: InjectionToken<object> = Symbol("ConfigSection");
 
 // Provenance is kept off the instance so a section serializes to exactly its values.
-const META = new WeakMap<object, { path: string; provenance: FieldProvenance[] }>();
+interface SectionMeta {
+  path: string;
+  provenance: FieldProvenance[];
+  secrets: string[];
+}
 
-export function sectionMeta(instance: object): { path: string; provenance: FieldProvenance[] } {
-  return META.get(instance) ?? { path: "?", provenance: [] };
+const META = new WeakMap<object, SectionMeta>();
+
+export function sectionMeta(instance: object): SectionMeta {
+  return META.get(instance) ?? { path: "?", provenance: [], secrets: [] };
 }
 
 export class ConfigError extends Error {}
@@ -68,7 +74,13 @@ export function SectionOf<S extends SectionSpec>(
 
       Object.assign(this, values);
       Object.freeze(this);
-      META.set(this, { path, provenance });
+      META.set(this, {
+        path,
+        provenance,
+        secrets: Object.entries(spec)
+          .filter(([, field]) => field.isSecret)
+          .map(([key]) => key),
+      });
     }
   }
 

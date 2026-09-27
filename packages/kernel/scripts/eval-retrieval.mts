@@ -105,6 +105,10 @@ eval-retrieval — labelled relevance eval across configuration arms.
   --sample N Score a stable subset of N queries, chosen by hashing the query text — the
              same subset for every arm and for every re-run, so a sweep over a few
              thousand labels stays interactive without making two runs incomparable.
+  --mode M   Search mode for every query: hybrid (default), text or vector — to score one
+             branch on its own.
+  --kinds K  Comma-separated memory kinds every query is restricted to, e.g.
+             semantic,episodic to compare stores that do not both hold the code mirror.
   --min N    Lower that floor. Numbers below it are noise; use it to smoke-test the path
              or to peek at early data, not to draw conclusions.
   --help     This text.
@@ -113,6 +117,8 @@ Examples
   npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
   npm run eval:retrieval -- --arm flat:MEMORY_USE_WEIGHT=0 --arm usage:MEMORY_USE_WEIGHT=0.25
   npm run eval:retrieval -- --db ~/.cerebrium/memory.db --gold ~/.cerebrium/gold.jsonl
+  npm run eval:retrieval -- --db snap.db --kinds semantic,episodic --arm sqlite \
+    --arm pg:MEMORY_STORE_BACKEND=postgres,MEMORY_PG_URL=postgres://u:p@localhost/snap
 
 Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, Facet@${FACET_K} (the 
 share of distinct gold facets covered by the returned set), and SecAcc@${K} (the share of 
@@ -429,7 +435,13 @@ function liveNodes(db: Database.Database): Set<string> {
 async function runArm(
   arm: Arm,
   queries: EvalQuery[],
-  shared: { db: Database.Database; provider: EmbeddingProvider; readonly: boolean },
+  shared: {
+    db: Database.Database;
+    provider: EmbeddingProvider;
+    readonly: boolean;
+    mode?: "hybrid" | "text" | "vector";
+    kinds?: MemoryKind[];
+  },
   facetOf: Map<string, string>,
 ): Promise<Scores> {
   // A fresh container per arm so every config section is rebuilt from the arm's overlay,
@@ -460,7 +472,13 @@ async function runArm(
   const scores: Scores = { rr: [], ndcg: [], p1: [], recall: [], facets: [], secAcc: [] };
 
   for (const q of queries) {
-    const res = await tool.invoke({ session_id: sid, query: q.query, limit: K });
+    const res = await tool.invoke({
+      session_id: sid,
+      query: q.query,
+      limit: K,
+      ...(shared.mode === undefined ? {} : { mode: shared.mode }),
+      ...(shared.kinds === undefined ? {} : { kinds: shared.kinds }),
+    });
     const ranked = res.results.map((r) => r.id);
     const facet = facetCoverage(ranked, q.gold, facetOf, FACET_K);
     const secAcc = sectionAccuracy(res.results, q.gold, q.sections, K);
@@ -489,6 +507,12 @@ async function main() {
   const arms = parseArms(argv);
   const store = argv[argv.indexOf("--db") + 1];
   const readonly = argv.includes("--db") && !!store;
+  const mode = argv.includes("--mode")
+    ? (argv[argv.indexOf("--mode") + 1] as "hybrid" | "text" | "vector")
+    : undefined;
+  const kinds = argv.includes("--kinds")
+    ? (argv[argv.indexOf("--kinds") + 1]!.split(",") as MemoryKind[])
+    : undefined;
   const floor = argv.includes("--min")
     ? Number(argv[argv.indexOf("--min") + 1] ?? MIN_GOLD_QUERIES)
     : MIN_GOLD_QUERIES;
@@ -596,7 +620,7 @@ async function main() {
   const table: { arm: Arm; scores: Scores }[] = [];
 
   for (const arm of arms) {
-    const scores = await runArm(arm, queries, { db, provider, readonly }, facetOf);
+    const scores = await runArm(arm, queries, { db, provider, readonly, mode, kinds }, facetOf);
 
     table.push({ arm, scores });
     console.log(

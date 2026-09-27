@@ -10,6 +10,7 @@ function row(overrides: Partial<ProcessRow> = {}): ProcessRow {
   return {
     id: "01JPROCESS0000000000000001",
     role: "server",
+    host: "laptop",
     pid: 4242,
     started_at: "2026-08-20T10:00:00.000Z",
     node_version: "v25.0.0",
@@ -55,6 +56,17 @@ describe("ProcessesRepo", () => {
     });
   });
 
+  it("should keep the same pid on two hosts apart", async () => {
+    // Given
+    await repo.publish(row({ id: "01JPROCESS0000000000000001", host: "laptop", pid: 1 }));
+
+    // When
+    await repo.publish(row({ id: "01JPROCESS0000000000000002", host: "container", pid: 1 }));
+
+    // Then
+    expect((await repo.list()).map((p) => p.host).sort()).toEqual(["container", "laptop"]);
+  });
+
   it("should hold one row per live process side by side", async () => {
     // Given / When
     await repo.publish(row({ id: "01JPROCESS0000000000000001", pid: 1, role: "server" }));
@@ -89,7 +101,7 @@ describe("ProcessesRepo", () => {
 });
 
 function probe(self: number, live: number[]): ProcessProbe {
-  return { self: () => self, alive: (pid) => live.includes(pid) };
+  return { self: () => self, alive: (pid) => live.includes(pid), host: () => "laptop" };
 }
 
 function registry(opts: {
@@ -249,6 +261,20 @@ describe("ProcessRegistryService", () => {
 
     // Then
     expect((await repo.list()).map((p) => p.pid).sort()).toEqual([111, 900]);
+  });
+
+  it("should leave another host's rows alone, since their pids mean nothing here", async () => {
+    // Given
+    await repo.publish(
+      row({ id: "01JPROCESS0000000000000009", host: "container", pid: 1, role: "daemon" }),
+    );
+
+    // When
+    await registry({ self: 900, live: [900] }).publish("server");
+    const listed = await registry({ self: 900, live: [900] }).list();
+
+    // Then
+    expect(listed.find((p) => p.host === "container")).toMatchObject({ pid: 1, alive: true });
   });
 
   it("should retire the row it published", async () => {
