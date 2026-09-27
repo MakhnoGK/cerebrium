@@ -6,9 +6,9 @@ export default defineConfig({
   plugins: [tsconfigPaths({ projects: ["tsconfig.json"] }), swc.vite()],
   test: {
     globals: true,
-    include: ["test/**/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
     environment: "node",
-    setupFiles: ["test/setup.ts"],
+    setupFiles: ["packages/kernel/test/setup.ts"],
     // Deterministic, offline embeddings for every test (incl. buildCtx-based ones).
     env: { MEMORY_EMBED_PROVIDER: "local-null" },
   },

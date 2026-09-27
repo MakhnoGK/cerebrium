@@ -1,0 +1,422 @@
+import type {
+  ConsolidationKind,
+  ConsolidationStatus,
+  EdgeType,
+  EventAction,
+  MemoryKind,
+} from "./vocab";
+
+// Domain types shared across the repository layer and the tools. Pure — no db or
+// process imports — so both the data layer and callers depend inward on these.
+
+export interface Envelope {
+  id: string;
+  kind: MemoryKind;
+  type: string;
+  title: string;
+  summary: string;
+  project: string | null;
+  updated: string;
+  rev: number;
+  edges: number;
+  invalidated: boolean;
+}
+
+// One addressable section of a node's body: the heading path chunks were filed under
+// (or the preamble sentinel), and the size of the text behind it.
+export interface NodeSection {
+  section: string;
+  chars: number;
+}
+
+export interface NeighborStub {
+  id: string;
+  type: string;
+  title: string;
+  edge: string;
+  direction: "out" | "in";
+}
+
+export interface RevisionMeta {
+  rev: number;
+  ts: string;
+  session_id: string;
+  reason: string | null;
+}
+
+export interface EnrichedRow {
+  id: string;
+  memory_kind: MemoryKind;
+  type: string;
+  title: string;
+  project: string | null;
+  valid_from: string;
+  invalidated_at: string | null;
+  rev: number;
+  updated: string;
+  content: string;
+  edge_count: number;
+  use_count: number;
+  last_used_at: string | null;
+}
+
+export interface SearchRow extends EnrichedRow {
+  bm25: number;
+}
+
+export interface VectorRow extends EnrichedRow {
+  distance: number; // cosine distance in [0,2]; cosine similarity = 1 - distance
+  chunk_text: string;
+  chunk_heading: string | null; // heading path of the matched chunk; null before the first heading
+}
+
+export interface QueueRow {
+  node_id: string;
+  enqueued_at: string;
+  attempts: number;
+}
+
+// A pre-generated distill/merge summary attached to a candidate; null until a
+// generation provider runs (or when the agent will author it at apply time).
+// `recommendation`/`reason` carry the provider's verdict on whether to consolidate at
+// all (absent on agent-authored or pre-recommendation proposals).
+export interface ConsolidationProposal {
+  title: string;
+  summary: string;
+  body: string;
+  recommendation?: "apply" | "reject";
+  reason?: string;
+}
+
+// A queued consolidation candidate. `member_ids` is the cluster the sweep
+// found; `canonical_id` is the merge survivor / link dst when applicable.
+export interface ConsolidationCandidate {
+  id: string;
+  kind: ConsolidationKind;
+  status: ConsolidationStatus;
+  project: string | null;
+  member_ids: string[];
+  canonical_id: string | null;
+  score: number;
+  proposal: ConsolidationProposal | null;
+  detected_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  attempts: number;
+  last_error: string | null;
+}
+
+export interface NewCandidate {
+  kind: ConsolidationKind;
+  project?: string | null;
+  member_ids: string[];
+  canonical_id?: string | null;
+  score: number;
+  proposal?: ConsolidationProposal | null;
+  detected_at: string;
+}
+
+export interface UnembeddedChunk {
+  id: string;
+  node_id: string;
+  text: string;
+}
+
+export interface TechStats {
+  queue: {
+    backlog: number;
+    parked: number;
+    total: number;
+    with_errors: number;
+    oldest_enqueued_at: string | null;
+    attempts_histogram: Record<string, number>;
+  };
+  content: {
+    nodes_by_kind: Record<string, number>;
+    nodes_total: number;
+    edges: number;
+    chunks_active: number;
+    chunks_stale: number;
+    chunks_embedded: number;
+    chunks_unembedded: number;
+    vectors_authored: number;
+    vectors_code: number;
+    sessions: number;
+    events: number;
+  };
+  storage: {
+    db_path: string;
+    db_bytes: number;
+    wal_bytes: number;
+    page_count: number;
+    page_size: number;
+  };
+  drain: {
+    lease_owner: string | null;
+    lease_expires_at: string | null;
+    lease_active: boolean;
+  };
+  graph: {
+    dangling_edges: number; // live edges from a live node into an invalidated one
+    repointable_edges: number; // of those, the authored ones whose target has a live successor
+    detached_nodes: number; // live nodes no longer reachable from the graph's densest hub
+  };
+  consolidation: {
+    pending: number;
+    applied: number;
+    dismissed: number;
+    runs_total: number;
+    last_run_at: string | null;
+    last_error: string | null;
+    last_stage: string | null;
+    // Whether a sweep holds the lease right now. Ask this, never `ended_at IS NULL`.
+    sweep_running: boolean;
+    sweep_lease_owner: string | null;
+    sweep_lease_expires_at: string | null;
+  };
+  jobs: {
+    by_state: Record<string, number>;
+    // The kernel's own recurring maintenance: when the mirror refresh last finished, and
+    // whether one is queued or in flight right now.
+    last_code_index_at: string | null;
+    last_code_index_error: string | null;
+    code_index_open: boolean;
+  };
+  code_repos: RepoProvenance[];
+  last_activity: string | null;
+}
+
+export interface RepoProvenance {
+  repo: string;
+  root: string | null;
+  branch: string | null;
+  commit: string | null;
+  dirty: boolean;
+  indexed_at: string;
+  // The root is no longer on this machine, so the symbols under it can never be refreshed
+  // or verified against source. They stay retrievable; they just cannot be trusted as
+  // current, and nothing should propose new links into them.
+  detached: boolean;
+}
+
+export interface Neighbor {
+  parent: string;
+  edge: EdgeType;
+  node: EnrichedRow;
+}
+
+export interface NewNode {
+  memory_kind: MemoryKind;
+  type: string;
+  title: string;
+  content: string;
+  project: string | null;
+  session_id: string;
+  ts: string;
+  links?: { dst: string; type: EdgeType }[];
+  // Event axis — when the fact itself was true, independent of when it was written down.
+  // Absent means no claim; reads treat that as an open interval.
+  event_from?: string;
+  event_to?: string;
+}
+
+// ---- code indexing --------------------------------------------------------
+
+// One symbol extracted from source. `external_id` is the stable symbol id
+// (sha256 prefix of repo\0path\0qualified\0symbol_kind); `summary` becomes the
+// node's revision content (FTS + embedded); `source` is the raw slice (get-only).
+export interface ExtractedSymbol {
+  external_id: string;
+  symbol_kind: string;
+  name: string;
+  qualified: string;
+  signature: string | null;
+  summary: string;
+  start_line: number;
+  end_line: number;
+  code_hash: string;
+  source: string;
+}
+
+export interface FileIndexInput {
+  repo: string;
+  path: string;
+  lang: string;
+  fileHash: string;
+  symbols: ExtractedSymbol[];
+  defines: { src: string; dst: string }[]; // container external_id -> member external_id (both local)
+  session_id: string;
+  ts: string;
+}
+
+export interface FileIndexResult {
+  added: number;
+  updated: number;
+  invalidated: number;
+  edges: number;
+}
+
+export interface SymbolDirEntry {
+  node_id: string;
+  path: string;
+  name: string;
+  qualified: string;
+  symbol_kind: string;
+}
+
+export interface SymbolFacets {
+  repo: string;
+  path: string;
+  lang: string;
+  symbol_kind: string;
+  name: string;
+  qualified: string;
+  signature: string | null;
+  start_line: number;
+  end_line: number;
+}
+
+export interface SymbolLookup {
+  envelope: Envelope;
+  facets: SymbolFacets;
+  neighbors: NeighborStub[];
+}
+
+// A repo to index: the name symbol identity is content-addressed on, and the
+// directory to walk.
+export interface IndexTarget {
+  name: string;
+  root: string;
+}
+
+// The compact per-repo summary an index run returns — counts and provenance, never
+// symbols or source.
+export interface IndexStats {
+  repo: string;
+  files_scanned: number;
+  files_indexed: number;
+  files_skipped: number;
+  symbols_added: number;
+  symbols_updated: number;
+  symbols_invalidated: number;
+  edges_written: number;
+  duration_ms: number;
+  parked_embeddings: number;
+  branch: string | null;
+  commit: string | null;
+  dirty: boolean;
+  // The root directory was not on disk, so nothing was read and nothing was retired. Absent
+  // on a normal run. Distinguishes "the source tree is gone" from "the author deleted every
+  // file", which the sweep below cannot tell apart on its own.
+  root_missing?: true;
+}
+
+// ---- external mirrors ------------------------------------------------------
+
+// A registered external mirror source (a row in `mirror_sources`). `kind` becomes
+// each mirror node's `origin`; `id` is the deployment-local instance (e.g.
+// 'grafana-prod'). Empty registry in a fresh clone -> no active sources.
+export interface MirrorSource {
+  id: string;
+  kind: string;
+  label: string | null;
+  project: string | null;
+  freshness_hours: number | null;
+  recipe: string | null;
+  enabled: boolean;
+  last_synced_at: string | null;
+  registered_at: string;
+}
+
+// A source plus its computed freshness + live node count (for `mirror_status` and
+// the session_start freshness hook). `stale` is only true for an enabled source
+// with a `freshness_hours` threshold that has been exceeded (or never synced).
+export interface MirrorSourceStatus extends MirrorSource {
+  hours_stale: number | null; // null when never synced
+  stale: boolean;
+  node_count: number;
+}
+
+// One curated external record the agent asks to mirror. `content` is a compact
+// markdown summary the agent composed from the source; `url` is a deep link back;
+// `facets` is opaque structured metadata. Idempotent by (source, native_id).
+export interface MirrorItem {
+  native_id: string;
+  type: string;
+  title: string;
+  content: string;
+  url?: string;
+  project?: string;
+  facets?: Record<string, unknown>;
+}
+
+export interface MirrorUpsertResult {
+  source_id: string;
+  added: number;
+  updated: number;
+  unchanged: number;
+  node_ids: string[];
+}
+
+// The per-record facet row (mirror_records) for an external mirror node, returned
+// alongside content by `get`.
+export interface MirrorRecord {
+  source_id: string;
+  native_id: string;
+  url: string | null;
+  facets: Record<string, unknown> | null;
+}
+
+// One row of the `events` audit log: what a caller did, in one session. Callers
+// describe the event; the writer stamps `ts` from the clock.
+export interface EventDraft {
+  action: EventAction;
+  session_id: string;
+  node_id?: string | null;
+  detail?: unknown;
+}
+
+const SUMMARY_MAX = 160;
+
+export function deriveSummary(content: string): string {
+  const line = content
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith("#"));
+  if (!line) return "";
+  return line.length > SUMMARY_MAX ? line.slice(0, SUMMARY_MAX).trimEnd() + "…" : line;
+}
+
+// True when a result's `best_chunk` already carries what its `summary` says. The summary is
+// the body's first non-heading line and the chunk is the matched slice, so on a hit whose
+// match is the node's opening they are the same sentence shipped twice.
+export function summaryIsRedundant(summary: string, bestChunk: string): boolean {
+  const [shorter, longer] =
+    summary.length <= bestChunk.length ? [summary, bestChunk] : [bestChunk, summary];
+
+  return shorter.length > 0 && longer.startsWith(shorter.replace(/…$/, ""));
+}
+
+export function toEnvelope(row: EnrichedRow): Envelope {
+  return {
+    id: row.id,
+    kind: row.memory_kind,
+    type: row.type,
+    title: row.title,
+    summary: deriveSummary(row.content),
+    project: row.project,
+    updated: row.updated,
+    rev: row.rev,
+    edges: row.edge_count,
+    invalidated: row.invalidated_at != null,
+  };
+}
+
+// What one principal has spent inside the current quota window. Lives here because the
+// limiter that produces it and the operator surface that reports it sit on opposite sides
+// of the delivery boundary.
+export interface PrincipalUsage {
+  principal: string;
+  calls: number;
+  writes: number;
+}

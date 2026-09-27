@@ -20,11 +20,28 @@ A personal R&D project exploring long-term memory for agents, used daily with Cl
 
 ## Architecture
 
-Clean-architecture layers, no ORM, one directory per MCP tool:
+An npm-workspaces monorepo. Every deliverable is one workspace, and the import boundaries
+between them are lint-enforced:
 
 ```
-src/
-  core/            pure primitives — ids, vocab, tokens, chunking, FTS, types (no I/O)
+packages/
+  contracts/       the wire both sides share — RPC framing and deadlines, protocol
+                   version, vocabularies, the data types that cross it (no I/O, no deps)
+  kernel/          the memory kernel (below); its tests, and the eval/calibration scripts
+apps/
+  host/            cerebrium-host — daemon, runner, their workers and CLIs, the container
+                   image and the files each release deploys to the GPU laptop
+  plugin/          cerebrium-plugin — the stdio MCP server agents launch, the skill, the
+                   always-on rules and session hooks, the pi extension, the installer
+  dashboard-api/   web dashboard backend (NestJS), scaffold only
+  dashboard-web/   web dashboard UI (React), scaffold only
+```
+
+The kernel keeps clean-architecture layers, no ORM, and one directory per MCP tool:
+
+```
+packages/kernel/src/
+  core/            pure primitives — ids, tokens, chunking, FTS, wikilinks (no I/O)
   domain/ports/    interfaces the inner layers own — Clock, Embedding/Consolidation
                    providers, and the declarative config mechanism
   application/     use-cases/ (the seam every delivery layer resolves: contracts +
@@ -43,22 +60,28 @@ src/
                    liveness, launchd agent, the socket client)
   presentation/    delivery — mcp/ (stdio server, audit + output adapters, one dir per
                    tool) and rpc/ (the daemon's local socket server and its methods)
-  server.ts        stdio MCP server      daemon.ts      embedding drain + socket
-  read-worker.ts   one read pool worker (read-only connection, no model)
-  stats-cli.ts     operational snapshot  service-cli.ts launchd agent management
+  container.ts     the composition root every bin builds from
+
+apps/plugin/src/server.ts      stdio MCP server
+apps/host/src/daemon.ts        embedding drain + socket    runner.ts   unattended agent jobs
+apps/host/src/read-worker.ts   one read pool worker (read-only connection, no model)
+apps/host/src/stats-cli.ts     operational snapshot        service-cli.ts  launchd agents
 ```
 
-Dependencies point inward only: `core` imports nothing, `domain/ports` sees only `core`,
-adapters implement the ports, and nothing may import `presentation`. **That direction is
+Every bin is still bundled flat into the root `dist/`, which is what the local install and
+every agent host point at.
+
+Dependencies point inward only: `contracts` imports nothing, `core` sees only `contracts`, `domain/ports` sees only those two,
+adapters implement the ports, and nothing may import `presentation`. The kernel may not import an app, and the host and the plugin never import each other. **That direction is
 enforced by `no-restricted-imports` — a violation fails `npm run check`,** so the layering
 is a build constraint rather than a convention.
 
 The two background workers are application services that happen to run on a timer, so they
 live in `application/workers/` rather than beside the adapters they drive.
 
-All SQL lives in `src/db/repositories/*`; consumers inject the specific repositories they
+All SQL lives in `packages/kernel/src/db/repositories/*`; consumers inject the specific repositories they
 need and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
-once in `core/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
+once in `packages/contracts/src/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
 contract and invariants are in [`CLAUDE.md`](CLAUDE.md).
 
 ### Configuration
@@ -699,16 +722,16 @@ does not violate the single-writer invariant (that is about who writes the *DB*)
   `Foo::bar` definitions), enums, `using` aliases, templates and free functions), and
   Lua (`.lua` — table methods in both `M.f` and `M:f` form, local and global functions,
   function-valued bindings, and locals as consts). The language registry
-  (`src/code/languages.ts`) is a small map and the extractor dispatches per language, so
+  (`packages/kernel/src/code/languages.ts`) is a small map and the extractor dispatches per language, so
   adding Python/Go later is a new grammar + a handler, not a rewrite. Files with no known
   grammar are skipped and counted.
 - **Grammars come from `tree-sitter-wasms`, with one vendored exception.** Its Lua
   build carries an external scanner whose state survives a parse, so in a process that
   parses more than one Lua file only the first comes out correct — everything after it
   gains spurious `ERROR` nodes and silently loses symbols. A working build of the same
-  grammar is committed at `src/code/vendor/tree-sitter-lua.wasm` (48 KB, provenance and
+  grammar is committed at `packages/kernel/src/code/vendor/tree-sitter-lua.wasm` (48 KB, provenance and
   update steps in that directory's README) and `LangDef.vendored` routes the loader to
-  it. `test/code-parser.test.ts` re-parses every language four times so a future grammar
+  it. `packages/kernel/test/code-parser.test.ts` re-parses every language four times so a future grammar
   bump cannot quietly reintroduce this.
 - **Headers are parsed with the C++ grammar.** `.h` is ambiguous across C, C++ and
   Objective-C; the C++ grammar accepts nearly all C, while the C grammar turns every
@@ -775,7 +798,7 @@ into `mirror` nodes, so they're searchable and linkable alongside the notes that
 The design is **source-agnostic and credential-free**: the kernel never connects to an
 external service and hard-codes no source. The *agent* fetches with the source's own MCP
 tools and writes the results in; a deployment with a different toolset just registers
-different sources, with no change to `src/`.
+different sources, with no change to `packages/kernel/src/`.
 
 - **Registry (`mirror_sources`), empty by default.** `source_register` adds a per-deployment
   source instance (`id` e.g. `grafana-prod`, `kind` e.g. `grafana`, optional `project`,
@@ -958,7 +981,7 @@ no label.
 
 ### The gold file
 
-`--gold PATH` supplies labels the log cannot: a JSONL file (format in `scripts/gold.ts`)
+`--gold PATH` supplies labels the log cannot: a JSONL file (format in `packages/kernel/scripts/gold.ts`)
 whose entries carry a query, the node ids that answer it, and an `origin` — `generated`
 (a question written from one section, which is then the gold), `adjudicated` (a real query
 from the log with each candidate judged), or `mined` (the implicit signal above). File and
@@ -1169,9 +1192,9 @@ indexed.
 
 ## Skill for consuming agents
 
-`skill/cerebrium/SKILL.md` teaches a consuming agent the usage *discipline* — session
+`apps/plugin/skill/cerebrium/SKILL.md` teaches a consuming agent the usage *discipline* — session
 lifecycle, search-before-write, retrieval economy, episodic-vs-semantic — not the API.
-`skill/cerebrium-setup/SKILL.md` is the other half: it teaches an agent to install
+`apps/plugin/skill/cerebrium-setup/SKILL.md` is the other half: it teaches an agent to install
 Cerebrium into whatever host it is running in.
 
 Install both with `npm run agent:setup -- --apply`, or by hand:
@@ -1198,7 +1221,7 @@ surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, a
 | Claude Code | `claude mcp add -s user` | symlink in `~/.claude/skills/` | block in `~/.claude/CLAUDE.md` | `SessionStart` in `~/.claude/settings.json` |
 | Codex CLI | `codex mcp add` | symlink in `~/.codex/skills/` | block in `~/.codex/AGENTS.md` | `SessionStart` in `~/.codex/hooks.json` |
 | Antigravity | `~/.gemini/config/mcp_config.json` | path entry in `~/.gemini/config/skills.json` | global block in `~/.gemini/GEMINI.md` | `PreInvocation` in `~/.gemini/config/hooks.json` |
-| pi | *(no MCP client — see below)* | extension offers `skill/` to discovery | extension chains the block onto the system prompt | extension calls `session_start` itself |
+| pi | *(no MCP client — see below)* | extension offers `apps/plugin/skill/` to discovery | extension chains the block onto the system prompt | extension calls `session_start` itself |
 
 The rules block is written between `cerebrium:start`/`cerebrium:end` markers and replaced
 in place on later runs, so the rest of a file you maintain is never touched. Two steps are
@@ -1211,13 +1234,13 @@ settings. Setup merges the current tool grants into both active configs, preserv
 entries, and refuses malformed JSON or permission shapes instead of overwriting them.
 
 pi subtracts one: it ships no MCP client at all. Its four surfaces are delivered by a single
-extension loaded from this working tree — `install/pi/`, registered in
+extension loaded from this working tree — `apps/plugin/install/pi/`, registered in
 `~/.pi/agent/settings.json`, with the launch entry (`command`/`args`/`env`) in
 `~/.pi/agent/cerebrium.json`. Because the extension owns the transport, it can do what a hook
 cannot: it calls `session_start` before the first turn and hands the model the real
 `session_id` plus the working set, and fills that same id into any later call that omits it.
 Memory tools carry a `cerebrium_` prefix there, since pi already has built-in `write`, `read`
-and `get`. See `install/pi/README.md`.
+and `get`. See `apps/plugin/install/pi/README.md`.
 
 Setup reads the numeric version in `.nvmrc`, verifies that it is running under that Node, opens
 an in-memory `better-sqlite3` database as a native-addon preflight, and registers the canonical
@@ -1228,8 +1251,8 @@ silently selecting incompatible Node ABIs. After changing or removing the NVM ve
 `npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
 server over stdio against a throwaway store, calls `session_start`, counts the tools and
 runs the hook script — or, for pi, loads the extension under `node --experimental-strip-types`
-and checks it exports a factory. `install/README.md` has the per-host procedure by hand, and
-`install/hosts.md` records what was verified on which host version.
+and checks it exports a factory. `apps/plugin/install/README.md` has the per-host procedure by hand, and
+`apps/plugin/install/hosts.md` records what was verified on which host version.
 
 `npm run eval:agents` audits persisted Antigravity traces. It emits aggregate tool names and
 counts only—never prompts, argument values, ids, or paths—and marks truncated histories as
@@ -1267,7 +1290,7 @@ Every merge to `main` that passes CI is tagged `vYYYY.MM.DD.N`, built into
 `ghcr.io/makhnogk/cerebrium`, published as a GitHub Release and deployed to the host over
 Tailscale. The image runs the daemon with `CEREBRIUM_HOME=/data`; the container is healthy
 once `dist/healthcheck.js` sees the model loaded. Layout, rollback and the required
-secrets are in [deploy/host/README.md](deploy/host/README.md).
+secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
 
 
 ## Engineering highlights

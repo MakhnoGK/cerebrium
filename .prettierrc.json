@@ -10,11 +10,15 @@
   "importOrder": [
     "<BUILTIN_MODULES>",
     "<THIRD_PARTY_MODULES>",
+    "^@cerebrium/contracts/(.*)$",
+    "^@cerebrium/kernel/(.*)$",
     "^@/domain(/.*)?$",
     "^@/application(/.*)?$",
     "^@/(db|code|embeddings|consolidation|runtime)/(.*)$",
     "^@/(core|presentation|tools)/(.*)$",
     "^@/(.*)$",
+    "^@host/(.*)$",
+    "^@plugin/(.*)$",
     "^@test/(.*)$",
     "^[./]"
   ]

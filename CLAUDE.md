@@ -106,6 +106,22 @@ Full usage discipline (good vs bad examples) lives in the skill `cerebrium`
 When I distill code / Sentry / GitLab knowledge into something durable, it goes in
 Cerebrium.
 
+# Monorepo rules
+
+This repository is one npm-workspaces monorepo for every Cerebrium deliverable:
+`packages/contracts`, `packages/kernel`, `apps/host` (cerebrium-host), `apps/plugin`
+(cerebrium-plugin), `apps/dashboard-api` and `apps/dashboard-web`. What each one holds and
+the import boundaries between them are in `CODEX.md` → **Repository layout**;
+`eslint.config.js` enforces them.
+
+- **One MR = one finished feature**, across every package it touches. If a change needs the
+  plugin, the host or the dashboard updated too, that happens in the same MR. Its size does
+  not matter; its completeness does.
+- **A contract change lands on both sides together.** A change to `packages/contracts` ships
+  with every consumer updated in the same MR.
+- Feature branch → PR into `dev` → `dev` into `main`. Every green `main` is released to the
+  host by `.github/workflows/release.yml`.
+
 # Code comments
 
 Keep comments minimal. Don't narrate what the code already says, don't restate

@@ -1,0 +1,15 @@
+{
+  "name": "@cerebrium/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "cerebrium-host: the daemon, the runner and their workers, packaged as the container released to the GPU laptop",
+  "dependencies": {
+    "@cerebrium/contracts": "*",
+    "@cerebrium/kernel": "*",
+    "better-sqlite3": "^12.11.1",
+    "reflect-metadata": "^0.2.2",
+    "tsyringe": "^4.10.0"
+  }
+}

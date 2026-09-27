@@ -1,0 +1,8 @@
+{
+  "name": "@cerebrium/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Wire contract shared by every side: RPC framing and deadlines, the protocol version, and the vocabulary and data types that cross it"
+}

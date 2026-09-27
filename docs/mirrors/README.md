@@ -7,7 +7,7 @@ turn one external source into curated `mirror` nodes using the MCP tools the age
 has, then write them with `mirror_upsert`.
 
 A deployment with a different toolset simply writes different recipes and registers different
-sources — nothing in `src/` changes.
+sources — nothing in `packages/kernel/src/` changes.
 
 ## The loop
 

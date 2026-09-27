@@ -6,10 +6,13 @@
     "lib": ["ES2022"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@test/*": ["test/*"],
-      "@scripts/*": ["scripts/*"],
-      "@install/*": ["install/*"]
+      "@/*": ["packages/kernel/src/*"],
+      "@cerebrium/contracts/*": ["packages/contracts/src/*"],
+      "@cerebrium/kernel/*": ["packages/kernel/src/*"],
+      "@host/*": ["apps/host/src/*"],
+      "@plugin/*": ["apps/plugin/*"],
+      "@test/*": ["packages/kernel/test/*"],
+      "@scripts/*": ["packages/kernel/scripts/*"]
     },
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -22,6 +25,6 @@
     "emitDecoratorMetadata": true,
     "noEmit": true
   },
-  "include": ["src", "test", "scripts", "install", "tsup.config.ts", "vitest.config.ts"],
-  "exclude": ["node_modules", "dist", ".tmp", "test/fixtures"]
+  "include": ["packages", "apps", "scripts", "tsup.config.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "**/node_modules", "dist", "**/dist", ".tmp", "**/test/fixtures"]
 }

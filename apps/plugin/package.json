@@ -1,0 +1,15 @@
+{
+  "name": "@cerebrium/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "cerebrium-plugin: the stdio MCP server agents launch, their hooks, skill and rules, and the installer that wires them up",
+  "dependencies": {
+    "@cerebrium/contracts": "*",
+    "@cerebrium/kernel": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "reflect-metadata": "^0.2.2",
+    "tsyringe": "^4.10.0"
+  }
+}
