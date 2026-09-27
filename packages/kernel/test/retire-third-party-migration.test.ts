@@ -1,10 +1,10 @@
 import { createRequire } from "node:module";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { openDatabase } from "@/db/database";
+import { openDatabase } from "@/db/sqlite/database";
 
 const { up: retire } = createRequire(import.meta.url)(
-  "../src/db/migrations/028_retire_third_party_symbols.cjs",
+  "../src/db/sqlite/migrations/028_retire_third_party_symbols.cjs",
 ) as { up: (db: Database.Database) => void };
 
 // A store indexed before `vendor` was excluded from the walk: the rows are there, and the

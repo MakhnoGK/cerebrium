@@ -57,15 +57,15 @@ describe("readGitProvenance", () => {
 });
 
 describe("Repo provenance store", () => {
-  it("should round-trip and upsert one row per repo when provenance is set twice", () => {
+  it("should round-trip and upsert one row per repo when provenance is set twice", async () => {
     // Given
     const { code, clock } = setup();
 
     // When
-    code.setRepoProvenance("api", "/repos/api", "main", "abc1234", false, clock.t);
+    await code.setRepoProvenance("api", "/repos/api", "main", "abc1234", false, clock.t);
 
     // Then
-    expect(code.repoProvenance("api")).toMatchObject({
+    expect(await code.repoProvenance("api")).toMatchObject({
       repo: "api",
       root: "/repos/api",
       branch: "main",
@@ -74,43 +74,50 @@ describe("Repo provenance store", () => {
     });
 
     // When — upsert.
-    code.setRepoProvenance("api", "/repos/api", "feature/x", "def5678", true, clock.t);
+    await code.setRepoProvenance("api", "/repos/api", "feature/x", "def5678", true, clock.t);
 
     // Then
-    expect(code.allRepoProvenance()).toHaveLength(1);
-    expect(code.repoProvenance("api")).toMatchObject({
+    expect(await code.allRepoProvenance()).toHaveLength(1);
+    expect(await code.repoProvenance("api")).toMatchObject({
       branch: "feature/x",
       commit: "def5678",
       dirty: true,
     });
   });
 
-  it("should report a repo whose root is gone as detached", () => {
+  it("should report a repo whose root is gone as detached", async () => {
     // Given — the machine was renamed and nine repos' roots went with it; symbols under a
     // missing root can never be refreshed or checked against source again.
     const { code, clock } = setup();
 
-    code.setRepoProvenance("gone", "/repos/deleted-last-year", "main", "abc1234", false, clock.t);
-    code.setRepoProvenance("here", process.cwd(), "main", "def5678", false, clock.t);
+    await code.setRepoProvenance(
+      "gone",
+      "/repos/deleted-last-year",
+      "main",
+      "abc1234",
+      false,
+      clock.t,
+    );
+    await code.setRepoProvenance("here", process.cwd(), "main", "def5678", false, clock.t);
 
     // When
-    const provenance = code.allRepoProvenance();
+    const provenance = await code.allRepoProvenance();
 
     // Then
     expect(provenance.find((r) => r.repo === "gone")?.detached).toBe(true);
     expect(provenance.find((r) => r.repo === "here")?.detached).toBe(false);
   });
 
-  it("should expose remembered roots as index targets and exclude rootless repos", () => {
+  it("should expose remembered roots as index targets and exclude rootless repos", async () => {
     // Given
     const { code, clock } = setup();
 
     // When
-    code.setRepoProvenance("api", "/repos/api", null, null, false, clock.t);
-    code.setRepoProvenance("web", null, null, null, false, clock.t); // no root -> excluded
+    await code.setRepoProvenance("api", "/repos/api", null, null, false, clock.t);
+    await code.setRepoProvenance("web", null, null, null, false, clock.t); // no root -> excluded
 
     // Then
-    expect(code.storedRepoRoots()).toEqual([{ name: "api", root: "/repos/api" }]);
+    expect(await code.storedRepoRoots()).toEqual([{ name: "api", root: "/repos/api" }]);
   });
 });
 
@@ -128,21 +135,21 @@ describe("Indexer records provenance", () => {
 
     // Then
     expect(s).toMatchObject({ branch: null, commit: null, dirty: false });
-    expect(code.repoProvenance("proj")).toMatchObject({ repo: "proj", branch: null });
-    expect(stats.techStats(clock.t).code_repos).toHaveLength(1);
+    expect(await code.repoProvenance("proj")).toMatchObject({ repo: "proj", branch: null });
+    expect((await stats.techStats(clock.t)).code_repos).toHaveLength(1);
   });
 
-  it("should tolerate a DB predating the code_repos migration when computing techStats", () => {
+  it("should tolerate a DB predating the code_repos migration when computing techStats", async () => {
     // Given
     const { stats, db, clock } = setup();
     db.exec("DROP TABLE code_repos"); // simulate a pre-004 database
 
     // When / Then
-    expect(() => stats.techStats(clock.t)).not.toThrow();
-    expect(stats.techStats(clock.t).code_repos).toEqual([]);
+    await expect(stats.techStats(clock.t)).resolves.toBeDefined();
+    expect((await stats.techStats(clock.t)).code_repos).toEqual([]);
   });
 
-  it("should tolerate a code_repos table predating the root column", () => {
+  it("should tolerate a code_repos table predating the root column", async () => {
     // Given
     const { code, db } = setup();
     db.exec(
@@ -152,8 +159,12 @@ describe("Indexer records provenance", () => {
     );
 
     // When / Then
-    expect(() => code.allRepoProvenance()).not.toThrow();
-    expect(code.repoProvenance("api")).toMatchObject({ repo: "api", root: null, branch: "main" });
+    await expect(code.allRepoProvenance()).resolves.toBeDefined();
+    expect(await code.repoProvenance("api")).toMatchObject({
+      repo: "api",
+      root: null,
+      branch: "main",
+    });
   });
 });
 
@@ -167,35 +178,39 @@ describe("CodeIndexService.resolveTargets", () => {
     return { indexer: new CodeIndexService(code, queue, clock, config), code, clock };
   }
 
-  it("should derive the name from the basename when an explicit path is given", () => {
+  it("should derive the name from the basename when an explicit path is given", async () => {
     // Given / When
-    const targets = service().indexer.resolveTargets({ path: "/repos/api/" });
+    const targets = await service().indexer.resolveTargets({ path: "/repos/api/" });
 
     // Then
     expect(targets).toEqual([{ name: "api", root: "/repos/api/" }]);
   });
 
-  it("should resolve a name against the roots remembered from a prior index-by-path", () => {
+  it("should resolve a name against the roots remembered from a prior index-by-path", async () => {
     // Given
     const { indexer, code, clock } = service();
-    code.setRepoProvenance("api", "/stored/api", null, null, false, clock.t);
+    await code.setRepoProvenance("api", "/stored/api", null, null, false, clock.t);
 
     // When / Then
-    expect(indexer.resolveTargets({ repo: "api" })).toEqual([{ name: "api", root: "/stored/api" }]);
+    expect(await indexer.resolveTargets({ repo: "api" })).toEqual([
+      { name: "api", root: "/stored/api" },
+    ]);
   });
 
-  it("should let a configured root win over a remembered one of the same name", () => {
+  it("should let a configured root win over a remembered one of the same name", async () => {
     // Given
     const { indexer, code, clock } = service({ MEMORY_CODE_ROOTS: "api=/env/api" });
-    code.setRepoProvenance("api", "/stored/api", null, null, false, clock.t);
+    await code.setRepoProvenance("api", "/stored/api", null, null, false, clock.t);
 
     // When / Then
-    expect(indexer.resolveTargets({ repo: "api" })).toEqual([{ name: "api", root: "/env/api" }]);
+    expect(await indexer.resolveTargets({ repo: "api" })).toEqual([
+      { name: "api", root: "/env/api" },
+    ]);
   });
 
-  it("should throw when no root is configured or remembered", () => {
+  it("should throw when no root is configured or remembered", async () => {
     // Given / When / Then
-    expect(() => service().indexer.resolveTargets({})).toThrow(/No code roots configured/);
+    await expect(service().indexer.resolveTargets({})).rejects.toThrow(/No code roots configured/);
   });
 });
 

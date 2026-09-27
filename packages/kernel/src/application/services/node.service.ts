@@ -1,15 +1,15 @@
 import { inject, injectable } from "tsyringe";
 import { EdgeType, MemoryKind, NODE_TYPES, typeAllowedForKind } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
-import { NodesRepo } from "@/db/repositories";
 
 const MAX_CONTENT = 50_000;
 
 @injectable()
 export class NodeService {
   constructor(
-    private readonly nodesRepo: NodesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodesRepo: NodesRepo,
     private readonly references: NodeReferenceService,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
@@ -59,7 +59,7 @@ export class NodeService {
     const resolvedLinks = [...(links ?? [])];
 
     if (parent_node_id !== null) {
-      this.references.requireLive(parent_node_id, "parent node");
+      await this.references.requireLive(parent_node_id, "parent node");
 
       if (
         !resolvedLinks.some(
@@ -71,10 +71,10 @@ export class NodeService {
     }
 
     for (const link of resolvedLinks) {
-      this.references.requireLive(link.dst, "link destination");
+      await this.references.requireLive(link.dst, "link destination");
     }
 
-    return this.nodesRepo.createNode({
+    return await this.nodesRepo.createNode({
       memory_kind,
       type,
       title,

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { EmbeddingWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
-import { isBusy, withBusyRetry } from "@/db/retry";
+import { isBusy, withBusyRetry } from "@/db/sqlite/retry";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
@@ -91,7 +91,7 @@ describe("Embedding worker lease", () => {
     const s = await session();
     await writeFact(s, "one");
     await writeFact(s, "two");
-    expect(env.queue.embeddingStats().backlog).toBe(2);
+    expect((await env.queue.embeddingStats()).backlog).toBe(2);
 
     // One-chunk batches so the first tick leaves work behind for the contention check.
     const a = new EmbeddingWorker(env.queue, env.provider, env.clock, {
@@ -105,17 +105,17 @@ describe("Embedding worker lease", () => {
 
     // When / Then — A takes the lease and drains one chunk.
     expect((await a.tick()).embedded).toBeGreaterThan(0);
-    const afterA = env.queue.embeddingStats().backlog;
+    const afterA = (await env.queue.embeddingStats()).backlog;
     expect(afterA).toBeGreaterThan(0); // work remains
 
     // When / Then — B cannot drain: A's lease is still live at the same clock instant.
     expect((await b.tick()).embedded).toBe(0);
-    expect(env.queue.embeddingStats().backlog).toBe(afterA);
+    expect((await env.queue.embeddingStats()).backlog).toBe(afterA);
 
     // When / Then — once A's lease lapses, B steals it and finishes the queue.
     env.clock.advanceMs(11_000);
     expect((await b.tick()).embedded).toBeGreaterThan(0);
-    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect((await env.queue.embeddingStats()).backlog).toBe(0);
   });
 
   it("should keep renewing its own lease across ticks", async () => {
@@ -130,6 +130,6 @@ describe("Embedding worker lease", () => {
     await writeFact(s, "solo-2");
     env.clock.advanceMs(4_000); // within its own TTL — still the holder, no hand-off
     expect((await w.tick()).embedded).toBeGreaterThan(0);
-    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect((await env.queue.embeddingStats()).backlog).toBe(0);
   });
 });

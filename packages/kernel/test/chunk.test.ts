@@ -93,7 +93,7 @@ describe("Embedding diff: only genuinely-new chunks re-embed", () => {
     await update.invoke({ session_id: s, id: node.id, content: edited, reason: "tune ranking" });
 
     // Then — the diff queues exactly one new chunk; the other two keep their vectors.
-    expect(env.queue.unembeddedChunks([node.id], 16).length).toBe(1);
+    expect((await env.queue.unembeddedChunks([node.id], 16)).length).toBe(1);
     const second = await env.worker.tick();
     expect(second.embedded).toBe(1);
   });

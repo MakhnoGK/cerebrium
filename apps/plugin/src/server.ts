@@ -32,18 +32,17 @@ async function serveLocal(container: DependencyContainer): Promise<void> {
   const worker = container.resolve(EmbeddingWorker);
   const server = scope.resolve(Server);
   const registry = container.resolve(ProcessRegistryService);
-  const registered = registry.publish("server");
+  const registered = await registry.publish("server");
 
   // stdio hosts stop the server by closing the pipe or signalling it; either way the row
   // must go, and a sweep on the next publish is the backstop for a hard kill.
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
-      registry.retire(registered);
-      process.exit(0);
+      void registry.retire(registered).finally(() => process.exit(0));
     });
   }
   process.once("exit", () => {
-    registry.retire(registered);
+    void registry.retire(registered);
   });
 
   await server.connect();
@@ -58,10 +57,10 @@ async function serveLocal(container: DependencyContainer): Promise<void> {
 
   try {
     if (ensureDaemon(daemon) === "skipped") {
-      worker.start();
+      await worker.start();
     }
   } catch {
-    worker.start();
+    await worker.start();
   }
 }
 

@@ -4,7 +4,7 @@ import {
   ReconcileAction,
   type ConsolidationProvider,
 } from "@/domain/ports/consolidation-provider";
-import { NodesRepo } from "@/db/repositories";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 
 const RECONCILE_CANDIDATES = 3;
 
@@ -31,7 +31,7 @@ interface ReconcileVO {
 @injectable()
 export class ConsolidationService {
   constructor(
-    private readonly nodesRepo: NodesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodesRepo: NodesRepo,
     @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
   ) {}
 

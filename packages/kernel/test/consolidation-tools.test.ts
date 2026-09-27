@@ -76,9 +76,11 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
 
     // Then — the edge now exists and the candidate is no longer pending.
     expect(applied).toMatchObject({ status: "applied", kind: ConsolidationKind.LINK });
-    expect(env.edges.edgesOf(a).some((e) => e.id === b && e.edge === "similar_to")).toBe(true);
-    expect(env.consolidation.pendingCandidates()).toHaveLength(0);
-    expect(env.consolidation.getCandidate(cand.id)!.status).toBe("applied");
+    expect((await env.edges.edgesOf(a)).some((e) => e.id === b && e.edge === "similar_to")).toBe(
+      true,
+    );
+    expect(await env.consolidation.pendingCandidates()).toHaveLength(0);
+    expect((await env.consolidation.getCandidate(cand.id))!.status).toBe("applied");
   });
 
   it("should dismiss without an edge and refuse re-resolution when rejected", async () => {
@@ -100,7 +102,9 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
 
     // Then
     expect(rejected.status).toBe("dismissed");
-    expect(env.edges.edgesOf(a).some((e) => e.id === b && e.edge === "similar_to")).toBe(false);
+    expect((await env.edges.edgesOf(a)).some((e) => e.id === b && e.edge === "similar_to")).toBe(
+      false,
+    );
 
     // When / Then — a dismissed candidate cannot be re-resolved.
     await expect(
@@ -120,7 +124,7 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
     const { s, a, b } = await twinsWithSuggestedLink(env, t);
     await container.resolve(ConsolidationWorker).tick();
     const cand = candidates(await t.consolidateSuggest.invoke({ session_id: s }))[0]!;
-    env.nodes.invalidateNode(b, { ts: env.clock.t, session_id: s });
+    await env.nodes.invalidateNode(b, { ts: env.clock.t, session_id: s });
 
     const resolved = (await t.consolidateApply.invoke({
       session_id: s,
@@ -129,8 +133,10 @@ describe("ConsolidateSuggestTool / ConsolidateApplyTool", () => {
     })) as { status: string; kind: string };
 
     expect(resolved).toMatchObject({ status: "dismissed", kind: ConsolidationKind.LINK });
-    expect(env.edges.edgesOf(a).some((e) => e.id === b && e.edge === "similar_to")).toBe(false);
-    expect(env.consolidation.getCandidate(cand.id)!.status).toBe("dismissed");
+    expect((await env.edges.edgesOf(a)).some((e) => e.id === b && e.edge === "similar_to")).toBe(
+      false,
+    );
+    expect((await env.consolidation.getCandidate(cand.id))!.status).toBe("dismissed");
   });
 
   it("should throw when the candidate id is unknown", async () => {

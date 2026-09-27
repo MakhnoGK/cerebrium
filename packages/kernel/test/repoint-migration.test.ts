@@ -7,7 +7,7 @@ import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/012_repoint_dangling_edges.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/012_repoint_dangling_edges.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -38,15 +38,15 @@ function liveEdges(db: { prepare: (sql: string) => { all: () => unknown } }) {
 // The pre-repair shape: a node retired without the write path re-pointing anything,
 // with its successor recorded separately. This is what the store looked like before
 // `invalidateNode` learned to move referrers.
-function strand(
+async function strand(
   env: ReturnType<typeof setup>,
   s: string,
   dead: string,
   successors: string[],
-): void {
-  env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: s });
+): Promise<void> {
+  await env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: s });
   for (const successor of successors) {
-    env.edges.insertEdge(successor, dead, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(successor, dead, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
   }
 }
 
@@ -58,9 +58,9 @@ describe("Migration 012: re-point dangling edges", () => {
     const referrer = await writeFact(s, "referrer");
     const dead = await writeFact(s, "dead");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    strand(env, s, dead, [successor]);
-    expect(env.stats.techStats(env.clock.t).graph.repointable_edges).toBe(1);
+    await env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await strand(env, s, dead, [successor]);
+    expect((await env.stats.techStats(env.clock.t)).graph.repointable_edges).toBe(1);
 
     // When
     up(env.db);
@@ -69,7 +69,7 @@ describe("Migration 012: re-point dangling edges", () => {
     const edges = liveEdges(env.db);
     expect(edges).toContainEqual({ src: referrer, dst: successor, type: EdgeType.REFERENCES });
     expect(edges).not.toContainEqual({ src: referrer, dst: dead, type: EdgeType.REFERENCES });
-    expect(env.stats.techStats(env.clock.t).graph.repointable_edges).toBe(0);
+    expect((await env.stats.techStats(env.clock.t)).graph.repointable_edges).toBe(0);
   });
 
   it("should keep the retired edge queryable rather than deleting it", async () => {
@@ -79,8 +79,8 @@ describe("Migration 012: re-point dangling edges", () => {
     const referrer = await writeFact(s, "referrer");
     const dead = await writeFact(s, "dead");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    strand(env, s, dead, [successor]);
+    await env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await strand(env, s, dead, [successor]);
 
     // When
     up(env.db);
@@ -99,8 +99,8 @@ describe("Migration 012: re-point dangling edges", () => {
     const referrer = await writeFact(s, "referrer");
     const dead = await writeFact(s, "dead");
     const successor = await writeFact(s, "successor");
-    strand(env, s, dead, [successor]);
-    env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    await strand(env, s, dead, [successor]);
+    await env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
 
     // When
     up(env.db);
@@ -117,8 +117,8 @@ describe("Migration 012: re-point dangling edges", () => {
     const s = await session();
     const dead = await writeFact(s, "dead");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(successor, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    strand(env, s, dead, [successor]);
+    await env.edges.insertEdge(successor, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await strand(env, s, dead, [successor]);
 
     // When
     up(env.db);
@@ -134,9 +134,9 @@ describe("Migration 012: re-point dangling edges", () => {
     const referrer = await writeFact(s, "referrer");
     const dead = await writeFact(s, "dead");
     const alsoDead = await writeFact(s, "also dead");
-    env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    strand(env, s, dead, [alsoDead]);
-    env.nodes.invalidateNode(alsoDead, { ts: env.clock.t, session_id: s });
+    await env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await strand(env, s, dead, [alsoDead]);
+    await env.nodes.invalidateNode(alsoDead, { ts: env.clock.t, session_id: s });
 
     // When
     up(env.db);
@@ -157,8 +157,8 @@ describe("Migration 012: re-point dangling edges", () => {
     const dead = await writeFact(s, "dead");
     const a = await writeFact(s, "successor a");
     const b = await writeFact(s, "successor b");
-    env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    strand(env, s, dead, [a, b]);
+    await env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await strand(env, s, dead, [a, b]);
 
     // When
     up(env.db);
@@ -178,7 +178,7 @@ describe("Migration 012: re-point dangling edges", () => {
     const s = await session();
     const one = await writeFact(s, "one");
     const two = await writeFact(s, "two");
-    env.edges.insertEdge(one, two, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(one, two, EdgeType.REFERENCES, "agent", s, env.clock.t);
     const before = liveEdges(env.db);
 
     // When

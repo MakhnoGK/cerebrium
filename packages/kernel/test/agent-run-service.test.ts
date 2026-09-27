@@ -28,7 +28,7 @@ const REPORT: AgentRunReport = {
 
 const service = () => container.resolve(AgentRunService);
 
-const queue = (env: TestEnv, kind: string = JobKind.AGENT_SELFTEST) =>
+const queue = async (env: TestEnv, kind: string = JobKind.AGENT_SELFTEST) =>
   env.jobs.submit({ id: newId(), kind, payload: {}, scheduled_for: T0, now: T0 });
 
 const runNotes = (env: TestEnv) =>
@@ -37,13 +37,13 @@ const runNotes = (env: TestEnv) =>
     .all(MemoryKind.EPISODIC) as { id: string; title: string }[];
 
 describe("AgentRunService", () => {
-  it("should claim an agent job when one is queued", () => {
+  it("should claim an agent job when one is queued", async () => {
     // Given
     const env = setup();
-    queue(env);
+    await queue(env);
 
     // When
-    const job = service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    const job = await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // Then
     expect(job).not.toBeNull();
@@ -51,32 +51,34 @@ describe("AgentRunService", () => {
     expect(job!.lease_owner).toBe(OWNER);
   });
 
-  it("should refuse to claim kernel work even when asked for it directly", () => {
+  it("should refuse to claim kernel work even when asked for it directly", async () => {
     // Given — a code.index job waiting, and a runner that names it explicitly.
     const env = setup();
-    queue(env, JobKind.CODE_INDEX);
+    await queue(env, JobKind.CODE_INDEX);
 
     // When
-    const job = service().claim([JobKind.CODE_INDEX, JobKind.AGENT_SELFTEST], OWNER);
+    const job = await service().claim([JobKind.CODE_INDEX, JobKind.AGENT_SELFTEST], OWNER);
 
     // Then
     expect(job).toBeNull();
-    expect(env.jobs.byId(env.jobs.recent({ limit: 1 })[0]!.id)!.state).toBe(JobState.PENDING);
+    expect((await env.jobs.byId((await env.jobs.recent({ limit: 1 }))[0]!.id))!.state).toBe(
+      JobState.PENDING,
+    );
   });
 
   it("should close the job and record the run when a completed report arrives", async () => {
     // Given
     const env = setup();
-    const job = queue(env);
+    const job = await queue(env);
 
-    service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // When
     const ok = await service().finish(job.id, OWNER, REPORT);
 
     // Then
     expect(ok).toBe(true);
-    expect(env.jobs.byId(job.id)!.state).toBe(JobState.DONE);
+    expect((await env.jobs.byId(job.id))!.state).toBe(JobState.DONE);
 
     const notes = runNotes(env);
     expect(notes).toHaveLength(1);
@@ -87,9 +89,9 @@ describe("AgentRunService", () => {
   it("should record what the run spent even when it failed, because that spend is real", async () => {
     // Given
     const env = setup();
-    const job = queue(env);
+    const job = await queue(env);
 
-    service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // When
     await service().finish(job.id, OWNER, {
@@ -113,39 +115,39 @@ describe("AgentRunService", () => {
   it("should leave the job retryable when a run fails with attempts to spare", async () => {
     // Given
     const env = setup();
-    const job = queue(env);
+    const job = await queue(env);
 
-    service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // When
     await service().finish(job.id, OWNER, { ...REPORT, exit: "failed", error: "boom" });
 
     // Then
-    expect(env.jobs.byId(job.id)!.state).toBe(JobState.PENDING);
+    expect((await env.jobs.byId(job.id))!.state).toBe(JobState.PENDING);
   });
 
   it("should reject a report from a runner that no longer holds the lease", async () => {
     // Given
     const env = setup();
-    const job = queue(env);
+    const job = await queue(env);
 
-    service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // When
     const ok = await service().finish(job.id, "someone-else", REPORT);
 
     // Then
     expect(ok).toBe(false);
-    expect(env.jobs.byId(job.id)!.state).toBe(JobState.RUNNING);
+    expect((await env.jobs.byId(job.id))!.state).toBe(JobState.RUNNING);
     expect(runNotes(env)).toHaveLength(0);
   });
 
   it("should attribute the run record to the system, not to the runner or the human", async () => {
     // Given
     const env = setup();
-    const job = queue(env);
+    const job = await queue(env);
 
-    service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // When
     await service().finish(job.id, OWNER, REPORT);
@@ -161,34 +163,38 @@ describe("AgentRunService", () => {
 });
 
 describe("AgentRunService.enqueue", () => {
-  it("should queue an agent job the call surface refuses to take", () => {
+  it("should queue an agent job the call surface refuses to take", async () => {
     // Given
     const env = setup();
 
     // When
-    const job = service().enqueue(JobKind.AGENT_SELFTEST, { why: "verification" })!;
+    const job = (await service().enqueue(JobKind.AGENT_SELFTEST, { why: "verification" }))!;
 
     // Then
     expect(job.state).toBe(JobState.PENDING);
-    expect(env.jobs.byId(job.id)!.kind).toBe(JobKind.AGENT_SELFTEST);
-    expect(JSON.parse(env.jobs.byId(job.id)!.payload_json)).toEqual({ why: "verification" });
+    expect((await env.jobs.byId(job.id))!.kind).toBe(JobKind.AGENT_SELFTEST);
+    expect(JSON.parse((await env.jobs.byId(job.id))!.payload_json)).toEqual({
+      why: "verification",
+    });
   });
 
-  it("should refuse kernel work, which belongs on the call surface instead", () => {
+  it("should refuse kernel work, which belongs on the call surface instead", async () => {
     // Given
     setup();
 
     // When / Then
-    expect(() => service().enqueue(JobKind.CODE_INDEX, {})).toThrow(/goes through submit_job/);
+    await expect(service().enqueue(JobKind.CODE_INDEX, {})).rejects.toThrow(
+      /goes through submit_job/,
+    );
   });
 
-  it("should be claimable by the runner as soon as it is queued", () => {
+  it("should be claimable by the runner as soon as it is queued", async () => {
     // Given
     setup();
-    const job = service().enqueue(JobKind.AGENT_SELFTEST, {})!;
+    const job = (await service().enqueue(JobKind.AGENT_SELFTEST, {}))!;
 
     // When
-    const claimed = service().claim([JobKind.AGENT_SELFTEST], OWNER);
+    const claimed = await service().claim([JobKind.AGENT_SELFTEST], OWNER);
 
     // Then
     expect(claimed?.id).toBe(job.id);
@@ -198,25 +204,25 @@ describe("AgentRunService.enqueue", () => {
 describe("AgentRunService.enqueue on a cadence", () => {
   const HOUR = 3_600_000;
 
-  it("should queue recurring work when the kind has never run", () => {
+  it("should queue recurring work when the kind has never run", async () => {
     // Given
     setup();
 
     // When
-    const job = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+    const job = await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
 
     // Then
     expect(job).not.toBeNull();
     expect(job!.kind).toBe(JobKind.AGENT_DOCUMENTS);
   });
 
-  it("should queue nothing while one of its kind is still open", () => {
+  it("should queue nothing while one of its kind is still open", async () => {
     // Given
     setup();
-    const first = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+    const first = await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
 
     // When
-    const second = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+    const second = await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
 
     // Then
     expect(first).not.toBeNull();
@@ -226,24 +232,24 @@ describe("AgentRunService.enqueue on a cadence", () => {
   it("should queue nothing when the last run ended more recently than the cadence", async () => {
     // Given
     const env = setup();
-    const first = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR)!;
-    const claimed = service().claim([JobKind.AGENT_DOCUMENTS], OWNER)!;
+    const first = (await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR))!;
+    const claimed = (await service().claim([JobKind.AGENT_DOCUMENTS], OWNER))!;
 
     await service().finish(claimed.id, OWNER, REPORT);
 
     // When
-    const second = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+    const second = await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
 
     // Then
-    expect(env.jobs.byId(first.id)!.ended_at).not.toBeNull();
+    expect((await env.jobs.byId(first.id))!.ended_at).not.toBeNull();
     expect(second).toBeNull();
   });
 
   it("should queue again once the cadence has elapsed since the last run ended", async () => {
     // Given
     const env = setup();
-    const first = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR)!;
-    const claimed = service().claim([JobKind.AGENT_DOCUMENTS], OWNER)!;
+    const first = (await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR))!;
+    const claimed = (await service().claim([JobKind.AGENT_DOCUMENTS], OWNER))!;
 
     await service().finish(claimed.id, OWNER, REPORT);
     env.db
@@ -251,20 +257,20 @@ describe("AgentRunService.enqueue on a cadence", () => {
       .run("2020-01-01T00:00:00.000Z", first.id);
 
     // When
-    const second = service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+    const second = await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
 
     // Then
     expect(second).not.toBeNull();
     expect(second!.id).not.toBe(first.id);
   });
 
-  it("should still queue unconditionally when no cadence is named, which is what --once does", () => {
+  it("should still queue unconditionally when no cadence is named, which is what --once does", async () => {
     // Given
     setup();
-    service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
+    await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);
 
     // When
-    const forced = service().enqueue(JobKind.AGENT_DOCUMENTS, {});
+    const forced = await service().enqueue(JobKind.AGENT_DOCUMENTS, {});
 
     // Then
     expect(forced).not.toBeNull();

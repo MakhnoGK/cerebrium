@@ -1,32 +1,33 @@
-import type Database from "better-sqlite3";
-import { inject, injectable } from "tsyringe";
+import { injectable } from "tsyringe";
 import type { Envelope, NeighborStub, NewNode, RevisionMeta } from "@cerebrium/contracts/types";
 import { toEnvelope } from "@cerebrium/contracts/types";
 import { EdgeType } from "@cerebrium/contracts/vocab";
+import type { NodesRepo } from "@/domain/ports/storage";
 import type { UseRecorder } from "@/domain/ports/use-recorder";
-import { BaseRepo, DB_TOKEN } from "@/db/repositories/base";
-import { EdgesRepo } from "@/db/repositories/edges";
-import { enrichedById, ftsPut, insertRevision, syncChunks } from "@/db/repositories/internal";
+import { BaseRepo } from "@/db/sqlite/base";
+import {
+  edgesOf,
+  enrichedById,
+  ftsPut,
+  insertEdge,
+  insertRevision,
+  invalidateEdge,
+  invalidateSystemSimilaritiesOf,
+  syncChunks,
+} from "@/db/sqlite/internal";
 import { newId } from "@/core/ids";
 
 // The authored-node write path (nodes + revisions + FTS + chunks/queue, atomically)
 // and node reads. The append-only-revisions and FTS-in-write-transaction invariants
-// live here, explicit in SQL. Edge writes are delegated to EdgesRepo so the graph
-// stays a single owner.
+// live here, explicit in SQL. Edge writes go through the shared primitives in internal.ts,
+// so they join this repository's transaction.
 @injectable()
-export class NodesRepo extends BaseRepo implements UseRecorder {
-  constructor(
-    @inject(DB_TOKEN) db: Database.Database,
-    private readonly edges: EdgesRepo,
-  ) {
-    super(db);
-  }
-
+export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
   async exists(id: string): Promise<boolean> {
     return !!this.db.prepare("SELECT 1 FROM nodes WHERE id = ?").get(id);
   }
 
-  referenceState(id: string): "live" | "invalidated" | "missing" {
+  async referenceState(id: string): Promise<"live" | "invalidated" | "missing"> {
     const row = this.db.prepare("SELECT invalidated_at FROM nodes WHERE id = ?").get(id) as
       { invalidated_at: string | null } | undefined;
 
@@ -38,12 +39,18 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // The mirror provenance of a node, or undefined if it doesn't exist. Lets the
   // invalidate guard tell a code mirror (origin='repo', indexer-only) from an
   // external mirror (agent-curated, retirable by hand) from an authored node.
-  nodeOrigin(id: string): { memory_kind: string; origin: string | null } | undefined {
+  async nodeOrigin(
+    id: string,
+  ): Promise<{ memory_kind: string; origin: string | null } | undefined> {
     return this.db.prepare("SELECT memory_kind, origin FROM nodes WHERE id = ?").get(id) as
       { memory_kind: string; origin: string | null } | undefined;
   }
 
-  envelope(id: string): Envelope | undefined {
+  async envelope(id: string): Promise<Envelope | undefined> {
+    return this.envelopeNow(id);
+  }
+
+  private envelopeNow(id: string): Envelope | undefined {
     const row = enrichedById(this.db, id);
     return row ? toEnvelope(row) : undefined;
   }
@@ -54,16 +61,16 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
     const row = enrichedById(this.db, id);
     if (!row) return undefined;
 
-    return { envelope: toEnvelope(row), content: row.content, edges: this.edges.edgesOf(id) };
+    return { envelope: toEnvelope(row), content: row.content, edges: edgesOf(this.db, id) };
   }
 
-  listRevisions(id: string): RevisionMeta[] {
+  async listRevisions(id: string): Promise<RevisionMeta[]> {
     return this.db
       .prepare("SELECT rev, ts, session_id, reason FROM revisions WHERE node_id = ? ORDER BY rev")
       .all(id) as RevisionMeta[];
   }
 
-  revisionContent(id: string, rev: number): string | undefined {
+  async revisionContent(id: string, rev: number): Promise<string | undefined> {
     const row = this.db
       .prepare("SELECT content FROM revisions WHERE node_id = ? AND rev = ?")
       .get(id, rev) as { content: string } | undefined;
@@ -94,10 +101,10 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
       ftsPut(this.db, id, input.title, input.content);
       syncChunks(this.db, id, 1, input.content, input.ts);
       for (const link of input.links ?? []) {
-        this.edges.insertEdge(id, link.dst, link.type, "agent", input.session_id, input.ts);
+        insertEdge(this.db, id, link.dst, link.type, "agent", input.session_id, input.ts);
       }
     });
-    return this.envelope(id)!;
+    return this.envelopeNow(id)!;
   }
 
   // Distillation apply: create one durable semantic/fact node from a cluster of
@@ -105,14 +112,14 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // chunks/queue), plus a derived_from edge to each source and a consolidated_at stamp
   // on each. One transaction: a new fact never lands with its sources left unmarked
   // (which would re-trigger distillation). Sources stay queryable via history.
-  applyDistillation(input: {
+  async applyDistillation(input: {
     title: string;
     content: string;
     project: string | null;
     sourceIds: string[];
     session_id: string;
     ts: string;
-  }): Envelope {
+  }): Promise<Envelope> {
     const id = newId();
     this.tx(() => {
       this.db
@@ -135,24 +142,24 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
          WHERE id = @src AND memory_kind = 'episodic' AND consolidated_at IS NULL`,
       );
       for (const src of input.sourceIds) {
-        this.edges.insertEdge(id, src, EdgeType.DERIVED_FROM, "system", input.session_id, input.ts);
+        insertEdge(this.db, id, src, EdgeType.DERIVED_FROM, "system", input.session_id, input.ts);
         mark.run({ ts: input.ts, src });
       }
     });
-    return this.envelope(id)!;
+    return this.envelopeNow(id)!;
   }
 
   // Merge apply: fold `loserId` into `survivorId`, atomically. Optionally revise
   // the survivor to a merged body, re-point the loser's authored edges onto the survivor
   // (system edges like similar_to are left to be recomputed), then invalidate the loser
   // with supersedes -> survivor. The loser stays queryable via history.
-  applyMerge(input: {
+  async applyMerge(input: {
     survivorId: string;
     loserId: string;
     session_id: string;
     ts: string;
     merged?: { title: string; body: string };
-  }): Envelope | undefined {
+  }): Promise<Envelope | undefined> {
     const applied = this.tx(() => {
       const live = this.db
         .prepare(
@@ -163,7 +170,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
       if (live.count !== 2) return false;
 
       if (input.merged) {
-        this.addRevision(input.survivorId, {
+        this.revise(input.survivorId, {
           content: input.merged.body,
           title: input.merged.title,
           session_id: input.session_id,
@@ -182,15 +189,16 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
         type: string;
         weight: number;
       }[];
-      const invalidateEdge = this.db.prepare(
+      const retireEdge = this.db.prepare(
         "UPDATE edges SET invalidated_at = @ts WHERE src = @src AND dst = @dst AND type = @type",
       );
       for (const e of incident) {
-        invalidateEdge.run({ ts: input.ts, src: e.src, dst: e.dst, type: e.type });
+        retireEdge.run({ ts: input.ts, src: e.src, dst: e.dst, type: e.type });
         const nsrc = e.src === input.loserId ? input.survivorId : e.src;
         const ndst = e.dst === input.loserId ? input.survivorId : e.dst;
         if (nsrc === ndst) continue; // self-loop after re-point -> drop
-        this.edges.insertEdge(
+        insertEdge(
+          this.db,
           nsrc,
           ndst,
           e.type as EdgeType,
@@ -200,14 +208,14 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
           e.weight,
         );
       }
-      this.invalidateNode(input.loserId, {
+      this.retire(input.loserId, {
         ts: input.ts,
         superseded_by: input.survivorId,
         session_id: input.session_id,
       });
       return true;
     });
-    return applied ? this.envelope(input.survivorId)! : undefined;
+    return applied ? this.envelopeNow(input.survivorId)! : undefined;
   }
 
   // Attribute enrichment apply: record the generated annotation for a node's
@@ -217,13 +225,13 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // node vanished/was invalidated or advanced past `rev` since detection (the stale rev is
   // re-detected next sweep), and if an annotation for this rev already exists (idempotent).
   // Returns true when it enriched, false when it safely skipped. Never mutates a revision.
-  applyAnnotation(input: {
+  async applyAnnotation(input: {
     nodeId: string;
     rev: number;
     annotationsJson: string;
     ftsText: string;
     ts: string;
-  }): boolean {
+  }): Promise<boolean> {
     return this.tx(() => {
       const row = enrichedById(this.db, input.nodeId);
       if (!row || row.invalidated_at || row.rev !== input.rev) return false;
@@ -242,7 +250,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
     });
   }
 
-  addRevision(
+  async addRevision(
     id: string,
     fields: {
       content?: string;
@@ -251,7 +259,21 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
       reason: string | null;
       ts: string;
     },
-  ): Envelope {
+  ): Promise<Envelope> {
+    this.revise(id, fields);
+    return this.envelopeNow(id)!;
+  }
+
+  private revise(
+    id: string,
+    fields: {
+      content?: string;
+      title?: string;
+      session_id: string;
+      reason: string | null;
+      ts: string;
+    },
+  ): void {
     this.tx(() => {
       const cur = this.db.prepare("SELECT title FROM nodes WHERE id = ?").get(id) as {
         title: string;
@@ -279,11 +301,12 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
       ftsPut(this.db, id, title, content);
       syncChunks(this.db, id, nextRev, content, fields.ts);
     });
-    return this.envelope(id)!;
   }
 
   // The event window, when one was claimed. Read by `get`; never folded into an envelope.
-  eventWindow(id: string): { event_from: string | null; event_to: string | null } | undefined {
+  async eventWindow(
+    id: string,
+  ): Promise<{ event_from: string | null; event_to: string | null } | undefined> {
     return this.db.prepare("SELECT event_from, event_to FROM nodes WHERE id = ?").get(id) as
       { event_from: string | null; event_to: string | null } | undefined;
   }
@@ -291,7 +314,10 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // Correct a node's event window. Facts of this shape get revised often ("it actually
   // started earlier"), and the window is node metadata, not content, so this is not a
   // revision. Only the keys passed are touched.
-  setEventWindow(id: string, window: { event_from?: string; event_to?: string }): void {
+  async setEventWindow(
+    id: string,
+    window: { event_from?: string; event_to?: string },
+  ): Promise<void> {
     const sets: string[] = [];
     const params: Record<string, string> = { id };
 
@@ -314,7 +340,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // then, or undefined if the node did not exist yet or had already been invalidated.
   // Answers "what did we believe on D", which is how a decision taken on stale information
   // gets audited. Note the title is not versioned, so only the body is historical.
-  stateAt(id: string, asOf: string): { rev: number; content: string } | undefined {
+  async stateAt(id: string, asOf: string): Promise<{ rev: number; content: string } | undefined> {
     return this.db
       .prepare(
         `SELECT r.rev AS rev, r.content AS content FROM revisions r
@@ -333,7 +359,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // Authored nodes only. A code mirror's session is whichever run indexed it, so
   // attributing it to that run's principal would weight derived rows by who happened to
   // refresh the index.
-  principalsOf(ids: string[]): Map<string, string> {
+  async principalsOf(ids: string[]): Promise<Map<string, string>> {
     if (!ids.length) return new Map();
 
     const ph = ids.map(() => "?").join(",");
@@ -349,7 +375,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
     return new Map(rows.map((row) => [row.id, row.principal]));
   }
 
-  recordUse(ids: string[], ts: string): void {
+  async recordUse(ids: string[], ts: string): Promise<void> {
     if (!ids.length) return;
 
     const ph = ids.map(() => "?").join(",");
@@ -358,20 +384,29 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
       .run(ts, ...ids);
   }
 
-  invalidateNode(
+  async invalidateNode(
     id: string,
     fields: { ts: string; superseded_by?: string; session_id: string },
-  ): Envelope {
+  ): Promise<Envelope> {
+    this.retire(id, fields);
+    return this.envelopeNow(id)!;
+  }
+
+  private retire(
+    id: string,
+    fields: { ts: string; superseded_by?: string; session_id: string },
+  ): void {
     this.tx(() => {
       const { changes } = this.db
         .prepare("UPDATE nodes SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL")
         .run(fields.ts, id);
       if (changes) {
-        this.edges.invalidateSystemSimilaritiesOf(id, fields.ts);
+        invalidateSystemSimilaritiesOf(this.db, id, fields.ts);
       }
       if (changes && fields.superseded_by) {
         this.repointReferrers(id, fields.superseded_by, fields.session_id, fields.ts);
-        this.edges.insertEdge(
+        insertEdge(
+          this.db,
           fields.superseded_by,
           id,
           EdgeType.SUPERSEDES,
@@ -381,7 +416,6 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
         );
       }
     });
-    return this.envelope(id)!;
   }
 
   // Bring a soft-deleted node back, and retire the supersedes edges that killed it —
@@ -390,7 +424,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
   // Referrers the supersession moved onto the successor are NOT moved back; the successor
   // is where they have pointed since, and undoing that is a separate decision.
   // Returns false when the node was not invalidated in the first place.
-  restoreNode(id: string, fields: { ts: string; session_id: string }): boolean {
+  async restoreNode(id: string, fields: { ts: string; session_id: string }): Promise<boolean> {
     return this.tx(() => {
       const { changes } = this.db
         .prepare(
@@ -407,7 +441,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
         .all({ id, type: EdgeType.SUPERSEDES }) as { src: string }[];
 
       for (const e of supersedes) {
-        this.edges.invalidateEdge(e.src, id, EdgeType.SUPERSEDES, fields.ts);
+        invalidateEdge(this.db, e.src, id, EdgeType.SUPERSEDES, fields.ts);
       }
       return true;
     });
@@ -429,17 +463,9 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
       .all({ id }) as { src: string; type: string; weight: number }[];
 
     for (const e of inbound) {
-      this.edges.invalidateEdge(e.src, id, e.type as EdgeType, ts);
+      invalidateEdge(this.db, e.src, id, e.type as EdgeType, ts);
       if (e.src === successor) continue; // self-loop after re-point -> drop
-      this.edges.insertEdge(
-        e.src,
-        successor,
-        e.type as EdgeType,
-        "agent",
-        session_id,
-        ts,
-        e.weight,
-      );
+      insertEdge(this.db, e.src, successor, e.type as EdgeType, "agent", session_id, ts, e.weight);
     }
   }
 }
@@ -447,7 +473,7 @@ export class NodesRepo extends BaseRepo implements UseRecorder {
 // What a host with a read-only handle gets. A read-pool worker cannot perform the one
 // write a read makes, so the call that dispatched the read makes it on the writer.
 export class NoUseRecorder implements UseRecorder {
-  recordUse(): void {
+  async recordUse(): Promise<void> {
     return;
   }
 }

@@ -17,13 +17,13 @@ function rows(db: { prepare: (sql: string) => { all: () => unknown[] } }): Event
 }
 
 describe("EventLogService", () => {
-  it("should write one row per draft, stamped with the clock", () => {
+  it("should write one row per draft, stamped with the clock", async () => {
     // Given
     const { db, clock } = setup({ start: "2026-03-01T10:00:00.000Z" });
     const log = container.resolve(EventLogService);
 
     // When
-    log.record([
+    await log.record([
       { action: EventAction.WRITE, session_id: "s1", node_id: "n1", detail: { type: "fact" } },
       { action: EventAction.GET, session_id: "s1", node_id: "n1", detail: { count: 2 } },
     ]);
@@ -36,39 +36,39 @@ describe("EventLogService", () => {
     expect(JSON.parse(written[0]!.detail!)).toEqual({ type: "fact" });
   });
 
-  it("should store nulls when a draft omits node_id and detail", () => {
+  it("should store nulls when a draft omits node_id and detail", async () => {
     // Given
     const { db } = setup();
     const log = container.resolve(EventLogService);
 
     // When
-    log.record([{ action: EventAction.STATS, session_id: "s1" }]);
+    await log.record([{ action: EventAction.STATS, session_id: "s1" }]);
 
     // Then
     expect(rows(db)[0]).toMatchObject({ node_id: null, detail: null });
   });
 
-  it("should be a no-op when handed no drafts", () => {
+  it("should be a no-op when handed no drafts", async () => {
     // Given
     const { db } = setup();
     const log = container.resolve(EventLogService);
 
     // When
-    log.record([]);
+    await log.record([]);
 
     // Then
     expect(rows(db)).toHaveLength(0);
   });
 
-  it("should swallow the error when the audit row cannot be written", () => {
+  it("should swallow the error when the audit row cannot be written", async () => {
     // Given
     const { db } = setup();
     const log = container.resolve(EventLogService);
     db.exec("DROP TABLE events");
 
     // When / Then
-    expect(() => {
-      log.record([{ action: EventAction.SEARCH, session_id: "s1" }]);
-    }).not.toThrow();
+    await expect(
+      log.record([{ action: EventAction.SEARCH, session_id: "s1" }]),
+    ).resolves.toBeUndefined();
   });
 });

@@ -29,7 +29,8 @@ async function orphanSymbol(env: TestEnv): Promise<{ s: string; symbolId: string
   const stats = (await container.resolve(CodeIndexTool).invoke({ session_id: s, path: root })) as {
     repo: string;
   };
-  const symbolId = env.code.findSymbolsByName("prunableWidget", stats.repo, 1)[0]!.envelope.id;
+  const symbolId = (await env.code.findSymbolsByName("prunableWidget", stats.repo, 1))[0]!.envelope
+    .id;
   env.db.prepare("DELETE FROM code_files WHERE repo = ?").run(stats.repo);
   return { s, symbolId };
 }
@@ -54,7 +55,8 @@ describe("Tier-1 mirror prune", () => {
     const stats = (await container
       .resolve(CodeIndexTool)
       .invoke({ session_id: s, path: root })) as { repo: string };
-    const symbolId = env.code.findSymbolsByName("prunableWidget", stats.repo, 1)[0]!.envelope.id;
+    const symbolId = (await env.code.findSymbolsByName("prunableWidget", stats.repo, 1))[0]!
+      .envelope.id;
 
     expect((await worker.tick()).pruned).toBe(0);
 
@@ -63,7 +65,7 @@ describe("Tier-1 mirror prune", () => {
 
     // Then
     expect((await worker.tick()).pruned).toBe(0);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(false);
 
     // And once an index run advances the watermark, the same drift is found
     env.db
@@ -71,21 +73,21 @@ describe("Tier-1 mirror prune", () => {
       .run("2099-01-01T00:00:00.000Z", stats.repo);
 
     expect((await worker.tick()).pruned).toBeGreaterThanOrEqual(1);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(true);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(true);
   });
 
   it("should auto-invalidate an orphaned symbol so it drops out of retrieval", async () => {
     // Given
     const env = setup();
     const { s, symbolId } = await orphanSymbol(env);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(false);
 
     // When
     const r = await container.resolve(ConsolidationWorker).tick();
 
     // Then
     expect(r.pruned).toBeGreaterThanOrEqual(1); // module symbol + the function
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(true);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(true);
 
     // gone from default search, present under history
     const normal = (await container.resolve(SearchTool).invoke({
@@ -121,9 +123,9 @@ describe("Tier-1 mirror prune", () => {
     })) as Envelope;
 
     // When / Then — the dead-mirror detector returns only the orphaned symbol, never the fact.
-    expect(env.consolidation.deadMirrorNodes(50)).not.toContain(fact.id);
+    expect(await env.consolidation.deadMirrorNodes(50)).not.toContain(fact.id);
     await container.resolve(ConsolidationWorker).tick();
-    expect(env.nodes.envelope(fact.id)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(fact.id))!.invalidated).toBe(false);
   });
 
   it("should queue a prune candidate under suggest and invalidate on apply", async () => {
@@ -137,16 +139,16 @@ describe("Tier-1 mirror prune", () => {
 
     // Then
     expect(r.prune_suggested).toBeGreaterThanOrEqual(1);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(false);
 
-    const cand = env.consolidation
-      .pendingCandidates({ kind: ConsolidationKind.PRUNE })
-      .find((c) => c.member_ids[0] === symbolId);
+    const cand = (
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.PRUNE })
+    ).find((c) => c.member_ids[0] === symbolId);
     expect(cand).toBeDefined();
     await container
       .resolve(ConsolidateApplyTool)
       .invoke({ session_id: s, id: cand!.id, decision: ConsolidationRecommendation.APPLY });
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(true);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(true);
   });
 
   it("should prune nothing under the off posture", async () => {
@@ -161,6 +163,6 @@ describe("Tier-1 mirror prune", () => {
     // Then
     expect(r.pruned).toBe(0);
     expect(r.prune_suggested).toBe(0);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(false);
   });
 });

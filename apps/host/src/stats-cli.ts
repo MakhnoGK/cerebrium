@@ -8,7 +8,7 @@ import {
   type OperatorSnapshotResult,
 } from "@cerebrium/kernel/application/use-cases";
 import { buildContainer } from "@cerebrium/kernel/container";
-import { DB_TOKEN } from "@cerebrium/kernel/db/repositories/base";
+import { DB_TOKEN } from "@cerebrium/kernel/db/sqlite/base";
 import type { FieldProvenance } from "@cerebrium/kernel/domain/ports/config";
 import { DaemonConfig } from "@cerebrium/kernel/infrastructure/config";
 import { isMainModule } from "@cerebrium/kernel/runtime/is-main";

@@ -33,7 +33,8 @@ async function orphanedRepo(env: TestEnv): Promise<{ repo: string; symbolId: str
   const stats = (await container.resolve(CodeIndexTool).invoke({ session_id: s, path: root })) as {
     repo: string;
   };
-  const symbolId = env.code.findSymbolsByName("prunableWidget", stats.repo, 1)[0]!.envelope.id;
+  const symbolId = (await env.code.findSymbolsByName("prunableWidget", stats.repo, 1))[0]!.envelope
+    .id;
 
   env.db.prepare("DELETE FROM code_files WHERE repo = ?").run(stats.repo);
   env.db
@@ -56,7 +57,7 @@ describe("mirror prune against a repo whose root is not on disk", () => {
 
     // Then
     expect(r.pruned).toBe(0);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(false);
   });
 
   it("should still prune a genuine orphan when the root is present", async () => {
@@ -69,7 +70,7 @@ describe("mirror prune against a repo whose root is not on disk", () => {
 
     // Then
     expect(r.pruned).toBeGreaterThanOrEqual(1);
-    expect(env.nodes.envelope(symbolId)!.invalidated).toBe(true);
+    expect((await env.nodes.envelope(symbolId))!.invalidated).toBe(true);
   });
 
   it("should exclude the named repos when the repository is asked directly", async () => {
@@ -78,8 +79,8 @@ describe("mirror prune against a repo whose root is not on disk", () => {
     const { repo, symbolId } = await orphanedRepo(env);
 
     // When
-    const all = env.consolidation.deadMirrorNodes(50);
-    const excluded = env.consolidation.deadMirrorNodes(50, [repo]);
+    const all = await env.consolidation.deadMirrorNodes(50);
+    const excluded = await env.consolidation.deadMirrorNodes(50, [repo]);
 
     // Then
     expect(all).toContain(symbolId);

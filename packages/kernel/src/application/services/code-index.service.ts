@@ -4,6 +4,12 @@ import { inject, injectable } from "tsyringe";
 import type { FileIndexResult, IndexStats, IndexTarget } from "@cerebrium/contracts/types";
 import { EdgeType } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  CODE_REPO_TOKEN,
+  EMBEDDING_QUEUE_REPO_TOKEN,
+  type CodeRepo,
+  type EmbeddingQueueRepo,
+} from "@/domain/ports/storage";
 import { CodeRootsNotConfiguredError, RepositoryNotConfiguredError } from "@/application/errors";
 import { extractFile, FileExtract } from "@/code/extract";
 import { readGitProvenance } from "@/code/git";
@@ -19,7 +25,6 @@ import {
   yieldToLoop,
 } from "@/code/indexer";
 import { parse } from "@/code/parser";
-import { CodeRepo, EmbeddingQueueRepo } from "@/db/repositories";
 import { CodeConfig } from "@/infrastructure/config";
 
 export interface IndexRunOptions {
@@ -30,8 +35,8 @@ export interface IndexRunOptions {
 @injectable()
 export class CodeIndexService {
   constructor(
-    private readonly code: CodeRepo,
-    private readonly queue: EmbeddingQueueRepo,
+    @inject(CODE_REPO_TOKEN) private readonly code: CodeRepo,
+    @inject(EMBEDDING_QUEUE_REPO_TOKEN) private readonly queue: EmbeddingQueueRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly codeConfig: CodeConfig,
   ) {}
@@ -39,14 +44,20 @@ export class CodeIndexService {
   // An explicit `path` wins; otherwise a name resolves against the roots configured in
   // MEMORY_CODE_ROOTS plus those remembered from a prior index-by-path (env wins on a
   // clash), so a repo indexed once by `path` can later be re-indexed by name.
-  public resolveTargets({ repo, path }: { repo?: string; path?: string }): IndexTarget[] {
+  public async resolveTargets({
+    repo,
+    path,
+  }: {
+    repo?: string;
+    path?: string;
+  }): Promise<IndexTarget[]> {
     if (path) {
       return [{ name: basename(path.replace(/\/+$/, "")) || path, root: path }];
     }
 
     const byName = new Map<string, IndexTarget>();
 
-    this.code.storedRepoRoots().forEach((root) => {
+    (await this.code.storedRepoRoots()).forEach((root) => {
       byName.set(root.name, root);
     });
 
@@ -136,7 +147,7 @@ export class CodeIndexService {
 
       const fileHash = sha256(buf);
 
-      if (!opts.force && this.code.codeFileHash(target.name, c.rel) === fileHash) {
+      if (!opts.force && (await this.code.codeFileHash(target.name, c.rel)) === fileHash) {
         stats.files_skipped++;
         continue; // hash-gate: unchanged file, nothing parsed or re-embedded
       }
@@ -146,7 +157,7 @@ export class CodeIndexService {
       const extract = extractFile(target.name, c.rel, c.lang, source, tree.rootNode);
       tree.delete(); // free WASM heap; extractFile has copied out everything it needs
 
-      const res: FileIndexResult = this.code.applyFileIndex({
+      const res: FileIndexResult = await this.code.applyFileIndex({
         repo: target.name,
         path: c.rel,
         lang: c.lang,
@@ -171,22 +182,26 @@ export class CodeIndexService {
     }
 
     // ---- Sweep: files gone from disk -> invalidate their symbols ----
-    for (const path of this.code.listCodeFilePaths(target.name)) {
+    for (const path of await this.code.listCodeFilePaths(target.name)) {
       if (!onDisk.has(path)) {
-        stats.symbols_invalidated += this.code.removeFile(target.name, path, this.clock.now());
+        stats.symbols_invalidated += await this.code.removeFile(
+          target.name,
+          path,
+          this.clock.now(),
+        );
       }
     }
 
     // ---- Pass 2: cross-file imports/calls, resolved against the full directory ----
     if (dirty.length) {
-      const resolver = buildResolver(this.code, target.name);
+      const resolver = await buildResolver(this.code, target.name);
       let resolved = 0;
 
       for (const { rel, lang, extract } of dirty) {
         const importPairs = resolveImports(resolver, rel, extract);
         const callPairs = resolveCalls(resolver, rel, lang, extract);
 
-        stats.edges_written += this.code.rebuildResolvedEdges(
+        stats.edges_written += await this.code.rebuildResolvedEdges(
           target.name,
           rel,
           EdgeType.IMPORTS,
@@ -194,7 +209,7 @@ export class CodeIndexService {
           opts.session_id,
           this.clock.now(),
         );
-        stats.edges_written += this.code.rebuildResolvedEdges(
+        stats.edges_written += await this.code.rebuildResolvedEdges(
           target.name,
           rel,
           EdgeType.CALLS,
@@ -214,7 +229,7 @@ export class CodeIndexService {
     stats.commit = provenance.commit;
     stats.dirty = provenance.dirty;
 
-    this.code.setRepoProvenance(
+    await this.code.setRepoProvenance(
       target.name,
       target.root,
       provenance.branch,
@@ -223,7 +238,7 @@ export class CodeIndexService {
       this.clock.now(),
     );
 
-    stats.parked_embeddings = this.queue.embeddingStats().parked;
+    stats.parked_embeddings = (await this.queue.embeddingStats()).parked;
     stats.duration_ms = Math.max(0, Date.parse(this.clock.now()) - start);
 
     return stats;

@@ -9,6 +9,12 @@ import {
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
 import {
+  EDGES_REPO_TOKEN,
+  SEARCH_REPO_TOKEN,
+  type EdgesRepo,
+  type SearchRepo,
+} from "@/domain/ports/storage";
+import {
   BEST_CHUNK_CHARS,
   byScore,
   CANDIDATE_CAP,
@@ -32,7 +38,6 @@ import {
   type SearchQuery,
   type SearchResult,
 } from "@/application/use-cases/contracts";
-import { EdgesRepo, SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
 import { RetrievalConfig } from "@/infrastructure/config";
 
@@ -40,8 +45,8 @@ import { RetrievalConfig } from "@/infrastructure/config";
 export class LocalSearchMemory implements SearchMemory {
   constructor(
     private readonly embeddings: EmbeddingService,
-    private readonly searchRepo: SearchRepo,
-    private readonly edges: EdgesRepo,
+    @inject(SEARCH_REPO_TOKEN) private readonly searchRepo: SearchRepo,
+    @inject(EDGES_REPO_TOKEN) private readonly edges: EdgesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     private readonly retrieval: RetrievalConfig,
@@ -64,10 +69,10 @@ export class LocalSearchMemory implements SearchMemory {
     }
 
     if (mode === "text") {
-      return this.textSearch(args, match, history, penalty);
+      return await this.textSearch(args, match, history, penalty);
     }
 
-    const { ftsRows, ftsTotal, ftsChunks } = this.textCandidates(args, match, history, mode);
+    const { ftsRows, ftsTotal, ftsChunks } = await this.textCandidates(args, match, history, mode);
     const vecRows = await this.vectorCandidates(args, history);
 
     const entries = fuse({
@@ -80,19 +85,19 @@ export class LocalSearchMemory implements SearchMemory {
       useWeight: this.retrieval.useWeight,
     });
 
-    this.applyTrust(entries);
+    await this.applyTrust(entries);
 
     if ((args.expand_graph ?? true) && entries.size) {
-      for (const entry of this.expandByRank(entries, args.as_of, args.valid_at)) {
+      for (const entry of await this.expandByRank(entries, args.as_of, args.valid_at)) {
         entries.set(entry.row.id, entry);
       }
     }
 
     const ordered = [...entries.values()].sort(byScore);
     const selections = selectDiverse(ordered, args.limit, {
-      vectors: this.searchRepo.vectorsFor(ordered.map((e) => e.row.id)),
-      protectedPairs: this.edges.supersedesPairs(ordered.map((e) => e.row.id)),
-      recordedPairs: this.edges.duplicatePairs(ordered.map((e) => e.row.id)),
+      vectors: await this.searchRepo.vectorsFor(ordered.map((e) => e.row.id)),
+      protectedPairs: await this.edges.supersedesPairs(ordered.map((e) => e.row.id)),
+      recordedPairs: await this.edges.duplicatePairs(ordered.map((e) => e.row.id)),
       foldSim: this.retrieval.foldSim,
       mmrLambda: this.retrieval.mmrLambda,
     });
@@ -127,7 +132,7 @@ export class LocalSearchMemory implements SearchMemory {
     return {
       results,
       total_matches: mode === "vector" ? vecRows.length : ftsTotal,
-      notes: this.contextNotes(ranked),
+      notes: await this.contextNotes(ranked),
       audit: {
         mode,
         query: args.query,
@@ -154,21 +159,21 @@ export class LocalSearchMemory implements SearchMemory {
     return args.kinds?.length === 1 && args.kinds[0] === MemoryKind.MIRROR;
   }
 
-  private textCandidates(
+  private async textCandidates(
     args: SearchQuery,
     match: string,
     history: boolean,
     mode: string,
-  ): {
+  ): Promise<{
     ftsRows: SearchRow[];
     ftsTotal: number;
-    ftsChunks: ReturnType<SearchRepo["bestFtsChunksFor"]>;
-  } {
+    ftsChunks: Awaited<ReturnType<SearchRepo["bestFtsChunksFor"]>>;
+  }> {
     if (mode === "vector") {
       return { ftsRows: [], ftsTotal: 0, ftsChunks: new Map() };
     }
 
-    const { rows, total } = this.searchRepo.search({
+    const { rows, total } = await this.searchRepo.search({
       match,
       project: args.project,
       kinds: args.kinds,
@@ -183,7 +188,7 @@ export class LocalSearchMemory implements SearchMemory {
     return {
       ftsRows,
       ftsTotal: total,
-      ftsChunks: this.searchRepo.bestFtsChunksFor(
+      ftsChunks: await this.searchRepo.bestFtsChunksFor(
         ftsRows.map((r) => r.id),
         match,
       ),
@@ -197,7 +202,7 @@ export class LocalSearchMemory implements SearchMemory {
 
       if (!qvec) return [];
 
-      return this.searchRepo.vectorSearch(qvec, {
+      return await this.searchRepo.vectorSearch(qvec, {
         project: args.project,
         kinds: args.kinds,
         types: args.types,
@@ -214,13 +219,13 @@ export class LocalSearchMemory implements SearchMemory {
 
   // Phase-1 text-only path, byte-compatible: bm25 normalized by the best match × the
   // memory-kind factor. No RRF, no vectors, no graph, no context_notes.
-  private textSearch(
+  private async textSearch(
     args: SearchQuery,
     match: string,
     history: boolean,
     penalty: number,
-  ): SearchOutcome {
-    const { rows, total } = this.searchRepo.search({
+  ): Promise<SearchOutcome> {
+    const { rows, total } = await this.searchRepo.search({
       match,
       project: args.project,
       kinds: args.kinds,
@@ -234,12 +239,12 @@ export class LocalSearchMemory implements SearchMemory {
     const now = Date.parse(this.clock.now());
     const best = Math.min(...rows.map((r) => r.bm25));
 
-    const ftsChunks = this.searchRepo.bestFtsChunksFor(
+    const ftsChunks = await this.searchRepo.bestFtsChunksFor(
       rows.map((r) => r.id),
       match,
     );
 
-    const trust = this.trust.factors(rows.map((r) => r.id));
+    const trust = await this.trust.factors(rows.map((r) => r.id));
 
     const ranked = rows
       .filter((row) => !isRevoked(trust.get(row.id)))
@@ -295,8 +300,8 @@ export class LocalSearchMemory implements SearchMemory {
 
   // The weight multiplies what its principal wrote, and a revoked principal's nodes leave
   // the candidate set outright — before graph expansion, so they cannot seed it either.
-  private applyTrust(entries: Map<string, Entry>): void {
-    const trust = this.trust.factors([...entries.keys()]);
+  private async applyTrust(entries: Map<string, Entry>): Promise<void> {
+    const trust = await this.trust.factors([...entries.keys()]);
 
     for (const [id, factor] of trust) {
       if (isRevoked(factor)) {
@@ -316,7 +321,11 @@ export class LocalSearchMemory implements SearchMemory {
   // seeds outranks one backed by a single strong seed — neither is expressible with fixed
   // 1-hop weights. PPR scores only nodes the query did NOT match directly: direct
   // relevance is left exactly as fusion computed it.
-  private expandByRank(entries: Map<string, Entry>, asOf?: string, validAt?: string): Entry[] {
+  private async expandByRank(
+    entries: Map<string, Entry>,
+    asOf?: string,
+    validAt?: string,
+  ): Promise<Entry[]> {
     const seeds = [...entries.values()];
     const topScore = Math.max(...seeds.map((s) => s.score));
 
@@ -324,7 +333,7 @@ export class LocalSearchMemory implements SearchMemory {
       return [];
     }
 
-    const edges = this.edges.subgraphFrom(
+    const edges = await this.edges.subgraphFrom(
       seeds.map((s) => s.row.id),
       { depth: PPR_DEPTH, cap: this.retrieval.pprFrontier, types: TRAVERSABLE, asOf, validAt },
     );
@@ -351,12 +360,12 @@ export class LocalSearchMemory implements SearchMemory {
     // outrank it.
     const best = Math.max(...surfaced.map(([, r]) => r));
     const rows = new Map(
-      this.searchRepo
-        .rowsFor(
+      (
+        await this.searchRepo.rowsFor(
           surfaced.map(([id]) => id),
           { asOf, validAt },
         )
-        .map((r) => [r.id, r]),
+      ).map((r) => [r.id, r]),
     );
     const out: Entry[] = [];
 
@@ -377,9 +386,9 @@ export class LocalSearchMemory implements SearchMemory {
     return out;
   }
 
-  private contextNotes(ranked: Entry[]): string[] {
-    const notes = [...this.embeddings.getEmbeddingNotes()];
-    const superseded = this.edges.supersededInfo(ranked.map((e) => e.row.id));
+  private async contextNotes(ranked: Entry[]): Promise<string[]> {
+    const notes = [...(await this.embeddings.getEmbeddingNotes())];
+    const superseded = await this.edges.supersededInfo(ranked.map((e) => e.row.id));
 
     for (const [id, info] of superseded) {
       notes.push(`${id} was superseded by ${info.by} on ${info.at.slice(0, 10)}.`);

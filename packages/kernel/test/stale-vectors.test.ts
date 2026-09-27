@@ -9,7 +9,7 @@ import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/014_purge_stale_chunk_vectors.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/014_purge_stale_chunk_vectors.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -31,7 +31,7 @@ async function writeLong(s: string): Promise<Envelope> {
 }
 
 async function drain(env: TestEnv): Promise<void> {
-  for (let i = 0; i < 50 && env.queue.embeddingStats().backlog > 0; i++) {
+  for (let i = 0; i < 50 && (await env.queue.embeddingStats()).backlog > 0; i++) {
     await env.worker.tick();
   }
 }

@@ -7,11 +7,12 @@ import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
+import { CONSOLIDATION_REPO_TOKEN, NODES_REPO_TOKEN, STORAGE_TOKENS } from "@/domain/ports/storage";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
-import { openDatabase, openDatabaseReadonly } from "@/db/database";
-import { DB_TOKEN } from "@/db/repositories/base";
-import { ConsolidationRepo } from "@/db/repositories/consolidation";
-import { NodesRepo, NoUseRecorder } from "@/db/repositories/nodes";
+import { registerSqliteRepositories } from "@/db/sqlite";
+import { DB_TOKEN } from "@/db/sqlite/base";
+import { openDatabase, openDatabaseReadonly } from "@/db/sqlite/database";
+import { NoUseRecorder } from "@/db/sqlite/nodes";
 import {
   ConsolidationConfig,
   DaemonConfig,
@@ -66,6 +67,7 @@ export const KERNEL_TOKENS = {
   consolidationProvider: CONSOLIDATION_PROVIDER_TOKEN,
   consolidationReporter: CONSOLIDATION_REPORTER_TOKEN,
   useRecorder: USE_RECORDER_TOKEN,
+  ...STORAGE_TOKENS,
 } as const;
 
 export function buildContainer({
@@ -129,6 +131,7 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
       return role === "cli" || role === "reader" ? openDatabaseReadonly(path) : openDatabase(path);
     }),
   });
+  registerSqliteRepositories(target);
 
   target.registerSingleton(CLOCK_TOKEN, SystemClock);
   target.registerSingleton(PROCESS_PROBE_TOKEN, SystemProcessProbe);
@@ -170,14 +173,14 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
   });
 
   target.register(CONSOLIDATION_REPORTER_TOKEN, {
-    useToken: ConsolidationRepo,
+    useToken: CONSOLIDATION_REPO_TOKEN,
   });
 
   target.register(USE_RECORDER_TOKEN, {
     useFactory: instanceCachingFactory((c) =>
       // `get` bumps use_count, which the read-only roles cannot do. They record nothing
       // and the caller that dispatched the read writes it — see CallPipeline.
-      role === "cli" || role === "reader" ? new NoUseRecorder() : c.resolve(NodesRepo),
+      role === "cli" || role === "reader" ? new NoUseRecorder() : c.resolve(NODES_REPO_TOKEN),
     ),
   });
 }

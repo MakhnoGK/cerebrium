@@ -45,7 +45,7 @@ describe("Embedding queue drains", () => {
         }
       ).p,
     ).toBe(1);
-    expect(env.queue.embeddingStats().backlog).toBe(1);
+    expect((await env.queue.embeddingStats()).backlog).toBe(1);
 
     // When
     const res = await env.worker.tick();
@@ -59,7 +59,7 @@ describe("Embedding queue drains", () => {
         }
       ).p,
     ).toBe(0);
-    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect((await env.queue.embeddingStats()).backlog).toBe(0);
     expect(env.db.prepare("SELECT COUNT(*) c FROM embedding_queue").get()).toEqual({ c: 0 });
   });
 });
@@ -76,22 +76,22 @@ describe("Retry with backoff, then park", () => {
 
     // When / Then — attempt 1 fails.
     await worker.tick();
-    expect(env.queue.queueRows(10)[0]!.attempts).toBe(1);
+    expect((await env.queue.queueRows(10))[0]!.attempts).toBe(1);
 
     // When / Then — backoff: not eligible again until the clock advances.
     await worker.tick();
-    expect(env.queue.queueRows(10)[0]!.attempts).toBe(1); // skipped, no retry yet
+    expect((await env.queue.queueRows(10))[0]!.attempts).toBe(1); // skipped, no retry yet
 
     for (let n = 2; n <= 5; n++) {
       env.clock.advanceMs(60_000); // past any backoff
       await worker.tick();
-      if (n < 5) expect(env.queue.queueRows(10)[0]!.attempts).toBe(n);
+      if (n < 5) expect((await env.queue.queueRows(10))[0]!.attempts).toBe(n);
     }
 
     // Then — attempts === 5 -> parked, excluded from the eligible queue.
-    expect(env.queue.queueRows(10).length).toBe(0);
-    expect(env.queue.embeddingStats().parked).toBe(1);
-    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect((await env.queue.queueRows(10)).length).toBe(0);
+    expect((await env.queue.embeddingStats()).parked).toBe(1);
+    expect((await env.queue.embeddingStats()).backlog).toBe(0);
 
     // When / Then — stays parked, no retry.
     env.clock.advanceMs(10_000_000);
@@ -108,11 +108,11 @@ describe("Restart recovery", () => {
 
     // When
     const restarted = new EmbeddingWorker(env.queue, env.provider, env.clock);
-    restarted.reconcile();
+    await restarted.reconcile();
 
     // Then
     expect((await restarted.tick()).embedded).toBeGreaterThan(0);
-    expect(env.queue.embeddingStats().backlog).toBe(0);
+    expect((await env.queue.embeddingStats()).backlog).toBe(0);
   });
 
   it("should re-enqueue a pending node whose queue row was lost", async () => {
@@ -121,14 +121,14 @@ describe("Restart recovery", () => {
     const s = await session();
     const node = await writeFact(s, "Orphan");
     env.db.prepare("DELETE FROM embedding_queue").run(); // simulate a lost queue row
-    expect(env.queue.queueRows(10).length).toBe(0);
+    expect((await env.queue.queueRows(10)).length).toBe(0);
 
     // When
     const restarted = new EmbeddingWorker(env.queue, env.provider, env.clock);
-    restarted.reconcile();
+    await restarted.reconcile();
 
     // Then
-    expect(env.queue.queueRows(10).length).toBe(1); // pending node re-queued
+    expect((await env.queue.queueRows(10)).length).toBe(1); // pending node re-queued
     await restarted.tick();
     expect(
       (

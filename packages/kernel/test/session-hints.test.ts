@@ -1,8 +1,8 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationKind, MemoryKind } from "@cerebrium/contracts/vocab";
+import { CONSOLIDATION_REPO_TOKEN, type ConsolidationRepo } from "@/domain/ports/storage";
 import { HintsService } from "@/application/services";
-import { ConsolidationRepo } from "@/db/repositories";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, type TestEnv } from "@test/helpers";
@@ -20,7 +20,7 @@ async function candidateFrom(title: string): Promise<void> {
     content: `${title} — a durable fact with enough words in it to be worth a chunk`,
   });
 
-  container.resolve(ConsolidationRepo).insertCandidate({
+  await container.resolve<ConsolidationRepo>(CONSOLIDATION_REPO_TOKEN).insertCandidate({
     kind: ConsolidationKind.PRUNE,
     member_ids: [id],
     score: 1,

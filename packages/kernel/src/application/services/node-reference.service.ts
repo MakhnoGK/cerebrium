@@ -1,20 +1,25 @@
-import { injectable } from "tsyringe";
-import { EdgesRepo, NodesRepo } from "@/db/repositories";
+import { inject, injectable } from "tsyringe";
+import {
+  EDGES_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  type EdgesRepo,
+  type NodesRepo,
+} from "@/domain/ports/storage";
 
 @injectable()
 export class NodeReferenceService {
   constructor(
-    private readonly nodes: NodesRepo,
-    private readonly edges: EdgesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
+    @inject(EDGES_REPO_TOKEN) private readonly edges: EdgesRepo,
   ) {}
 
-  requireLive(id: string, label = "node"): void {
-    const state = this.nodes.referenceState(id);
+  async requireLive(id: string, label = "node"): Promise<void> {
+    const state = await this.nodes.referenceState(id);
 
     if (state === "live") return;
     if (state === "missing") throw new Error(`${label} ${id} does not exist.`);
 
-    const successors = this.terminalLiveSuccessors(id);
+    const successors = await this.terminalLiveSuccessors(id);
 
     if (successors.length === 1) {
       throw new Error(`${label} ${id} is invalidated. Use live successor ${successors[0]}.`);
@@ -32,7 +37,7 @@ export class NodeReferenceService {
   // Where a retired node's identity went: the live nodes reachable by following
   // `supersedes` forward, however many hops it takes. More than one means the question
   // has no single answer and the caller has to say so rather than pick.
-  terminalLiveSuccessors(id: string): string[] {
+  async terminalLiveSuccessors(id: string): Promise<string[]> {
     const live = new Set<string>();
     const visited = new Set<string>();
     const pending = [id];
@@ -43,8 +48,8 @@ export class NodeReferenceService {
       if (visited.has(current)) continue;
       visited.add(current);
 
-      for (const successor of this.edges.liveSuccessorsOf(current)) {
-        const state = this.nodes.referenceState(successor);
+      for (const successor of await this.edges.liveSuccessorsOf(current)) {
+        const state = await this.nodes.referenceState(successor);
 
         if (state === "live") live.add(successor);
         if (state === "invalidated" && !visited.has(successor)) pending.push(successor);

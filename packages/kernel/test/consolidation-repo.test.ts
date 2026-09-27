@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { ConsolidationKind, ConsolidationStatus, MemoryKind } from "@cerebrium/contracts/vocab";
-import { candidateHash } from "@/db/repositories/consolidation";
+import { candidateHash } from "@/domain/ports/storage";
 import { setup } from "@test/helpers";
 
 describe("ConsolidationRepo candidate queue", () => {
-  it("should insert a candidate and read it back with parsed members and proposal when a candidate is stored", () => {
+  it("should insert a candidate and read it back with parsed members and proposal when a candidate is stored", async () => {
     // Given
     const { consolidation } = setup();
 
     // When
-    const id = consolidation.insertCandidate({
+    const id = await consolidation.insertCandidate({
       kind: ConsolidationKind.DISTILL,
       project: "cerebrium",
       member_ids: ["b", "a", "c"],
@@ -20,7 +20,7 @@ describe("ConsolidationRepo candidate queue", () => {
 
     // Then
     expect(id).not.toBeNull();
-    const c = consolidation.getCandidate(id!)!;
+    const c = (await consolidation.getCandidate(id!))!;
     expect(c.kind).toBe("distill");
     expect(c.status).toBe("pending");
     expect(c.member_ids).toEqual(["b", "a", "c"]);
@@ -28,19 +28,19 @@ describe("ConsolidationRepo candidate queue", () => {
     expect(c.canonical_id).toBeNull();
   });
 
-  it("should ignore a duplicate when the same (kind, members) cluster is inserted regardless of order", () => {
+  it("should ignore a duplicate when the same (kind, members) cluster is inserted regardless of order", async () => {
     // Given
     const { consolidation } = setup();
 
     // When
-    const first = consolidation.insertCandidate({
+    const first = await consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: ["x", "y"],
       canonical_id: "x",
       score: 0.95,
       detected_at: "2026-01-01T00:00:00.000Z",
     });
-    const dup = consolidation.insertCandidate({
+    const dup = await consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: ["y", "x"], // reordered — same cluster
       canonical_id: "x",
@@ -51,17 +51,19 @@ describe("ConsolidationRepo candidate queue", () => {
     // Then
     expect(first).not.toBeNull();
     expect(dup).toBeNull();
-    expect(consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(1);
-    expect(consolidation.candidateExists(ConsolidationKind.MERGE, ["x", "y"])).toBe(true);
+    expect(await consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE })).toHaveLength(
+      1,
+    );
+    expect(await consolidation.candidateExists(ConsolidationKind.MERGE, ["x", "y"])).toBe(true);
     expect(candidateHash(ConsolidationKind.MERGE, ["x", "y"])).toBe(
       candidateHash(ConsolidationKind.MERGE, ["y", "x"]),
     );
   });
 
-  it("should create a distinct candidate when the same members are inserted under a different kind", () => {
+  it("should create a distinct candidate when the same members are inserted under a different kind", async () => {
     // Given
     const { consolidation } = setup();
-    consolidation.insertCandidate({
+    await consolidation.insertCandidate({
       kind: ConsolidationKind.LINK,
       member_ids: ["a", "b"],
       score: 0.9,
@@ -69,7 +71,7 @@ describe("ConsolidationRepo candidate queue", () => {
     });
 
     // When
-    const other = consolidation.insertCandidate({
+    const other = await consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: ["a", "b"],
       score: 0.9,
@@ -80,68 +82,70 @@ describe("ConsolidationRepo candidate queue", () => {
     expect(other).not.toBeNull();
   });
 
-  it("should filter by status and order by score descending when pending candidates are listed", () => {
+  it("should filter by status and order by score descending when pending candidates are listed", async () => {
     // Given
     const { consolidation } = setup();
-    const lo = consolidation.insertCandidate({
+    const lo = (await consolidation.insertCandidate({
       kind: ConsolidationKind.DISTILL,
       member_ids: ["a"],
       score: 0.5,
       detected_at: "t",
-    })!;
-    const hi = consolidation.insertCandidate({
+    }))!;
+    const hi = (await consolidation.insertCandidate({
       kind: ConsolidationKind.DISTILL,
       member_ids: ["b"],
       score: 0.9,
       detected_at: "t",
-    })!;
+    }))!;
 
     // When
-    const pending = consolidation.pendingCandidates();
+    const pending = await consolidation.pendingCandidates();
 
     // Then
     expect(pending.map((c) => c.id)).toEqual([hi, lo]);
 
     // When / Then
     expect(
-      consolidation.resolveCandidate(
+      await consolidation.resolveCandidate(
         lo,
         ConsolidationStatus.DISMISSED,
         "sess-1",
         "2026-01-03T00:00:00.000Z",
       ),
     ).toBe(true);
-    const after = consolidation.pendingCandidates();
+    const after = await consolidation.pendingCandidates();
     expect(after.map((c) => c.id)).toEqual([hi]);
-    const resolved = consolidation.getCandidate(lo)!;
+    const resolved = (await consolidation.getCandidate(lo))!;
     expect(resolved.status).toBe("dismissed");
     expect(resolved.resolved_by).toBe("sess-1");
     expect(resolved.resolved_at).toBe("2026-01-03T00:00:00.000Z");
   });
 
-  it("should be a no-op when the candidate is unknown or already resolved", () => {
+  it("should be a no-op when the candidate is unknown or already resolved", async () => {
     // Given
     const { consolidation } = setup();
 
     // When / Then
-    expect(consolidation.resolveCandidate("nope", ConsolidationStatus.APPLIED, "s", "t")).toBe(
-      false,
-    );
+    expect(
+      await consolidation.resolveCandidate("nope", ConsolidationStatus.APPLIED, "s", "t"),
+    ).toBe(false);
 
     // Given
-    const id = consolidation.insertCandidate({
+    const id = (await consolidation.insertCandidate({
       kind: ConsolidationKind.PRUNE,
       member_ids: ["m"],
       score: 1,
       detected_at: "t",
-    })!;
+    }))!;
 
     // When / Then
-    expect(consolidation.resolveCandidate(id, ConsolidationStatus.APPLIED, "s", "t")).toBe(true);
-    expect(consolidation.resolveCandidate(id, ConsolidationStatus.DISMISSED, "s2", "t2")).toBe(
-      false,
-    ); // already resolved
-    expect(consolidation.getCandidate(id)!.status).toBe("applied");
+    expect(await consolidation.resolveCandidate(id, ConsolidationStatus.APPLIED, "s", "t")).toBe(
+      true,
+    );
+    expect(
+      await consolidation.resolveCandidate(id, ConsolidationStatus.DISMISSED, "s2", "t2"),
+    ).toBe(false); // already resolved
+    expect((await consolidation.getCandidate(id))!.status).toBe("applied");
   });
 });
 
@@ -179,13 +183,12 @@ describe("ConsolidationRepo kNN seeding", () => {
     const { consolidation, twinA, twinB, orphan } = await seedWithVectorlessNode();
 
     // When
-    const keys = consolidation
-      .sweepSeeds(50)
-      .flatMap((seed) =>
-        consolidation
-          .neighboursOf(seed.id, { minScore: 0.5 })
-          .map((nb) => [seed.id, nb.id].sort().join()),
-      );
+    const keys: string[] = [];
+    for (const seed of await consolidation.sweepSeeds(50)) {
+      for (const nb of await consolidation.neighboursOf(seed.id, { minScore: 0.5 })) {
+        keys.push([seed.id, nb.id].sort().join());
+      }
+    }
 
     // Then
     expect(keys).toContain([twinA, twinB].sort().join());
@@ -197,7 +200,7 @@ describe("ConsolidationRepo kNN seeding", () => {
     const { consolidation, twinA, twinB } = await seedWithVectorlessNode();
 
     // When / Then
-    const pair = consolidation.duplicatePairFor(twinA, twinB, 0.95);
+    const pair = await consolidation.duplicatePairFor(twinA, twinB, 0.95);
     expect(pair?.member_ids.slice().sort().join()).toBe([twinA, twinB].sort().join());
   });
 
@@ -206,10 +209,10 @@ describe("ConsolidationRepo kNN seeding", () => {
     const { consolidation, twinA, twinB } = await seedWithVectorlessNode();
     const [a, b] = [twinA, twinB].sort();
 
-    expect(consolidation.duplicatePairFor(a!, b!, 0.95)).not.toBeNull();
+    expect(await consolidation.duplicatePairFor(a!, b!, 0.95)).not.toBeNull();
 
     // When
-    consolidation.insertCandidate({
+    await consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: [a!, b!],
       canonical_id: a!,
@@ -218,6 +221,6 @@ describe("ConsolidationRepo kNN seeding", () => {
     });
 
     // Then
-    expect(consolidation.duplicatePairFor(a!, b!, 0.95)).toBeNull();
+    expect(await consolidation.duplicatePairFor(a!, b!, 0.95)).toBeNull();
   });
 });

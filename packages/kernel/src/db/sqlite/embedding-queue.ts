@@ -1,6 +1,7 @@
 import { injectable } from "tsyringe";
 import type { QueueRow, UnembeddedChunk } from "@cerebrium/contracts/types";
-import { BaseRepo, MAX_EMBED_ATTEMPTS } from "@/db/repositories/base";
+import type { EmbeddingQueueRepo } from "@/domain/ports/storage";
+import { BaseRepo, MAX_EMBED_ATTEMPTS } from "@/db/sqlite/base";
 import {
   AUTHORED_VEC,
   CODE_VEC,
@@ -10,16 +11,16 @@ import {
   syncChunks,
   vectorPoolFor,
   type VectorPool,
-} from "@/db/repositories/internal";
+} from "@/db/sqlite/internal";
 
 // The async-embedding drain side of the queue: candidate selection, vector commits,
 // per-node finalization, failure backoff, worker-lease election, and startup
 // reconciliation. The write-side enqueue (refreshQueue) lives with the node write in
 // internal.ts; this repo owns everything the daemon touches while draining.
 @injectable()
-export class EmbeddingQueueRepo extends BaseRepo {
+export class SqliteEmbeddingQueueRepo extends BaseRepo implements EmbeddingQueueRepo {
   // Nodes eligible for an embedding attempt: not parked (attempts < max), oldest first.
-  queueRows(limit: number): QueueRow[] {
+  async queueRows(limit: number): Promise<QueueRow[]> {
     return this.db
       .prepare(
         `SELECT node_id, enqueued_at, attempts FROM embedding_queue
@@ -28,7 +29,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
       .all(MAX_EMBED_ATTEMPTS, limit) as QueueRow[];
   }
 
-  unembeddedChunks(nodeIds: string[], limit: number): UnembeddedChunk[] {
+  async unembeddedChunks(nodeIds: string[], limit: number): Promise<UnembeddedChunk[]> {
     if (!nodeIds.length) {
       return [];
     }
@@ -48,20 +49,29 @@ export class EmbeddingQueueRepo extends BaseRepo {
   // Vector upserts + node bookkeeping in one transaction, per the async-embedding
   // exception to the write-in-transaction invariant. vec0 has no upsert, so
   // delete-then-insert.
-  commitNodeEmbeddings(
+  async commitNodeEmbeddings(
     nodeId: string,
     items: { chunkId: string; vector: number[] }[],
     model: string,
     version: string,
     ts: string,
-  ): void {
-    this.commitBatchEmbeddings([{ nodeId, items }], model, version, ts);
+  ): Promise<void> {
+    this.commitBatchEmbeddingsNow([{ nodeId, items }], model, version, ts);
   }
 
   // One transaction for a whole tick's worth of nodes. Batching matters under
   // contention: the write lock is taken once per tick, not once per node, so a
   // 64-node tick no longer fights other writers 64 separate times.
-  commitBatchEmbeddings(
+  async commitBatchEmbeddings(
+    batch: { nodeId: string; items: { chunkId: string; vector: number[] }[] }[],
+    model: string,
+    version: string,
+    ts: string,
+  ): Promise<void> {
+    this.commitBatchEmbeddingsNow(batch, model, version, ts);
+  }
+
+  private commitBatchEmbeddingsNow(
     batch: { nodeId: string; items: { chunkId: string; vector: number[] }[] }[],
     model: string,
     version: string,
@@ -94,14 +104,18 @@ export class EmbeddingQueueRepo extends BaseRepo {
           meta.run(it.chunkId, model, version, ts);
         }
 
-        this.finalizeNode(nodeId, ts);
+        this.finalizeNodeNow(nodeId, ts);
       }
     });
   }
 
   // Node fully embedded -> clear pending + dequeue. Otherwise a batch made partial
   // progress, so clear the failure backoff and leave it queued for the next tick.
-  finalizeNode(nodeId: string, ts: string): void {
+  async finalizeNode(nodeId: string, ts: string): Promise<void> {
+    this.finalizeNodeNow(nodeId, ts);
+  }
+
+  private finalizeNodeNow(nodeId: string, ts: string): void {
     if (countUnembedded(this.db, nodeId) === 0) {
       this.db.prepare("UPDATE nodes SET pending_embedding = 0 WHERE id = ?").run(nodeId);
       this.db.prepare("DELETE FROM embedding_queue WHERE node_id = ?").run(nodeId);
@@ -114,7 +128,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
     }
   }
 
-  recordEmbeddingFailure(nodeIds: string[], error: string, ts: string): void {
+  async recordEmbeddingFailure(nodeIds: string[], error: string, ts: string): Promise<void> {
     const stmt = this.db.prepare(
       "UPDATE embedding_queue SET attempts = attempts + 1, last_error = ?, enqueued_at = ? WHERE node_id = ?",
     );
@@ -163,7 +177,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
 
   // Startup recovery: chunk any pending node that predates chunking, and re-queue
   // any pending node missing its queue row. The queue itself survives restarts.
-  reconcilePending(ts: string): void {
+  async reconcilePending(ts: string): Promise<void> {
     const pending = this.db.prepare("SELECT id FROM nodes WHERE pending_embedding = 1").all() as {
       id: string;
     }[];
@@ -186,7 +200,7 @@ export class EmbeddingQueueRepo extends BaseRepo {
     }
   }
 
-  embeddingStats(): { backlog: number; parked: number } {
+  async embeddingStats(): Promise<{ backlog: number; parked: number }> {
     const row = this.db
       .prepare(
         `SELECT SUM(CASE WHEN attempts < ? THEN 1 ELSE 0 END) AS backlog,

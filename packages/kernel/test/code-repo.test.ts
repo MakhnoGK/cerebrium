@@ -58,7 +58,7 @@ describe("Code mirror schema", () => {
 });
 
 describe("CodeRepo.applyFileIndex", () => {
-  it("should create mirror symbol nodes and enqueue embeddings when a file is indexed for the first time", () => {
+  it("should create mirror symbol nodes and enqueue embeddings when a file is indexed for the first time", async () => {
     // Given
     const { code, db } = setup();
     const mod = sym({
@@ -70,7 +70,7 @@ describe("CodeRepo.applyFileIndex", () => {
     const cls = sym({ name: "AuthService", symbol_kind: "class", source: "class AuthService {}" });
 
     // When
-    const res = code.applyFileIndex(fileInput({ symbols: [mod, cls] }));
+    const res = await code.applyFileIndex(fileInput({ symbols: [mod, cls] }));
 
     // Then
     expect(res).toMatchObject({ added: 2, updated: 0, invalidated: 0 });
@@ -99,17 +99,17 @@ describe("CodeRepo.applyFileIndex", () => {
       .prepare("SELECT COUNT(*) AS c FROM nodes WHERE pending_embedding = 1")
       .get() as { c: number };
     expect(pending.c).toBe(2);
-    expect(code.codeFileHash(REPO, PATH)).toBeTruthy();
+    expect(await code.codeFileHash(REPO, PATH)).toBeTruthy();
   });
 
-  it("should be a no-op when an unchanged file set is re-applied", () => {
+  it("should be a no-op when an unchanged file set is re-applied", async () => {
     // Given
     const { code } = setup();
     const cls = sym({ name: "AuthService", symbol_kind: "class", source: "class AuthService {}" });
-    code.applyFileIndex(fileInput({ symbols: [cls] }));
+    await code.applyFileIndex(fileInput({ symbols: [cls] }));
 
     // When
-    const again = code.applyFileIndex(
+    const again = await code.applyFileIndex(
       fileInput({ symbols: [cls], ts: "2026-01-02T00:00:00.000Z" }),
     );
 
@@ -117,16 +117,16 @@ describe("CodeRepo.applyFileIndex", () => {
     expect(again).toMatchObject({ added: 0, updated: 0, invalidated: 0 });
   });
 
-  it("should bump only the changed symbol's revision and leave siblings untouched when re-applied", () => {
+  it("should bump only the changed symbol's revision and leave siblings untouched when re-applied", async () => {
     // Given
     const { code, db } = setup();
     const a = sym({ name: "alpha", source: "function alpha() { return 1; }" });
     const b = sym({ name: "beta", source: "function beta() { return 2; }" });
-    code.applyFileIndex(fileInput({ symbols: [a, b] }));
+    await code.applyFileIndex(fileInput({ symbols: [a, b] }));
 
     // When
     const a2 = sym({ name: "alpha", source: "function alpha() { return 99; }" });
-    const res = code.applyFileIndex(
+    const res = await code.applyFileIndex(
       fileInput({ symbols: [a2, b], ts: "2026-01-03T00:00:00.000Z" }),
     );
 
@@ -145,10 +145,12 @@ describe("CodeRepo.applyFileIndex", () => {
     const { code, nodes, db } = setup();
     const a = sym({ name: "alpha", source: "function alpha() {}" });
     const b = sym({ name: "beta", source: "function beta() {}" });
-    code.applyFileIndex(fileInput({ symbols: [a, b] }));
+    await code.applyFileIndex(fileInput({ symbols: [a, b] }));
 
     // When
-    const res = code.applyFileIndex(fileInput({ symbols: [a], ts: "2026-01-04T00:00:00.000Z" }));
+    const res = await code.applyFileIndex(
+      fileInput({ symbols: [a], ts: "2026-01-04T00:00:00.000Z" }),
+    );
 
     // Then
     expect(res).toMatchObject({ invalidated: 1 });
@@ -161,19 +163,21 @@ describe("CodeRepo.applyFileIndex", () => {
     };
     expect(bRow.invalidated_at).toBe("2026-01-04T00:00:00.000Z");
     // node + symbols facet row survive (never hard-deleted)
-    expect(code.symbolDetail(bRow.id)).toBeDefined();
+    expect(await code.symbolDetail(bRow.id)).toBeDefined();
     expect(await nodes.fullNode(bRow.id)).toBeDefined();
   });
 
-  it("should revive rather than duplicate a symbol when it reappears after removal", () => {
+  it("should revive rather than duplicate a symbol when it reappears after removal", async () => {
     // Given
     const { code, db } = setup();
     const b = sym({ name: "beta", source: "function beta() {}" });
-    code.applyFileIndex(fileInput({ symbols: [b] }));
-    code.applyFileIndex(fileInput({ symbols: [], ts: "2026-01-02T00:00:00.000Z" })); // b removed
+    await code.applyFileIndex(fileInput({ symbols: [b] }));
+    await code.applyFileIndex(fileInput({ symbols: [], ts: "2026-01-02T00:00:00.000Z" })); // b removed
 
     // When
-    const res = code.applyFileIndex(fileInput({ symbols: [b], ts: "2026-01-03T00:00:00.000Z" })); // back
+    const res = await code.applyFileIndex(
+      fileInput({ symbols: [b], ts: "2026-01-03T00:00:00.000Z" }),
+    ); // back
 
     // Then
     expect(res).toMatchObject({ added: 0, updated: 1 });
@@ -193,7 +197,7 @@ describe("CodeRepo.applyFileIndex", () => {
 });
 
 describe("CodeRepo code edges", () => {
-  it("should write a 'defines' edge with 'system' provenance when a class defining a method is indexed", () => {
+  it("should write a 'defines' edge with 'system' provenance when a class defining a method is indexed", async () => {
     // Given
     const { code, db } = setup();
     const cls = sym({ name: "AuthService", symbol_kind: "class", source: "class AuthService {}" });
@@ -205,7 +209,7 @@ describe("CodeRepo code edges", () => {
     });
 
     // When
-    const res = code.applyFileIndex(
+    const res = await code.applyFileIndex(
       fileInput({ symbols: [cls, m], defines: [{ src: cls.external_id, dst: m.external_id }] }),
     );
 
@@ -218,7 +222,7 @@ describe("CodeRepo code edges", () => {
     expect(edge).toMatchObject({ type: "defines", provenance: "system" });
   });
 
-  it("should create edges for resolved imports and drop unresolved ones when edges are rebuilt", () => {
+  it("should create edges for resolved imports and drop unresolved ones when edges are rebuilt", async () => {
     // Given
     const { code } = setup();
     // Imported file (bar.ts) indexed first.
@@ -234,7 +238,7 @@ describe("CodeRepo code edges", () => {
       qualified: "bar.ts:Bar",
       source: "class Bar {}",
     });
-    code.applyFileIndex(fileInput({ path: "bar.ts", symbols: [barMod, bar] }));
+    await code.applyFileIndex(fileInput({ path: "bar.ts", symbols: [barMod, bar] }));
 
     // Importing module.
     const mod = sym({
@@ -243,14 +247,14 @@ describe("CodeRepo code edges", () => {
       qualified: PATH,
       source: "import",
     });
-    code.applyFileIndex(fileInput({ symbols: [mod] }));
+    await code.applyFileIndex(fileInput({ symbols: [mod] }));
 
-    const dir = code.repoSymbolDirectory(REPO);
+    const dir = await code.repoSymbolDirectory(REPO);
     const modId = dir.find((d) => d.qualified === PATH)!.node_id;
     const barId = dir.find((d) => d.qualified === "bar.ts:Bar")!.node_id;
 
     // When
-    const n = code.rebuildResolvedEdges(
+    const n = await code.rebuildResolvedEdges(
       REPO,
       PATH,
       EdgeType.IMPORTS,
@@ -264,13 +268,13 @@ describe("CodeRepo code edges", () => {
 
     // Then
     expect(n).toBe(1);
-    const neigh = code.findSymbolsByName("auth.service.ts", REPO, 5)[0]!.neighbors;
+    const neigh = (await code.findSymbolsByName("auth.service.ts", REPO, 5))[0]!.neighbors;
     expect(neigh.some((e) => e.edge === "imports" && e.id === barId)).toBe(true);
   });
 });
 
 describe("CodeRepo symbol lookups", () => {
-  it("should return the matching envelopes, facets, and source when symbols are queried by name, by file, and by detail", () => {
+  it("should return the matching envelopes, facets, and source when symbols are queried by name, by file, and by detail", async () => {
     // Given
     const { code } = setup();
     const mod = sym({
@@ -286,10 +290,10 @@ describe("CodeRepo symbol lookups", () => {
       start_line: 3,
       end_line: 9,
     });
-    code.applyFileIndex(fileInput({ symbols: [mod, cls] }));
+    await code.applyFileIndex(fileInput({ symbols: [mod, cls] }));
 
     // When
-    const byName = code.findSymbolsByName("AuthService", REPO, 5);
+    const byName = await code.findSymbolsByName("AuthService", REPO, 5);
 
     // Then
     expect(byName).toHaveLength(1);
@@ -301,11 +305,11 @@ describe("CodeRepo symbol lookups", () => {
     expect(byName[0]!.envelope.kind).toBe("mirror");
 
     // When / Then
-    const inFile = code.findSymbolsInFile(REPO, PATH, 25);
+    const inFile = await code.findSymbolsInFile(REPO, PATH, 25);
     expect(inFile.map((s) => s.facets.name).sort()).toEqual(["AuthService", "auth.service.ts"]);
 
     // When / Then
-    const detail = code.symbolDetail(byName[0]!.envelope.id)!;
+    const detail = (await code.symbolDetail(byName[0]!.envelope.id))!;
     expect(detail.source).toContain("class AuthService");
   });
 });

@@ -9,7 +9,7 @@ import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/013_split_vector_pools.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/013_split_vector_pools.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -79,8 +79,8 @@ async function seed(env: TestEnv): Promise<void> {
     title: "Retention policy",
     content: "a durable fact about retention with a few words of body text",
   });
-  env.code.applyFileIndex(fileInput(["validate", "reject"]));
-  for (let i = 0; i < 50 && env.queue.embeddingStats().backlog > 0; i++) {
+  await env.code.applyFileIndex(fileInput(["validate", "reject"]));
+  for (let i = 0; i < 50 && (await env.queue.embeddingStats()).backlog > 0; i++) {
     await env.worker.tick();
   }
 }

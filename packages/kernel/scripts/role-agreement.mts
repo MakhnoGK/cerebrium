@@ -25,7 +25,7 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { HttpConsolidator } from "@/consolidation/http";
 import { resolveRoles } from "@/consolidation/roles";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { buildContainer } from "@/container";
 import { ConsolidationConfig, DatabaseConfig } from "@/infrastructure/config";
 

@@ -1,6 +1,6 @@
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 import { Capability, Posture } from "@cerebrium/contracts/vocab";
-import { ReviewsRepo, type ReviewScope } from "@/db/repositories/reviews";
+import { REVIEWS_REPO_TOKEN, type ReviewScope, type ReviewsRepo } from "@/domain/ports/storage";
 import { PrincipalsConfig } from "@/infrastructure/config";
 
 // Who is under review, and how much of their work is waiting.
@@ -13,7 +13,7 @@ import { PrincipalsConfig } from "@/infrastructure/config";
 export class ReviewService {
   constructor(
     private readonly config: PrincipalsConfig,
-    private readonly reviews: ReviewsRepo,
+    @inject(REVIEWS_REPO_TOKEN) private readonly reviews: ReviewsRepo,
   ) {}
 
   scope(): ReviewScope {
@@ -47,10 +47,10 @@ export class ReviewService {
     return scope.mode === "only" && scope.principals.length === 0;
   }
 
-  pending(): { edges: number; nodes: number; total: number } {
+  async pending(): Promise<{ edges: number; nodes: number; total: number }> {
     if (this.reviewsNobody()) return { edges: 0, nodes: 0, total: 0 };
 
-    const counts = this.reviews.pendingCount(this.scope());
+    const counts = await this.reviews.pendingCount(this.scope());
 
     return { ...counts, total: counts.edges + counts.nodes };
   }

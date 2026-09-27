@@ -18,12 +18,19 @@ import {
 } from "@cerebrium/kernel/application/workers";
 import { buildContainer } from "@cerebrium/kernel/container";
 import { newId } from "@cerebrium/kernel/core/ids";
-import { ConsolidationRepo, EmbeddingQueueRepo, JobsRepo } from "@cerebrium/kernel/db/repositories";
 import type { ConsolidationTickResult } from "@cerebrium/kernel/domain/ports/consolidation-reporter";
 import {
   EMBEDDING_PROVIDER_TOKEN,
   EmbeddingRole,
 } from "@cerebrium/kernel/domain/ports/embedding-provider";
+import {
+  CONSOLIDATION_REPO_TOKEN,
+  EMBEDDING_QUEUE_REPO_TOKEN,
+  JOBS_REPO_TOKEN,
+  type ConsolidationRepo,
+  type EmbeddingQueueRepo,
+  type JobsRepo,
+} from "@cerebrium/kernel/domain/ports/storage";
 import {
   resolveEmbedWorker,
   WorkerEmbeddingProvider,
@@ -182,7 +189,7 @@ export async function runDaemon(
     jobsPerTick?: number;
     // The kernel's own recurring maintenance. The loop owns the cadence, the caller owns
     // what enqueueing means — same split as the sweep and `onSwept`.
-    scheduleCodeIndex?: () => void;
+    scheduleCodeIndex?: () => Promise<void>;
     codeIndexIntervalMs?: number;
   } = {},
 ): Promise<void> {
@@ -197,7 +204,7 @@ export async function runDaemon(
   const consolidation = opts.consolidation;
   const consolidateInterval = opts.consolidateIntervalMs ?? IDLE_EXIT_MS;
 
-  worker.reconcile();
+  await worker.reconcile();
 
   const jobs = opts.jobs;
   const codeIndexInterval = opts.codeIndexIntervalMs ?? 0;
@@ -208,7 +215,7 @@ export async function runDaemon(
 
   while (!stopped()) {
     await worker.tick();
-    const { backlog } = queue.embeddingStats();
+    const { backlog } = await queue.embeddingStats();
 
     // Jobs run under the same two gates as the sweep — caught up on embeddings, nobody
     // waiting — but on every pass rather than on an interval: a submitted job is something
@@ -216,7 +223,7 @@ export async function runDaemon(
     if (jobs && backlog === 0 && !busy()) {
       if (codeIndexInterval > 0 && now() - lastCodeIndexMs >= codeIndexInterval) {
         lastCodeIndexMs = now();
-        opts.scheduleCodeIndex?.();
+        await opts.scheduleCodeIndex?.();
       }
 
       const ran = await jobs.tick({ shouldYield: busy, max: opts.jobsPerTick });
@@ -329,15 +336,15 @@ async function main(): Promise<void> {
 
     process.stderr.write("took over the database\n");
   }
-  const queue = container.resolve(EmbeddingQueueRepo);
+  const queue = container.resolve<EmbeddingQueueRepo>(EMBEDDING_QUEUE_REPO_TOKEN);
   const worker = container.resolve(EmbeddingWorker);
   const consolidation = container.resolve(ConsolidationWorker);
 
   // A sweep killed outright leaves its row open, and only the process that starts next can
   // say so. `interrupted` is the truth; a row still open would read as a sweep in progress
   // for as long as the store lives.
-  const abandoned = container
-    .resolve(ConsolidationRepo)
+  const abandoned = await container
+    .resolve<ConsolidationRepo>(CONSOLIDATION_REPO_TOKEN)
     .closeAbandonedRuns("the daemon exited before the sweep finished");
 
   if (abandoned > 0) {
@@ -345,9 +352,9 @@ async function main(): Promise<void> {
   }
 
   const jobsConfig = container.resolve(JobsConfig);
-  const jobsRepo = container.resolve(JobsRepo);
+  const jobsRepo = container.resolve<JobsRepo>(JOBS_REPO_TOKEN);
   const jobs = jobsConfig.enabled ? container.resolve(JobWorker) : null;
-  const reopened = jobs?.reconcile() ?? 0;
+  const reopened = (await jobs?.reconcile()) ?? 0;
 
   if (reopened > 0) {
     process.stderr.write(`reopened ${String(reopened)} abandoned job(s)\n`);
@@ -357,7 +364,7 @@ async function main(): Promise<void> {
   const warmup = container.resolve(ModelWarmupService);
 
   writeDaemonPid(dbPath);
-  const registered = registry.publish("daemon");
+  const registered = await registry.publish("daemon");
 
   let stopping = false;
   let model: WarmupOutcome | null = null;
@@ -465,7 +472,7 @@ async function main(): Promise<void> {
     jobs?.stop();
 
     await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
-    registry.retire(registered);
+    await registry.retire(registered);
     clearDaemonPid(dbPath);
     process.exit(0);
   };
@@ -488,7 +495,7 @@ async function main(): Promise<void> {
   const warmed = await warmup.warm();
 
   model = warmed;
-  registry.recordModel(registered, warmed);
+  await registry.recordModel(registered, warmed);
 
   process.stderr.write(
     warmed.state === "ready"
@@ -512,12 +519,12 @@ async function main(): Promise<void> {
       codeIndexIntervalMs: jobsConfig.codeIndexIntervalMs,
       // Every configured root, hash-gated: an unchanged repo costs a stat per file. Skipped
       // while one is still queued or running, so a slow index cannot stack up behind itself.
-      scheduleCodeIndex: () => {
-        if (jobsRepo.hasOpen(JobKind.CODE_INDEX)) return;
+      scheduleCodeIndex: async () => {
+        if (await jobsRepo.hasOpen(JobKind.CODE_INDEX)) return;
 
         const at = new Date().toISOString();
 
-        jobsRepo.submit({
+        await jobsRepo.submit({
           id: newId(),
           kind: JobKind.CODE_INDEX,
           payload: {},
@@ -534,7 +541,7 @@ async function main(): Promise<void> {
       jobs?.stop();
 
       await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
-      registry.retire(registered);
+      await registry.retire(registered);
       clearDaemonPid(dbPath);
     }
   }

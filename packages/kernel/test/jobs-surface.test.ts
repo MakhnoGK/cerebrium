@@ -32,7 +32,7 @@ describe("job call surface", () => {
     // Then
     expect(job.state).toBe(JobState.PENDING);
     expect(job.kind).toBe(JobKind.CODE_INDEX);
-    expect(env.jobs.byId(job.id)!.submitted_by).toBe("claude-code");
+    expect((await env.jobs.byId(job.id))!.submitted_by).toBe("claude-code");
   });
 
   it("should refuse an agent kind naming why when a caller tries to enqueue external work", async () => {
@@ -95,13 +95,13 @@ describe("job call surface", () => {
     const env = setup();
     const { job } = await submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
 
-    env.jobs.claim({
+    await env.jobs.claim({
       kinds: [JobKind.CODE_INDEX],
       owner: "daemon",
       now: env.clock.now(),
       leaseMs: 1000,
     });
-    env.jobs.succeed(job.id, "daemon", { files_indexed: 4 }, env.clock.now());
+    await env.jobs.succeed(job.id, "daemon", { files_indexed: 4 }, env.clock.now());
 
     // When
     const { jobs } = await status().invoke({ id: job.id });

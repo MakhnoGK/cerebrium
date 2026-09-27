@@ -9,9 +9,9 @@ import type {
   ConsolidationResult,
   ReconcileResult,
 } from "@/domain/ports/consolidation-provider";
+import { type SearchRepo } from "@/domain/ports/storage";
 import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
-import type { SearchRepo } from "@/db/repositories";
 import { toFtsMatch } from "@/core/fts";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -58,12 +58,12 @@ async function writeFact(s: string): Promise<string> {
 
 // Direct FTS probe: does a text search for `term` return `id`? Proves the annotation
 // reached node_fts.content without any vector/embedding involvement.
-function ftsFinds(search: SearchRepo, term: string, id: string): boolean {
+async function ftsFinds(search: SearchRepo, term: string, id: string): Promise<boolean> {
   const match = toFtsMatch(term);
   if (!match) return false;
-  return search
-    .search({ match, kinds: [MemoryKind.SEMANTIC], history: false, cap: 10 })
-    .rows.some((r) => r.id === id);
+  return (
+    await search.search({ match, kinds: [MemoryKind.SEMANTIC], history: false, cap: 10 })
+  ).rows.some((r) => r.id === id);
 }
 
 function annotationRows(db: BetterSqlite3.Database, id: string): unknown[] {
@@ -90,7 +90,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
     }));
     const env = setup({ consolidator: provider });
     const id = await writeFact(await session("infra"));
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false); // injected keyword finds nothing yet
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(false); // injected keyword finds nothing yet
 
     // When
     const r = await container.resolve(ConsolidationWorker).tick();
@@ -99,8 +99,8 @@ describe("Write-time attribute enrichment (annotate)", () => {
     expect(r.annotated).toBe(1);
     expect(provider.calls).toBe(1);
     // findable by the injected keyword and the context phrase…
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(true);
-    expect(ftsFinds(env.search, "outage", id)).toBe(true);
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(true);
+    expect(await ftsFinds(env.search, "outage", id)).toBe(true);
     // …but the authored body is byte-for-byte unchanged, and no new revision was created.
     const full = (await env.nodes.fullNode(id))!;
     expect(full.content).toBe(BODY);
@@ -130,7 +130,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
     await cw.tick();
 
     // When — a new revision drops the rev-1 annotation from FTS; the node is un-annotated again.
-    env.nodes.addRevision(id, {
+    await env.nodes.addRevision(id, {
       content: `${BODY} and logs the switch`,
       session_id: s,
       reason: null,
@@ -138,9 +138,9 @@ describe("Write-time attribute enrichment (annotate)", () => {
     });
 
     // Then
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(false);
     expect((await cw.tick()).annotated).toBe(1);
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(true);
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(true);
   });
 
   it("should do nothing under the default offline manual provider", async () => {
@@ -153,7 +153,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
 
     // Then
     expect(r.annotated).toBe(0);
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(false);
   });
 
   it("should skip enrichment when the posture is off even with an enabled provider", async () => {
@@ -169,7 +169,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
     // Then
     expect(r.annotated).toBe(0);
     expect(provider.calls).toBe(0);
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(false);
   });
 
   it("should skip the node on a generation failure with no annotation or FTS change", async () => {
@@ -190,8 +190,8 @@ describe("Write-time attribute enrichment (annotate)", () => {
 
     // Then
     expect(r.annotated).toBe(0);
-    expect(ftsFinds(env.search, KEYWORD, id)).toBe(false);
+    expect(await ftsFinds(env.search, KEYWORD, id)).toBe(false);
     // The node is still authored-body findable — enrichment is purely additive.
-    expect(ftsFinds(env.search, "standby", id)).toBe(true);
+    expect(await ftsFinds(env.search, "standby", id)).toBe(true);
   });
 });

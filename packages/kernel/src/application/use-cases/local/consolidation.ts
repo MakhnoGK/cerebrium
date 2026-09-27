@@ -3,6 +3,14 @@ import { decodeCursor, encodeCursor, pageSizeOf, splitOverfetch } from "@cerebri
 import { ConsolidationKind, ConsolidationStatus } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
+import {
+  CONSOLIDATION_REPO_TOKEN,
+  EDGES_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  type ConsolidationRepo,
+  type EdgesRepo,
+  type NodesRepo,
+} from "@/domain/ports/storage";
 import { InvalidCursorError } from "@/application/errors";
 import {
   APPLY_CANDIDATE,
@@ -19,18 +27,22 @@ import {
   type SuggestCandidatesArgs,
   type SuggestCandidatesResult,
 } from "@/application/use-cases/contracts";
-import { ConsolidationRepo, EdgesRepo, NodesRepo } from "@/db/repositories";
 
 @useCase(SUGGEST_CANDIDATES)
 export class LocalSuggestCandidates implements SuggestCandidates {
-  constructor(private readonly consolidation: ConsolidationRepo) {}
+  constructor(
+    @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidation: ConsolidationRepo,
+  ) {}
 
   async invoke(args: SuggestCandidatesArgs): Promise<SuggestCandidatesResult> {
     // Without a cursor and without page_size this is the pre-pagination call, answered
     // exactly as before so existing callers see no change.
     if (args.cursor === undefined && args.page_size === undefined) {
       return {
-        candidates: this.consolidation.pendingCandidates({ kind: args.kind, limit: args.limit }),
+        candidates: await this.consolidation.pendingCandidates({
+          kind: args.kind,
+          limit: args.limit,
+        }),
       };
     }
 
@@ -41,7 +53,7 @@ export class LocalSuggestCandidates implements SuggestCandidates {
       throw new InvalidCursorError();
     }
 
-    const rows = this.consolidation.pendingCandidatePage({
+    const rows = await this.consolidation.pendingCandidatePage({
       ...(args.kind === undefined ? {} : { kind: args.kind }),
       // One extra row answers "is there more" without a second query.
       limit: pageSize + 1,
@@ -68,14 +80,14 @@ export class LocalSuggestCandidates implements SuggestCandidates {
 @useCase(APPLY_CANDIDATE)
 export class LocalApplyCandidate implements ApplyCandidate {
   constructor(
-    private readonly consolidation: ConsolidationRepo,
-    private readonly edges: EdgesRepo,
-    private readonly nodes: NodesRepo,
+    @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidation: ConsolidationRepo,
+    @inject(EDGES_REPO_TOKEN) private readonly edges: EdgesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
-  invoke(args: ApplyCandidateArgs): Promise<ApplyCandidateResult> {
-    const current = this.consolidation.getCandidate(args.id);
+  async invoke(args: ApplyCandidateArgs): Promise<ApplyCandidateResult> {
+    const current = await this.consolidation.getCandidate(args.id);
 
     if (!current) throw new Error(`no consolidation candidate ${args.id}.`);
     if (current.status !== ConsolidationStatus.PENDING) {
@@ -83,11 +95,11 @@ export class LocalApplyCandidate implements ApplyCandidate {
     }
 
     const now = this.clock.now();
-    const resolved = this.consolidation.resolveCandidateAtomically(
+    const resolved = await this.consolidation.resolveCandidateAtomically(
       args.id,
       args.session_id,
       now,
-      (candidate) => {
+      async (candidate) => {
         if (args.decision === ConsolidationRecommendation.REJECT) {
           return ConsolidationStatus.DISMISSED;
         }
@@ -96,7 +108,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
           const [note, symbol] = candidate.member_ids;
           if (!note || !symbol) throw new Error(`documents candidate ${args.id} is malformed.`);
 
-          const inserted = this.edges.insertSystemDocumentsIfLive(
+          const inserted = await this.edges.insertSystemDocumentsIfLive(
             note,
             symbol,
             args.session_id,
@@ -109,7 +121,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
           const [src, dst] = candidate.member_ids;
           if (!src || !dst) throw new Error(`link candidate ${args.id} is malformed.`);
 
-          const inserted = this.edges.insertSystemSimilarityIfLive(
+          const inserted = await this.edges.insertSystemSimilarityIfLive(
             src,
             dst,
             args.session_id,
@@ -127,7 +139,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
             );
           }
 
-          this.nodes.applyDistillation({
+          await this.nodes.applyDistillation({
             title: result.title,
             content: result.body,
             project: candidate.project,
@@ -144,7 +156,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
           if (!survivor || !loser) throw new Error(`merge candidate ${args.id} is malformed.`);
 
           if (!args.collapse) {
-            const recorded = this.edges.insertDuplicateOfIfLive(
+            const recorded = await this.edges.insertDuplicateOfIfLive(
               loser,
               survivor,
               args.session_id,
@@ -155,7 +167,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
           }
 
           const merged = args.override ?? candidate.proposal;
-          const applied = this.nodes.applyMerge({
+          const applied = await this.nodes.applyMerge({
             survivorId: survivor,
             loserId: loser,
             session_id: args.session_id,
@@ -167,13 +179,13 @@ export class LocalApplyCandidate implements ApplyCandidate {
 
         const [target] = candidate.member_ids;
         if (!target) throw new Error(`prune candidate ${args.id} is malformed.`);
-        this.nodes.invalidateNode(target, { ts: now, session_id: args.session_id });
+        await this.nodes.invalidateNode(target, { ts: now, session_id: args.session_id });
         return ConsolidationStatus.APPLIED;
       },
     );
 
     if (!resolved) {
-      const latest = this.consolidation.getCandidate(args.id);
+      const latest = await this.consolidation.getCandidate(args.id);
       throw new Error(`candidate ${args.id} is already ${latest?.status ?? "resolved"}.`);
     }
 
@@ -187,11 +199,13 @@ export class LocalApplyCandidate implements ApplyCandidate {
 
 @useCase(RETRY_CANDIDATE)
 export class LocalRetryCandidate implements RetryCandidate {
-  constructor(private readonly consolidation: ConsolidationRepo) {}
+  constructor(
+    @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidation: ConsolidationRepo,
+  ) {}
 
-  invoke({ id }: RetryCandidateArgs): Promise<RetryCandidateResult> {
-    this.consolidation.clearCandidateProposal(id, null);
-    this.consolidation.reopenCandidate(id);
+  async invoke({ id }: RetryCandidateArgs): Promise<RetryCandidateResult> {
+    await this.consolidation.clearCandidateProposal(id, null);
+    await this.consolidation.reopenCandidate(id);
 
     return Promise.resolve({ status: "reopened", id });
   }

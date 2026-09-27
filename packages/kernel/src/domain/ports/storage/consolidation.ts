@@ -1,0 +1,124 @@
+import { createHash } from "node:crypto";
+import type {
+  ConsolidationCandidate,
+  ConsolidationProposal,
+  NewCandidate,
+} from "@cerebrium/contracts/types";
+import type {
+  ConsolidationKind,
+  ConsolidationStatus,
+  MemoryKind,
+} from "@cerebrium/contracts/vocab";
+import type {
+  ConsolidationReporter,
+  ConsolidationTickResult,
+} from "@/domain/ports/consolidation-reporter";
+
+export interface SweepSeed {
+  id: string;
+  kind: MemoryKind;
+  ordinal: number;
+}
+
+export interface DuplicatePair {
+  member_ids: string[];
+  canonical_id: string;
+  project: string | null;
+  score: number;
+  same_session: boolean;
+  youngest_created_at: string;
+}
+
+export type ResolvedStatus = Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>;
+
+// Idempotency key: a cluster is the same regardless of member order, so hash the
+// kind with the sorted ids. Re-detecting an existing cluster (pending, applied, or
+// dismissed) collides on UNIQUE(member_hash) and is ignored — never re-proposed.
+export function candidateHash(kind: ConsolidationKind, memberIds: string[]): string {
+  const key = `${kind}\0${[...memberIds].sort().join("\0")}`;
+  return createHash("sha256").update(key).digest("hex").slice(0, 24);
+}
+
+// Canonical orientation for a symmetric pair, so (a,b) and (b,a) dedupe to one key and
+// one stored edge (graph expansion via neighborsOf is symmetric, so one direction suffices).
+export function pairKey(a: string, b: string): string {
+  return a < b ? `${a}\0${b}` : `${b}\0${a}`;
+}
+
+export const CONSOLIDATION_REPO_TOKEN = Symbol("ConsolidationRepo");
+
+export interface ConsolidationRepo extends ConsolidationReporter {
+  insertCandidate(input: NewCandidate): Promise<string | null>;
+  candidateExists(kind: ConsolidationKind, memberIds: string[]): Promise<boolean>;
+  pendingNeedingProposal(limit: number): Promise<ConsolidationCandidate[]>;
+  setCandidateProposal(id: string, proposal: ConsolidationProposal): Promise<boolean>;
+  getCandidate(id: string): Promise<ConsolidationCandidate | undefined>;
+  pendingCandidateCount(): Promise<number>;
+  pendingCandidates(opts?: {
+    kind?: ConsolidationKind;
+    limit?: number;
+  }): Promise<ConsolidationCandidate[]>;
+  pendingCandidatePage(opts: {
+    kind?: ConsolidationKind;
+    limit: number;
+    after?: { score: number; detected_at: string; id: string };
+  }): Promise<ConsolidationCandidate[]>;
+  sweepSeeds(limit: number): Promise<SweepSeed[]>;
+  neighboursOf(
+    seedId: string,
+    opts: { minScore: number; k?: number; capPerNode?: number },
+  ): Promise<{ id: string; score: number }[]>;
+  storedSimilarPairs(): Promise<Set<string>>;
+  linkDegrees(ids: string[]): Promise<Map<string, number>>;
+  overCapSimilarLinks(opts: {
+    maxDegree: number;
+    limit: number;
+  }): Promise<{ src: string; dst: string }[]>;
+  candidateInputs(ids: string[]): Promise<{ id: string; title: string; content: string }[]>;
+  staleEpisodicClusters(opts: {
+    minScore: number;
+    minCluster: number;
+    cutoff: string;
+    limit: number;
+    k?: number;
+    capPerNode?: number;
+  }): Promise<{ project: string | null; member_ids: string[]; score: number }[]>;
+  duplicatePairFor(a: string, b: string, score: number): Promise<DuplicatePair | null>;
+  citableSymbols(): Promise<{ name: string; node_id: string; repo: string }[]>;
+  authoredBodies(): Promise<
+    { id: string; title: string; project: string | null; content: string }[]
+  >;
+  revisionCount(): Promise<number>;
+  retiredAuthoredTitles(): Promise<{ id: string; title: string }[]>;
+  codeIndexWatermark(): Promise<string | null>;
+  deadMirrorNodes(limit: number, unreachable?: readonly string[]): Promise<string[]>;
+  unannotatedSemantic(
+    limit: number,
+  ): Promise<{ id: string; rev: number; title: string; content: string; project: string | null }[]>;
+  resolveCandidate(
+    id: string,
+    status: ResolvedStatus,
+    resolvedBy: string,
+    ts: string,
+  ): Promise<boolean>;
+  resolvePendingByMembers(
+    kind: ConsolidationKind,
+    memberIds: string[],
+    status: ResolvedStatus,
+    resolvedBy: string,
+    ts: string,
+  ): Promise<boolean>;
+  // Runs `operation` and the candidate's resolution in one transaction, so the writes it
+  // performs through other repositories commit or roll back together with it.
+  resolveCandidateAtomically(
+    id: string,
+    resolvedBy: string,
+    ts: string,
+    operation: (candidate: ConsolidationCandidate) => Promise<ResolvedStatus>,
+  ): Promise<{ candidate: ConsolidationCandidate; status: ResolvedStatus } | null>;
+  reportTick(runId: string, result: ConsolidationTickResult): Promise<void>;
+  closeRun(runId: string, at: string, reason: string): Promise<void>;
+  closeAbandonedRuns(reason: string): Promise<number>;
+  clearCandidateProposal(id: string, error: string | null): Promise<void>;
+  reopenCandidate(id: string): Promise<void>;
+}

@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { appendGold, lexicalOverlap, readGoldFile, type GoldEntry } from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
 import type Database from "better-sqlite3";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 

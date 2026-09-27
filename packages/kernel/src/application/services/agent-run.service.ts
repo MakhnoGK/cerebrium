@@ -1,9 +1,15 @@
 import { inject, injectable } from "tsyringe";
 import { AGENT_JOB_PREFIX, MemoryKind } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  JOBS_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  type JobRow,
+  type JobsRepo,
+  type NodesRepo,
+} from "@/domain/ports/storage";
 import { SessionService } from "@/application/services/session.service";
 import type { AgentRunReport } from "@/application/use-cases/contracts/runner";
-import { JobsRepo, NodesRepo, type JobRow } from "@/db/repositories";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 
@@ -36,20 +42,20 @@ function tokensOf(report: AgentRunReport): number | null {
 @injectable()
 export class AgentRunService {
   constructor(
-    private readonly jobs: JobsRepo,
-    private readonly nodes: NodesRepo,
+    @inject(JOBS_REPO_TOKEN) private readonly jobs: JobsRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     private readonly sessions: SessionService,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   // Only `agent.*`. The daemon's own JobWorker owns everything else, and a runner that
   // could claim `code.index` would be running kernel work in the wrong process.
-  claim(kinds: string[], owner: string): JobRow | null {
+  async claim(kinds: string[], owner: string): Promise<JobRow | null> {
     const agentKinds = kinds.filter((kind) => kind.startsWith(AGENT_JOB_PREFIX));
 
     if (!agentKinds.length) return null;
 
-    return this.jobs.claim({
+    return await this.jobs.claim({
       kinds: agentKinds,
       owner,
       now: this.clock.now(),
@@ -63,7 +69,11 @@ export class AgentRunService {
   //
   // `everyMs` makes the enqueue conditional on the kind being due, and answers null when it
   // is not. The cadence still belongs to the caller's registry; only the race does not.
-  enqueue(kind: string, payload: Record<string, unknown>, everyMs?: number): JobRow | null {
+  async enqueue(
+    kind: string,
+    payload: Record<string, unknown>,
+    everyMs?: number,
+  ): Promise<JobRow | null> {
     if (!kind.startsWith(AGENT_JOB_PREFIX)) {
       throw new Error(`${kind} is not an agent job; kernel work goes through submit_job`);
     }
@@ -72,18 +82,18 @@ export class AgentRunService {
     const job = { id: newId(), kind, payload, scheduled_for: now, now };
 
     return everyMs === undefined
-      ? this.jobs.submit(job)
-      : this.jobs.submitIfDue({ ...job, everyMs });
+      ? await this.jobs.submit(job)
+      : await this.jobs.submitIfDue({ ...job, everyMs });
   }
 
-  renew(id: string, owner: string): boolean {
-    return this.jobs.renew(id, owner, this.clock.now(), LEASE_MS);
+  async renew(id: string, owner: string): Promise<boolean> {
+    return await this.jobs.renew(id, owner, this.clock.now(), LEASE_MS);
   }
 
   // Closes the job and records the run. The record is written even when the run failed —
   // a timeout that still cost money is exactly the thing that has to be findable later.
   async finish(id: string, owner: string, report: AgentRunReport): Promise<boolean> {
-    const job = this.jobs.byId(id);
+    const job = await this.jobs.byId(id);
 
     if (job?.lease_owner !== owner) return false;
 
@@ -91,8 +101,8 @@ export class AgentRunService {
     const ok = report.exit === "completed";
 
     const closed = ok
-      ? this.jobs.succeed(id, owner, report, now)
-      : this.jobs.fail(id, owner, report.error ?? report.exit, now);
+      ? await this.jobs.succeed(id, owner, report, now)
+      : await this.jobs.fail(id, owner, report.error ?? report.exit, now);
 
     if (!closed) return false;
 
@@ -104,7 +114,7 @@ export class AgentRunService {
   private async record(job: JobRow, report: AgentRunReport, now: string): Promise<void> {
     const sessionId = newId();
 
-    this.sessions.startSession(sessionId, null, now, RUN_WRITER);
+    await this.sessions.startSession(sessionId, null, now, RUN_WRITER);
 
     const tokens = tokensOf(report);
     const seconds = (report.duration_ms / 1000).toFixed(1);

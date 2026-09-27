@@ -9,6 +9,7 @@ import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
+import { STATS_REPO_TOKEN, type StatsRepo } from "@/domain/ports/storage";
 import {
   CodeIndexService,
   DaemonService,
@@ -30,7 +31,6 @@ import {
   type StatsSnapshot,
 } from "@/application/use-cases/contracts";
 import { describeRoles, resolveRoles } from "@/consolidation/roles";
-import { StatsRepo } from "@/db/repositories";
 import { ConfigRegistry, ConsolidationConfig } from "@/infrastructure/config";
 
 @useCase(INDEX_CODE)
@@ -41,13 +41,13 @@ export class LocalIndexCode implements IndexCode {
   ) {}
 
   async invoke(args: IndexCodeArgs): Promise<IndexCodeResult> {
-    const targets = this.indexer.resolveTargets({ repo: args.repo, path: args.path });
+    const targets = await this.indexer.resolveTargets({ repo: args.repo, path: args.path });
     const results = await this.indexer.indexTargets(targets, {
       session_id: args.session_id,
       force: args.force,
     });
 
-    return { results, notes: this.embeddings.getEmbeddingNotes() };
+    return { results, notes: await this.embeddings.getEmbeddingNotes() };
   }
 }
 
@@ -55,7 +55,7 @@ export class LocalIndexCode implements IndexCode {
 export class LocalStatsSnapshot implements StatsSnapshot {
   constructor(
     private readonly daemon: DaemonService,
-    private readonly statsRepo: StatsRepo,
+    @inject(STATS_REPO_TOKEN) private readonly statsRepo: StatsRepo,
     private readonly processes: ProcessRegistryService,
     private readonly config: ConfigRegistry,
     private readonly consolidation: ConsolidationConfig,
@@ -65,8 +65,8 @@ export class LocalStatsSnapshot implements StatsSnapshot {
     @inject(CONSOLIDATION_PROVIDER_TOKEN) private readonly consolidator: ConsolidationProvider,
   ) {}
 
-  invoke(): Promise<Record<string, unknown>> {
-    const stats = this.statsRepo.techStats(this.clock.now());
+  async invoke(): Promise<Record<string, unknown>> {
+    const stats = await this.statsRepo.techStats(this.clock.now());
 
     return Promise.resolve({
       ...stats,
@@ -77,11 +77,11 @@ export class LocalStatsSnapshot implements StatsSnapshot {
         daemon_pid: this.daemon.readDaemonPid(),
       },
       generation: generationReport(this.consolidator, this.consolidation),
-      review: reviewReport(this.reviews),
+      review: await reviewReport(this.reviews),
       // The registry and the ignored-config channel, compact: which processes are up and
       // whether any variable was set but unusable. Values themselves stay out — an agent
       // should not pay tokens for the whole config table (`cerebrium-stats` prints it).
-      processes: this.processes.list().map((row) => ({
+      processes: (await this.processes.list()).map((row) => ({
         role: row.role,
         pid: row.pid,
         alive: row.alive,
@@ -100,7 +100,7 @@ export class LocalStatsSnapshot implements StatsSnapshot {
 export class LocalOperatorSnapshot implements OperatorSnapshot {
   constructor(
     private readonly daemon: DaemonService,
-    private readonly statsRepo: StatsRepo,
+    @inject(STATS_REPO_TOKEN) private readonly statsRepo: StatsRepo,
     private readonly processes: ProcessRegistryService,
     private readonly config: ConfigRegistry,
     private readonly consolidation: ConsolidationConfig,
@@ -111,8 +111,8 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
     @inject(CONFIG_FILE_TOKEN) private readonly file: ConfigFileReport | null,
   ) {}
 
-  invoke(): Promise<OperatorSnapshotResult> {
-    const stats = this.statsRepo.techStats(this.clock.now());
+  async invoke(): Promise<OperatorSnapshotResult> {
+    const stats = await this.statsRepo.techStats(this.clock.now());
     const effective = this.config.effective();
 
     return Promise.resolve({
@@ -123,7 +123,7 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
         daemon_alive: this.daemon.isDaemonAlive(),
         daemon_pid: this.daemon.readDaemonPid(),
       },
-      processes: this.processes.list().map((row) => ({
+      processes: (await this.processes.list()).map((row) => ({
         role: row.role,
         pid: row.pid,
         alive: row.alive,
@@ -134,7 +134,7 @@ export class LocalOperatorSnapshot implements OperatorSnapshot {
         model_error: row.model_error,
       })),
       generation: generationReport(this.consolidator, this.consolidation),
-      review: reviewReport(this.reviews),
+      review: await reviewReport(this.reviews),
       config: {
         file: this.file,
         values: effective.values,
@@ -160,9 +160,9 @@ function generationReport(
 
 // Who writes under review and what is waiting. Reported even when nobody does, because
 // "no queue" and "an empty queue" are different operational facts.
-function reviewReport(reviews: ReviewService): Record<string, unknown> {
+async function reviewReport(reviews: ReviewService): Promise<Record<string, unknown>> {
   const scope = reviews.scope();
-  const pending = reviews.pending();
+  const pending = await reviews.pending();
 
   return {
     reviewing: { mode: scope.mode, principals: [...scope.principals] },

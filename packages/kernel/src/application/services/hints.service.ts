@@ -1,8 +1,8 @@
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
+import { CONSOLIDATION_REPO_TOKEN, type ConsolidationRepo } from "@/domain/ports/storage";
 import { ReviewService } from "@/application/services/review.service";
 import { SessionNotices } from "@/application/services/session-notices.service";
 import { SessionService } from "@/application/services/session.service";
-import { ConsolidationRepo } from "@/db/repositories/consolidation";
 import { chunkContent, sectionName } from "@/core/chunk";
 import { RetrievalConfig } from "@/infrastructure/config";
 
@@ -10,7 +10,7 @@ import { RetrievalConfig } from "@/infrastructure/config";
 export class HintsService {
   constructor(
     private readonly sessionsService: SessionService,
-    private readonly consolidation: ConsolidationRepo,
+    @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidation: ConsolidationRepo,
     private readonly reviews: ReviewService,
     private readonly notices: SessionNotices,
     private readonly retrieval: RetrievalConfig,
@@ -21,15 +21,15 @@ export class HintsService {
 
   async getSessionHints(sessionId: string): Promise<string[]> {
     const now = new Date().toISOString();
-    this.sessionsService.requireSession(sessionId, now);
+    await this.sessionsService.requireSession(sessionId, now);
 
-    return [...this.backlogHint(sessionId), ...this.reviewHint(sessionId)];
+    return [...(await this.backlogHint(sessionId)), ...(await this.reviewHint(sessionId))];
   }
 
   // Asked for on every tool call, so it is a count rather than a listing, and it stays
   // quiet unless the figure is new to this session.
-  private backlogHint(sessionId: string): string[] {
-    const pending = this.consolidation.pendingCandidateCount();
+  private async backlogHint(sessionId: string): Promise<string[]> {
+    const pending = await this.consolidation.pendingCandidateCount();
 
     if (pending === 0 || !this.notices.isNews(sessionId, "consolidation", pending)) {
       return [];
@@ -44,10 +44,10 @@ export class HintsService {
   // What an unattended writer has put in the store on a `suggest` posture. Separate from the
   // consolidation backlog because they are different queues: that one holds proposals, this
   // one holds writes that already landed.
-  private reviewHint(sessionId: string): string[] {
+  private async reviewHint(sessionId: string): Promise<string[]> {
     if (this.reviews.reviewsNobody()) return [];
 
-    const { total } = this.reviews.pending();
+    const { total } = await this.reviews.pending();
 
     if (total === 0 || !this.notices.isNews(sessionId, "reviews", total)) {
       return [];

@@ -1,5 +1,6 @@
 import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import {
   INVALIDATE_MEMORY,
   useCase,
@@ -7,12 +8,11 @@ import {
   type InvalidateMemory,
   type InvalidateMemoryArgs,
 } from "@/application/use-cases/contracts";
-import { NodesRepo } from "@/db/repositories";
 
 @useCase(INVALIDATE_MEMORY)
 export class LocalInvalidateMemory implements InvalidateMemory {
   constructor(
-    private readonly nodes: NodesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
@@ -25,7 +25,7 @@ export class LocalInvalidateMemory implements InvalidateMemory {
     // Code mirrors are maintained by the indexer; retiring one by hand would just come
     // back on the next re-index. External mirrors (origin != 'repo') are agent-curated,
     // so the agent legitimately retires a stale record here.
-    const prov = this.nodes.nodeOrigin(args.id);
+    const prov = await this.nodes.nodeOrigin(args.id);
 
     if (prov?.memory_kind === "mirror" && prov.origin === "repo") {
       throw new Error(
@@ -34,7 +34,7 @@ export class LocalInvalidateMemory implements InvalidateMemory {
     }
 
     return {
-      envelope: this.nodes.invalidateNode(args.id, {
+      envelope: await this.nodes.invalidateNode(args.id, {
         ts: this.clock.now(),
         superseded_by: args.superseded_by,
         session_id: args.session_id,

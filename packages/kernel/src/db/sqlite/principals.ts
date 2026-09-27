@@ -1,24 +1,17 @@
 import { injectable } from "tsyringe";
 import { PrincipalKind, UNATTRIBUTED_PRINCIPAL } from "@cerebrium/contracts/vocab";
-import { BaseRepo } from "@/db/repositories/base";
-import type { Writer } from "@/runtime/client-identity";
-
-export interface PrincipalRow {
-  id: string;
-  kind: string;
-  label: string | null;
-  created_at: string;
-  last_seen: string;
-}
+import type { PrincipalRow, PrincipalsRepo } from "@/domain/ports/storage";
+import type { Writer } from "@/domain/writer";
+import { BaseRepo } from "@/db/sqlite/base";
 
 // The writer behind a session, stable across sessions. Keyed by the client name the MCP
 // handshake reports, so policy is addressed by that name rather than through a surrogate.
 @injectable()
-export class PrincipalsRepo extends BaseRepo {
+export class SqlitePrincipalsRepo extends BaseRepo implements PrincipalsRepo {
   // A session always resolves to a principal, including one whose host never named itself
   // — otherwise the writes with no identity would sit outside every rule instead of under
   // a rule that can be written for them.
-  resolve(writer: Writer, ts: string): string {
+  async resolve(writer: Writer, ts: string): Promise<string> {
     const id = writer.client ?? UNATTRIBUTED_PRINCIPAL;
 
     this.db
@@ -32,12 +25,12 @@ export class PrincipalsRepo extends BaseRepo {
     return id;
   }
 
-  find(id: string): PrincipalRow | undefined {
+  async find(id: string): Promise<PrincipalRow | undefined> {
     return this.db.prepare("SELECT * FROM principals WHERE id = ?").get(id) as
       PrincipalRow | undefined;
   }
 
-  list(): PrincipalRow[] {
+  async list(): Promise<PrincipalRow[]> {
     return this.db
       .prepare("SELECT * FROM principals ORDER BY last_seen DESC")
       .all() as PrincipalRow[];

@@ -70,7 +70,7 @@ describe("Episodic -> semantic distillation", () => {
     // Then
     expect(r.distill_suggested).toBe(1);
     expect(r.distilled).toBe(0);
-    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL });
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL });
     expect(cand).toBeDefined();
     expect(cand!.member_ids).toEqual([...ids].sort());
     expect(cand!.proposal).toBeNull();
@@ -82,7 +82,7 @@ describe("Episodic -> semantic distillation", () => {
     const { s, ids } = await seedEpisodics(env);
     env.clock.advanceDays(15);
     await container.resolve(ConsolidationWorker).tick();
-    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL });
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL });
 
     // When
     const applied = (await container.resolve(ConsolidateApplyTool).invoke({
@@ -100,8 +100,7 @@ describe("Episodic -> semantic distillation", () => {
       .prepare("SELECT id FROM nodes WHERE memory_kind = 'semantic' AND title = ?")
       .get("Rollback runbook") as { id: string } | undefined;
     expect(fact).toBeDefined();
-    const derived = env.edges
-      .edgesOf(fact!.id)
+    const derived = (await env.edges.edgesOf(fact!.id))
       .filter((e) => e.edge === "derived_from")
       .map((e) => e.id)
       .sort();
@@ -114,7 +113,7 @@ describe("Episodic -> semantic distillation", () => {
       };
       expect(row.consolidated_at).not.toBeNull();
     }
-    expect(env.consolidation.getCandidate(cand!.id)!.status).toBe("applied");
+    expect((await env.consolidation.getCandidate(cand!.id))!.status).toBe("applied");
   });
 
   it("should throw when a proposal-less candidate is accepted without an override", async () => {
@@ -123,7 +122,7 @@ describe("Episodic -> semantic distillation", () => {
     const { s } = await seedEpisodics(env);
     env.clock.advanceDays(15);
     await container.resolve(ConsolidationWorker).tick();
-    const [cand] = env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL });
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL });
 
     // When / Then
     await expect(
@@ -143,9 +142,9 @@ describe("Episodic -> semantic distillation", () => {
 
     // Then
     expect(r.distill_suggested).toBe(0);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL })).toHaveLength(
-      0,
-    );
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL }),
+    ).toHaveLength(0);
   });
 
   it("should write the fact directly and idempotently when auto with a generating provider", async () => {
@@ -162,9 +161,9 @@ describe("Episodic -> semantic distillation", () => {
     // Then
     expect(r.distilled).toBe(1);
     expect(r.distill_suggested).toBe(0);
-    expect(env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL })).toHaveLength(
-      0,
-    );
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL }),
+    ).toHaveLength(0);
 
     const fact = env.db
       .prepare("SELECT id FROM nodes WHERE memory_kind = 'semantic' AND title = ?")

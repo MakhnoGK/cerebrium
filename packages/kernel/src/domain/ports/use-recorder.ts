@@ -5,5 +5,5 @@ export const USE_RECORDER_TOKEN = Symbol("UseRecorder");
 // performs, so it is addressed as a port — a host without a writable handle binds a
 // recorder that does nothing and whoever dispatched the read records it instead.
 export interface UseRecorder {
-  recordUse(ids: string[], ts: string): void;
+  recordUse(ids: string[], ts: string): Promise<void>;
 }

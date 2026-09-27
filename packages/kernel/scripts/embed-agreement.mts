@@ -2,7 +2,7 @@
 import "reflect-metadata";
 import type Database from "better-sqlite3";
 import { EmbeddingRole } from "@/domain/ports/embedding-provider";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
 import { HttpProvider } from "@/embeddings/http";
 import { buildContainer } from "@/container";
 import { DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";

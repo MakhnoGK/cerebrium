@@ -10,22 +10,32 @@ import {
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
+import {
+  CHUNKS_REPO_TOKEN,
+  CODE_REPO_TOKEN,
+  CONSOLIDATION_REPO_TOKEN,
+  EDGES_REPO_TOKEN,
+  EMBEDDING_QUEUE_REPO_TOKEN,
+  JOBS_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  SEARCH_REPO_TOKEN,
+  SESSIONS_REPO_TOKEN,
+  STATS_REPO_TOKEN,
+  type ChunksRepo,
+  type CodeRepo,
+  type ConsolidationRepo,
+  type EdgesRepo,
+  type EmbeddingQueueRepo,
+  type JobsRepo,
+  type NodesRepo,
+  type SearchRepo,
+  type SessionsRepo,
+  type StatsRepo,
+} from "@/domain/ports/storage";
 import { PrincipalQuotaService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
-import { openDatabase } from "@/db/database";
-import {
-  ChunksRepo,
-  CodeRepo,
-  ConsolidationRepo,
-  EdgesRepo,
-  EmbeddingQueueRepo,
-  JobsRepo,
-  NodesRepo,
-  SearchRepo,
-  SessionsRepo,
-  StatsRepo,
-} from "@/db/repositories";
-import { DB_TOKEN } from "@/db/repositories/base";
+import { DB_TOKEN } from "@/db/sqlite/base";
+import { openDatabase } from "@/db/sqlite/database";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { ClientIdentity, UNKNOWN_WRITER } from "@/runtime/client-identity";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
@@ -87,7 +97,7 @@ export function setup(opts?: {
   container.register(CLOCK_TOKEN, { useValue: clock });
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
   container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: consolidator });
-  container.register(USE_RECORDER_TOKEN, { useToken: NodesRepo });
+  container.register(USE_RECORDER_TOKEN, { useToken: NODES_REPO_TOKEN });
 
   // The identity holder outlives a container re-registration; without this a client named
   // by one test is still named in the next.
@@ -100,16 +110,16 @@ export function setup(opts?: {
     provider,
     consolidator,
     worker: container.resolve(EmbeddingWorker),
-    nodes: container.resolve(NodesRepo),
-    edges: container.resolve(EdgesRepo),
-    search: container.resolve(SearchRepo),
-    chunks: container.resolve(ChunksRepo),
-    code: container.resolve(CodeRepo),
-    consolidation: container.resolve(ConsolidationRepo),
-    jobs: container.resolve(JobsRepo),
-    stats: container.resolve(StatsRepo),
-    queue: container.resolve(EmbeddingQueueRepo),
-    sessions: container.resolve(SessionsRepo),
+    nodes: container.resolve<NodesRepo>(NODES_REPO_TOKEN),
+    edges: container.resolve<EdgesRepo>(EDGES_REPO_TOKEN),
+    search: container.resolve<SearchRepo>(SEARCH_REPO_TOKEN),
+    chunks: container.resolve<ChunksRepo>(CHUNKS_REPO_TOKEN),
+    code: container.resolve<CodeRepo>(CODE_REPO_TOKEN),
+    consolidation: container.resolve<ConsolidationRepo>(CONSOLIDATION_REPO_TOKEN),
+    jobs: container.resolve<JobsRepo>(JOBS_REPO_TOKEN),
+    stats: container.resolve<StatsRepo>(STATS_REPO_TOKEN),
+    queue: container.resolve<EmbeddingQueueRepo>(EMBEDDING_QUEUE_REPO_TOKEN),
+    sessions: container.resolve<SessionsRepo>(SESSIONS_REPO_TOKEN),
   };
 }
 

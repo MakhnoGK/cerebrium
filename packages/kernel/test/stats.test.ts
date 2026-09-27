@@ -6,9 +6,9 @@ import { describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
 import { CONFIG_FILE_TOKEN } from "@/domain/ports/config";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
+import { PROCESSES_REPO_TOKEN, type ProcessesRepo } from "@/domain/ports/storage";
 import { ProcessRegistryService } from "@/application/services";
-import { openDatabase, openDatabaseReadonly } from "@/db/database";
-import { ProcessesRepo } from "@/db/repositories";
+import { openDatabase, openDatabaseReadonly } from "@/db/sqlite/database";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { StatsTool } from "@/presentation/mcp/tools/stats";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -38,7 +38,7 @@ describe("StatsRepo.techStats", () => {
     await writeFact(s, "two");
 
     // When / Then — before draining.
-    const before = env.stats.techStats(env.clock.t);
+    const before = await env.stats.techStats(env.clock.t);
     expect(before.content.nodes_by_kind.semantic).toBe(2);
     expect(before.content.nodes_total).toBe(2);
     expect(before.queue.backlog).toBe(2);
@@ -48,7 +48,7 @@ describe("StatsRepo.techStats", () => {
 
     // When / Then — after draining.
     await env.worker.tick();
-    const after = env.stats.techStats(env.clock.t);
+    const after = await env.stats.techStats(env.clock.t);
     expect(after.queue.backlog).toBe(0);
     expect(after.content.chunks_embedded).toBeGreaterThan(0);
     expect(after.content.chunks_unembedded).toBe(0);
@@ -64,13 +64,13 @@ describe("StatsRepo.techStats", () => {
     await env.worker.tick(); // acquires the 'embedding' lease
 
     // When / Then
-    const snap = env.stats.techStats(env.clock.t);
+    const snap = await env.stats.techStats(env.clock.t);
     expect(snap.drain.lease_owner).toBeTruthy();
     expect(snap.drain.lease_active).toBe(true);
 
     // Far in the future, the same lease has lapsed.
     const later = new Date(Date.parse(env.clock.t) + 10 * 60_000).toISOString();
-    expect(env.stats.techStats(later).drain.lease_active).toBe(false);
+    expect((await env.stats.techStats(later)).drain.lease_active).toBe(false);
   });
 
   it("should count active unembedded chunks when stale embeddings outnumber active chunks", async () => {
@@ -92,7 +92,7 @@ describe("StatsRepo.techStats", () => {
     }
 
     // Then
-    const content = env.stats.techStats(env.clock.t).content;
+    const content = (await env.stats.techStats(env.clock.t)).content;
     expect(content.chunks_embedded).toBeGreaterThan(content.chunks_active);
     expect(content.chunks_unembedded).toBe(1);
   });
@@ -107,7 +107,7 @@ describe("StatsRepo graph integrity", () => {
     await writeFact(s, "other");
 
     // When / Then
-    const snap = env.stats.techStats(env.clock.t).graph;
+    const snap = (await env.stats.techStats(env.clock.t)).graph;
     expect(snap).toEqual({ dangling_edges: 0, repointable_edges: 0, detached_nodes: 0 });
   });
 
@@ -118,14 +118,14 @@ describe("StatsRepo graph integrity", () => {
     const referrer = await writeFact(s, "referrer");
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    env.edges.insertEdge(successor, doomed, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(successor, doomed, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+    await env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
 
     // Then — the supersedes edge itself is not counted; the stranded reference is.
-    const snap = env.stats.techStats(env.clock.t).graph;
+    const snap = (await env.stats.techStats(env.clock.t)).graph;
     expect(snap.dangling_edges).toBe(1);
     expect(snap.repointable_edges).toBe(1);
   });
@@ -137,14 +137,14 @@ describe("StatsRepo graph integrity", () => {
     const referrer = await writeFact(s, "referrer");
     const doomed = await writeFact(s, "doomed");
     const successor = await writeFact(s, "successor");
-    env.edges.insertEdge(referrer, doomed, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
-    env.edges.insertEdge(successor, doomed, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(referrer, doomed, EdgeType.SIMILAR_TO, "system", s, env.clock.t);
+    await env.edges.insertEdge(successor, doomed, EdgeType.SUPERSEDES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+    await env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
 
     // Then
-    const snap = env.stats.techStats(env.clock.t).graph;
+    const snap = (await env.stats.techStats(env.clock.t)).graph;
     expect(snap.dangling_edges).toBe(0);
     expect(snap.repointable_edges).toBe(0);
   });
@@ -157,15 +157,15 @@ describe("StatsRepo graph integrity", () => {
     const spoke = await writeFact(s, "spoke");
     const doomed = await writeFact(s, "doomed");
     const island = await writeFact(s, "island");
-    env.edges.insertEdge(hub, spoke, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    env.edges.insertEdge(hub, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
-    env.edges.insertEdge(island, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(hub, spoke, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(hub, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
+    await env.edges.insertEdge(island, doomed, EdgeType.REFERENCES, "agent", s, env.clock.t);
 
     // When
-    env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
+    await env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
 
     // Then
-    expect(env.stats.techStats(env.clock.t).graph.detached_nodes).toBe(1);
+    expect((await env.stats.techStats(env.clock.t)).graph.detached_nodes).toBe(1);
   });
 });
 
@@ -232,7 +232,7 @@ describe("StatsTool observability channels", () => {
       useValue: { self: () => 700, alive: () => true },
     });
     container.register(CONFIG_FILE_TOKEN, { useFactory: () => null });
-    container.resolve(ProcessRegistryService).publish("server");
+    await container.resolve(ProcessRegistryService).publish("server");
 
     // When
     const out = (await container.resolve(StatsTool).invoke({})) as {
@@ -247,12 +247,12 @@ describe("StatsTool observability channels", () => {
     expect(out.config.ignored).toEqual([]);
   });
 
-  it("should report an empty registry rather than failing on a store no writer has migrated", () => {
+  it("should report an empty registry rather than failing on a store no writer has migrated", async () => {
     // Given — a read-only handle never runs migrations, which is the CLI's situation.
     const env = setup();
     env.db.exec("DROP TABLE processes");
 
     // When / Then
-    expect(container.resolve(ProcessesRepo).list()).toEqual([]);
+    expect(await container.resolve<ProcessesRepo>(PROCESSES_REPO_TOKEN).list()).toEqual([]);
   });
 });

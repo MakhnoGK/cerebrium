@@ -76,7 +76,7 @@ describe("Indexer incremental hash-gate", () => {
     expect(first.files_indexed).toBe(2);
     expect(first.symbols_added).toBeGreaterThan(4);
     await drain(worker);
-    expect(queue.embeddingStats().backlog).toBe(0);
+    expect((await queue.embeddingStats()).backlog).toBe(0);
 
     // When
     clock.advanceDays(1);
@@ -86,7 +86,7 @@ describe("Indexer incremental hash-gate", () => {
     expect(again.files_indexed).toBe(0);
     expect(again.files_skipped).toBe(2);
     expect(again).toMatchObject({ symbols_added: 0, symbols_updated: 0, symbols_invalidated: 0 });
-    expect(queue.embeddingStats().backlog).toBe(0); // nothing re-enqueued
+    expect((await queue.embeddingStats()).backlog).toBe(0); // nothing re-enqueued
   });
 
   it("should re-embed only the edited symbol and keep sibling ids + embeddings when one symbol changes", async () => {
@@ -168,8 +168,8 @@ describe("Indexer incremental hash-gate", () => {
 
     // Then
     expect(res.symbols_invalidated).toBeGreaterThanOrEqual(1);
-    expect(code.codeFileHash(NAME, "util/crypto.ts")).toBeUndefined();
-    expect(code.findSymbolsInFile(NAME, "util/crypto.ts", 25)).toHaveLength(0);
+    expect(await code.codeFileHash(NAME, "util/crypto.ts")).toBeUndefined();
+    expect(await code.findSymbolsInFile(NAME, "util/crypto.ts", 25)).toHaveLength(0);
   });
 });
 
@@ -475,8 +475,8 @@ describe("Indexer walk filters", () => {
 
     // Then
     expect(res.files_scanned).toBe(2); // only util/crypto.ts + auth/auth.service.ts
-    expect(code.findSymbolsByName("x", NAME, 5)).toHaveLength(0);
-    expect(code.findSymbolsByName("k", NAME, 5)).toHaveLength(0);
+    expect(await code.findSymbolsByName("x", NAME, 5)).toHaveLength(0);
+    expect(await code.findSymbolsByName("k", NAME, 5)).toHaveLength(0);
   });
 
   it("should index source with a NUL byte in a string literal without treating it as binary", async () => {
@@ -492,6 +492,6 @@ describe("Indexer walk filters", () => {
 
     // Then
     expect(res.files_indexed).toBe(3); // crypto + auth + nul/sep
-    expect(code.findSymbolsByName("join", NAME, 5)).toHaveLength(1);
+    expect(await code.findSymbolsByName("join", NAME, 5)).toHaveLength(1);
   });
 });

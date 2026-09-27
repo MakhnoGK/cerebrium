@@ -10,7 +10,7 @@ import { setup, type TestEnv } from "@test/helpers";
 function jobWorker(): JobWorker {
   const service = container.resolve(CodeIndexService);
 
-  vi.spyOn(service, "resolveTargets").mockReturnValue([]);
+  vi.spyOn(service, "resolveTargets").mockResolvedValue([]);
   vi.spyOn(service, "indexTargets").mockResolvedValue([]);
   container.register(CodeIndexService, { useValue: service });
 
@@ -40,13 +40,13 @@ async function spin(
     jobs: jobWorker(),
     jobsPerTick: 1,
     codeIndexIntervalMs: opts.codeIndexIntervalMs,
-    scheduleCodeIndex: () => {
-      if (env.jobs.hasOpen(JobKind.CODE_INDEX)) return;
+    scheduleCodeIndex: async () => {
+      if (await env.jobs.hasOpen(JobKind.CODE_INDEX)) return;
 
       const at = env.clock.now();
 
       scheduled.push(at);
-      env.jobs.submit({
+      await env.jobs.submit({
         id: newId(),
         kind: JobKind.CODE_INDEX,
         payload: {},
@@ -69,7 +69,7 @@ describe("scheduled code-mirror refresh", () => {
 
     // Then
     expect(scheduled.length).toBeGreaterThan(0);
-    expect(env.jobs.counts()[JobState.DONE]).toBeGreaterThan(0);
+    expect((await env.jobs.counts())[JobState.DONE]).toBeGreaterThan(0);
   });
 
   it("should never enqueue when the interval is zero", async () => {
@@ -81,14 +81,14 @@ describe("scheduled code-mirror refresh", () => {
 
     // Then
     expect(scheduled).toEqual([]);
-    expect(env.jobs.counts()).toEqual({});
+    expect(await env.jobs.counts()).toEqual({});
   });
 
   it("should not stack a second refresh on top of one still queued when the interval fires again", async () => {
     // Given — one already waiting, and a cadence that fires on every pass.
     const env = setup();
 
-    env.jobs.submit({
+    await env.jobs.submit({
       id: newId(),
       kind: JobKind.CODE_INDEX,
       payload: {},
@@ -101,14 +101,14 @@ describe("scheduled code-mirror refresh", () => {
 
     // Then
     expect(scheduled).toEqual([]);
-    expect(Object.values(env.jobs.counts()).reduce((a, b) => a + b, 0)).toBe(1);
+    expect(Object.values(await env.jobs.counts()).reduce((a, b) => a + b, 0)).toBe(1);
   });
 
   it("should leave the queue alone while a client is waiting", async () => {
     // Given
     const env = setup();
 
-    env.jobs.submit({
+    await env.jobs.submit({
       id: newId(),
       kind: JobKind.CODE_INDEX,
       payload: {},
@@ -125,6 +125,6 @@ describe("scheduled code-mirror refresh", () => {
     });
 
     // Then
-    expect(env.jobs.counts()).toEqual({ [JobState.PENDING]: 1 });
+    expect(await env.jobs.counts()).toEqual({ [JobState.PENDING]: 1 });
   });
 });

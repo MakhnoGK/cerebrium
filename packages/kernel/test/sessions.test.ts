@@ -17,36 +17,36 @@ function countSessions(env: TestEnv, id: string): number {
 }
 
 describe("SessionService", () => {
-  it("should create a session only through startSession", () => {
+  it("should create a session only through startSession", async () => {
     const env = setup();
     const service = container.resolve(SessionService);
 
-    service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
-    service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
+    await service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
+    await service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
 
     expect(countSessions(env, SESSION)).toBe(1);
   });
 
-  it("should refresh last_seen for a known session", () => {
+  it("should refresh last_seen for a known session", async () => {
     const env = setup();
     const service = container.resolve(SessionService);
-    service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
+    await service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
     env.clock.advanceDays(1);
 
-    service.requireSession(SESSION, env.clock.now());
+    await service.requireSession(SESSION, env.clock.now());
 
     expect(
       env.db.prepare("SELECT last_seen FROM sessions WHERE id = ?").get(SESSION),
     ).toStrictEqual({ last_seen: env.clock.now() });
   });
 
-  it("should reject an unknown session without creating it", () => {
+  it("should reject an unknown session without creating it", async () => {
     const env = setup();
     const service = container.resolve(SessionService);
 
-    expect(() => {
-      service.requireSession(UNKNOWN, env.clock.now());
-    }).toThrow(`Unknown session_id ${UNKNOWN}`);
+    await expect(service.requireSession(UNKNOWN, env.clock.now())).rejects.toThrow(
+      `Unknown session_id ${UNKNOWN}`,
+    );
     expect(countSessions(env, UNKNOWN)).toBe(0);
   });
 });

@@ -7,7 +7,7 @@ import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
 
 const require = createRequire(import.meta.url);
-const { up } = require("../src/db/migrations/016_repair_post_supersede_edges.cjs") as {
+const { up } = require("../src/db/sqlite/migrations/016_repair_post_supersede_edges.cjs") as {
   up: (db: import("better-sqlite3").Database) => void;
 };
 
@@ -31,14 +31,14 @@ async function writeFact(sessionId: string, title: string): Promise<string> {
   return result.id;
 }
 
-function supersede(
+async function supersede(
   env: ReturnType<typeof setup>,
   sessionId: string,
   dead: string,
   successor: string,
-): void {
-  env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: sessionId });
-  env.edges.insertEdge(successor, dead, EdgeType.SUPERSEDES, "agent", sessionId, env.clock.t);
+): Promise<void> {
+  await env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: sessionId });
+  await env.edges.insertEdge(successor, dead, EdgeType.SUPERSEDES, "agent", sessionId, env.clock.t);
 }
 
 describe("Migration 016: repair post-supersede edges", () => {
@@ -48,9 +48,16 @@ describe("Migration 016: repair post-supersede edges", () => {
     const first = await writeFact(sessionId, "first");
     const second = await writeFact(sessionId, "second");
     const terminal = await writeFact(sessionId, "terminal");
-    env.edges.insertEdge(referrer, first, EdgeType.REFERENCES, "agent", sessionId, env.clock.t);
-    supersede(env, sessionId, first, second);
-    supersede(env, sessionId, second, terminal);
+    await env.edges.insertEdge(
+      referrer,
+      first,
+      EdgeType.REFERENCES,
+      "agent",
+      sessionId,
+      env.clock.t,
+    );
+    await supersede(env, sessionId, first, second);
+    await supersede(env, sessionId, second, terminal);
 
     up(env.db);
 
@@ -61,7 +68,7 @@ describe("Migration 016: repair post-supersede edges", () => {
         )
         .all(referrer, EdgeType.REFERENCES),
     ).toStrictEqual([{ src: referrer, dst: terminal, type: EdgeType.REFERENCES }]);
-    expect(env.stats.techStats(env.clock.t).graph.repointable_edges).toBe(0);
+    expect((await env.stats.techStats(env.clock.t)).graph.repointable_edges).toBe(0);
   });
 
   it("should preserve an existing live target edge when the repair collides", async () => {
@@ -69,10 +76,18 @@ describe("Migration 016: repair post-supersede edges", () => {
     const referrer = await writeFact(sessionId, "referrer");
     const dead = await writeFact(sessionId, "dead");
     const successor = await writeFact(sessionId, "successor");
-    env.edges.insertEdge(referrer, dead, EdgeType.DOCUMENTS, "agent", sessionId, env.clock.t, 0.4);
-    supersede(env, sessionId, dead, successor);
+    await env.edges.insertEdge(
+      referrer,
+      dead,
+      EdgeType.DOCUMENTS,
+      "agent",
+      sessionId,
+      env.clock.t,
+      0.4,
+    );
+    await supersede(env, sessionId, dead, successor);
     env.clock.advanceDays(1);
-    env.edges.insertEdge(
+    await env.edges.insertEdge(
       referrer,
       successor,
       EdgeType.DOCUMENTS,
@@ -98,12 +113,26 @@ describe("Migration 016: repair post-supersede edges", () => {
     const a = await writeFact(sessionId, "a");
     const b = await writeFact(sessionId, "b");
     const invalidatedSource = await writeFact(sessionId, "invalidated source");
-    env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", sessionId, env.clock.t);
-    env.edges.insertEdge(referrer, dead, EdgeType.SIMILAR_TO, "system", sessionId, env.clock.t);
-    env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: sessionId });
-    env.edges.insertEdge(a, dead, EdgeType.SUPERSEDES, "agent", sessionId, env.clock.t);
-    env.edges.insertEdge(b, dead, EdgeType.SUPERSEDES, "agent", sessionId, env.clock.t);
-    env.edges.insertEdge(
+    await env.edges.insertEdge(
+      referrer,
+      dead,
+      EdgeType.REFERENCES,
+      "agent",
+      sessionId,
+      env.clock.t,
+    );
+    await env.edges.insertEdge(
+      referrer,
+      dead,
+      EdgeType.SIMILAR_TO,
+      "system",
+      sessionId,
+      env.clock.t,
+    );
+    await env.nodes.invalidateNode(dead, { ts: env.clock.t, session_id: sessionId });
+    await env.edges.insertEdge(a, dead, EdgeType.SUPERSEDES, "agent", sessionId, env.clock.t);
+    await env.edges.insertEdge(b, dead, EdgeType.SUPERSEDES, "agent", sessionId, env.clock.t);
+    await env.edges.insertEdge(
       invalidatedSource,
       dead,
       EdgeType.DOCUMENTS,
@@ -111,7 +140,7 @@ describe("Migration 016: repair post-supersede edges", () => {
       sessionId,
       env.clock.t,
     );
-    env.nodes.invalidateNode(invalidatedSource, { ts: env.clock.t, session_id: sessionId });
+    await env.nodes.invalidateNode(invalidatedSource, { ts: env.clock.t, session_id: sessionId });
     const before = env.db
       .prepare("SELECT src, dst, type, invalidated_at FROM edges ORDER BY src, dst, type")
       .all();
@@ -130,8 +159,15 @@ describe("Migration 016: repair post-supersede edges", () => {
     const referrer = await writeFact(sessionId, "referrer");
     const dead = await writeFact(sessionId, "dead");
     const successor = await writeFact(sessionId, "successor");
-    env.edges.insertEdge(referrer, dead, EdgeType.REFERENCES, "agent", sessionId, env.clock.t);
-    supersede(env, sessionId, dead, successor);
+    await env.edges.insertEdge(
+      referrer,
+      dead,
+      EdgeType.REFERENCES,
+      "agent",
+      sessionId,
+      env.clock.t,
+    );
+    await supersede(env, sessionId, dead, successor);
     up(env.db);
     const once = env.db.prepare("SELECT * FROM edges ORDER BY src, dst, type").all();
 

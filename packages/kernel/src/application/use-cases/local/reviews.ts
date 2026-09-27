@@ -6,6 +6,17 @@ import {
   ReviewDecision,
 } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
+import {
+  EDGES_REPO_TOKEN,
+  NODES_REPO_TOKEN,
+  parseEdgeRef,
+  REVIEWS_REPO_TOKEN,
+  SESSIONS_REPO_TOKEN,
+  type EdgesRepo,
+  type NodesRepo,
+  type ReviewsRepo,
+  type SessionsRepo,
+} from "@/domain/ports/storage";
 import { ReviewService } from "@/application/services/review.service";
 import {
   LIST_REVIEWS,
@@ -19,8 +30,6 @@ import {
   type ResolveReviewResult,
   type ReviewItem,
 } from "@/application/use-cases/contracts";
-import { EdgesRepo, NodesRepo, SessionsRepo } from "@/db/repositories";
-import { parseEdgeRef, ReviewsRepo } from "@/db/repositories/reviews";
 import { ClientIdentity } from "@/runtime/client-identity";
 
 const DEFAULT_LIMIT = 20;
@@ -30,13 +39,13 @@ const MAX_LIMIT = 100;
 export class LocalListReviews implements ListReviews {
   constructor(
     private readonly service: ReviewService,
-    private readonly reviews: ReviewsRepo,
+    @inject(REVIEWS_REPO_TOKEN) private readonly reviews: ReviewsRepo,
   ) {}
 
-  invoke(args: ListReviewsArgs): Promise<ListReviewsResult> {
+  async invoke(args: ListReviewsArgs): Promise<ListReviewsResult> {
     const scope = this.service.scope();
     const limit = Math.min(args.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
-    const counts = this.service.pending();
+    const counts = await this.service.pending();
 
     const answer = (items: ReviewItem[]): ListReviewsResult => ({
       items,
@@ -50,7 +59,7 @@ export class LocalListReviews implements ListReviews {
     const wantNodes = args.artifact === undefined || args.artifact === ReviewArtifact.NODE;
 
     const edges: ReviewItem[] = wantEdges
-      ? this.reviews.pendingEdges(scope, limit).map((e) => ({
+      ? (await this.reviews.pendingEdges(scope, limit)).map((e) => ({
           artifact: ReviewArtifact.EDGE,
           ref: e.ref,
           principal: e.principal,
@@ -62,7 +71,7 @@ export class LocalListReviews implements ListReviews {
       : [];
 
     const nodes: ReviewItem[] = wantNodes
-      ? this.reviews.pendingNodes(scope, limit).map((n) => ({
+      ? (await this.reviews.pendingNodes(scope, limit)).map((n) => ({
           artifact: ReviewArtifact.NODE,
           ref: n.ref,
           principal: n.principal,
@@ -82,10 +91,10 @@ export class LocalListReviews implements ListReviews {
 @useCase(RESOLVE_REVIEW)
 export class LocalResolveReview implements ResolveReview {
   constructor(
-    private readonly reviews: ReviewsRepo,
-    private readonly edges: EdgesRepo,
-    private readonly nodes: NodesRepo,
-    private readonly sessions: SessionsRepo,
+    @inject(REVIEWS_REPO_TOKEN) private readonly reviews: ReviewsRepo,
+    @inject(EDGES_REPO_TOKEN) private readonly edges: EdgesRepo,
+    @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
+    @inject(SESSIONS_REPO_TOKEN) private readonly sessions: SessionsRepo,
     private readonly identity: ClientIdentity,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
@@ -94,13 +103,14 @@ export class LocalResolveReview implements ResolveReview {
     const now = this.clock.now();
     const undone = args.decision === ReviewDecision.UNDONE ? await this.undo(args, now) : false;
 
-    this.reviews.record({
+    await this.reviews.record({
       artifact: args.artifact,
       ref: args.ref,
       decision: args.decision,
       decided_at: now,
       decided_by:
-        this.sessions.principalOf(args.session_id) ?? principalIdOf(this.identity.get().client),
+        (await this.sessions.principalOf(args.session_id)) ??
+        principalIdOf(this.identity.get().client),
       note: args.note ?? null,
     });
 
@@ -115,17 +125,17 @@ export class LocalResolveReview implements ResolveReview {
         throw new Error(`${args.ref} is not an edge reference; expected src|dst|type`);
       }
 
-      this.edges.invalidateEdge(edge.src, edge.dst, edge.type as EdgeType, now);
+      await this.edges.invalidateEdge(edge.src, edge.dst, edge.type as EdgeType, now);
 
       return true;
     }
 
     // Already retired by someone else is not an error: the decision still needs recording,
     // and re-invalidating would move a timestamp that belongs to the first retirement.
-    if (this.nodes.referenceState(args.ref) !== "live") return false;
+    if ((await this.nodes.referenceState(args.ref)) !== "live") return false;
 
     await Promise.resolve(
-      this.nodes.invalidateNode(args.ref, { ts: now, session_id: args.session_id }),
+      await this.nodes.invalidateNode(args.ref, { ts: now, session_id: args.session_id }),
     );
 
     return true;

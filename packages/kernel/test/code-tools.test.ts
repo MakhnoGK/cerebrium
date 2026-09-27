@@ -107,7 +107,7 @@ describe("GetTool on a symbol", () => {
   it("should return the raw source slice and structured facets", async () => {
     // Given
     const { env, session_id } = await indexed();
-    const id = env.code.findSymbolsByName("AuthService", undefined, 1)[0]!.envelope.id;
+    const id = (await env.code.findSymbolsByName("AuthService", undefined, 1))[0]!.envelope.id;
 
     // When
     const res = (await container.resolve(GetTool).invoke({ session_id, ids: [id] })) as {
@@ -142,7 +142,7 @@ describe("Mirror discipline", () => {
   it("should reject an update on a symbol node with an actionable message", async () => {
     // Given
     const { env, session_id } = await indexed();
-    const id = env.code.findSymbolsByName("AuthService", undefined, 1)[0]!.envelope.id;
+    const id = (await env.code.findSymbolsByName("AuthService", undefined, 1))[0]!.envelope.id;
 
     // When / Then
     await expect(

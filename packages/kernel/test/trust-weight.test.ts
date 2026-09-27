@@ -1,8 +1,8 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import { CallPipeline } from "@/application/call-pipeline";
-import { NodesRepo } from "@/db/repositories";
 import {
   NEUTRAL_WEIGHT,
   OPEN_PROFILE,
@@ -157,8 +157,8 @@ describe("Trust weight at read time", () => {
       );
 
     // When
-    const principals = container
-      .resolve(NodesRepo)
+    const principals = await container
+      .resolve<NodesRepo>(NODES_REPO_TOKEN)
       .principalsOf([authored, "01ZZZZZZZZZZZZZZZZZZZZZZZZ"]);
 
     // Then — the authored node resolves to its writer, the mirror row to nobody.
