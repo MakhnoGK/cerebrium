@@ -53,6 +53,32 @@ describe("Health verdict (healthProblem)", () => {
     expect(healthProblem(report)).toContain(`protocol ${String(PROTOCOL_VERSION + 1)}`);
   });
 
+  it("should report a store that does not answer, even with the model ready", () => {
+    // Given
+    const report = {
+      protocol: PROTOCOL_VERSION,
+      pid: 7,
+      model: { state: "ready", ms: 1 },
+      store: { backend: "postgres", ready: false, error: "connection refused" },
+    };
+
+    // When / Then
+    expect(healthProblem(report)).toBe("store postgres unavailable: connection refused");
+  });
+
+  it("should call a daemon healthy whose store answers", () => {
+    // Given
+    const report = {
+      protocol: PROTOCOL_VERSION,
+      pid: 7,
+      model: { state: "ready", ms: 1 },
+      store: { backend: "sqlite", ready: true },
+    };
+
+    // When / Then
+    expect(healthProblem(report)).toBeNull();
+  });
+
   it("should report an answer that is not a health report", () => {
     // Given / When / Then
     expect(healthProblem(null)).toBe("no health report");
@@ -73,6 +99,21 @@ describe("Health probe over the socket (checkHealth)", () => {
 
     // When / Then
     expect(await checkHealth(SOCKET)).toBeNull();
+  });
+
+  it("should fail when the daemon reports its store unreachable", async () => {
+    // Given
+    server = new RpcServer(
+      createDaemonMethods(container, {
+        pid: 11,
+        model: () => ({ state: "ready", ms: 5 }),
+        store: () => Promise.resolve({ backend: "postgres", ready: false, error: "down" }),
+      }),
+    );
+    await server.listen(SOCKET);
+
+    // When / Then
+    expect(await checkHealth(SOCKET)).toBe("store postgres unavailable: down");
   });
 
   it("should fail when no daemon is listening", async () => {

@@ -1263,7 +1263,14 @@ What differs from SQLite:
 
 Moving a store: `npm run import:sqlite -- --from copy.db --to <url> --verify` copies authored
 memory from a `.backup` of the SQLite file (never the live one), idempotently, and `--verify`
-compares counts and content hashes per table.
+compares counts and content hashes per table (rows the target wrote itself, such as its
+daemon's own session, are reported as `target_only` and do not fail it). Before a Postgres
+store replaces a SQLite one, `npm run parity:pg -- --sqlite copy.db --pg <url> --gold …`
+runs both on the same queries and query vectors: the vector branch's top-40 must overlap
+at ≥ 0.98, text and hybrid nDCG@10 / Recall@10 may trail SQLite by at most one point, and
+no labelled merge pair may cross a similarity gate. On the host, Postgres runs in the
+compose stack beside the daemon, with a dump before every deploy
+([`apps/host/deploy/README.md`](apps/host/deploy/README.md)).
 
 Testing: `npm run pg:up` starts a throwaway ParadeDB in podman or docker and prints the
 `CEREBRIUM_TEST_PG_URL` to export; `npm run test:pg` then reruns the suites against it

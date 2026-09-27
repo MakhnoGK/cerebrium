@@ -87,6 +87,7 @@ export class PgDatabase {
       connectionString: options.url,
       max: options.poolMax,
       allowExitOnIdle: true,
+      connectionTimeoutMillis: 10_000,
       ...(options.readOnly ? { options: "-c default_transaction_read_only=on" } : {}),
     });
     // An idle client whose connection drops emits here; unhandled, it kills the process.

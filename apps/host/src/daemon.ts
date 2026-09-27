@@ -44,7 +44,12 @@ import {
   EmbeddingConfig,
   JobsConfig,
 } from "@cerebrium/kernel/infrastructure/config";
-import { createDaemonMethods, RpcServer, surfaceMethods } from "@cerebrium/kernel/presentation/rpc";
+import {
+  createDaemonMethods,
+  RpcServer,
+  surfaceMethods,
+  type StoreHealth,
+} from "@cerebrium/kernel/presentation/rpc";
 import {
   clearDaemonPid,
   isDaemonAlive,
@@ -283,6 +288,29 @@ export async function runDaemon(
   }
 }
 
+const STORE_PING_MS = 3_000;
+
+async function storeHealth(store: Store): Promise<StoreHealth> {
+  let timer: NodeJS.Timeout | undefined;
+
+  try {
+    await Promise.race([
+      store.ping(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`no answer in ${String(STORE_PING_MS)} ms`));
+        }, STORE_PING_MS);
+      }),
+    ]);
+
+    return { backend: store.backend, ready: true };
+  } catch (err) {
+    return { backend: store.backend, ready: false, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function main(): Promise<void> {
   const container = buildContainer({ role: "daemon" });
   const dbPath = container.resolve(DatabaseConfig).path;
@@ -434,6 +462,7 @@ async function main(): Promise<void> {
         {
           pid: process.pid,
           model: () => model,
+          store: () => storeHealth(container.resolve<Store>(STORE_TOKEN)),
           principals: () => container.resolve(PrincipalQuotaService).usage(Date.now()),
           ...(pool === null ? {} : { queueDepth: () => pool.depth }),
         },

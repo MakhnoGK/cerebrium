@@ -1,16 +1,22 @@
+#!/usr/bin/env node
 import "reflect-metadata";
-import { PgDatabase, redactUrl } from "@/db/postgres/database";
-import { importSqlite, verifyImport } from "@/db/postgres/import-sqlite";
-import { openDatabaseReadonly } from "@/db/sqlite/database";
+import { readFileSync } from "node:fs";
+import { PgDatabase, redactUrl } from "@cerebrium/kernel/db/postgres/database";
+import { importSqlite, verifyImport } from "@cerebrium/kernel/db/postgres/import-sqlite";
+import { openDatabaseReadonly } from "@cerebrium/kernel/db/sqlite/database";
+import { isMainModule } from "@cerebrium/kernel/runtime/is-main";
 
 const HELP = `
 import-sqlite — copy authored memory from a SQLite store into a Postgres one.
 
   npm run import:sqlite -- --from PATH --to URL [--verify] [--verify-only]
+  node dist/import-sqlite.js --from PATH --to-file PATH [--verify]     (in the host image)
 
   --from PATH     SQLite store to read, opened READ-ONLY. Use a copy made with
                   sqlite3 memory.db ".backup copy.db", never the live file.
   --to URL        Postgres database to write. Migrated first; re-running converges.
+  --to-file PATH  Read the URL from a file instead (a container secret), so it never
+                  appears in a process listing.
   --verify        After importing, compare per-table counts and content hashes.
   --verify-only   Compare without importing.
   --help          This text.
@@ -37,10 +43,13 @@ async function main(): Promise<void> {
   }
 
   const from = arg(argv, "--from");
-  const to = arg(argv, "--to");
+  const toFile = arg(argv, "--to-file");
+  const to = toFile ? readFileSync(toFile, "utf8").trim() : arg(argv, "--to");
 
   if (!from || !to) {
-    console.error("import-sqlite: --from PATH and --to URL are required (see --help)");
+    console.error(
+      "import-sqlite: --from PATH and --to URL (or --to-file) are required (see --help)",
+    );
     process.exitCode = 2;
     return;
   }
@@ -74,7 +83,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(`import-sqlite failed: ${(err as Error).message}`);
-  process.exitCode = 1;
-});
+if (isMainModule(import.meta.url)) {
+  main().catch((err: unknown) => {
+    console.error(`import-sqlite failed: ${(err as Error).message}`);
+    process.exitCode = 1;
+  });
+}

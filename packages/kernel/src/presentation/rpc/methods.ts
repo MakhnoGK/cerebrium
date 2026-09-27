@@ -36,6 +36,13 @@ export interface DaemonIdentity {
   // Reported rather than awaited: `status` has to answer while the model is still
   // loading, and after a load that failed outright.
   model: () => { state: string; ms: number | null; error?: string } | null;
+  store?: () => Promise<StoreHealth>;
+}
+
+export interface StoreHealth {
+  backend: string;
+  ready: boolean;
+  error?: string;
 }
 
 // One JSON-RPC method per call on the surface, dispatched through the pipeline so a socket
@@ -86,13 +93,14 @@ export function createDaemonMethods(
     // reports the mismatch instead of failing later as an unknown method.
     initialize: () => Promise.resolve({ protocol: PROTOCOL_VERSION, pid: identity.pid }),
 
-    // The container probe. Answered from memory, so it costs nothing on a large store.
-    health: () =>
-      Promise.resolve({
-        protocol: PROTOCOL_VERSION,
-        pid: identity.pid,
-        model: identity.model(),
-      }),
+    // The container probe. Answered from memory apart from one trivial query to the store,
+    // so it costs nothing on a large one.
+    health: async () => ({
+      protocol: PROTOCOL_VERSION,
+      pid: identity.pid,
+      model: identity.model(),
+      ...(identity.store === undefined ? {} : { store: await identity.store() }),
+    }),
 
     // The runner host's side of the queue. These are daemon methods rather than calls on
     // the surface deliberately: claiming and reporting a job is operational, and putting it

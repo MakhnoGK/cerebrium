@@ -13,6 +13,10 @@ export class PgStore implements Store {
     return this.db.identity;
   }
 
+  async ping(): Promise<void> {
+    await this.db.query("SELECT 1");
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }

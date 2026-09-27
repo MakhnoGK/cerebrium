@@ -1,11 +1,49 @@
 name: cerebrium
 
 services:
+  postgres:
+    image: paradedb/paradedb:0.25.10-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cerebrium
+      POSTGRES_DB: cerebrium
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+    secrets:
+      - pg_password
+    volumes:
+      - pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cerebrium", "-d", "cerebrium"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    stop_grace_period: 60s
+
   daemon:
     image: ghcr.io/makhnogk/cerebrium:${CEREBRIUM_TAG:?set CEREBRIUM_TAG}
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       MEMORY_JOBS_CODE_INDEX_MS: "0"
+      MEMORY_STORE_BACKEND: postgres
+      MEMORY_PG_URL_FILE: /run/secrets/pg_url
+      # Until the cutover the Mac is the only writer; a sweep here would write edges and
+      # candidates into the imported copy that the source never had.
+      MEMORY_CONSOLIDATE_INTERVAL_MS: "86400000"
+      MEMORY_CONSOLIDATE_LINKS: "off"
+      MEMORY_CONSOLIDATE_LINK_PRUNE: "off"
+      MEMORY_CONSOLIDATE_DISTILL: "off"
+      MEMORY_CONSOLIDATE_MERGE: "off"
+      MEMORY_CONSOLIDATE_PRUNE: "off"
+      MEMORY_CONSOLIDATE_ANNOTATE: "off"
+      MEMORY_CONSOLIDATE_RECONCILE: "off"
+      MEMORY_CONSOLIDATE_DOCUMENTS: "off"
+    secrets:
+      - pg_url
     volumes:
       - data:/data
     healthcheck:
@@ -18,6 +56,14 @@ services:
       start_interval: 5s
     stop_grace_period: 30s
 
+secrets:
+  pg_password:
+    file: ${CEREBRIUM_SECRETS:?set CEREBRIUM_SECRETS}/pg_password
+  pg_url:
+    file: ${CEREBRIUM_SECRETS:?set CEREBRIUM_SECRETS}/pg_url
+
 volumes:
   data:
     name: cerebrium-data
+  pg:
+    name: cerebrium-pg
