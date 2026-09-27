@@ -38,18 +38,22 @@ pull() {
     return
   fi
 
-  # A throwaway config: the default one points at the macOS keychain, which is locked
-  # in an SSH session. It also drops the docker context, so the engine is named directly.
-  local config engine
+  # The macOS keychain is locked in an SSH session, and the docker CLI picks it whenever a
+  # docker-credential-osxkeychain is on PATH, even with no credsStore in the config. So:
+  # a throwaway config, a PATH without the helper, and the engine named directly because
+  # the throwaway config has no docker context.
+  local config engine bin
+  bin="$(command -v docker)"
   engine="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
   config="$(mktemp -d)"
   echo '{}' >"$config/config.json"
 
   local status=0
   printf '%s' "$token" |
-    DOCKER_HOST="$engine" DOCKER_CONFIG="$config" \
-      docker login ghcr.io -u "$REGISTRY_USER" --password-stdin >/dev/null &&
-    DOCKER_HOST="$engine" DOCKER_CONFIG="$config" docker pull "$IMAGE:$VERSION" ||
+    env PATH=/usr/bin:/bin DOCKER_HOST="$engine" DOCKER_CONFIG="$config" \
+      "$bin" login ghcr.io -u "$REGISTRY_USER" --password-stdin >/dev/null &&
+    env PATH=/usr/bin:/bin DOCKER_HOST="$engine" DOCKER_CONFIG="$config" \
+      "$bin" pull "$IMAGE:$VERSION" ||
     status=$?
 
   rm -rf "$config"
