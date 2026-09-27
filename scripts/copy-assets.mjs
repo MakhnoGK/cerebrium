@@ -6,6 +6,9 @@ mkdirSync("dist", { recursive: true });
 if (existsSync("packages/kernel/src/db/sqlite/migrations")) {
   cpSync("packages/kernel/src/db/sqlite/migrations", "dist/migrations", { recursive: true });
 }
+if (existsSync("packages/kernel/src/db/postgres/migrations")) {
+  cpSync("packages/kernel/src/db/postgres/migrations", "dist/pg-migrations", { recursive: true });
+}
 if (existsSync("packages/kernel/src/code/vendor")) {
   cpSync("packages/kernel/src/code/vendor", "dist/vendor", { recursive: true });
 }

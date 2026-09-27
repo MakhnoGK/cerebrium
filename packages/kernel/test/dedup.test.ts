@@ -4,13 +4,12 @@ import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { EmbeddingWorker } from "@/application/workers";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
 import { RetrievalConfig } from "@/infrastructure/config";
+import { freshStore } from "@test/helpers";
 
 async function session(tool: SessionStartTool, project?: string): Promise<string> {
   return (await tool.invoke({ project })).session_id;
@@ -49,7 +48,7 @@ describe("Duplicate detection at write time", () => {
   });
 
   beforeEach(() => {
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore();
 
     sessionTool = container.resolve(SessionStartTool);
     writeTool = container.resolve(WriteTool);

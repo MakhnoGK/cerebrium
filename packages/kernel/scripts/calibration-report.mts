@@ -4,7 +4,7 @@ import type Database from "better-sqlite3";
 import { SEARCH_REPO_TOKEN, type SearchRepo } from "@/domain/ports/storage";
 import { DB_TOKEN } from "@/db/sqlite/base";
 import { chunkContent } from "@/core/chunk";
-import { toFtsMatch } from "@/core/fts";
+import { parseTextQuery } from "@/core/fts";
 import { buildContainer } from "@/container";
 import {
   ConsolidationThresholdsConfig,
@@ -656,13 +656,13 @@ async function lexicalDensity(
     if (!own) continue;
     const firstChunk = chunkContent("probe", own.content)[0]?.text ?? own.content;
     const probe = `${own.title}\n${firstChunk}`;
-    const match = toFtsMatch(probe);
-    if (!match) continue;
+    const query = parseTextQuery(probe);
+    if (!query) continue;
 
     const probeTokens = tokenSet(probe);
     const scores = (
       await searchRepo.search({
-        match,
+        text: query,
         project: node.project ?? undefined,
         kinds: ["semantic"],
         history: false,

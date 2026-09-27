@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import type Database from "better-sqlite3";
 import {
   OPERATOR_SNAPSHOT,
   type OperatorProcess,
@@ -8,8 +7,8 @@ import {
   type OperatorSnapshotResult,
 } from "@cerebrium/kernel/application/use-cases";
 import { buildContainer } from "@cerebrium/kernel/container";
-import { DB_TOKEN } from "@cerebrium/kernel/db/sqlite/base";
 import type { FieldProvenance } from "@cerebrium/kernel/domain/ports/config";
+import { STORE_TOKEN, type Store } from "@cerebrium/kernel/domain/ports/storage";
 import { DaemonConfig } from "@cerebrium/kernel/infrastructure/config";
 import { isMainModule } from "@cerebrium/kernel/runtime/is-main";
 import { rpcCall, rpcHandshake, RpcUnavailableError } from "@cerebrium/kernel/runtime/rpc-client";
@@ -232,9 +231,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Resolving the database is what opens it, so the remote path above never touches the
-  // file at all.
-  const db = container.resolve<Database.Database>(DB_TOKEN);
+  // Resolving the store is what opens it, so the remote path above never touches the
+  // database at all.
+  const store = container.resolve<Store>(STORE_TOKEN);
 
   try {
     const snapshot = await container.resolve<OperatorSnapshot>(OPERATOR_SNAPSHOT).invoke({});
@@ -243,7 +242,7 @@ async function main(): Promise<void> {
       asJson ? JSON.stringify(snapshot, null, 2) + "\n" : render(snapshot, "local database"),
     );
   } finally {
-    db.close();
+    await store.close();
   }
 }
 

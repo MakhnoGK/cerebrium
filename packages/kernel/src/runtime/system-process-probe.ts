@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { injectable } from "tsyringe";
 import type { ProcessProbe } from "@/domain/ports/process-probe";
 import { isProcessAlive } from "@/runtime/daemon-pid";
@@ -10,5 +11,9 @@ export class SystemProcessProbe implements ProcessProbe {
 
   self(): number {
     return process.pid;
+  }
+
+  host(): string {
+    return hostname();
   }
 }

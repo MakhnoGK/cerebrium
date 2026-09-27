@@ -27,9 +27,11 @@ import {
   CONSOLIDATION_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
   JOBS_REPO_TOKEN,
+  STORE_TOKEN,
   type ConsolidationRepo,
   type EmbeddingQueueRepo,
   type JobsRepo,
+  type Store,
 } from "@cerebrium/kernel/domain/ports/storage";
 import {
   resolveEmbedWorker,
@@ -516,7 +518,9 @@ async function main(): Promise<void> {
       onSwept: publishSweep,
       ...(jobs === null ? {} : { jobs }),
       jobsPerTick: jobsConfig.maxPerTick,
-      codeIndexIntervalMs: jobsConfig.codeIndexIntervalMs,
+      codeIndexIntervalMs: container.resolve<Store>(STORE_TOKEN).capabilities.codeIndex
+        ? jobsConfig.codeIndexIntervalMs
+        : 0,
       // Every configured root, hash-gated: an unchanged repo costs a stat per file. Skipped
       // while one is still queued or running, so a slow index cannot stack up behind itself.
       scheduleCodeIndex: async () => {

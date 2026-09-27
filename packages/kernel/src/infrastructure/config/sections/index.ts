@@ -22,6 +22,8 @@ export {
   EmbeddingConfig,
   IdentityConfig,
   RetrievalConfig,
+  STORE_BACKENDS,
+  StorageConfig,
 } from "@/infrastructure/config/sections/runtime.config";
 export {
   NEUTRAL_WEIGHT,

@@ -9,6 +9,7 @@ import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
 import { CONSOLIDATION_REPO_TOKEN, NODES_REPO_TOKEN, STORAGE_TOKENS } from "@/domain/ports/storage";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
+import { registerPostgresRepositories } from "@/db/postgres";
 import { registerSqliteRepositories } from "@/db/sqlite";
 import { DB_TOKEN } from "@/db/sqlite/base";
 import { openDatabase, openDatabaseReadonly } from "@/db/sqlite/database";
@@ -21,6 +22,8 @@ import {
   EnvConfigSource,
   FileConfigSource,
   LayeredConfigSource,
+  StorageConfig,
+  STORE_BACKENDS,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
 import { resolveRoles } from "@/consolidation/roles";
@@ -59,7 +62,6 @@ export interface ContainerOptions {
 export const KERNEL_TOKENS = {
   configSource: CONFIG_SOURCE_TOKEN,
   configFile: CONFIG_FILE_TOKEN,
-  database: DB_TOKEN,
   clock: CLOCK_TOKEN,
   processProbe: PROCESS_PROBE_TOKEN,
   workerOptions: WORKER_OPTIONS_TOKEN,
@@ -114,24 +116,30 @@ function registerConfigSource(target: DependencyContainer, pinned?: ConfigSource
   target.register(CONFIG_FILE_TOKEN, { useValue: file.report() });
 }
 
-// The local kernel: everything resolves in-process against one SQLite file. A remote
-// kernel would register these same tokens against a transport client and sit beside
-// this function; nothing else would change.
+// The local kernel: everything resolves in-process against the configured store — one
+// SQLite file, or a Postgres database. A remote kernel registers these same tokens against
+// a transport client instead.
 //
 // Registrations are lazy (`instanceCachingFactory`): a role that never resolves the
 // embedding provider never constructs it, which is what makes registering the full set
 // for every role free.
 function registerLocalKernel(role: HostRole, target: DependencyContainer): void {
-  target.register(DB_TOKEN, {
-    useFactory: instanceCachingFactory((c) => {
-      const { path } = c.resolve(DatabaseConfig);
+  // `reader` is a read pool worker: read-only so a use case that writes fails here rather
+  // than racing the one writer.
+  const readOnly = role === "cli" || role === "reader";
 
-      // `reader` is a read pool worker: read-only so a use case that writes fails here
-      // rather than racing the one writer.
-      return role === "cli" || role === "reader" ? openDatabaseReadonly(path) : openDatabase(path);
-    }),
-  });
-  registerSqliteRepositories(target);
+  if (target.resolve(StorageConfig).backend === STORE_BACKENDS.POSTGRES) {
+    registerPostgresRepositories(target, { readOnly });
+  } else {
+    target.register(DB_TOKEN, {
+      useFactory: instanceCachingFactory((c) => {
+        const { path } = c.resolve(DatabaseConfig);
+
+        return readOnly ? openDatabaseReadonly(path) : openDatabase(path);
+      }),
+    });
+    registerSqliteRepositories(target);
+  }
 
   target.registerSingleton(CLOCK_TOKEN, SystemClock);
   target.registerSingleton(PROCESS_PROBE_TOKEN, SystemProcessProbe);

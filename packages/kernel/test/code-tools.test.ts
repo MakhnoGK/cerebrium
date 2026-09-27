@@ -1,3 +1,4 @@
+// sqlite-only: needs the code index
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { container } from "tsyringe";

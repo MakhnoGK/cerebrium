@@ -12,6 +12,7 @@ import {
   LATEST_REVISION,
   type VectorPool,
 } from "@/db/sqlite/internal";
+import { toFtsMatch, type TextQuery } from "@/core/fts";
 
 // KNN over-fetch per pool: pull this many nearest chunks, then filter + collapse to the
 // best chunk per node. The two pools carry different budgets because they are different
@@ -131,7 +132,7 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
   }
 
   async search(opts: {
-    match: string;
+    text: TextQuery;
     project?: string;
     kinds?: string[];
     types?: string[];
@@ -141,7 +142,7 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
     validAt?: string;
   }): Promise<{ rows: SearchRow[]; total: number }> {
     const where: string[] = ["node_fts MATCH @match"];
-    const params: Record<string, unknown> = { match: opts.match };
+    const params: Record<string, unknown> = { match: toFtsMatch(opts.text) };
     if (opts.project !== undefined) {
       where.push("n.project = @project");
       params.project = opts.project;
@@ -181,7 +182,7 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
                 lr.rev AS rev, lr.ts AS updated, lr.content AS content,
                 (SELECT COUNT(*) FROM edges e WHERE (e.src = n.id OR e.dst = n.id) AND e.invalidated_at IS NULL) AS edge_count,
                 n.use_count, n.last_used_at,
-                bm25(node_fts) AS bm25
+                bm25(node_fts) AS text_rank
          FROM node_fts
          JOIN nodes n ON n.id = node_fts.node_id
          ${LATEST_REVISION}
@@ -273,7 +274,7 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
   // to provide a token-efficient snippet and section name, same as the vector path.
   async bestFtsChunksFor(
     ids: string[],
-    match: string,
+    text: TextQuery,
   ): Promise<Map<string, { chunk_text: string; chunk_heading: string | null }>> {
     const out = new Map<string, { chunk_text: string; chunk_heading: string | null }>();
     if (!ids.length) return out;
@@ -287,7 +288,11 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
          WHERE chunk_fts.node_id IN (${ph}) AND chunk_fts MATCH ?
          ORDER BY chunk_fts.node_id, bm25(chunk_fts)`,
       )
-      .all(...ids, match) as { id: string; chunk_text: string; chunk_heading: string | null }[];
+      .all(...ids, toFtsMatch(text)) as {
+      id: string;
+      chunk_text: string;
+      chunk_heading: string | null;
+    }[];
 
     for (const r of rows) {
       if (out.has(r.id)) continue;

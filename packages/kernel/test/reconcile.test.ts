@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import { container } from "tsyringe";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -12,13 +11,13 @@ import {
   type ReconcileTask,
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
+import { STORE_TOKEN, type Store } from "@/domain/ports/storage";
 import { EmbeddingWorker } from "@/application/workers";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { createConsolidator } from "@/consolidation";
+import { freshStore } from "@test/helpers";
 
 // An enabled provider double: it only judges duplicates. `generate` is unused here.
 class FakeJudge implements ConsolidationProvider {
@@ -87,11 +86,11 @@ describe("Write-time reconcile", () => {
   });
 
   afterEach(() => {
-    container.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore();
   });
 
   afterAll(() => {
-    container.resolve<Database.Database>(DB_TOKEN).close();
+    void container.resolve<Store>(STORE_TOKEN).close();
   });
 
   it("should return a judged action naming the target when a near-duplicate is written", async () => {

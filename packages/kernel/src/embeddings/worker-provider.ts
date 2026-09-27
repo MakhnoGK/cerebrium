@@ -50,8 +50,9 @@ export function resolveEmbedWorker(): string | null {
 }
 
 export class WorkerEmbeddingProvider implements EmbeddingProvider {
-  readonly name = "worker";
-  readonly version = "1";
+  // The model in the worker, reported by its `ready` message; until then, the configured one.
+  name: string;
+  version = "1";
   readonly dim = VECTOR_DIM;
 
   private readonly worker: Worker;
@@ -65,9 +66,14 @@ export class WorkerEmbeddingProvider implements EmbeddingProvider {
       ...(settings === undefined ? {} : { workerData: settings }),
     });
     this.worker.unref();
+    this.name = settings?.model ?? "worker";
 
     this.worker.on("message", (reply: WorkerReply) => {
-      if ("ready" in reply) return;
+      if ("ready" in reply) {
+        this.name = reply.name;
+        this.version = reply.version;
+        return;
+      }
 
       const waiting = this.pending.get(reply.id);
 

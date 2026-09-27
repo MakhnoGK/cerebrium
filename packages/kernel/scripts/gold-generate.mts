@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { createHash } from "node:crypto";
 import { appendGold, lexicalOverlap, readGoldFile, type GoldEntry } from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
 import type Database from "better-sqlite3";
@@ -34,6 +35,9 @@ gold-generate — manufacture labelled queries from the store's own sections.
                   entries are read first, so an interrupted run resumes where it stopped.
   --per-section N Questions to ask per section (default 3).
   --limit N       Stop after N sections (default all).
+  --sample N      Only these N sections of the eligible set, spread over the whole store
+                  rather than its oldest nodes. The pick is a stable hash order, so a
+                  re-run with the same N resumes the same sample.
   --project P     Only nodes of this project.
   --min-chars N   Skip sections shorter than this (default 200) — a two-line section
                   yields questions no ranking can distinguish.
@@ -99,6 +103,16 @@ function loadSections(db: Database.Database, project: string | undefined): Secti
   return rows;
 }
 
+function sampleSections(sections: Section[], size: number): Section[] {
+  const rank = (s: Section) => createHash("sha256").update(`${s.node}|${s.heading}`).digest("hex");
+
+  return sections
+    .map((s) => ({ s, key: rank(s) }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .slice(0, size)
+    .map(({ s }) => s);
+}
+
 function prompt(section: Section, perSection: number): string {
   return (
     `NOTE: ${section.title}\n` +
@@ -142,7 +156,9 @@ async function main(): Promise<void> {
     ),
   });
   const db = container.resolve<Database.Database>(DB_TOKEN);
-  const sections = loadSections(db, project).filter((s) => s.text.length >= minChars);
+  const eligible = loadSections(db, project).filter((s) => s.text.length >= minChars);
+  const sample = num(argv, "--sample", Infinity);
+  const sections = Number.isFinite(sample) ? sampleSections(eligible, sample) : eligible;
   const done = new Set(
     readGoldFile(out)
       .entries.filter((e) => e.source?.node)
@@ -154,7 +170,7 @@ async function main(): Promise<void> {
 
   console.log(`store: ${store} (read-only)`);
   console.log(
-    `sections: ${String(sections.length)} eligible, ${String(done.size)} already generated, ${String(pending.length)} to do`,
+    `sections: ${String(eligible.length)} eligible, ${String(sections.length)} selected, ${String(done.size)} already generated, ${String(pending.length)} to do`,
   );
 
   if (argv.includes("--dry-run") || !pending.length) {

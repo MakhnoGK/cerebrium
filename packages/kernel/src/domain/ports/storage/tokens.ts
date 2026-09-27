@@ -11,6 +11,7 @@ import { REVIEWS_REPO_TOKEN } from "@/domain/ports/storage/reviews";
 import { SEARCH_REPO_TOKEN } from "@/domain/ports/storage/search";
 import { SESSIONS_REPO_TOKEN } from "@/domain/ports/storage/sessions";
 import { STATS_REPO_TOKEN } from "@/domain/ports/storage/stats";
+import { STORE_TOKEN } from "@/domain/ports/storage/store";
 
 // Every storage port a backend has to bind.
 export const STORAGE_TOKENS = {
@@ -27,4 +28,5 @@ export const STORAGE_TOKENS = {
   searchRepo: SEARCH_REPO_TOKEN,
   sessionsRepo: SESSIONS_REPO_TOKEN,
   statsRepo: STATS_REPO_TOKEN,
+  store: STORE_TOKEN,
 } as const;

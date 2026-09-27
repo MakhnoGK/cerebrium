@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { describe, expect, it } from "vitest";
 import { JobKind, JobState } from "@cerebrium/contracts/vocab";
 import { newId } from "@/core/ids";

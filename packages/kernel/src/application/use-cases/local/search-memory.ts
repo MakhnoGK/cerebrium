@@ -38,7 +38,7 @@ import {
   type SearchQuery,
   type SearchResult,
 } from "@/application/use-cases/contracts";
-import { toFtsMatch } from "@/core/fts";
+import { parseTextQuery, type TextQuery } from "@/core/fts";
 import { RetrievalConfig } from "@/infrastructure/config";
 
 @useCase(SEARCH_MEMORY)
@@ -57,9 +57,9 @@ export class LocalSearchMemory implements SearchMemory {
     const history = args.history ?? false;
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : this.retrieval.symbolWeight;
-    const match = toFtsMatch(args.query);
+    const text = parseTextQuery(args.query);
 
-    if (!match) {
+    if (!text) {
       return {
         results: [],
         total_matches: 0,
@@ -69,10 +69,10 @@ export class LocalSearchMemory implements SearchMemory {
     }
 
     if (mode === "text") {
-      return await this.textSearch(args, match, history, penalty);
+      return await this.textSearch(args, text, history, penalty);
     }
 
-    const { ftsRows, ftsTotal, ftsChunks } = await this.textCandidates(args, match, history, mode);
+    const { ftsRows, ftsTotal, ftsChunks } = await this.textCandidates(args, text, history, mode);
     const vecRows = await this.vectorCandidates(args, history);
 
     const entries = fuse({
@@ -161,7 +161,7 @@ export class LocalSearchMemory implements SearchMemory {
 
   private async textCandidates(
     args: SearchQuery,
-    match: string,
+    text: TextQuery,
     history: boolean,
     mode: string,
   ): Promise<{
@@ -174,7 +174,7 @@ export class LocalSearchMemory implements SearchMemory {
     }
 
     const { rows, total } = await this.searchRepo.search({
-      match,
+      text,
       project: args.project,
       kinds: args.kinds,
       types: args.types,
@@ -190,7 +190,7 @@ export class LocalSearchMemory implements SearchMemory {
       ftsTotal: total,
       ftsChunks: await this.searchRepo.bestFtsChunksFor(
         ftsRows.map((r) => r.id),
-        match,
+        text,
       ),
     };
   }
@@ -217,16 +217,16 @@ export class LocalSearchMemory implements SearchMemory {
     }
   }
 
-  // Phase-1 text-only path, byte-compatible: bm25 normalized by the best match × the
+  // Phase-1 text-only path, byte-compatible: the text rank normalized by the best match × the
   // memory-kind factor. No RRF, no vectors, no graph, no context_notes.
   private async textSearch(
     args: SearchQuery,
-    match: string,
+    text: TextQuery,
     history: boolean,
     penalty: number,
   ): Promise<SearchOutcome> {
     const { rows, total } = await this.searchRepo.search({
-      match,
+      text,
       project: args.project,
       kinds: args.kinds,
       types: args.types,
@@ -237,11 +237,11 @@ export class LocalSearchMemory implements SearchMemory {
     });
 
     const now = Date.parse(this.clock.now());
-    const best = Math.min(...rows.map((r) => r.bm25));
+    const best = Math.min(...rows.map((r) => r.text_rank));
 
     const ftsChunks = await this.searchRepo.bestFtsChunksFor(
       rows.map((r) => r.id),
-      match,
+      text,
     );
 
     const trust = await this.trust.factors(rows.map((r) => r.id));
@@ -249,7 +249,7 @@ export class LocalSearchMemory implements SearchMemory {
     const ranked = rows
       .filter((row) => !isRevoked(trust.get(row.id)))
       .map((row) => {
-        const normalized = best < 0 ? row.bm25 / best : 1;
+        const normalized = best < 0 ? row.text_rank / best : 1;
         const chunk = ftsChunks.get(row.id);
         const envelope: SearchResult = toEnvelope(row);
 

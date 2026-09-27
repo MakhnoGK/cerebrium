@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { EdgeType } from "@cerebrium/contracts/vocab";

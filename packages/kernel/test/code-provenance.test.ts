@@ -1,3 +1,4 @@
+// sqlite-only: needs the code index
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

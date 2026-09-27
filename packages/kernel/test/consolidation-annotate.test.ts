@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,7 +13,7 @@ import type {
 import { type SearchRepo } from "@/domain/ports/storage";
 import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
-import { toFtsMatch } from "@/core/fts";
+import { parseTextQuery } from "@/core/fts";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
@@ -59,10 +60,10 @@ async function writeFact(s: string): Promise<string> {
 // Direct FTS probe: does a text search for `term` return `id`? Proves the annotation
 // reached node_fts.content without any vector/embedding involvement.
 async function ftsFinds(search: SearchRepo, term: string, id: string): Promise<boolean> {
-  const match = toFtsMatch(term);
-  if (!match) return false;
+  const text = parseTextQuery(term);
+  if (!text) return false;
   return (
-    await search.search({ match, kinds: [MemoryKind.SEMANTIC], history: false, cap: 10 })
+    await search.search({ text, kinds: [MemoryKind.SEMANTIC], history: false, cap: 10 })
   ).rows.some((r) => r.id === id);
 }
 

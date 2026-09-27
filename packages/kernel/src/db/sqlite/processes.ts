@@ -7,20 +7,21 @@ import { BaseRepo } from "@/db/sqlite/base";
 // callers probe instead (see ProcessRegistryService).
 @injectable()
 export class SqliteProcessesRepo extends BaseRepo implements ProcessesRepo {
-  // A pid is unique but reusable, so publishing claims it: any row left by whatever held
-  // this pid before is replaced rather than accumulating beside the live one.
+  // A pid is unique on its host but reusable, so publishing claims it: any row left by
+  // whatever held this pid there before is replaced rather than accumulating beside it.
   async publish(row: Omit<ProcessRow, "model_state" | "model_ms" | "model_error">): Promise<void> {
     this.tx(() => {
-      this.db.prepare("DELETE FROM processes WHERE pid = ?").run(row.pid);
+      this.db.prepare("DELETE FROM processes WHERE host = ? AND pid = ?").run(row.host, row.pid);
       this.db
         .prepare(
           `INSERT INTO processes
-             (id, role, pid, started_at, node_version, db_path, config_file, config_state, config_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, role, host, pid, started_at, node_version, db_path, config_file, config_state, config_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           row.id,
           row.role,
+          row.host,
           row.pid,
           row.started_at,
           row.node_version,

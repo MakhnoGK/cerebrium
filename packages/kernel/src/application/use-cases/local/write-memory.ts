@@ -23,7 +23,7 @@ import {
   type WriteMemoryResult,
 } from "@/application/use-cases/contracts";
 import { chunkContent } from "@/core/chunk";
-import { toFtsMatch } from "@/core/fts";
+import { parseTextQuery } from "@/core/fts";
 import {
   ConsolidationPostureConfig,
   ConsolidationThresholdsConfig,
@@ -138,14 +138,14 @@ export class LocalWriteMemory implements WriteMemory {
       if (!scored.length) {
         threshold = this.retrieval.lexicalDedupThreshold;
 
-        const match = toFtsMatch(probe);
+        const text = parseTextQuery(probe);
 
-        if (match) {
+        if (text) {
           const probeTokens = tokenSet(probe);
 
           scored = (
             await this.search.search({
-              match,
+              text,
               project: args.project ?? undefined,
               kinds: ["semantic"],
               history: false,

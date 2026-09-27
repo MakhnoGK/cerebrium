@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { createRequire } from "node:module";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";

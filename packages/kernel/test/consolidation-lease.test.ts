@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConsolidationKind, MemoryKind } from "@cerebrium/contracts/vocab";

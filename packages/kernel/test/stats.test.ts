@@ -1,3 +1,4 @@
+// sqlite-only: reads or swaps the SQLite handle directly
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -229,7 +230,7 @@ describe("StatsTool observability channels", () => {
     // Given
     setup();
     container.register(PROCESS_PROBE_TOKEN, {
-      useValue: { self: () => 700, alive: () => true },
+      useValue: { self: () => 700, alive: () => true, host: () => "laptop" },
     });
     container.register(CONFIG_FILE_TOKEN, { useFactory: () => null });
     await container.resolve(ProcessRegistryService).publish("server");

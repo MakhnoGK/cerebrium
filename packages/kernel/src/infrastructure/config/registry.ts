@@ -1,6 +1,8 @@
 import { injectable, injectAll } from "tsyringe";
 import { CONFIG_SECTION_TOKEN, sectionMeta, type FieldProvenance } from "@/domain/ports/config";
 
+export const REDACTED = "<redacted>";
+
 export interface EffectiveConfig {
   values: Record<string, Record<string, unknown>>;
   provenance: FieldProvenance[];
@@ -19,8 +21,13 @@ export class ConfigRegistry {
 
     for (const section of this.sections) {
       const meta = sectionMeta(section);
+      const shown: Record<string, unknown> = { ...section };
 
-      values[meta.path] = { ...section };
+      for (const key of meta.secrets) {
+        if (shown[key] != null) shown[key] = REDACTED;
+      }
+
+      values[meta.path] = shown;
       provenance.push(...meta.provenance);
     }
 

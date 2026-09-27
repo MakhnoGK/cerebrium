@@ -11,6 +11,8 @@ import {
   ConsolidationRecommendation,
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { NODES_REPO_TOKEN } from "@/domain/ports/storage";
+import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import { DB_TOKEN } from "@/db/sqlite/base";
 import { openDatabase } from "@/db/sqlite/database";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
@@ -18,14 +20,17 @@ import { Server } from "@/presentation/mcp/server";
 import { sessionIdDescription } from "@/presentation/mcp/tools/contracts";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
+import { freshStore } from "@test/helpers";
+import { TEST_BACKEND } from "@test/pg";
 
-// Every test gets its own MCP client backed by a fresh in-memory DB, so ordering and
-// cross-test state never leak. A child DI container re-binds DB_TOKEN, and the Server
+// Every test gets its own MCP client backed by a fresh store, so ordering and cross-test
+// state never leak. A child DI container re-binds the store, and the Server
 // (with all seventeen tools) is resolved from a pipelined scope of it — the same way a
 // host with no daemon serves them.
 async function connect(): Promise<Client> {
   const scope = container.createChildContainer();
-  scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+  freshStore(scope);
+  scope.register(USE_RECORDER_TOKEN, { useToken: NODES_REPO_TOKEN });
   scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
   scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
 
@@ -171,26 +176,29 @@ describe("session_start tool", () => {
     expect(res.hints.length).toBeGreaterThan(0);
   });
 
-  it("should attribute the session to the client named in the initialize handshake", async () => {
-    const scope = container.createChildContainer();
-    const db = openDatabase(":memory:");
-    scope.register(DB_TOKEN, { useValue: db });
-    scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
-    scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
+  it.skipIf(TEST_BACKEND === "postgres")(
+    "should attribute the session to the client named in the initialize handshake",
+    async () => {
+      const scope = container.createChildContainer();
+      const db = openDatabase(":memory:");
+      scope.register(DB_TOKEN, { useValue: db });
+      scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
+      scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
 
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await scope.resolve(Server).connect(serverTransport);
-    const client = new Client({ name: "codex-cli", version: "4.5.6" });
-    await client.connect(clientTransport);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await scope.resolve(Server).connect(serverTransport);
+      const client = new Client({ name: "codex-cli", version: "4.5.6" });
+      await client.connect(clientTransport);
 
-    const { session_id } = payload<{ session_id: string }>(
-      await client.callTool({ name: "session_start", arguments: {} }),
-    );
+      const { session_id } = payload<{ session_id: string }>(
+        await client.callTool({ name: "session_start", arguments: {} }),
+      );
 
-    expect(
-      db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
-    ).toStrictEqual({ client: "codex-cli", client_version: "4.5.6" });
-  });
+      expect(
+        db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
+      ).toStrictEqual({ client: "codex-cli", client_version: "4.5.6" });
+    },
+  );
 
   it("should scope the working set to the project when a project is given", async () => {
     const client = await connect();
@@ -772,7 +780,21 @@ describe("stats tool", () => {
   });
 });
 
-describe("code_index tool", () => {
+describe.runIf(TEST_BACKEND === "postgres")("code tools on the postgres backend", () => {
+  it("should refuse code_index with a reason rather than index nothing", async () => {
+    const client = await connect();
+    const sid = await startSession(client);
+
+    const res = asError(
+      await client.callTool({ name: "code_index", arguments: { session_id: sid, path: FIXTURE } }),
+    );
+
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("not available on the postgres backend");
+  });
+});
+
+describe.skipIf(TEST_BACKEND === "postgres")("code_index tool", () => {
   it("should return a compact summary when indexing an explicit path", async () => {
     const client = await connect();
     const sid = await startSession(client);
@@ -800,7 +822,7 @@ describe("code_index tool", () => {
   });
 });
 
-describe("code_lookup tool", () => {
+describe.skipIf(TEST_BACKEND === "postgres")("code_lookup tool", () => {
   async function indexed(client: Client): Promise<string> {
     const sid = await startSession(client);
     await client.callTool({ name: "code_index", arguments: { session_id: sid, path: FIXTURE } });
