@@ -38,14 +38,46 @@ export const RESULT_SCHEMA = {
   required: ["recommendation", "reason", "title", "summary", "body"],
 } as const;
 
-// The user message for a task: the cluster's records, labeled and ordered.
+// Total characters of record content one cluster prompt may carry.
+export const CLUSTER_CHARS = 12_000;
+
+const TRUNCATED = "\n…[truncated]";
+
+function shares(lengths: number[], total: number): number[] {
+  const out = new Array<number>(lengths.length).fill(0);
+  const shortestFirst = lengths.map((_, i) => i).sort((a, b) => lengths[a]! - lengths[b]!);
+  let left = total;
+  let remaining = lengths.length;
+
+  for (const i of shortestFirst) {
+    const take = Math.min(lengths[i]!, Math.floor(left / remaining));
+    out[i] = take;
+    left -= take;
+    remaining--;
+  }
+
+  return out;
+}
+
+function clip(content: string, budget: number): string {
+  return content.length <= budget ? content : content.slice(0, budget).trimEnd() + TRUNCATED;
+}
+
+// The user message for a task: the cluster's records, labeled, ordered, and clipped to
+// the cluster budget.
 export function taskPrompt(task: ConsolidationTask): string {
   const verb =
     task.kind === ConsolidationKind.MERGE
       ? "Merge these near-duplicate records"
       : "Consolidate these records";
   const scope = task.project ? ` (project: ${task.project})` : "";
-  const records = task.inputs.map((r, i) => `[${i + 1}] ${r.title}\n${r.content}`).join("\n\n");
+  const budgets = shares(
+    task.inputs.map((r) => r.content.length),
+    CLUSTER_CHARS,
+  );
+  const records = task.inputs
+    .map((r, i) => `[${i + 1}] ${r.title}\n${clip(r.content, budgets[i]!)}`)
+    .join("\n\n");
 
   return `${verb}${scope}:\n\n${records}`;
 }

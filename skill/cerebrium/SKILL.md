@@ -121,7 +121,7 @@ BAD:  cram both into one node titled "auth stuff".
 
 ## Code
 
-The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP/Rust) into `symbol` mirror
+The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP/Rust/C/C++/Lua) into `symbol` mirror
 nodes (functions, methods, classes, interfaces, types, enums, traits, consts,
 modules) with code edges (`defines`/`imports`/`calls`). Symbols are **mirrors**: derived from source, not
 authored — never `write`/`update` them by hand (both are rejected). They are

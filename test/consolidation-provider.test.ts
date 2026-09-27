@@ -8,6 +8,7 @@ import { CommandConsolidator } from "@/consolidation/command";
 import { HttpConsolidator, type FetchFn } from "@/consolidation/http";
 import {
   annotationFtsText,
+  CLUSTER_CHARS,
   parseAnnotate,
   parseReconcile,
   parseResult,
@@ -225,6 +226,65 @@ describe("Task prompt building (taskPrompt)", () => {
     expect(p).toContain("[1] First");
     expect(p).toContain("[2] Second");
     expect(p).toContain("splitting it made it fast");
+  });
+
+  it("should keep every record whole when the cluster fits the budget", () => {
+    // Given
+    const task: ConsolidationTask = {
+      ...TASK,
+      inputs: [
+        { id: "a", title: "First", content: "x".repeat(CLUSTER_CHARS / 2) },
+        { id: "b", title: "Second", content: "y".repeat(CLUSTER_CHARS / 2) },
+      ],
+    };
+
+    // When
+    const p = taskPrompt(task);
+
+    // Then
+    expect(p).not.toContain("truncated");
+    expect(p).toContain("x".repeat(CLUSTER_CHARS / 2));
+  });
+
+  it("should clip the cluster to the budget when the records overflow it", () => {
+    // Given
+    const task: ConsolidationTask = {
+      ...TASK,
+      inputs: Array.from({ length: 9 }, (_, i) => ({
+        id: String(i),
+        title: `Note ${i}`,
+        content: "z".repeat(4_000),
+      })),
+    };
+
+    // When
+    const p = taskPrompt(task);
+
+    // Then
+    const content = (p.match(/z+/g) ?? []).reduce((n, run) => n + run.length, 0);
+    expect(content).toBeLessThanOrEqual(CLUSTER_CHARS);
+    expect(p).toContain("truncated");
+    for (let i = 0; i < 9; i++) expect(p).toContain(`[${i + 1}] Note ${i}`);
+  });
+
+  it("should spend a short record's unused allowance on the long ones when sharing the budget", () => {
+    // Given
+    const task: ConsolidationTask = {
+      ...TASK,
+      inputs: [
+        { id: "a", title: "Tiny", content: "short" },
+        { id: "b", title: "Huge", content: "w".repeat(CLUSTER_CHARS * 2) },
+      ],
+    };
+
+    // When
+    const p = taskPrompt(task);
+
+    // Then
+    const longest = (p.match(/w+/g) ?? [""])[0].length;
+    expect(p).toContain("short");
+    expect(longest).toBeGreaterThan(CLUSTER_CHARS / 2);
+    expect(longest).toBeLessThanOrEqual(CLUSTER_CHARS);
   });
 });
 

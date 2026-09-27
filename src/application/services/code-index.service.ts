@@ -142,7 +142,7 @@ export class CodeIndexService {
       }
 
       const source = buf.toString("utf8");
-      const tree = await parse(c.wasm, source);
+      const tree = await parse(c.wasm, source, c.vendored);
       const extract = extractFile(target.name, c.rel, c.lang, source, tree.rootNode);
       tree.delete(); // free WASM heap; extractFile has copied out everything it needs
 

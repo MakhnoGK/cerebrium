@@ -64,6 +64,7 @@ interface Candidate {
   abs: string;
   lang: string;
   wasm: string;
+  vendored: boolean;
 }
 
 // Walk `root`, yielding indexable files (known grammar, not ignored/binary/oversized).
@@ -96,7 +97,13 @@ export function walk(root: string): Candidate[] {
         if (!def) continue; // no grammar -> not a code file
         if (SKIP_FILES.some((re) => re.test(entry.name))) continue;
         if (localMatchers.some((m) => m(childRel, false))) continue;
-        out.push({ rel: childRel, abs: join(dir, entry.name), lang: def.lang, wasm: def.wasm });
+        out.push({
+          rel: childRel,
+          abs: join(dir, entry.name),
+          lang: def.lang,
+          wasm: def.wasm,
+          vendored: def.vendored ?? false,
+        });
       }
     }
   };
@@ -168,6 +175,11 @@ export function resolveImports(
 // same-file/imported resolution).
 const NAMESPACED_IMPORTS = new Set(["php", "rust"]);
 
+// C/C++ `#include` and Lua `require` pull a whole file's names into scope with no
+// binding list, so a callee may live in any of them — search those files by name
+// rather than falling back to the whole repo.
+const MODULE_SCOPE_IMPORTS = new Set(["c", "cpp", "lua"]);
+
 export function resolveCalls(
   r: Resolver,
   path: string,
@@ -175,10 +187,13 @@ export function resolveCalls(
   ex: FileExtract,
 ): { src: string; dst: string }[] {
   const importByName = new Map<string, string[]>();
+  const moduleScopePaths: string[] = [];
 
   for (const imp of ex.imports) {
     if (!imp.namespace && !imp.byName) {
       importByName.set(imp.name, imp.candidatePaths);
+    } else if (imp.namespace && MODULE_SCOPE_IMPORTS.has(lang)) {
+      moduleScopePaths.push(...imp.candidatePaths);
     }
   }
 
@@ -193,7 +208,7 @@ export function resolveCalls(
     }
 
     if (!dst) {
-      for (const cp of importByName.get(call.callee) ?? []) {
+      for (const cp of [...(importByName.get(call.callee) ?? []), ...moduleScopePaths]) {
         dst = r.byPathName.get(pathNameKey(cp, call.callee));
         if (dst) break;
       }
