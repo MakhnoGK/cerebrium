@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import type { DependencyContainer } from "tsyringe";
+import { parseHostPort } from "@cerebrium/contracts/rpc";
 import { JobKind } from "@cerebrium/contracts/vocab";
 import { CallPipeline } from "@cerebrium/kernel/application/call-pipeline";
 import {
   ActivityMonitor,
   ModelWarmupService,
   PrincipalQuotaService,
+  PrincipalTokenService,
   ProcessRegistryService,
   SubscriptionService,
   type WarmupOutcome,
@@ -46,6 +49,7 @@ import {
 } from "@cerebrium/kernel/infrastructure/config";
 import {
   createDaemonMethods,
+  networkMethods,
   RpcServer,
   surfaceMethods,
   type StoreHealth,
@@ -290,6 +294,37 @@ export async function runDaemon(
 
 const STORE_PING_MS = 3_000;
 
+async function listenOnNetwork(
+  rpc: RpcServer,
+  address: string,
+  container: DependencyContainer,
+): Promise<void> {
+  const store = container.resolve<Store>(STORE_TOKEN);
+
+  if (!store.capabilities.principalTokens) {
+    process.stderr.write(
+      `rpc: MEMORY_RPC_LISTEN=${address} is ignored — the ${store.backend} store has no ` +
+        "principal tokens, so nothing is served on the network\n",
+    );
+
+    return;
+  }
+
+  const tokens = container.resolve(PrincipalTokenService);
+
+  try {
+    const { host, port } = parseHostPort(address);
+    const bound = await rpc.listenTcp(host, port, {
+      authenticate: (token) => tokens.authenticate(token),
+      methods: networkMethods(),
+    });
+
+    process.stderr.write(`rpc: listening on tcp ${bound.host}:${String(bound.port)}\n`);
+  } catch (err) {
+    process.stderr.write(`rpc tcp unavailable on ${address}: ${(err as Error).message}\n`);
+  }
+}
+
 async function storeHealth(store: Store): Promise<StoreHealth> {
   let timer: NodeJS.Timeout | undefined;
 
@@ -517,6 +552,10 @@ async function main(): Promise<void> {
     // A daemon that cannot be asked anything still drains the queue, which is the job it
     // had before the socket existed.
     process.stderr.write(`rpc unavailable: ${(err as Error).message}\n`);
+  }
+
+  if (daemonConfig.listen !== null) {
+    await listenOnNetwork(rpc, daemonConfig.listen, container);
   }
 
   // Before the loop, not inside its first tick: this is the process that exists to hold

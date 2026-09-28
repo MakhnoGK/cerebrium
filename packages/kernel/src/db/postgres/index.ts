@@ -8,6 +8,7 @@ import {
   EMBEDDING_QUEUE_REPO_TOKEN,
   JOBS_REPO_TOKEN,
   NODES_REPO_TOKEN,
+  PRINCIPAL_TOKENS_REPO_TOKEN,
   PRINCIPALS_REPO_TOKEN,
   PROCESSES_REPO_TOKEN,
   REVIEWS_REPO_TOKEN,
@@ -24,6 +25,7 @@ import { PgEdgesRepo } from "@/db/postgres/edges";
 import { PgEmbeddingQueueRepo } from "@/db/postgres/embedding-queue";
 import { PgJobsRepo } from "@/db/postgres/jobs";
 import { PgNodesRepo } from "@/db/postgres/nodes";
+import { PgPrincipalTokensRepo } from "@/db/postgres/principal-tokens";
 import { PgPrincipalsRepo } from "@/db/postgres/principals";
 import { PgProcessesRepo } from "@/db/postgres/processes";
 import { PgReviewsRepo } from "@/db/postgres/reviews";
@@ -69,6 +71,7 @@ export function registerPostgresRepositories(
   c.register(JOBS_REPO_TOKEN, { useClass: PgJobsRepo });
   c.register(NODES_REPO_TOKEN, { useClass: PgNodesRepo });
   c.register(PRINCIPALS_REPO_TOKEN, { useClass: PgPrincipalsRepo });
+  c.register(PRINCIPAL_TOKENS_REPO_TOKEN, { useClass: PgPrincipalTokensRepo });
   c.register(PROCESSES_REPO_TOKEN, { useClass: PgProcessesRepo });
   c.register(REVIEWS_REPO_TOKEN, { useClass: PgReviewsRepo });
   c.register(SEARCH_REPO_TOKEN, { useClass: PgSearchRepo });

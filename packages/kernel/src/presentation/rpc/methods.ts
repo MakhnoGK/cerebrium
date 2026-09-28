@@ -62,9 +62,18 @@ export function surfaceMethods(
 }
 
 function writerOf(meta: RpcMeta): Writer {
-  return meta.client == null && meta.version == null
-    ? UNKNOWN_WRITER
-    : { client: meta.client ?? null, version: meta.version ?? null };
+  const writer =
+    meta.client == null && meta.version == null
+      ? UNKNOWN_WRITER
+      : { client: meta.client ?? null, version: meta.version ?? null };
+
+  return meta.principal == null ? writer : { ...writer, principal: meta.principal };
+}
+
+// What a network connection may call: the handshake, the probe and the call surface. The
+// daemon methods (the job queue, `status`) are trusted by the unix socket's mode alone.
+export function networkMethods(): ReadonlySet<string> {
+  return new Set(["initialize", "health", ...Object.keys(CALL_SURFACE)]);
 }
 
 // The runner speaks this over a socket, so its arguments are untrusted shapes rather than
@@ -91,7 +100,12 @@ export function createDaemonMethods(
     // The version handshake. A client calls this before anything else and refuses a
     // protocol it does not speak, so a rebuild against a still-running resident daemon
     // reports the mismatch instead of failing later as an unknown method.
-    initialize: () => Promise.resolve({ protocol: PROTOCOL_VERSION, pid: identity.pid }),
+    initialize: (_params: Record<string, unknown>, meta: RpcMeta) =>
+      Promise.resolve({
+        protocol: PROTOCOL_VERSION,
+        pid: identity.pid,
+        ...(meta.principal == null ? {} : { principal: meta.principal }),
+      }),
 
     // The container probe. Answered from memory apart from one trivial query to the store,
     // so it costs nothing on a large one.

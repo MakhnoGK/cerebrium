@@ -104,10 +104,20 @@ export class DaemonConfig extends SectionOf("daemon", {
   idleExitMs: int(300_000).positive().env("MEMORY_DAEMON_IDLE_MS"),
   resident: bool(false).env("MEMORY_DAEMON_RESIDENT"),
   socketPath: str(home("daemon.sock")).env("MEMORY_DAEMON_SOCKET"),
+  // `host:port` of the network listener, served beside the socket. Postgres only.
+  listen: nullableStr(null).env("MEMORY_RPC_LISTEN"),
   readWorkers: int(3).positive().env("MEMORY_DAEMON_READ_WORKERS"),
   // How long since the last client call before background work may run. Consolidation
   // shares this process with the reads, so it yields to them.
   quietMs: int(2_000).nonNegative().env("MEMORY_DAEMON_QUIET_MS"),
+}) {}
+
+// A kernel on another machine. When `url` is set a host talks only to it: no local
+// daemon, no local fallback.
+@configSection()
+export class KernelConfig extends SectionOf("kernel", {
+  url: nullableStr(null).env("MEMORY_KERNEL_URL"),
+  tokenFile: nullableStr(null).env("MEMORY_KERNEL_TOKEN_FILE"),
 }) {}
 
 export interface CodeRoot {

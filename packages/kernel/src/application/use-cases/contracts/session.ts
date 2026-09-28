@@ -34,6 +34,8 @@ export const START_SESSION = useCaseToken<StartSessionArgs, StartSessionResult>(
 
 export interface TouchSessionArgs {
   session_id: string;
+  // A token-pinned principal may only use its own sessions.
+  principal?: string;
 }
 
 // The guard every tool call passes through: it fails an unknown session id and stamps a

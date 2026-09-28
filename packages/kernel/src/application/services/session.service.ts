@@ -27,10 +27,16 @@ export class SessionService {
     return principal_id;
   }
 
-  async requireSession(id: string, ts: string): Promise<void> {
+  async requireSession(id: string, ts: string, principal?: string): Promise<void> {
     if (!(await this.sessionRepo.touchExisting(id, ts))) {
       throw new Error(
         `Unknown session_id ${id}. Call session_start and copy its returned session_id verbatim.`,
+      );
+    }
+
+    if (principal !== undefined && (await this.sessionRepo.principalOf(id)) !== principal) {
+      throw new Error(
+        `session_id ${id} belongs to another principal. Call session_start for a session of your own.`,
       );
     }
   }

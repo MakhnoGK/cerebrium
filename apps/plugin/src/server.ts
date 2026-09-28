@@ -8,13 +8,19 @@ import {
   DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
+  KernelConfig,
 } from "@cerebrium/kernel/infrastructure/config";
 import { Server } from "@cerebrium/kernel/presentation/mcp/server";
 import { isDaemonAlive } from "@cerebrium/kernel/runtime/daemon-pid";
 import { ensureDaemon } from "@cerebrium/kernel/runtime/ensure-daemon";
 import { isMainModule } from "@cerebrium/kernel/runtime/is-main";
-import { chooseKernel, HANDSHAKE_BUDGET_MS } from "@cerebrium/kernel/runtime/kernel-choice";
+import {
+  chooseKernel,
+  explicitKernel,
+  HANDSHAKE_BUDGET_MS,
+} from "@cerebrium/kernel/runtime/kernel-choice";
 import { pipelinedContainer } from "@cerebrium/kernel/runtime/pipelined-kernel";
+import { rpcHandshake } from "@cerebrium/kernel/runtime/rpc-client";
 
 // Talking to the daemon: the host holds no database at all, and the daemon's pipeline is
 // what checks the session and writes the audit row.
@@ -68,6 +74,27 @@ async function main(): Promise<void> {
   // Built local first only to read the resolved socket path; the config tiers are the same
   // either way, and nothing that touches the database has been resolved yet.
   const probe = buildContainer({ role: "server" });
+  const explicit = explicitKernel(probe.resolve(KernelConfig));
+
+  if (explicit !== null) {
+    // Reported, not required: every call names the URL when it cannot reach it.
+    await rpcHandshake({
+      socketPath: explicit.url,
+      token: explicit.token,
+      timeoutMs: HANDSHAKE_BUDGET_MS,
+    })
+      .then((protocol) => {
+        process.stderr.write(`kernel: ${explicit.url} (protocol ${String(protocol)})\n`);
+      })
+      .catch((err: unknown) => {
+        process.stderr.write(`kernel: ${explicit.url} unavailable: ${(err as Error).message}\n`);
+      });
+
+    await serveRemote(buildContainer({ role: "server", kernel: "remote" }));
+
+    return;
+  }
+
   const socketPath = probe.resolve(DaemonConfig).socketPath;
   const dbPath = probe.resolve(DatabaseConfig).path;
   const choice = await chooseKernel(socketPath, HANDSHAKE_BUDGET_MS, () => isDaemonAlive(dbPath));

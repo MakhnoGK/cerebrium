@@ -6,7 +6,7 @@ import { DB_TOKEN } from "@/db/sqlite/base";
 @injectable()
 export class SqliteStore implements Store {
   readonly backend = "sqlite" as const;
-  readonly capabilities = { codeIndex: true };
+  readonly capabilities = { codeIndex: true, principalTokens: false };
 
   constructor(@inject(DB_TOKEN) private readonly db: Database.Database) {}
 

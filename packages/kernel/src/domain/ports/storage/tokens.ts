@@ -5,6 +5,7 @@ import { EDGES_REPO_TOKEN } from "@/domain/ports/storage/edges";
 import { EMBEDDING_QUEUE_REPO_TOKEN } from "@/domain/ports/storage/embedding-queue";
 import { JOBS_REPO_TOKEN } from "@/domain/ports/storage/jobs";
 import { NODES_REPO_TOKEN } from "@/domain/ports/storage/nodes";
+import { PRINCIPAL_TOKENS_REPO_TOKEN } from "@/domain/ports/storage/principal-tokens";
 import { PRINCIPALS_REPO_TOKEN } from "@/domain/ports/storage/principals";
 import { PROCESSES_REPO_TOKEN } from "@/domain/ports/storage/processes";
 import { REVIEWS_REPO_TOKEN } from "@/domain/ports/storage/reviews";
@@ -23,6 +24,7 @@ export const STORAGE_TOKENS = {
   jobsRepo: JOBS_REPO_TOKEN,
   nodesRepo: NODES_REPO_TOKEN,
   principalsRepo: PRINCIPALS_REPO_TOKEN,
+  principalTokensRepo: PRINCIPAL_TOKENS_REPO_TOKEN,
   processesRepo: PROCESSES_REPO_TOKEN,
   reviewsRepo: REVIEWS_REPO_TOKEN,
   searchRepo: SEARCH_REPO_TOKEN,

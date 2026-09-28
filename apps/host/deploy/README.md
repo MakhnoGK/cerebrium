@@ -39,6 +39,11 @@ by `.github/workflows/release.yml`:
 - The container is healthy when `dist/healthcheck.js` gets a `health` answer on the daemon
   socket with the model loaded and the store answering a query. The first start downloads the embedding model into the
   volume, which the 10-minute start period covers.
+- The daemon also serves the kernel on TCP `7433` (`MEMORY_RPC_LISTEN`), published on the
+  host's tailnet address only (`CEREBRIUM_RPC_BIND`, default `100.92.157.103`). There is
+  no TLS: a connection's first frame must be `initialize {token}`, the token decides the
+  principal, and only the call surface plus `initialize`/`health` are served. The job queue
+  and `status` stay on the unix socket.
 - `deploy.sh` keeps three releases: the current one, the one before it, and one more.
 - **Before every deploy** `deploy.sh` dumps the running store (`pg_dump -Fc`) into
   `backups/`. A dump that fails or comes out empty stops the deploy before anything
@@ -102,6 +107,24 @@ docker compose -p cerebrium ps                                  # state and heal
 docker compose -p cerebrium logs -f daemon                      # daemon log
 docker exec cerebrium-daemon-1 node dist/healthcheck.js         # probe by hand
 ```
+
+Tokens for the network listener (one per machine × agent host) are kept as a sha256 in
+Postgres and revoked, never deleted. The value is printed once, so it can go straight to
+the client machine without landing on the host's disk:
+
+```bash
+# on the client machine
+(umask 077 && ssh host /bin/bash -s > ~/.cerebrium/host-token) <<'EOF'
+~/.orbstack/bin/docker exec cerebrium-daemon-1 \
+  node dist/service-cli.js token issue --principal <principal> --label <machine-agent>
+EOF
+# on the host
+docker exec cerebrium-daemon-1 node dist/service-cli.js token list
+docker exec cerebrium-daemon-1 node dist/service-cli.js token revoke <id>
+```
+
+A client uses it with `MEMORY_KERNEL_URL=tcp://100.92.157.103:7433` and
+`MEMORY_KERNEL_TOKEN_FILE=<that file>`. Open connections drop a revoked token within 30 s.
 
 A manual deploy pulls without credentials, so it works only for an image already on the
 host or a public package.

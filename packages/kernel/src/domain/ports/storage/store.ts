@@ -3,6 +3,8 @@ export type StoreBackend = "sqlite" | "postgres";
 export interface StoreCapabilities {
   // The structural code mirror (`symbols`, `code_files`, the code vector pool).
   codeIndex: boolean;
+  // Per-principal tokens, which the network listener authenticates against.
+  principalTokens: boolean;
 }
 
 export const STORE_TOKEN = Symbol("Store");

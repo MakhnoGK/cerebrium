@@ -2,6 +2,7 @@ import { inject, injectable, type DependencyContainer } from "tsyringe";
 import { Posture } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
+import { principalOfWriter } from "@/domain/writer";
 import { auditDetail } from "@/application/audit-detail";
 import { CapabilityDeniedError } from "@/application/errors";
 import {
@@ -83,10 +84,13 @@ export class CallPipeline {
     // Before the call, not after: an unknown session must not be able to write first and
     // be rejected afterwards.
     if (session !== null) {
-      await this.sessions.invoke({ session_id: session });
+      await this.sessions.invoke({
+        session_id: session,
+        ...(writer.principal == null ? {} : { principal: writer.principal }),
+      });
     }
 
-    const principal = this.policy.principalOf(writer.client);
+    const principal = this.policy.principalOf(writer);
 
     try {
       const review = this.authorize(name, principal);
@@ -182,9 +186,13 @@ export class CallPipeline {
 // than accepted from whatever the caller sent, and only the one call that persists it takes
 // it at all.
 function stamped(name: CallName, args: unknown, writer: Writer): unknown {
-  if (name !== "start_session") return args;
+  const plain = typeof args === "object" && args !== null ? args : {};
 
-  return { ...(typeof args === "object" && args !== null ? args : {}), client: writer };
+  if (name === "start_session") return { ...plain, client: writer };
+
+  if (name === "subscribe_events") return { ...plain, principal: principalOfWriter(writer) };
+
+  return args;
 }
 
 function detailOf(

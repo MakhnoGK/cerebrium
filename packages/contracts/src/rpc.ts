@@ -38,6 +38,7 @@ export const RPC_ERROR = {
   methodNotFound: -32601,
   invalidParams: -32602,
   internal: -32603,
+  unauthorized: -32001,
 } as const;
 
 // Who is calling, carried beside `params` rather than inside them. The distinction is the
@@ -47,6 +48,9 @@ export const RPC_ERROR = {
 export interface RpcMeta {
   client?: string | null;
   version?: string | null;
+  // Set by the network listener from the connection's token. `parseRequest` never reads it
+  // off the wire.
+  principal?: string | null;
 }
 
 export interface RpcRequest {
@@ -211,4 +215,33 @@ export function parseInbound(line: string): Inbound | null {
   }
 
   return message.id === undefined ? null : { kind: "response", response: message as RpcResponse };
+}
+
+// Where a kernel is reached: a unix socket path, or `tcp://host:port`.
+export type KernelTarget =
+  { kind: "unix"; path: string } | { kind: "tcp"; host: string; port: number };
+
+export function parseKernelTarget(target: string): KernelTarget {
+  if (!target.startsWith("tcp://")) return { kind: "unix", path: target };
+
+  return { kind: "tcp", ...parseHostPort(target.slice("tcp://".length), target) };
+}
+
+// `host:port`, as MEMORY_RPC_LISTEN takes it. IPv6 hosts are bracketed.
+export function parseHostPort(address: string, shown = address): { host: string; port: number } {
+  let url: URL;
+
+  try {
+    url = new URL(`tcp://${address}`);
+  } catch {
+    throw new Error(`not a host:port address: ${shown}`);
+  }
+
+  const port = Number(url.port);
+
+  if (!url.hostname || !Number.isInteger(port) || port <= 0 || url.pathname.length > 0) {
+    throw new Error(`not a host:port address: ${shown}`);
+  }
+
+  return { host: url.hostname.replace(/^\[|\]$/g, ""), port };
 }

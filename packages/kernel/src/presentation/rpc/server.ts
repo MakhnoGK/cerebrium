@@ -10,6 +10,7 @@ import {
   socketPathProblem,
   successResponse,
   type RpcMeta,
+  type RpcRequest,
 } from "@cerebrium/contracts/rpc";
 import { InvalidArgsError } from "@/presentation/rpc/schemas";
 
@@ -18,6 +19,30 @@ export type RpcMethod = (params: Record<string, unknown>, meta: RpcMeta) => Prom
 // A single request line is bounded so a stuck or hostile writer cannot grow the buffer
 // without limit; the daemon has to stay answerable.
 const MAX_LINE_BYTES = 1_000_000;
+
+// A connection on the network listener is anonymous until its first frame,
+// `initialize {token}`, names a live token. From then on the token's principal is the
+// caller, whatever `meta.client` says.
+export interface NetworkAuth {
+  authenticate(token: string): Promise<{ principal: string } | null>;
+  methods: ReadonlySet<string>;
+}
+
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+const KEEPALIVE_MS = 30_000;
+
+interface NetworkState {
+  auth: NetworkAuth;
+  token: string | null;
+  principal: string | null;
+  pending: Promise<boolean> | null;
+  refused: boolean;
+}
+
+interface ConnectionState {
+  client: string | null;
+  network: NetworkState | null;
+}
 
 export interface RpcServerOptions {
   // Consulted when the socket file already exists: true means another daemon owns it and
@@ -29,10 +54,11 @@ export interface RpcServerOptions {
 
 export class RpcServer {
   private server: Server | null = null;
+  private network: Server | null = null;
   // The identity a connection last called with, so a notification can be routed by
-  // principal. Recorded from `meta` on any request rather than at the handshake, which
-  // carries no identity of its own.
-  private readonly sockets = new Map<Socket, { client: string | null }>();
+  // principal. On the unix socket it is recorded from `meta` on any request; on the
+  // network listener it is the token's principal.
+  private readonly sockets = new Map<Socket, ConnectionState>();
 
   constructor(
     private readonly methods: Record<string, RpcMethod>,
@@ -55,7 +81,7 @@ export class RpcServer {
     }
 
     const server = createServer((socket) => {
-      this.accept(socket);
+      this.accept(socket, null);
     });
 
     this.server = server;
@@ -71,21 +97,53 @@ export class RpcServer {
     });
   }
 
+  // Resolves with the bound address, so a caller that asked for port 0 learns the port.
+  listenTcp(
+    host: string,
+    port: number,
+    auth: NetworkAuth,
+  ): Promise<{ host: string; port: number }> {
+    const server = createServer((socket) => {
+      this.accept(socket, auth);
+    });
+
+    this.network = server;
+
+    return new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        server.removeListener("error", reject);
+
+        const bound = server.address();
+
+        resolve(
+          typeof bound === "object" && bound !== null
+            ? { host: bound.address, port: bound.port }
+            : { host, port },
+        );
+      });
+    });
+  }
+
   async close(): Promise<void> {
     for (const socket of this.sockets.keys()) socket.destroy();
     this.sockets.clear();
 
-    const server = this.server;
-
-    if (server === null) return;
+    const servers = [this.server, this.network].filter((s): s is Server => s !== null);
 
     this.server = null;
+    this.network = null;
 
-    await new Promise<void>((resolve) => {
-      server.close(() => {
-        resolve();
-      });
-    });
+    await Promise.all(
+      servers.map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.close(() => {
+              resolve();
+            });
+          }),
+      ),
+    );
   }
 
   // Speaks to every connection the daemon is holding, without being asked. Deliberately
@@ -115,9 +173,22 @@ export class RpcServer {
     return reached;
   }
 
-  private accept(socket: Socket): void {
-    this.sockets.set(socket, { client: null });
+  private accept(socket: Socket, auth: NetworkAuth | null): void {
+    this.sockets.set(socket, {
+      client: null,
+      network:
+        auth === null
+          ? null
+          : { auth, token: null, principal: null, pending: null, refused: false },
+    });
     socket.setEncoding("utf8");
+
+    if (auth !== null) {
+      socket.setKeepAlive(true, KEEPALIVE_MS);
+      socket.setTimeout(HANDSHAKE_TIMEOUT_MS, () => {
+        socket.destroy();
+      });
+    }
 
     let buffer = "";
 
@@ -163,13 +234,32 @@ export class RpcServer {
 
     const { request } = parsed;
     const identity = this.sockets.get(socket);
+    const id = request.id ?? null;
+    let meta: RpcMeta = request.meta ?? {};
 
-    if (identity && typeof request.meta?.client === "string") {
+    if (identity?.network != null) {
+      const principal = await this.admit(socket, identity.network, request);
+
+      if (principal === null) return;
+
+      identity.client = principal;
+      meta = { ...meta, principal };
+
+      if (!identity.network.auth.methods.has(request.method)) {
+        if (!isNotification(request)) {
+          this.reply(
+            socket,
+            errorResponse(id, RPC_ERROR.methodNotFound, `${request.method} is not served over tcp`),
+          );
+        }
+
+        return;
+      }
+    } else if (identity && typeof request.meta?.client === "string") {
       identity.client = request.meta.client;
     }
 
     const method = this.methods[request.method];
-    const id = request.id ?? null;
 
     if (method === undefined) {
       if (!isNotification(request)) {
@@ -185,7 +275,7 @@ export class RpcServer {
     }
 
     try {
-      const result = await method(request.params ?? {}, request.meta ?? {});
+      const result = await method(request.params ?? {}, meta);
 
       if (!isNotification(request)) this.reply(socket, successResponse(id, result));
     } catch (err) {
@@ -200,6 +290,74 @@ export class RpcServer {
         this.reply(socket, errorResponse(id, code, message, issuesOf(err)));
       }
     }
+  }
+
+  // The principal this request runs as, or null once the connection has been refused.
+  // Frames that arrive while the handshake is in flight wait for its verdict.
+  private async admit(
+    socket: Socket,
+    state: NetworkState,
+    request: RpcRequest,
+  ): Promise<string | null> {
+    if (state.refused) return null;
+
+    if (state.principal === null && state.pending === null) {
+      const token = request.method === "initialize" ? request.params?.token : undefined;
+
+      if (typeof token !== "string" || !token.length) {
+        this.refuse(socket, state, request, "the first frame must be initialize {token}");
+
+        return null;
+      }
+
+      state.pending = this.verify(state, token);
+    }
+
+    if (state.principal === null) {
+      if (!(await state.pending)) {
+        this.refuse(socket, state, request, "invalid or revoked token");
+
+        return null;
+      }
+
+      socket.setTimeout(0);
+
+      return state.principal;
+    }
+
+    if (!(await this.verify(state, state.token!))) {
+      this.refuse(socket, state, request, "the token was revoked");
+
+      return null;
+    }
+
+    return state.principal;
+  }
+
+  private async verify(state: NetworkState, token: string): Promise<boolean> {
+    let found: { principal: string } | null;
+
+    try {
+      found = await state.auth.authenticate(token);
+    } catch (err) {
+      this.options.onError?.(`tcp auth: ${(err as Error).message}`);
+      found = null;
+    }
+
+    if (found === null) return false;
+
+    state.token = token;
+    state.principal = found.principal;
+
+    return true;
+  }
+
+  private refuse(socket: Socket, state: NetworkState, request: RpcRequest, why: string): void {
+    if (state.refused) return;
+
+    state.refused = true;
+    state.principal = null;
+    socket.end(encodeLine(errorResponse(request.id ?? null, RPC_ERROR.unauthorized, why)));
   }
 
   private reply(socket: Socket, response: ReturnType<typeof successResponse>): void {

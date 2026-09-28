@@ -10,6 +10,8 @@ export enum NotificationTopic {
 export interface SubscribeEventsArgs {
   session_id: string;
   topics: NotificationTopic[];
+  // Stamped by the pipeline from the writer, never taken from a caller.
+  principal?: string;
 }
 
 export interface SubscribeEventsResult {
