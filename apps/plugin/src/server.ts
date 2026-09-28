@@ -20,7 +20,7 @@ import {
   HANDSHAKE_BUDGET_MS,
 } from "@cerebrium/kernel/runtime/kernel-choice";
 import { pipelinedContainer } from "@cerebrium/kernel/runtime/pipelined-kernel";
-import { rpcHandshake } from "@cerebrium/kernel/runtime/rpc-client";
+import { serveHost } from "@plugin/src/serve-host";
 
 // Talking to the daemon: the host holds no database at all, and the daemon's pipeline is
 // what checks the session and writes the audit row.
@@ -77,20 +77,7 @@ async function main(): Promise<void> {
   const explicit = explicitKernel(probe.resolve(KernelConfig));
 
   if (explicit !== null) {
-    // Reported, not required: every call names the URL when it cannot reach it.
-    await rpcHandshake({
-      socketPath: explicit.url,
-      token: explicit.token,
-      timeoutMs: HANDSHAKE_BUDGET_MS,
-    })
-      .then((protocol) => {
-        process.stderr.write(`kernel: ${explicit.url} (protocol ${String(protocol)})\n`);
-      })
-      .catch((err: unknown) => {
-        process.stderr.write(`kernel: ${explicit.url} unavailable: ${(err as Error).message}\n`);
-      });
-
-    await serveRemote(buildContainer({ role: "server", kernel: "remote" }));
+    await serveHost(explicit, buildContainer({ role: "server", kernel: "remote" }));
 
     return;
   }

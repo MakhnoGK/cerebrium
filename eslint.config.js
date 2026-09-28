@@ -71,7 +71,7 @@ const restrict = (...patterns) => ({
 const KERNEL = "packages/kernel/src";
 
 export default tseslint.config(
-  { ignores: ["dist", "**/node_modules", ".tmp", "coverage", "**/test/fixtures"] },
+  { ignores: ["**/dist", "**/node_modules", ".tmp", "coverage", "**/test/fixtures"] },
   js.configs.recommended,
   {
     files: ["**/*.ts", "**/*.mts"],

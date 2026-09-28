@@ -21,7 +21,9 @@
     "cerebrium-service": "dist/service-cli.js"
   },
   "scripts": {
-    "build": "tsup && node scripts/copy-assets.mjs",
+    "build": "npm run build:bins && npm run build:plugin",
+    "build:bins": "tsup && node scripts/copy-assets.mjs",
+    "build:plugin": "tsup --config apps/plugin/tsup.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

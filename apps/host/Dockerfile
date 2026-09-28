@@ -22,7 +22,7 @@ COPY packages/contracts/src packages/contracts/src
 COPY packages/kernel/src packages/kernel/src
 COPY apps/host/src apps/host/src
 COPY apps/plugin/src apps/plugin/src
-RUN npm run build && npm prune --omit=dev
+RUN npm run build:bins && npm prune --omit=dev
 
 FROM node:26-bookworm-slim
 

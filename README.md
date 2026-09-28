@@ -61,15 +61,17 @@ packages/kernel/src/
   presentation/    delivery — mcp/ (stdio server, audit + output adapters, one dir per
                    tool) and rpc/ (the daemon's local socket server and its methods)
   container.ts     the composition root every bin builds from
+  remote-container.ts  the composition root of a host with no kernel of its own
 
-apps/plugin/src/server.ts      stdio MCP server
+apps/plugin/src/server.ts      stdio MCP server            plugin-server.ts  remote-only, for a host
 apps/host/src/daemon.ts        embedding drain + socket    runner.ts   unattended agent jobs
 apps/host/src/read-worker.ts   one read pool worker (read-only connection, no model)
 apps/host/src/stats-cli.ts     operational snapshot        service-cli.ts  launchd agents
 ```
 
 Every bin is still bundled flat into the root `dist/`, which is what the local install and
-every agent host point at.
+every agent host point at. The exception is the plugin's remote-only server, a single
+self-contained `apps/plugin/dist/server.js` (see [cerebrium-plugin](#cerebrium-plugin)).
 
 Dependencies point inward only: `contracts` imports nothing, `core` sees only `contracts`, `domain/ports` sees only those two,
 adapters implement the ports, and nothing may import `presentation`. The kernel may not import an app, and the host and the plugin never import each other. **That direction is
@@ -1243,6 +1245,44 @@ scenario evaluation remains a separate manual step.
 is allowed — see invariant #1 in `CODEX.md` — and measured: two servers doing 120
 interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
 landed and searchable.
+
+## cerebrium-plugin
+
+The thin client for a machine whose memory lives on a Cerebrium host. It is the same MCP
+server with none of the kernel: `apps/plugin/src/plugin-server.ts` is composed from
+`remote-container.ts`, so it opens no store, loads no model and never looks for, starts or
+falls back to a local daemon. It is built into one file, `apps/plugin/dist/server.js`
+(~960 KB, only node builtins imported), because a Claude Code plugin is copied into the
+plugin cache without `node_modules`. `apps/plugin/test/plugin-bundle.test.ts` fails the build
+if better-sqlite3, pg, onnx, tree-sitter or any other non-builtin import reaches it.
+
+It needs two settings and nothing else: `MEMORY_KERNEL_URL` (`tcp://host:port`) and
+`MEMORY_KERNEL_TOKEN_FILE`, a mode-600 file holding the token the host issued
+(`cerebrium-service token issue`). Without the URL it exits naming the variable. There is
+no offline queue: a call to an unreachable host fails with the URL in the message, and says
+whether anything was sent — a refused connection sent nothing, so repeating it is safe.
+
+**Claude Code plugin.** `apps/plugin` is a plugin directory: `.claude-plugin/plugin.json`
+(asks for `kernel_url` and `token_file` when enabled; only the file's path is stored),
+`.mcp.json` and `hooks/hooks.json`, with the `cerebrium` skill. `apps/plugin/dist` is not
+committed, so build first and load it locally:
+
+```bash
+npm run build && claude --plugin-dir apps/plugin
+```
+
+**A trial entry beside the local one.** Until the cutover, the host can be tried from Claude
+Code or Codex without touching the `cerebrium` entry:
+
+```bash
+npm run agent:setup -- --kernel tcp://100.92.157.103:7433 --token-file ~/.cerebrium/host-token --apply --verify
+```
+
+registers a second server, `cerebrium-host` (tools `mcp__cerebrium-host__*`), whose env is
+exactly the URL and the token file's path. The token file must not be readable by others;
+the token is never read into a config file or printed. `--verify` opens a real session on the
+host through the plugin bundle. Until per-branch code indexing lands on the host,
+`code_index` and `code_lookup` answer that the backend does not support them there.
 
 ## Postgres backend
 

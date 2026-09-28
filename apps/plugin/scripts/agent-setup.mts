@@ -4,6 +4,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyHost, type Applied } from "@plugin/scripts/agent-apply";
 import {
+  applyHostEntry,
+  HOST_ENTRY,
+  HOST_ENTRY_HOSTS,
+  hostEntryProblems,
+  planHostEntry,
+  type HostEntryHost,
+  type HostEntryInput,
+} from "@plugin/scripts/agent-host-entry";
+import {
   DEFAULT_ENV_KEYS,
   defaultEnv,
   discoverEnv,
@@ -16,7 +25,7 @@ import {
   type SurfaceStatus,
 } from "@plugin/scripts/agent-hosts";
 import { assertNativeRuntime, resolveNodeRuntime } from "@plugin/scripts/agent-runtime";
-import { verify } from "@plugin/scripts/agent-verify";
+import { verify, verifyHostEntry } from "@plugin/scripts/agent-verify";
 
 // Reports — and with --apply, installs — what each agent host needs to use Cerebrium as
 // memory. See install/README.md for the procedure this checks against.
@@ -37,6 +46,15 @@ agent-setup — report or install what each agent host needs to use Cerebrium as
   --json       Emit the plan as JSON instead of a table.
   --check      Exit non-zero if a detected host is missing a surface.
   --help       This text.
+
+Trial entry for a Cerebrium host (claude and codex only):
+
+  npm run agent:setup -- --kernel tcp://HOST:PORT --token-file PATH [--host claude|codex] [--apply] [--verify]
+
+  Registers a second MCP server, ${HOST_ENTRY}, that runs apps/plugin/dist/server.js against
+  the host. It never touches the cerebrium entry or any other surface. Its env holds the
+  URL and the token file's path; the token itself is never read into config or output.
+  --verify opens a real session on the host through the plugin bundle.
 
 Core surfaces per host: mcp, skill, rules, hook. Antigravity also has an explicit
 permissions surface for the IDE and CLI configs; pi has an extension surface instead,
@@ -112,6 +130,60 @@ function report(
   );
 }
 
+async function hostEntry(repoRoot: string, home: string, nodePath: string): Promise<void> {
+  const tokenFile = option("token-file", "");
+  if (tokenFile === "") {
+    process.stderr.write("--kernel needs --token-file PATH (a mode-600 file holding the token)\n");
+    process.exitCode = 2;
+    return;
+  }
+  const requested = option("host", "all");
+  const hosts: HostEntryHost[] =
+    requested === "all"
+      ? [...HOST_ENTRY_HOSTS]
+      : HOST_ENTRY_HOSTS.filter((h) => h === requested).map((h) => h);
+  if (hosts.length === 0) {
+    process.stderr.write(
+      `${HOST_ENTRY} is set up for ${HOST_ENTRY_HOSTS.join(" and ")} only; "${requested}" is not one.\n`,
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const input: HostEntryInput = {
+    home,
+    repoRoot,
+    nodePath,
+    kernelUrl: option("kernel", ""),
+    tokenFile: resolve(tokenFile),
+    hasCommand,
+  };
+  const problems = hostEntryProblems(input);
+  if (problems.length > 0) {
+    for (const problem of problems) process.stderr.write(`${problem}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  process.stdout.write(`\n${HOST_ENTRY} -> ${input.kernelUrl} (token file ${input.tokenFile})\n`);
+  for (const host of hosts) {
+    if (flag("apply")) {
+      const applied = applyHostEntry(host, input, { force: false, run });
+      process.stdout.write(`  ${outcomeGlyph(applied)} ${host}: ${applied.detail}\n`);
+      if (applied.outcome === "failed" || applied.outcome === "skipped") process.exitCode = 1;
+    }
+    const planned = planHostEntry(host, input);
+    process.stdout.write(`  ${GLYPH[planned.status]} ${host}: ${planned.detail}\n`);
+    process.stdout.write(`    ${planned.target}\n`);
+  }
+
+  if (flag("verify")) {
+    const result = await verifyHostEntry(input);
+    if (!result.ok) process.exitCode = 1;
+    process.stdout.write(`\n  ${result.ok ? "✓" : "✗"} ${result.name}: ${result.detail}\n`);
+  }
+}
+
 async function main(): Promise<void> {
   if (flag("help")) {
     process.stdout.write(HELP);
@@ -129,6 +201,11 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  if (option("kernel", "") !== "") {
+    await hostEntry(repoRoot, home, nodePath);
+    return;
+  }
+
   const requested = option("host", "all");
   const hosts: HostId[] =
     requested === "all" ? [...HOSTS] : HOSTS.filter((h) => h === requested).map((h) => h);

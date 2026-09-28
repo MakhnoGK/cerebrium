@@ -1,8 +1,13 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  hostEntryEnv,
+  pluginServerPath,
+  type HostEntryInput,
+} from "@plugin/scripts/agent-host-entry";
 import {
   hookScript,
   piExtension,
@@ -24,7 +29,7 @@ export interface VerifyResult {
 
 interface RpcResponse {
   id?: number;
-  result?: Record<string, unknown>;
+  result?: { tools?: unknown[]; isError?: boolean; content?: { text?: string }[] };
   error?: { message?: string };
 }
 
@@ -38,6 +43,8 @@ const INITIALIZE = {
     clientInfo: { name: "agent-setup", version: "1" },
   },
 };
+
+const INITIALIZED = { jsonrpc: "2.0", method: "notifications/initialized" };
 
 const SESSION_START = {
   jsonrpc: "2.0",
@@ -157,7 +164,7 @@ function speak(nodePath: string, path: string, env: Record<string, string>): Pro
       resolve(out);
     });
 
-    for (const message of [INITIALIZE, SESSION_START, TOOLS_LIST]) {
+    for (const message of [INITIALIZE, INITIALIZED, SESSION_START, TOOLS_LIST]) {
       child.stdin.write(`${JSON.stringify(message)}\n`);
     }
   });
@@ -256,8 +263,91 @@ function piBridge(input: PlanInput): Promise<VerifyResult> {
   });
 }
 
+interface Spoken {
+  tools: number;
+  call: RpcResponse | undefined;
+}
+
+async function speakTo(
+  nodePath: string,
+  path: string,
+  env: Record<string, string>,
+): Promise<Spoken> {
+  const responses = parseRpcResponses(await speak(nodePath, path, env));
+  const list = responses.find((r) => r.id === 3);
+
+  return {
+    tools: Array.isArray(list?.result?.tools) ? list.result.tools.length : 0,
+    call: responses.find((r) => r.id === 2),
+  };
+}
+
+function callText(call: RpcResponse | undefined): string {
+  return call?.result?.content?.[0]?.text ?? call?.error?.message ?? "no response";
+}
+
+/** Boots the plugin bundle against a port nothing listens on: it must list the tools and
+ * answer `session_start` with an error that names the URL, without a store anywhere. */
+async function pluginBundle(input: PlanInput): Promise<VerifyResult> {
+  const path = pluginServerPath(input.repoRoot);
+  if (!existsSync(path)) {
+    return { name: "plugin bundle", ok: false, detail: `${path} is missing — run npm run build` };
+  }
+  const scratch = mkdtempSync(join(tmpdir(), "cerebrium-verify-plugin-"));
+  const url = "tcp://127.0.0.1:1";
+  try {
+    const tokenFile = join(scratch, "token");
+    writeFileSync(tokenFile, "cbr_verify\n", { mode: 0o600 });
+    const { tools, call } = await speakTo(input.nodePath, path, {
+      CEREBRIUM_HOME: join(scratch, "home"),
+      MEMORY_KERNEL_URL: url,
+      MEMORY_KERNEL_TOKEN_FILE: tokenFile,
+    });
+    const text = callText(call);
+    const ok = tools > 0 && call?.result?.isError === true && text.includes(url);
+    return {
+      name: "plugin bundle",
+      ok,
+      detail: ok
+        ? `${String(tools)} tools exposed; an unreachable host is reported by URL`
+        : `unexpected answer: ${text.slice(0, 200)}`,
+    };
+  } catch (err) {
+    return { name: "plugin bundle", ok: false, detail: `could not run it: ${String(err)}` };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** Opens a real session on the host through the plugin bundle, as the entry would. */
+export async function verifyHostEntry(input: HostEntryInput): Promise<VerifyResult> {
+  const path = pluginServerPath(input.repoRoot);
+  if (!existsSync(path)) {
+    return { name: "host session", ok: false, detail: `${path} is missing — run npm run build` };
+  }
+  const scratch = mkdtempSync(join(tmpdir(), "cerebrium-verify-host-"));
+  try {
+    const { tools, call } = await speakTo(input.nodePath, path, {
+      ...hostEntryEnv(input),
+      CEREBRIUM_HOME: scratch,
+    });
+    const failed = call === undefined || call.error !== undefined || call.result?.isError === true;
+    return {
+      name: "host session",
+      ok: !failed && tools > 0,
+      detail: failed
+        ? `session_start failed: ${callText(call).slice(0, 300)}`
+        : `session_start answered by ${input.kernelUrl}; ${String(tools)} tools exposed`,
+    };
+  } catch (err) {
+    return { name: "host session", ok: false, detail: `could not run it: ${String(err)}` };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 export async function verify(input: PlanInput, hosts: readonly HostId[]): Promise<VerifyResult[]> {
-  const results = [bundle(input), store(input), await server(input)];
+  const results = [bundle(input), store(input), await server(input), await pluginBundle(input)];
   for (const host of hosts) {
     results.push(host === "pi" ? await piBridge(input) : await hook(input, host));
   }

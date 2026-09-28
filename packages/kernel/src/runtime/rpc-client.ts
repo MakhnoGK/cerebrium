@@ -31,6 +31,9 @@ export class RpcUnavailableError extends Error {
     // The connection failed, as opposed to the daemon being slow. Only the first is safe
     // to resend, and only for a call that says it is.
     readonly connectionLost = false,
+    // False when the call failed before its request was written: nothing reached the
+    // daemon, so even a write may be repeated.
+    readonly sent = true,
   ) {
     super(message);
   }
@@ -107,7 +110,15 @@ class Connection {
     // Whether the socket was usable is decided BEFORE anything is written, and that is the
     // only case a reconnect is allowed to cover: a request whose bytes went out is never
     // sent twice, because a write is not idempotent and the daemon may have run it.
-    const socket = this.live() ?? (await this.connect(timeoutMs));
+    let socket: Socket;
+
+    try {
+      socket = this.live() ?? (await this.connect(timeoutMs));
+    } catch (err) {
+      throw err instanceof RpcUnavailableError
+        ? new RpcUnavailableError(err.message, err.connectionLost, false)
+        : err;
+    }
 
     return this.request(socket, method, params, meta, timeoutMs);
   }
@@ -145,7 +156,7 @@ class Connection {
         );
       } catch (err) {
         this.settle(id, () => {
-          reject(new RpcUnavailableError((err as Error).message, true));
+          reject(new RpcUnavailableError((err as Error).message, true, false));
         });
       }
     });
@@ -194,6 +205,13 @@ class Connection {
 
     this.socket = socket;
     this.buffer = "";
+
+    try {
+      await connected(socket, this.socketPath, timeoutMs);
+    } catch (err) {
+      this.discard(socket);
+      throw err;
+    }
 
     if (target.kind === "unix") return socket;
 
@@ -291,6 +309,31 @@ class Connection {
       entry.reject(error);
     }
   }
+}
+
+function connected(socket: Socket, target: string, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const settle = (err?: Error): void => {
+      clearTimeout(timer);
+      socket.off("connect", onConnect);
+      socket.off("error", onError);
+
+      if (err === undefined) resolve();
+      else reject(err);
+    };
+    const onConnect = (): void => {
+      settle();
+    };
+    const onError = (err: Error): void => {
+      settle(new RpcUnavailableError(err.message, true));
+    };
+    const timer = setTimeout(() => {
+      settle(new RpcUnavailableError(`no connection to ${target} in ${String(timeoutMs)}ms`, true));
+    }, timeoutMs);
+
+    socket.once("connect", onConnect);
+    socket.once("error", onError);
+  });
 }
 
 const connections = new Map<string, Connection>();

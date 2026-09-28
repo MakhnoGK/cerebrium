@@ -53,7 +53,7 @@ export interface ApplyOptions {
   run: (cmd: string, args: string[]) => void;
 }
 
-function done(surface: Surface, outcome: Outcome, detail: string): Applied {
+export function done(surface: Surface, outcome: Outcome, detail: string): Applied {
   return { surface, outcome, detail };
 }
 
@@ -225,33 +225,50 @@ function writeAntigravityPermissions(input: PlanInput): Applied {
   }
 }
 
-function registerViaCli(
+export interface CliEntry {
+  name: string;
+  env: Record<string, string>;
+  command: string;
+  args: string[];
+}
+
+export function registerViaCli(
   cli: string,
   extra: string[],
-  input: PlanInput,
+  entry: CliEntry,
+  hasCommand: (cmd: string) => boolean,
   opts: ApplyOptions,
   stale: boolean,
   envFlag: string,
 ): Applied {
-  if (!input.hasCommand(cli)) {
+  if (!hasCommand(cli)) {
     return done("mcp", "skipped", `${cli} is not on PATH — register it from a machine that has it`);
   }
   try {
-    if (stale) opts.run(cli, ["mcp", "remove", "cerebrium", ...extra]);
+    if (stale) opts.run(cli, ["mcp", "remove", entry.name, ...extra]);
     opts.run(cli, [
       "mcp",
       "add",
-      "cerebrium",
+      entry.name,
       ...extra,
-      ...envFlags(input.env, envFlag),
+      ...envFlags(entry.env, envFlag),
       "--",
-      input.nodePath,
-      serverPath(input.repoRoot),
+      entry.command,
+      ...entry.args,
     ]);
   } catch (err) {
     return done("mcp", "failed", `${cli} mcp add failed: ${String(err)}`);
   }
-  return done("mcp", stale ? "updated" : "created", `${cli} mcp add cerebrium`);
+  return done("mcp", stale ? "updated" : "created", `${cli} mcp add ${entry.name}`);
+}
+
+function cerebriumEntry(input: PlanInput): CliEntry {
+  return {
+    name: "cerebrium",
+    env: input.env,
+    command: input.nodePath,
+    args: [serverPath(input.repoRoot)],
+  };
 }
 
 function applyClaude(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[]): Applied[] {
@@ -262,7 +279,15 @@ function applyClaude(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[])
   const mcp = has("mcp");
   if (mcp) {
     out.push(
-      registerViaCli("claude", ["-s", "user"], input, opts, mcp.status === "stale", "--env"),
+      registerViaCli(
+        "claude",
+        ["-s", "user"],
+        cerebriumEntry(input),
+        input.hasCommand,
+        opts,
+        mcp.status === "stale",
+        "--env",
+      ),
     );
   }
   if (has("skill")) {
@@ -281,7 +306,19 @@ function applyCodex(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[]):
   const out: Applied[] = [];
 
   const mcp = has("mcp");
-  if (mcp) out.push(registerViaCli("codex", [], input, opts, mcp.status === "stale", "--env"));
+  if (mcp) {
+    out.push(
+      registerViaCli(
+        "codex",
+        [],
+        cerebriumEntry(input),
+        input.hasCommand,
+        opts,
+        mcp.status === "stale",
+        "--env",
+      ),
+    );
+  }
   if (has("skill")) {
     out.push(
       ensureSymlink(join(dir, "skills", "cerebrium"), skillPath(input.repoRoot), opts.force),
