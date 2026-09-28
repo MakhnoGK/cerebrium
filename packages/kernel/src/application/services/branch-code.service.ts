@@ -8,6 +8,7 @@ import {
   looksBinary,
   MAX_BYTES,
   sha256Hex,
+  UPLOAD_FRAME_BLOBS,
   type CodeCommitArgs,
   type CodeCommitResult,
   type CodeManifestArgs,
@@ -26,7 +27,6 @@ import {
 } from "@/domain/ports/storage";
 
 const PARSE_BATCH = 16;
-const MAX_UPLOAD_BLOBS = 500;
 const MAX_MANIFEST_HASHES = 50_000;
 export const BRANCH_RETIRE_MS = 14 * 86_400_000;
 
@@ -56,8 +56,8 @@ export class BranchCodeService {
   async upload(args: CodeUploadArgs): Promise<CodeUploadResult> {
     this.requireBackend();
 
-    if (args.blobs.length > MAX_UPLOAD_BLOBS) {
-      throw new Error(`an upload carries at most ${String(MAX_UPLOAD_BLOBS)} blobs`);
+    if (args.blobs.length > UPLOAD_FRAME_BLOBS) {
+      throw new Error(`an upload carries at most ${String(UPLOAD_FRAME_BLOBS)} blobs`);
     }
 
     const rejected: CodeUploadResult["rejected"] = [];
