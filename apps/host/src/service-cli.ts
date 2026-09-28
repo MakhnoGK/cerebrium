@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "reflect-metadata";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -22,6 +23,7 @@ import {
   type LaunchAgentSpec,
   type ServiceName,
 } from "@cerebrium/kernel/runtime/launch-agent";
+import { tokenCli } from "@host/token-cli";
 
 // `cerebrium-service` — installs Cerebrium's supervised processes as launchd user agents so
 // they survive reboots and crashes without a Claude session. This is the only supervisor:
@@ -34,6 +36,9 @@ const USAGE = `cerebrium-service <command> [daemon|runner|all]
   print       write the rendered plist to stdout without touching the system
 
 The service defaults to \`daemon\`. \`all\` covers both.
+
+  token       issue, list or revoke the network listener's tokens
+              (\`cerebrium-service token --help\`)
 
   daemon   the kernel, in resident mode: launchd owns the lifetime, so the model is
            loaded once instead of per session. Respawned whatever the exit.
@@ -199,7 +204,7 @@ function targetsOf(argument: string | undefined): ServiceName[] | null {
   return SERVICES.includes(argument as ServiceName) ? [argument as ServiceName] : null;
 }
 
-function main(argv: string[]): number {
+function main(argv: string[]): number | Promise<number> {
   const command = argv[0];
 
   if (command === undefined || command === "--help" || command === "-h") {
@@ -207,6 +212,8 @@ function main(argv: string[]): number {
 
     return 0;
   }
+
+  if (command === "token") return tokenCli(argv.slice(1));
 
   const targets = targetsOf(argv[1]);
 
@@ -241,12 +248,15 @@ function main(argv: string[]): number {
 }
 
 if (isMainModule(import.meta.url)) {
-  try {
-    process.exit(main(process.argv.slice(2)));
-  } catch (err) {
-    process.stderr.write(`cerebrium-service failed: ${(err as Error).message}\n`);
-    process.exit(1);
-  }
+  Promise.resolve()
+    .then(() => main(process.argv.slice(2)))
+    .then(
+      (code) => process.exit(code),
+      (err: unknown) => {
+        process.stderr.write(`cerebrium-service failed: ${(err as Error).message}\n`);
+        process.exit(1);
+      },
+    );
 }
 
 export { main as runServiceCli };

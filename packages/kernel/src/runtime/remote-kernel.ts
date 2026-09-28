@@ -28,19 +28,25 @@ export class DaemonUnreachableError extends Error {
     socketPath: string,
     readonly cause: string,
   ) {
+    const check = socketPath.startsWith("tcp://")
+      ? "whether the host is up and reachable"
+      : "`cerebrium-service status`";
+
     super(
       `the memory daemon at ${socketPath} did not answer ${call} (${cause}). ` +
         (isRetryable(call)
-          ? "This is a read: retry it. If it keeps failing, check `cerebrium-service status`."
+          ? `This is a read: retry it. If it keeps failing, check ${check}.`
           : "This is a write and it may or may not have been applied — check before repeating it, " +
-            "because repeating it could duplicate the change. Then check `cerebrium-service status`."),
+            `because repeating it could duplicate the change. Then check ${check}.`),
     );
     this.name = "DaemonUnreachableError";
   }
 }
 
 export interface RemoteKernelOptions {
+  // A unix socket path or `tcp://host:port`.
   socketPath: string;
+  token?: string | null;
   // Flattens the per-method deadline to one number for every call. For tests; production
   // leaves it unset so each call is measured against its own work.
   timeoutMs?: number;
@@ -60,6 +66,7 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
       return await rpcCall(
         {
           socketPath: this.options.socketPath,
+          token: this.options.token ?? null,
           timeoutMs: this.options.timeoutMs ?? callDeadlineMs(this.name),
           // The same read/write distinction the error message below explains to an agent,
           // applied one layer down: a dropped connection is ridden out for a read and

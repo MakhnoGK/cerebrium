@@ -7,6 +7,7 @@ import {
   EMBEDDING_QUEUE_REPO_TOKEN,
   JOBS_REPO_TOKEN,
   NODES_REPO_TOKEN,
+  PRINCIPAL_TOKENS_REPO_TOKEN,
   PRINCIPALS_REPO_TOKEN,
   PROCESSES_REPO_TOKEN,
   REVIEWS_REPO_TOKEN,
@@ -22,6 +23,7 @@ import { SqliteEdgesRepo } from "@/db/sqlite/edges";
 import { SqliteEmbeddingQueueRepo } from "@/db/sqlite/embedding-queue";
 import { SqliteJobsRepo } from "@/db/sqlite/jobs";
 import { SqliteNodesRepo } from "@/db/sqlite/nodes";
+import { SqlitePrincipalTokensRepo } from "@/db/sqlite/principal-tokens";
 import { SqlitePrincipalsRepo } from "@/db/sqlite/principals";
 import { SqliteProcessesRepo } from "@/db/sqlite/processes";
 import { SqliteReviewsRepo } from "@/db/sqlite/reviews";
@@ -39,6 +41,7 @@ export {
   SqliteEmbeddingQueueRepo,
   SqliteJobsRepo,
   SqliteNodesRepo,
+  SqlitePrincipalTokensRepo,
   SqlitePrincipalsRepo,
   SqliteProcessesRepo,
   SqliteReviewsRepo,
@@ -57,6 +60,7 @@ export function registerSqliteRepositories(c: DependencyContainer): void {
   c.register(JOBS_REPO_TOKEN, { useClass: SqliteJobsRepo });
   c.register(NODES_REPO_TOKEN, { useClass: SqliteNodesRepo });
   c.register(PRINCIPALS_REPO_TOKEN, { useClass: SqlitePrincipalsRepo });
+  c.register(PRINCIPAL_TOKENS_REPO_TOKEN, { useClass: SqlitePrincipalTokensRepo });
   c.register(PROCESSES_REPO_TOKEN, { useClass: SqliteProcessesRepo });
   c.register(REVIEWS_REPO_TOKEN, { useClass: SqliteReviewsRepo });
   c.register(SEARCH_REPO_TOKEN, { useClass: SqliteSearchRepo });

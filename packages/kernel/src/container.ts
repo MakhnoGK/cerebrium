@@ -21,6 +21,7 @@ import {
   EmbeddingConfig,
   EnvConfigSource,
   FileConfigSource,
+  KernelConfig,
   LayeredConfigSource,
   StorageConfig,
   STORE_BACKENDS,
@@ -28,6 +29,7 @@ import {
 import "@/infrastructure/config/sections";
 import { resolveRoles } from "@/consolidation/roles";
 import { NoEmbeddingProvider } from "@/embeddings/worker-provider";
+import { explicitKernel } from "@/runtime/kernel-choice";
 import { configFilePath } from "@/runtime/paths";
 import { registerRemoteKernel } from "@/runtime/remote-kernel";
 import { SystemClock } from "@/runtime/system-clock";
@@ -85,7 +87,14 @@ export function buildContainer({
   if (kernel === "remote") {
     // Registered after the config source, because the socket path comes from it. Nothing
     // else is registered: see registerRemoteKernel.
-    registerRemoteKernel(target, { socketPath: target.resolve(DaemonConfig).socketPath });
+    const explicit = explicitKernel(target.resolve(KernelConfig));
+
+    registerRemoteKernel(
+      target,
+      explicit === null
+        ? { socketPath: target.resolve(DaemonConfig).socketPath }
+        : { socketPath: explicit.url, token: explicit.token },
+    );
 
     return target;
   }

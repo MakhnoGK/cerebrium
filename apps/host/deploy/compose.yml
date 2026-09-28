@@ -42,6 +42,10 @@ services:
       MEMORY_CONSOLIDATE_ANNOTATE: "off"
       MEMORY_CONSOLIDATE_RECONCILE: "off"
       MEMORY_CONSOLIDATE_DOCUMENTS: "off"
+      MEMORY_RPC_LISTEN: 0.0.0.0:7433
+    ports:
+      # The tailnet address only: the listener has tokens but no TLS.
+      - "${CEREBRIUM_RPC_BIND:-100.92.157.103}:7433:7433"
     secrets:
       - pg_url
     volumes:

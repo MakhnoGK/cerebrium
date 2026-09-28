@@ -21,6 +21,7 @@ export {
   DatabaseConfig,
   EmbeddingConfig,
   IdentityConfig,
+  KernelConfig,
   RetrievalConfig,
   STORE_BACKENDS,
   StorageConfig,

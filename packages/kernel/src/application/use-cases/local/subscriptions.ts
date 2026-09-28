@@ -1,3 +1,4 @@
+import { principalOfWriter } from "@/domain/writer";
 import { SubscriptionService } from "@/application/services/subscription.service";
 import {
   SUBSCRIBE_EVENTS,
@@ -16,6 +17,8 @@ export class LocalSubscribeEvents implements SubscribeEvents {
   ) {}
 
   async invoke(args: SubscribeEventsArgs): Promise<SubscribeEventsResult> {
-    return { topics: this.subscriptions.subscribe(this.identity.get().client, args.topics) };
+    const principal = args.principal ?? principalOfWriter(this.identity.get());
+
+    return { topics: this.subscriptions.subscribe(principal, args.topics) };
   }
 }

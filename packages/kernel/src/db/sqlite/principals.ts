@@ -1,7 +1,7 @@
 import { injectable } from "tsyringe";
 import { PrincipalKind, UNATTRIBUTED_PRINCIPAL } from "@cerebrium/contracts/vocab";
 import type { PrincipalRow, PrincipalsRepo } from "@/domain/ports/storage";
-import type { Writer } from "@/domain/writer";
+import { principalOfWriter, type Writer } from "@/domain/writer";
 import { BaseRepo } from "@/db/sqlite/base";
 
 // The writer behind a session, stable across sessions. Keyed by the client name the MCP
@@ -12,7 +12,7 @@ export class SqlitePrincipalsRepo extends BaseRepo implements PrincipalsRepo {
   // — otherwise the writes with no identity would sit outside every rule instead of under
   // a rule that can be written for them.
   async resolve(writer: Writer, ts: string): Promise<string> {
-    const id = writer.client ?? UNATTRIBUTED_PRINCIPAL;
+    const id = principalOfWriter(writer);
 
     this.db
       .prepare(

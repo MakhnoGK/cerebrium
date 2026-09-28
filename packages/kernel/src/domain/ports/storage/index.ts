@@ -28,6 +28,11 @@ export {
   type PrincipalRow,
 } from "@/domain/ports/storage/principals";
 export {
+  PRINCIPAL_TOKENS_REPO_TOKEN,
+  type PrincipalTokenRow,
+  type PrincipalTokensRepo,
+} from "@/domain/ports/storage/principal-tokens";
+export {
   PROCESSES_REPO_TOKEN,
   type ProcessesRepo,
   type ProcessRow,

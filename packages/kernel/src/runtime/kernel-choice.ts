@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { parseKernelTarget } from "@cerebrium/contracts/rpc";
 import { rpcHandshake, RpcUnavailableError } from "@/runtime/rpc-client";
+import type { KernelConfig } from "@/infrastructure/config";
 
 export type KernelChoice =
   { kernel: "remote"; protocol: number } | { kernel: "local"; reason: string };
@@ -66,4 +69,42 @@ async function attempt(socketPath: string, timeoutMs: number): Promise<Attempt> 
       },
     };
   }
+}
+
+export interface ExplicitKernel {
+  url: string;
+  token: string | null;
+}
+
+// A kernel named in config. When there is one, a host uses it and nothing else: no local
+// daemon is looked for or started, and there is no local fallback.
+export function explicitKernel(config: KernelConfig): ExplicitKernel | null {
+  if (config.url === null) return null;
+
+  const target = parseKernelTarget(config.url);
+
+  if (target.kind === "tcp" && config.tokenFile === null) {
+    throw new Error(`MEMORY_KERNEL_URL is ${config.url} but MEMORY_KERNEL_TOKEN_FILE is not set`);
+  }
+
+  return {
+    url: config.url,
+    token: config.tokenFile === null ? null : readToken(config.tokenFile),
+  };
+}
+
+function readToken(path: string): string {
+  let token: string;
+
+  try {
+    token = readFileSync(path, "utf8").trim();
+  } catch (err) {
+    throw new Error(`cannot read the kernel token file ${path}: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+
+  if (!token.length) throw new Error(`the kernel token file ${path} is empty`);
+
+  return token;
 }

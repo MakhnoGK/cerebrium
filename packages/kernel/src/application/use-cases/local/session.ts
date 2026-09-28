@@ -65,7 +65,7 @@ export class LocalTouchSession implements TouchSession {
   constructor(private readonly sessions: SessionService) {}
 
   async invoke(args: TouchSessionArgs): Promise<Record<string, never>> {
-    await this.sessions.requireSession(args.session_id, new Date().toISOString());
+    await this.sessions.requireSession(args.session_id, new Date().toISOString(), args.principal);
 
     return Promise.resolve({});
   }

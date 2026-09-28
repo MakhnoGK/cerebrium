@@ -1,5 +1,6 @@
 import { injectable } from "tsyringe";
-import { Capability, Posture, principalIdOf } from "@cerebrium/contracts/vocab";
+import { Capability, Posture } from "@cerebrium/contracts/vocab";
+import { principalOfWriter, type Writer } from "@/domain/writer";
 import {
   NEUTRAL_WEIGHT,
   PrincipalsConfig,
@@ -14,8 +15,8 @@ import {
 export class PrincipalPolicyService {
   constructor(private readonly config: PrincipalsConfig) {}
 
-  principalOf(client: string | null): string {
-    return principalIdOf(client);
+  principalOf(writer: Writer): string {
+    return principalOfWriter(writer);
   }
 
   postureFor(principal: string, capability: Capability): Posture {

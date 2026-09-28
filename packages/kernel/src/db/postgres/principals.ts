@@ -1,13 +1,13 @@
 import { injectable } from "tsyringe";
 import { PrincipalKind, UNATTRIBUTED_PRINCIPAL } from "@cerebrium/contracts/vocab";
 import type { PrincipalRow, PrincipalsRepo } from "@/domain/ports/storage";
-import type { Writer } from "@/domain/writer";
+import { principalOfWriter, type Writer } from "@/domain/writer";
 import { PgBaseRepo } from "@/db/postgres/base";
 
 @injectable()
 export class PgPrincipalsRepo extends PgBaseRepo implements PrincipalsRepo {
   async resolve(writer: Writer, ts: string): Promise<string> {
-    const id = writer.client ?? UNATTRIBUTED_PRINCIPAL;
+    const id = principalOfWriter(writer);
 
     await this.run(
       `INSERT INTO principals (id, kind, label, created_at, last_seen)

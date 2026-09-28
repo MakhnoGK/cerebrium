@@ -2,6 +2,7 @@ import { connect, type Socket } from "node:net";
 import {
   encodeLine,
   parseInbound,
+  parseKernelTarget,
   PROTOCOL_VERSION,
   RPC_DEADLINE_MS,
   RpcWork,
@@ -10,7 +11,10 @@ import {
 } from "@cerebrium/contracts/rpc";
 
 export interface RpcClientOptions {
+  // A unix socket path, or `tcp://host:port` for a kernel on the network.
   socketPath: string;
+  // Sent as `initialize {token}` on every new tcp connection. Ignored on a unix socket.
+  token?: string | null;
   // How long to wait for the answer. A caller that knows the method should pass the
   // deadline for that method's work — see `callDeadlineMs`.
   timeoutMs?: number;
@@ -32,9 +36,18 @@ export class RpcUnavailableError extends Error {
   }
 }
 
+// The kernel answered and refused the token; not retryable.
+export class RpcAuthError extends Error {
+  constructor(target: string, reason: string) {
+    super(`${target} refused this connection: ${reason}`);
+    this.name = "RpcAuthError";
+  }
+}
+
 export type NotificationHandler = (method: string, params: Record<string, unknown>) => void;
 
 const DEFAULT_TIMEOUT_MS = RPC_DEADLINE_MS[RpcWork.INTERACTIVE];
+const KEEPALIVE_MS = 30_000;
 
 interface Pending {
   resolve: (response: RpcResponse) => void;
@@ -52,12 +65,14 @@ interface Pending {
 // daemon able to speak first.
 class Connection {
   private socket: Socket | null = null;
+  private opening: Promise<Socket> | null = null;
   private buffer = "";
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
 
   constructor(
     private readonly socketPath: string,
+    private readonly token: string | null,
     private readonly handlers: Set<NotificationHandler>,
   ) {}
 
@@ -83,7 +98,7 @@ class Connection {
     }
   }
 
-  private attempt(
+  private async attempt(
     method: string,
     params: Record<string, unknown>,
     meta: RpcMeta | undefined,
@@ -92,7 +107,18 @@ class Connection {
     // Whether the socket was usable is decided BEFORE anything is written, and that is the
     // only case a reconnect is allowed to cover: a request whose bytes went out is never
     // sent twice, because a write is not idempotent and the daemon may have run it.
-    const socket = this.live() ?? this.open();
+    const socket = this.live() ?? (await this.connect(timeoutMs));
+
+    return this.request(socket, method, params, meta, timeoutMs);
+  }
+
+  private request(
+    socket: Socket,
+    method: string,
+    params: Record<string, unknown>,
+    meta: RpcMeta | undefined,
+    timeoutMs: number,
+  ): Promise<RpcResponse> {
     const id = this.nextId++;
 
     return new Promise<RpcResponse>((resolve, reject) => {
@@ -134,11 +160,23 @@ class Connection {
   private live(): Socket | null {
     const socket = this.socket;
 
-    return socket !== null && socket.writable && !socket.destroyed ? socket : null;
+    return this.opening === null && socket !== null && socket.writable && !socket.destroyed
+      ? socket
+      : null;
   }
 
-  private open(): Socket {
-    const socket = connect(this.socketPath);
+  // Concurrent callers share one connection attempt, handshake included.
+  private connect(timeoutMs: number): Promise<Socket> {
+    this.opening ??= this.open(timeoutMs).finally(() => {
+      this.opening = null;
+    });
+
+    return this.opening;
+  }
+
+  private async open(timeoutMs: number): Promise<Socket> {
+    const target = parseKernelTarget(this.socketPath);
+    const socket = target.kind === "tcp" ? connect(target.port, target.host) : connect(target.path);
 
     // Never a reason for a process to stay alive: a host is kept up by its stdio and the
     // daemon by its listener, so an idle connection here must not hold either one open.
@@ -157,7 +195,38 @@ class Connection {
     this.socket = socket;
     this.buffer = "";
 
+    if (target.kind === "unix") return socket;
+
+    socket.setKeepAlive(true, KEEPALIVE_MS);
+
+    let response: RpcResponse;
+
+    try {
+      response = await this.request(
+        socket,
+        "initialize",
+        { token: this.token ?? "" },
+        undefined,
+        timeoutMs,
+      );
+    } catch (err) {
+      this.discard(socket);
+      throw err;
+    }
+
+    if (response.error !== undefined) {
+      this.discard(socket);
+      throw new RpcAuthError(this.socketPath, response.error.message);
+    }
+
     return socket;
+  }
+
+  // A connection that never finished its handshake is not reused.
+  private discard(socket: Socket): void {
+    if (this.socket === socket) this.socket = null;
+
+    socket.destroy();
   }
 
   private receive(chunk: string): void {
@@ -227,16 +296,17 @@ class Connection {
 const connections = new Map<string, Connection>();
 const handlers = new Map<string, Set<NotificationHandler>>();
 
-function connectionFor(socketPath: string): Connection {
-  const existing = connections.get(socketPath);
+function connectionFor(socketPath: string, token: string | null = null): Connection {
+  const key = `${socketPath}\0${token ?? ""}`;
+  const existing = connections.get(key);
 
   if (existing) return existing;
 
   const listeners = handlers.get(socketPath) ?? new Set<NotificationHandler>();
   handlers.set(socketPath, listeners);
 
-  const created = new Connection(socketPath, listeners);
-  connections.set(socketPath, created);
+  const created = new Connection(socketPath, token, listeners);
+  connections.set(key, created);
 
   return created;
 }
@@ -249,7 +319,7 @@ export async function rpcCall(
   params: Record<string, unknown> = {},
   meta?: RpcMeta,
 ): Promise<unknown> {
-  const response = await connectionFor(options.socketPath).send(
+  const response = await connectionFor(options.socketPath, options.token ?? null).send(
     method,
     params,
     meta,
