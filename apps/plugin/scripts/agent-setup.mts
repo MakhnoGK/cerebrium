@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stableNodePath } from "@cerebrium/kernel/runtime/launch-agent";
 import { applyHost, type Applied } from "@plugin/scripts/agent-apply";
 import {
   applyHostEntry,
@@ -165,7 +166,9 @@ async function hostEntry(repoRoot: string, home: string, nodePath: string): Prom
     return;
   }
 
-  process.stdout.write(`\n${HOST_ENTRY} -> ${input.kernelUrl} (token file ${input.tokenFile})\n`);
+  process.stdout.write(
+    `\n${HOST_ENTRY} -> ${input.kernelUrl} (token file ${input.tokenFile}, node ${nodePath})\n`,
+  );
   for (const host of hosts) {
     if (flag("apply")) {
       const applied = applyHostEntry(host, input, { force: false, run });
@@ -202,7 +205,7 @@ async function main(): Promise<void> {
     return;
   }
   if (option("kernel", "") !== "") {
-    await hostEntry(repoRoot, home, nodePath);
+    await hostEntry(repoRoot, home, stableNodePath(nodePath));
     return;
   }
 

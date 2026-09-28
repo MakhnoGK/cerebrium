@@ -1279,7 +1279,9 @@ npm run agent:setup -- --kernel tcp://100.92.157.103:7433 --token-file ~/.cerebr
 ```
 
 registers a second server, `cerebrium-host` (tools `mcp__cerebrium-host__*`), whose env is
-exactly the URL and the token file's path. The token file must not be readable by others;
+exactly the URL and the token file's path. It runs under the stable Node alias on `PATH`
+(`/opt/homebrew/bin/node`, not a version-pinned Cellar path), since the bundle loads no
+native addon. The token file must not be readable by others;
 the token is never read into a config file or printed. `--verify` opens a real session on the
 host through the plugin bundle. Until per-branch code indexing lands on the host,
 `code_index` and `code_lookup` answer that the backend does not support them there.

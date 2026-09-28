@@ -140,6 +140,7 @@ function speak(nodePath: string, path: string, env: Record<string, string>): Pro
       stdio: ["pipe", "pipe", "ignore"],
     });
     let out = "";
+    let initialized = false;
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error("timed out after 30s"));
@@ -149,6 +150,12 @@ function speak(nodePath: string, path: string, env: Record<string, string>): Pro
     child.stdout.on("data", (chunk: string) => {
       out += chunk;
       const seen = parseRpcResponses(out);
+      if (!initialized && seen.some((r) => r.id === 1)) {
+        initialized = true;
+        for (const message of [INITIALIZED, SESSION_START, TOOLS_LIST]) {
+          child.stdin.write(`${JSON.stringify(message)}\n`);
+        }
+      }
       if (seen.some((r) => r.id === 2) && seen.some((r) => r.id === 3)) {
         clearTimeout(timer);
         child.kill();
@@ -164,9 +171,8 @@ function speak(nodePath: string, path: string, env: Record<string, string>): Pro
       resolve(out);
     });
 
-    for (const message of [INITIALIZE, INITIALIZED, SESSION_START, TOOLS_LIST]) {
-      child.stdin.write(`${JSON.stringify(message)}\n`);
-    }
+    // The MCP SDK drops clientInfo for an `initialized` sent in the same burst as `initialize`.
+    child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
   });
 }
 
