@@ -1,3 +1,4 @@
+import type { CodeContext } from "@cerebrium/contracts/code";
 import type { Envelope } from "@cerebrium/contracts/types";
 import type { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
 import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/use-case";
@@ -32,6 +33,7 @@ export interface WriteMemoryArgs extends EventWindow {
   project: string | null;
   parent_node_id: string | null;
   links?: NodeLink[];
+  code_context?: CodeContext;
 }
 
 export interface WriteMemoryResult {
@@ -93,6 +95,7 @@ export interface LinkNodesArgs {
   dst: string;
   type: EdgeType;
   weight?: number;
+  code_context?: CodeContext;
 }
 
 export interface LinkNodesResult {

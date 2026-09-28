@@ -25,6 +25,7 @@ import {
   type PlanInput,
   type SurfaceStatus,
 } from "@plugin/scripts/agent-hosts";
+import { applyIndexRepos, planIndexRepos } from "@plugin/scripts/agent-index-repos";
 import { assertNativeRuntime, resolveNodeRuntime } from "@plugin/scripts/agent-runtime";
 import { verify, verifyHostEntry } from "@plugin/scripts/agent-verify";
 
@@ -57,6 +58,11 @@ Trial entry for a Cerebrium host (claude and codex only):
   URL and the token file's path; the token itself is never read into config or output.
   --verify opens a real session on the host through the plugin bundle.
 
+  --index-repo PATH (repeatable) opts a checkout into the host's per-branch code index:
+  it is listed in ~/.cerebrium/plugin-index.json, the session-start hook indexes it in the
+  background, and post-commit/checkout/merge/rewrite hooks in that repo re-index it. An
+  existing hook is kept beside ours as <name>.cerebrium-prev and still runs first.
+
 Core surfaces per host: mcp, skill, rules, hook. Antigravity also has an explicit
 permissions surface for the IDE and CLI configs; pi has an extension surface instead,
 because it ships no MCP client and one extension delivers all four. See apps/plugin/install/hosts.md
@@ -80,6 +86,15 @@ function flag(name: string): boolean {
 function option(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
   return i === -1 ? fallback : (process.argv[i + 1] ?? fallback);
+}
+
+function options(name: string): string[] {
+  const out: string[] = [];
+  process.argv.forEach((arg, i) => {
+    const value = process.argv[i + 1];
+    if (arg === `--${name}` && value !== undefined) out.push(value);
+  });
+  return out;
 }
 
 function hasCommand(cmd: string): boolean {
@@ -178,6 +193,24 @@ async function hostEntry(repoRoot: string, home: string, nodePath: string): Prom
     const planned = planHostEntry(host, input);
     process.stdout.write(`  ${GLYPH[planned.status]} ${host}: ${planned.detail}\n`);
     process.stdout.write(`    ${planned.target}\n`);
+  }
+
+  const indexRepos = options("index-repo");
+  if (indexRepos.length > 0) {
+    const request = {
+      home,
+      repoRoot,
+      nodePath,
+      kernelUrl: input.kernelUrl,
+      tokenFile: input.tokenFile,
+      repos: indexRepos,
+    };
+    const outcomes = flag("apply") ? applyIndexRepos(request) : planIndexRepos(request);
+    process.stdout.write("\nCode index on the host:\n");
+    for (const o of outcomes) {
+      process.stdout.write(`  ${o.ok ? "✓" : flag("apply") ? "✗" : "·"} ${o.repo}: ${o.detail}\n`);
+      if (!o.ok && flag("apply")) process.exitCode = 1;
+    }
   }
 
   if (flag("verify")) {

@@ -1,5 +1,6 @@
 import type { DependencyContainer } from "tsyringe";
 import {
+  BRANCH_CODE_REPO_TOKEN,
   CHUNKS_REPO_TOKEN,
   CODE_REPO_TOKEN,
   CONSOLIDATION_REPO_TOKEN,
@@ -16,6 +17,7 @@ import {
   STATS_REPO_TOKEN,
   STORE_TOKEN,
 } from "@/domain/ports/storage";
+import { SqliteBranchCodeRepo } from "@/db/sqlite/branch-code";
 import { SqliteChunksRepo } from "@/db/sqlite/chunks";
 import { SqliteCodeRepo } from "@/db/sqlite/code";
 import { SqliteConsolidationRepo } from "@/db/sqlite/consolidation";
@@ -53,6 +55,7 @@ export {
 
 export function registerSqliteRepositories(c: DependencyContainer): void {
   c.register(CHUNKS_REPO_TOKEN, { useClass: SqliteChunksRepo });
+  c.register(BRANCH_CODE_REPO_TOKEN, { useClass: SqliteBranchCodeRepo });
   c.register(CODE_REPO_TOKEN, { useClass: SqliteCodeRepo });
   c.register(CONSOLIDATION_REPO_TOKEN, { useClass: SqliteConsolidationRepo });
   c.register(EDGES_REPO_TOKEN, { useClass: SqliteEdgesRepo });

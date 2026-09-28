@@ -1,3 +1,4 @@
+import { BRANCH_CODE_REPO_TOKEN } from "@/domain/ports/storage/branch-code";
 import { CHUNKS_REPO_TOKEN } from "@/domain/ports/storage/chunks";
 import { CODE_REPO_TOKEN } from "@/domain/ports/storage/code";
 import { CONSOLIDATION_REPO_TOKEN } from "@/domain/ports/storage/consolidation";
@@ -16,6 +17,7 @@ import { STORE_TOKEN } from "@/domain/ports/storage/store";
 
 // Every storage port a backend has to bind.
 export const STORAGE_TOKENS = {
+  branchCodeRepo: BRANCH_CODE_REPO_TOKEN,
   chunksRepo: CHUNKS_REPO_TOKEN,
   codeRepo: CODE_REPO_TOKEN,
   consolidationRepo: CONSOLIDATION_REPO_TOKEN,

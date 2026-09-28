@@ -1,6 +1,13 @@
 export { AgentRunService } from "@/application/services/agent-run.service";
 export { ActivityMonitor } from "@/application/services/activity.service";
+export { BranchCodeService } from "@/application/services/branch-code.service";
 export { CodeIndexService } from "@/application/services/code-index.service";
+export {
+  CodeReadService,
+  type ResolvedScopes,
+  type ScopeRequest,
+} from "@/application/services/code-read.service";
+export { CodeRefService } from "@/application/services/code-ref.service";
 export { ConsolidationService } from "@/application/services/consolidation.service";
 export { DaemonService } from "@/application/services/daemon.service";
 export { EmbeddingService } from "@/application/services/embedding.service";

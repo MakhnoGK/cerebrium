@@ -72,6 +72,7 @@ export class LocalWriteMemory implements WriteMemory {
       session_id: args.session_id,
       parent_node_id: args.parent_node_id,
       links: args.links,
+      ...(args.code_context === undefined ? {} : { code_context: args.code_context }),
       event_from: args.event_from,
       event_to: args.event_to,
     });

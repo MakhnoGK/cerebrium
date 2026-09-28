@@ -1,3 +1,4 @@
+import type { CodeContext } from "@cerebrium/contracts/code";
 import type { Envelope } from "@cerebrium/contracts/types";
 import type { MemoryKind } from "@cerebrium/contracts/vocab";
 import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/use-case";
@@ -21,6 +22,7 @@ export interface SearchQuery {
   // thread from the database: embedding is 3ms of a ~200ms search, so it stays where the
   // model is and the vector travels instead of the model being loaded twice.
   query_vector?: number[];
+  code_context?: CodeContext;
 }
 
 // A near-duplicate that gave up its slot to the result carrying it. Still addressable —

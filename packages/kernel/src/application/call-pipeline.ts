@@ -16,6 +16,7 @@ import {
   callCapability,
   isAudited,
   isCallName,
+  isCodeAware,
   readNameOf,
   RECORD_EVENTS,
   TOUCH_SESSION,
@@ -133,14 +134,15 @@ export class CallPipeline {
     writer: Writer,
   ): Promise<unknown> {
     const read = readNameOf(name);
+    const input = stamped(name, args, writer);
 
     if (read === null || this.reads === undefined) {
       return await container
         .resolve<UseCase<unknown, unknown>>(CALL_SURFACE[name].token)
-        .invoke(stamped(name, args, writer));
+        .invoke(input);
     }
 
-    const result = await this.reads(read, args);
+    const result = await this.reads(read, input);
 
     // A pooled read runs on a read-only handle, so the use accounting `get` owes its
     // nodes is settled here instead.
@@ -191,6 +193,14 @@ function stamped(name: CallName, args: unknown, writer: Writer): unknown {
   if (name === "start_session") return { ...plain, client: writer };
 
   if (name === "subscribe_events") return { ...plain, principal: principalOfWriter(writer) };
+
+  // Only the transport says which branch a caller is on; an argument under that name is
+  // dropped.
+  if (isCodeAware(name)) {
+    const { code_context: _dropped, ...rest } = plain as { code_context?: unknown };
+
+    return writer.code == null ? rest : { ...rest, code_context: writer.code };
+  }
 
   return args;
 }

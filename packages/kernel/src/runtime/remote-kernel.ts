@@ -1,8 +1,10 @@
 import type { DependencyContainer, InjectionToken } from "tsyringe";
+import type { CodeContext } from "@cerebrium/contracts/code";
 import type { RpcMeta } from "@cerebrium/contracts/rpc";
 import {
   CALL_SURFACE,
   callDeadlineMs,
+  isCodeAware,
   isRetryable,
   type CallName,
   type UseCase,
@@ -56,6 +58,8 @@ export interface RemoteKernelOptions {
   // Flattens the per-method deadline to one number for every call. For tests; production
   // leaves it unset so each call is measured against its own work.
   timeoutMs?: number;
+  // The caller's repo and branch, sent with the calls whose code reads are scoped to them.
+  codeContext?: () => Promise<CodeContext | null>;
 }
 
 class RemoteUseCase implements UseCase<unknown, unknown> {
@@ -68,6 +72,11 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
   ) {}
 
   async invoke(args: unknown): Promise<unknown> {
+    const code =
+      this.options.codeContext && isCodeAware(this.name)
+        ? await this.options.codeContext().catch(() => null)
+        : null;
+
     try {
       return await rpcCall(
         {
@@ -83,7 +92,7 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
         // Arguments cross as JSON, so they must already be plain data. They are: the seam
         // was defined that way precisely so a remote implementation could substitute here.
         (args ?? {}) as Record<string, unknown>,
-        this.identity(),
+        code === null ? this.identity() : { ...this.identity(), code },
       );
     } catch (err) {
       if (err instanceof RpcUnavailableError) {

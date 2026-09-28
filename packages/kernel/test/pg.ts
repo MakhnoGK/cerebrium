@@ -81,10 +81,27 @@ export function freshPgDatabase(spaceModel: string): PgDatabase {
   return created.db;
 }
 
+const standing: Current[] = [];
+
 // The root container's store. Anything it caches (the use recorder, for one) keeps using
 // it for the whole file, so it is never rotated out.
 export function standingPgDatabase(spaceModel: string): PgDatabase {
-  return createPgDatabase(spaceModel).db;
+  const created = createPgDatabase(spaceModel);
+
+  standing.push(created);
+
+  return created.db;
+}
+
+// Every database this test file created. Without it each file's databases stay until the
+// run ends, and a few hundred template copies fill a tmpfs server.
+export async function releasePgDatabases(): Promise<void> {
+  const all = [...live.splice(0), ...standing.splice(0)];
+
+  await retiring;
+  await Promise.all(all.map((c) => c.db.close().catch(() => undefined)));
+
+  for (const c of all) await dropDatabase(c.name).catch(() => undefined);
 }
 
 function createPgDatabase(spaceModel: string): Current {

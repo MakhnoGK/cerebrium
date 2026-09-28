@@ -214,3 +214,12 @@ hook as they are. The token file must be mode 600; only its path goes into the e
 `--verify` to open a real session on the host through it. Antigravity and pi are not
 covered: Antigravity would need its own `mcp(cerebrium-host/*)` grants, and pi runs one
 server per bridge config. See the README's cerebrium-plugin section for the Claude Code plugin.
+
+Code is indexed on the host per branch, from the checkouts on this machine. Add
+`--index-repo PATH` (repeatable) to the same command to opt a checkout in: it is listed in
+`~/.cerebrium/plugin-index.json`, the session-start hook indexes it in the background when a
+session opens inside it, and `post-commit`/`post-checkout`/`post-merge`/`post-rewrite` hooks
+in that repo's `.git/hooks` re-index it (`apps/plugin/dist/index.js`, detached and
+rate-limited, never blocking git). A hook that was already there is kept as
+`<name>.cerebrium-prev` and still runs first. `code_index` through `cerebrium-host` indexes
+the checkout it is called from at any time.

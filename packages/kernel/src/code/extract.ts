@@ -1,22 +1,14 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import type { Node } from "web-tree-sitter";
+import type { CodeCallRef, CodeImportRef } from "@cerebrium/contracts/code";
 import type { ExtractedSymbol } from "@/db/repo";
 
 // Per-file extraction result. Symbols become mirror nodes; defines are local
 // (container -> member) and resolvable immediately; imports/calls carry enough to be
 // resolved against the whole-repo symbol directory in the indexer's second pass.
-export interface ImportRef {
-  name: string; // imported binding name; for namespace/default, the target module is used
-  candidatePaths: string[]; // repo-relative candidate file paths the specifier may resolve to
-  namespace: boolean; // `* as X` / default import -> link module -> target module
-  byName?: boolean; // no path resolution available (e.g. PHP `use`) -> resolve by symbol name repo-wide
-}
-
-export interface CallRef {
-  srcQualified: string; // enclosing symbol (or the module) that makes the call
-  callee: string; // simple callee name (identifier or member property)
-}
+export type ImportRef = CodeImportRef;
+export type CallRef = CodeCallRef;
 
 export interface FileExtract {
   symbols: ExtractedSymbol[];

@@ -141,6 +141,12 @@ maintained by re-indexing.
   searches traverse it: a search for the note's topic surfaces the symbol via graph
   expansion (`via:{edge:'documents'}`). This is the payoff — design notes that point
   straight at the code they describe.
+- **Against a Cerebrium host, code is per branch.** `code_index` uploads the checkout
+  you are in (only files the host lacks) on its current branch; `code_lookup`, symbol
+  `search` and `get` read the branch your working directory is on, or the repo's default
+  branch when that one is not indexed yet (said so in `notes`). A symbol id names one
+  version of one file, so after the file changes, look it up again; a `documents` link
+  from a note keeps pointing at the symbol by repo, path and name on every branch.
 
 ```
 GOOD: code_index -> search "token expiry" types:['symbol'] -> get the symbol -> write a

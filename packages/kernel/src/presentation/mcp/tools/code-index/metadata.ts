@@ -11,7 +11,9 @@ export const metadata = {
     "invalidated (never deleted). Pass `repo` (a configured MEMORY_CODE_ROOTS name) or `path` (a directory), or neither to " +
     "index all configured roots; `force:true` re-parses everything. It does NOT read code back to you — it returns only a " +
     "compact per-repo summary (files scanned/indexed/skipped, symbols added/updated/invalidated, edges, timing). To read " +
-    "the code afterwards use `search` (by meaning) or `code_lookup` (by structure), then `get` for a symbol's source.",
+    "the code afterwards use `search` (by meaning) or `code_lookup` (by structure), then `get` for a symbol's source. " +
+    "Against a Cerebrium host, it indexes the git checkout at `path` (default: your working directory) on its current " +
+    "branch: only files the host lacks are uploaded, and the host parses them.",
 
   schema: {
     session_id: sessionIdSchema,
@@ -22,7 +24,9 @@ export const metadata = {
     path: z
       .string()
       .optional()
-      .describe("Explicit repo-root directory to index instead of a configured name."),
+      .describe(
+        "Explicit repo-root directory to index instead of a configured name (a checkout, on a Cerebrium host).",
+      ),
     force: z
       .boolean()
       .optional()

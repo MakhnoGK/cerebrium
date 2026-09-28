@@ -15,12 +15,14 @@ import {
 } from "@cerebrium/kernel/application/services";
 import { NotificationTopic } from "@cerebrium/kernel/application/use-cases";
 import {
+  CodeEmbeddingWorker,
   ConsolidationWorker,
   EmbeddingWorker,
   JobWorker,
 } from "@cerebrium/kernel/application/workers";
 import { buildContainer } from "@cerebrium/kernel/container";
 import { newId } from "@cerebrium/kernel/core/ids";
+import { CODE_PARSER_TOKEN } from "@cerebrium/kernel/domain/ports/code-parser";
 import type { ConsolidationTickResult } from "@cerebrium/kernel/domain/ports/consolidation-reporter";
 import {
   EMBEDDING_PROVIDER_TOKEN,
@@ -54,6 +56,7 @@ import {
   surfaceMethods,
   type StoreHealth,
 } from "@cerebrium/kernel/presentation/rpc";
+import { resolveCodeWorker, WorkerCodeParser } from "@cerebrium/kernel/runtime/code-worker-pool";
 import {
   clearDaemonPid,
   isDaemonAlive,
@@ -202,6 +205,8 @@ export async function runDaemon(
     // what enqueueing means — same split as the sweep and `onSwept`.
     scheduleCodeIndex?: () => Promise<void>;
     codeIndexIntervalMs?: number;
+    // Symbol summaries of the per-branch index, embedded once the notes are caught up.
+    codeEmbeddings?: { tick(): Promise<{ embedded: number }> };
   } = {},
 ): Promise<void> {
   const active = opts.activeIntervalMs ?? ACTIVE_MS;
@@ -227,6 +232,8 @@ export async function runDaemon(
   while (!stopped()) {
     await worker.tick();
     const { backlog } = await queue.embeddingStats();
+    const codeEmbedded =
+      backlog === 0 && opts.codeEmbeddings ? (await opts.codeEmbeddings.tick()).embedded : 0;
 
     // Jobs run under the same two gates as the sweep — caught up on embeddings, nobody
     // waiting — but on every pass rather than on an interval: a submitted job is something
@@ -288,7 +295,7 @@ export async function runDaemon(
       return;
     }
 
-    await nap(backlog > 0 ? active : idle);
+    await nap(backlog > 0 || codeEmbedded > 0 ? active : idle);
   }
 }
 
@@ -370,6 +377,13 @@ async function main(): Promise<void> {
         batchSize: embedding.batchSize,
       }),
     });
+  }
+
+  const codeEntry = resolveCodeWorker();
+  const codeParser = codeEntry === null ? null : new WorkerCodeParser(codeEntry);
+
+  if (codeParser !== null) {
+    container.register(CODE_PARSER_TOKEN, { useValue: codeParser });
   }
 
   const managedPid = launchdPid();
@@ -537,7 +551,13 @@ async function main(): Promise<void> {
 
     jobs?.stop();
 
-    await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
+    await Promise.all([
+      worker.stop(),
+      consolidation.stop(),
+      rpc.close(),
+      pool?.close(),
+      codeParser?.close(),
+    ]);
     await registry.retire(registered);
     clearDaemonPid(dbPath);
     process.exit(0);
@@ -586,6 +606,7 @@ async function main(): Promise<void> {
       onSwept: publishSweep,
       ...(jobs === null ? {} : { jobs }),
       jobsPerTick: jobsConfig.maxPerTick,
+      codeEmbeddings: container.resolve(CodeEmbeddingWorker),
       codeIndexIntervalMs: container.resolve<Store>(STORE_TOKEN).capabilities.codeIndex
         ? jobsConfig.codeIndexIntervalMs
         : 0,
@@ -612,7 +633,13 @@ async function main(): Promise<void> {
     if (!stopping) {
       jobs?.stop();
 
-      await Promise.all([worker.stop(), consolidation.stop(), rpc.close(), pool?.close()]);
+      await Promise.all([
+        worker.stop(),
+        consolidation.stop(),
+        rpc.close(),
+        pool?.close(),
+        codeParser?.close(),
+      ]);
       await registry.retire(registered);
       clearDaemonPid(dbPath);
     }

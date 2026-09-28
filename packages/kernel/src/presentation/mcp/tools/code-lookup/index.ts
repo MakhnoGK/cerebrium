@@ -15,6 +15,7 @@ type Schema = (typeof metadata)["schema"];
 
 interface ToolResponse {
   symbols: Record<string, unknown>[];
+  notes?: string[];
   hints?: string[];
 }
 
@@ -29,15 +30,18 @@ export class CodeLookupTool implements McpTool<Schema, ToolResponse> {
 
   async invoke(args: ToolArgs<Schema>): Promise<ToolResponse> {
     const { hints } = await this.sessionHints.invoke({ session_id: args.session_id });
-    const { symbols } = await this.lookup.invoke({
+    const { symbols, notes } = await this.lookup.invoke({
       session_id: args.session_id,
       name: args.name,
       file: args.file,
       repo: args.repo,
+      ...(args.branch === undefined ? {} : { branch: args.branch }),
       limit: args.limit,
     });
 
     const out: ToolResponse = { symbols: symbols.map(present) };
+
+    if (notes?.length) out.notes = notes;
 
     if (hints.length) out.hints = hints;
 
@@ -53,6 +57,7 @@ function present(s: SymbolLookup): Record<string, unknown> {
     symbol_kind: s.facets.symbol_kind,
     signature: s.facets.signature,
     repo: s.facets.repo,
+    ...(s.facets.branch === undefined ? {} : { branch: s.facets.branch }),
     path: s.facets.path,
     start_line: s.facets.start_line,
     end_line: s.facets.end_line,
