@@ -74,7 +74,7 @@ describe("The socket's request size bound", () => {
     await rpc.listen(SOCKET);
 
     // When
-    const { lines, closed } = await exchange(frame(1, 1_100_000), 1);
+    const { lines, closed } = await exchange(frame(1, 1_100_000), Infinity);
 
     // Then
     expect(closed).toBe(true);
