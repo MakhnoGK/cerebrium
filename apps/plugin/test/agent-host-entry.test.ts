@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { stableNodePath } from "@cerebrium/kernel/runtime/launch-agent";
 import type { ApplyOptions } from "@plugin/scripts/agent-apply";
 import {
   applyHostEntry,
@@ -222,6 +223,7 @@ describe("agent:setup --kernel", () => {
     // Then
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(`${HOST_ENTRY} -> ${URL}`);
+    expect(result.stdout).toContain(`node ${stableNodePath(realpathSync(process.execPath))})`);
     expect(result.stdout + result.stderr).not.toContain(TOKEN);
   });
 
