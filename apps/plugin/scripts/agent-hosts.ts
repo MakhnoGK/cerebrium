@@ -178,12 +178,12 @@ export function upsertManagedBlock(text: string, block: string): string {
   return base === "" ? `${block}\n` : `${base}\n\n${block}\n`;
 }
 
-interface JsonFile {
+export interface JsonFile {
   state: "missing" | "valid" | "conflict";
   value: Record<string, unknown>;
 }
 
-function readJson(path: string): JsonFile {
+export function readJson(path: string): JsonFile {
   if (!existsSync(path)) return { state: "missing", value: {} };
   const raw = readFileSync(path, "utf8").trim();
   if (raw === "") return { state: "valid", value: {} };
@@ -197,11 +197,11 @@ function readJson(path: string): JsonFile {
   }
 }
 
-function readText(path: string): string | null {
+export function readText(path: string): string | null {
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
-function record(value: unknown): Record<string, unknown> {
+export function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
@@ -233,7 +233,7 @@ function mcpState(
     : state("mcp", "stale", target, "registered against a different path or Node runtime");
 }
 
-function tomlSection(text: string, name: string): string | null {
+export function tomlSection(text: string, name: string): string | null {
   const lines = text.split("\n");
   const start = lines.findIndex((line) => line.trim() === `[${name}]`);
   if (start === -1) return null;
@@ -242,7 +242,7 @@ function tomlSection(text: string, name: string): string | null {
   return (next === -1 ? rest : rest.slice(0, next)).join("\n");
 }
 
-function tomlString(section: string, key: string): string | null {
+export function tomlString(section: string, key: string): string | null {
   const pattern = new RegExp(`^\\s*${key}\\s*=\\s*("(?:[^"\\\\]|\\\\.)*")\\s*$`, "m");
   const match = pattern.exec(section);
   if (match === null) return null;
@@ -256,7 +256,7 @@ function tomlString(section: string, key: string): string | null {
   }
 }
 
-function tomlStringArray(section: string, key: string): string[] | null {
+export function tomlStringArray(section: string, key: string): string[] | null {
   const pattern = new RegExp(`^\\s*${key}\\s*=\\s*(\\[[^\\n]*\\])\\s*$`, "m");
   const match = pattern.exec(section);
   if (match === null) return null;

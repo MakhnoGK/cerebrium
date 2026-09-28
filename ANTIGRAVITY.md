@@ -16,7 +16,7 @@ An npm-workspaces monorepo. Each workspace is one deliverable or one shared laye
 - `apps/plugin` (`@plugin/*`) — cerebrium-plugin: the stdio MCP server agents launch (`src/server.ts`), the skill (`skill/`), the rules and hooks (`install/`), and the installer (`scripts/agent-*.ts`).
 - `apps/dashboard-api`, `apps/dashboard-web` — the web dashboard (NestJS BFF, React UI). Scaffolds only.
 
-The host and the plugin never import each other. Every bin is still bundled flat into the root `dist/`, which is what the local install and every agent host point at.
+The host and the plugin never import each other. Every bin is still bundled flat into the root `dist/`, which is what the local install and every agent host point at. The one exception is cerebrium-plugin's remote-only server (`apps/plugin/src/plugin-server.ts`), built by `apps/plugin/tsup.config.ts` into `apps/plugin/dist/server.js` as one self-contained file: it is composed from `packages/kernel/src/remote-container.ts`, never from `container.ts`, and `apps/plugin/test/plugin-bundle.test.ts` fails if a storage backend, model runtime, parser or any non-builtin import reaches it.
 
 ## Invariants — never violate, never "temporarily" bypass
 
@@ -60,7 +60,7 @@ The host and the plugin never import each other. Every bin is still bundled flat
 - `npm run check` — typecheck + lint + format check + full suite. The single gate; must pass before any task is done.
 - `npm test` / `npm run test:watch` — full suite (Vitest) / watch mode.
 - `npm run typecheck` — `tsc --noEmit`. One root `tsconfig.json` covers every workspace, so every tool and every IDE resolves the aliases identically and tests are genuinely type-checked. `npm run lint` / `lint:fix` — ESLint. `npm run format` / `format:check` — Prettier (imports are auto-sorted into layer groups by `@ianvs/prettier-plugin-sort-imports`).
-- `npm run build` — tsup (esbuild) bundle of every bin, flat, to the root `dist/` + copy migrations (`scripts/copy-assets.mjs`).
+- `npm run build` — `build:bins` (tsup bundle of every bin, flat, to the root `dist/` + copy migrations via `scripts/copy-assets.mjs`; the only part the host image builds) then `build:plugin` (the self-contained plugin server to `apps/plugin/dist/server.js`).
 - ⚠️ **A green build is NOT a working bundle.** esbuild catches a class of import error that `tsc` cannot (see the type-vs-value note above), and a broken bundle has landed unnoticed three times — but the DI half is invisible to both. `npm run check` now ends with `npm run smoke:bundle`, which boots `dist/server.js` over stdio against a throwaway store and calls `session_start` for real: a `tools/call` exercises tsyringe constructor injection end to end, where `tools/list` alone does not (but should report **17** tools).
 - `npm run agent:setup` — report what each agent host (Claude Code, Codex, Antigravity, pi) still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it. Read-only without `--apply`, and it never touches the store. The doctrine it installs lives in `apps/plugin/install/`; see `apps/plugin/install/hosts.md` for the per-host surfaces.
 - `npm run dev` — run the server on stdio against a throwaway DB (`MEMORY_DB_PATH=.tmp/dev.db`).

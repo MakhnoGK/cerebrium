@@ -27,17 +27,23 @@ export class DaemonUnreachableError extends Error {
     readonly call: CallName,
     socketPath: string,
     readonly cause: string,
+    readonly sent = true,
   ) {
-    const check = socketPath.startsWith("tcp://")
-      ? "whether the host is up and reachable"
-      : "`cerebrium-service status`";
+    const tcp = socketPath.startsWith("tcp://");
+    const where = tcp
+      ? `the Cerebrium host at ${socketPath}`
+      : `the memory daemon at ${socketPath}`;
+    const check = tcp ? "whether the host is up and reachable" : "`cerebrium-service status`";
 
     super(
-      `the memory daemon at ${socketPath} did not answer ${call} (${cause}). ` +
-        (isRetryable(call)
-          ? `This is a read: retry it. If it keeps failing, check ${check}.`
-          : "This is a write and it may or may not have been applied — check before repeating it, " +
-            `because repeating it could duplicate the change. Then check ${check}.`),
+      sent
+        ? `${where} did not answer ${call} (${cause}). ` +
+            (isRetryable(call)
+              ? `This is a read: retry it. If it keeps failing, check ${check}.`
+              : "This is a write and it may or may not have been applied — check before repeating it, " +
+                `because repeating it could duplicate the change. Then check ${check}.`)
+        : `could not reach ${where} for ${call} (${cause}). Nothing was sent, so repeating the ` +
+            `call is safe. If it keeps failing, check ${check}.`,
     );
     this.name = "DaemonUnreachableError";
   }
@@ -81,7 +87,7 @@ class RemoteUseCase implements UseCase<unknown, unknown> {
       );
     } catch (err) {
       if (err instanceof RpcUnavailableError) {
-        throw new DaemonUnreachableError(this.name, this.options.socketPath, err.message);
+        throw new DaemonUnreachableError(this.name, this.options.socketPath, err.message, err.sent);
       }
 
       throw err;

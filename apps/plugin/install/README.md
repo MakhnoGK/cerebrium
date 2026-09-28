@@ -203,3 +203,14 @@ One thing that measurement did find: two processes opening a **brand new, unmigr
 at the same instant used to race, and the loser died on the migration ledger's primary key.
 Fixed — the ledger is now read inside the write transaction — but it is why the store should
 be created once, by whichever host you set up first, before you open a second.
+
+## Trying a Cerebrium host
+
+A machine can try the host while its local memory stays the one in use: `npm run agent:setup
+-- --kernel tcp://HOST:PORT --token-file PATH --apply` adds a second MCP server,
+`cerebrium-host`, to Claude Code and Codex. It runs the thin plugin bundle
+(`apps/plugin/dist/server.js`) and leaves the `cerebrium` entry, the skill, the rules and the
+hook as they are. The token file must be mode 600; only its path goes into the entry. Add
+`--verify` to open a real session on the host through it. Antigravity and pi are not
+covered: Antigravity would need its own `mcp(cerebrium-host/*)` grants, and pi runs one
+server per bridge config. See the README's cerebrium-plugin section for the Claude Code plugin.

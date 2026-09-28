@@ -1,0 +1,22 @@
+{
+  "name": "cerebrium",
+  "version": "0.1.0",
+  "description": "Durable cross-session memory for coding agents, served by a Cerebrium host over the tailnet",
+  "author": { "name": "Hryhorii Khyzhniakov" },
+  "license": "MIT",
+  "skills": ["./skill/cerebrium"],
+  "userConfig": {
+    "kernel_url": {
+      "type": "string",
+      "title": "Cerebrium host URL",
+      "description": "The host kernel, as tcp://host:port (for example tcp://100.92.157.103:7433).",
+      "required": true
+    },
+    "token_file": {
+      "type": "file",
+      "title": "Token file",
+      "description": "A file readable only by you (mode 600) holding this machine's principal token, issued on the host with `cerebrium-service token issue`. Only the path is stored.",
+      "required": true
+    }
+  }
+}

@@ -16,26 +16,19 @@ import { openDatabase, openDatabaseReadonly } from "@/db/sqlite/database";
 import { NoUseRecorder } from "@/db/sqlite/nodes";
 import {
   ConsolidationConfig,
-  DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
-  EnvConfigSource,
-  FileConfigSource,
-  KernelConfig,
-  LayeredConfigSource,
   StorageConfig,
   STORE_BACKENDS,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
 import { resolveRoles } from "@/consolidation/roles";
 import { NoEmbeddingProvider } from "@/embeddings/worker-provider";
-import { explicitKernel } from "@/runtime/kernel-choice";
-import { configFilePath } from "@/runtime/paths";
-import { registerRemoteKernel } from "@/runtime/remote-kernel";
 import { SystemClock } from "@/runtime/system-clock";
 import { SystemProcessProbe } from "@/runtime/system-process-probe";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
+import { buildRemoteContainer, registerConfigSource } from "@/remote-container";
 
 // Which process is being wired. A role selects *hosted behaviour* — whether this
 // process drains the queue in large batches, whether it may write at all — never which
@@ -82,47 +75,13 @@ export function buildContainer({
 }: ContainerOptions): DependencyContainer {
   const target = into ?? container;
 
+  if (kernel === "remote") return buildRemoteContainer({ source, into: target });
+
   registerConfigSource(target, source);
-
-  if (kernel === "remote") {
-    // Registered after the config source, because the socket path comes from it. Nothing
-    // else is registered: see registerRemoteKernel.
-    const explicit = explicitKernel(target.resolve(KernelConfig));
-
-    registerRemoteKernel(
-      target,
-      explicit === null
-        ? { socketPath: target.resolve(DaemonConfig).socketPath }
-        : { socketPath: explicit.url, token: explicit.token },
-    );
-
-    return target;
-  }
 
   registerLocalKernel(role, target);
 
   return target;
-}
-
-// Tiers: defaults <- config.json <- environment. Every host resolves them here and only
-// here, so spawn order can no longer decide what a process is configured with — the
-// daemon's posture used to depend on whether the GUI or Claude Code started it first.
-function registerConfigSource(target: DependencyContainer, pinned?: ConfigSource): void {
-  if (pinned) {
-    target.register(CONFIG_SOURCE_TOKEN, { useValue: pinned });
-    // A factory, not `useValue: null`: tsyringe tests `useValue != undefined`, so a null
-    // value provider falls through and it tries to construct the token instead.
-    target.register(CONFIG_FILE_TOKEN, { useFactory: () => null });
-
-    return;
-  }
-
-  const file = new FileConfigSource(configFilePath());
-
-  target.register(CONFIG_SOURCE_TOKEN, {
-    useValue: new LayeredConfigSource(new EnvConfigSource(), file),
-  });
-  target.register(CONFIG_FILE_TOKEN, { useValue: file.report() });
 }
 
 // The local kernel: everything resolves in-process against the configured store — one
