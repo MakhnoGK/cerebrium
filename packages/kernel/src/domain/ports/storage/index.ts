@@ -1,3 +1,18 @@
+export {
+  BRANCH_CODE_REPO_TOKEN,
+  type BranchCodeRepo,
+  type BranchFileChange,
+  type BranchScope,
+  type CodeBranchRow,
+  type CodeRefRow,
+  type CodeRepoRow,
+  type CodeSymbolDetail,
+  type CodeSymbolRow,
+  type CodeUnitSource,
+  type ResolvedCodeRef,
+  type UnitParse,
+  type UnitRefs,
+} from "@/domain/ports/storage/branch-code";
 export { CHUNKS_REPO_TOKEN, type ChunksRepo } from "@/domain/ports/storage/chunks";
 export { CODE_REPO_TOKEN, type CodeRepo } from "@/domain/ports/storage/code";
 export {

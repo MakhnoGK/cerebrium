@@ -67,7 +67,9 @@ function writerOf(meta: RpcMeta): Writer {
       ? UNKNOWN_WRITER
       : { client: meta.client ?? null, version: meta.version ?? null };
 
-  return meta.principal == null ? writer : { ...writer, principal: meta.principal };
+  const withPrincipal = meta.principal == null ? writer : { ...writer, principal: meta.principal };
+
+  return meta.code == null ? withPrincipal : { ...withPrincipal, code: meta.code };
 }
 
 // What a network connection may call: the handshake, the probe and the call surface. The

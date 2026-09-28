@@ -5,7 +5,7 @@ import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 @injectable()
 export class PgStore implements Store {
   readonly backend = "postgres" as const;
-  readonly capabilities = { codeIndex: false, principalTokens: true };
+  readonly capabilities = { codeIndex: false, principalTokens: true, branchCode: true };
 
   constructor(@inject(PG_TOKEN) private readonly db: PgDatabase) {}
 

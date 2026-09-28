@@ -1,3 +1,5 @@
+import type { CodeContext } from "./code";
+
 // Local socket protocol, shared by both ends — the daemon that serves it and the hosts
 // that call it — which is why it sits in core rather than beside either one.
 //
@@ -51,6 +53,8 @@ export interface RpcMeta {
   // Set by the network listener from the connection's token. `parseRequest` never reads it
   // off the wire.
   principal?: string | null;
+  // The repo and branch of the caller's working directory, which code reads are scoped to.
+  code?: CodeContext | null;
 }
 
 export interface RpcRequest {
@@ -141,12 +145,28 @@ export function parseRequest(line: string): ParsedRequest {
 function parseMeta(raw: unknown): RpcMeta {
   if (typeof raw !== "object" || raw === null) return {};
 
-  const { client, version } = raw as RpcMeta;
+  const { client, version, code } = raw as RpcMeta;
 
   return {
     client: typeof client === "string" ? client : null,
     version: typeof version === "string" ? version : null,
+    ...(isCodeContext(code) ? { code: { remote_key: code.remote_key, branch: code.branch } } : {}),
   };
+}
+
+function isCodeContext(raw: unknown): raw is CodeContext {
+  if (typeof raw !== "object" || raw === null) return false;
+
+  const { remote_key, branch } = raw as Partial<CodeContext>;
+
+  return (
+    typeof remote_key === "string" &&
+    typeof branch === "string" &&
+    remote_key.length > 0 &&
+    remote_key.length <= 512 &&
+    branch.length > 0 &&
+    branch.length <= 255
+  );
 }
 
 export function socketPathProblem(socketPath: string): string | null {

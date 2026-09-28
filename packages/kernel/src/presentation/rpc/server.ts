@@ -192,15 +192,19 @@ export class RpcServer {
 
     let buffer = "";
 
-    socket.on("data", (chunk: string) => {
-      buffer += chunk;
-
-      if (Buffer.byteLength(buffer, "utf8") > MAX_LINE_BYTES) {
-        socket.write(encodeLine(errorResponse(null, RPC_ERROR.parse, "request too large")));
+    let refused = false;
+    const tooLarge = (): void => {
+      refused = true;
+      buffer = "";
+      socket.write(encodeLine(errorResponse(null, RPC_ERROR.parse, "request too large")), () => {
         socket.destroy();
+      });
+    };
 
-        return;
-      }
+    socket.on("data", (chunk: string) => {
+      if (refused) return;
+
+      buffer += chunk;
 
       let newline = buffer.indexOf("\n");
 
@@ -208,10 +212,19 @@ export class RpcServer {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
 
+        if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) {
+          tooLarge();
+
+          return;
+        }
+
         if (line.length) void this.handleLine(socket, line);
 
         newline = buffer.indexOf("\n");
       }
+
+      // Only the unfinished line counts: several complete frames may arrive in one chunk.
+      if (Buffer.byteLength(buffer, "utf8") > MAX_LINE_BYTES) tooLarge();
     });
 
     socket.on("error", (err) => {

@@ -17,6 +17,7 @@ import { CALL_SURFACE, NotificationTopic, type CallName } from "@/application/us
 const ulid = z.string().regex(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/, "must be a ULID");
 const session = z.object({ session_id: ulid });
 const iso = z.string().datetime({ offset: true });
+const sha256 = z.string().regex(/^[0-9a-f]{64}$/, "must be a sha256 hex digest");
 const eventWindow = { event_from: iso.optional(), event_to: iso.optional() };
 const page = { page_size: z.number().int().optional(), cursor: z.string().optional() };
 
@@ -50,6 +51,7 @@ const SCHEMAS = {
     name: z.string().optional(),
     file: z.string().optional(),
     repo: z.string().optional(),
+    branch: z.string().optional(),
     limit: z.number().int().positive().optional(),
   }),
   stats_snapshot: z.object({ session_id: ulid.optional() }),
@@ -137,6 +139,21 @@ const SCHEMAS = {
     kind: z.string().min(1),
     payload: z.record(z.unknown()).optional(),
     scheduled_for: iso.optional(),
+  }),
+  code_manifest: session.extend({ hashes: z.array(sha256) }),
+  code_upload: session.extend({
+    blobs: z.array(z.object({ hash: sha256, content: z.string() })),
+  }),
+  code_commit: session.extend({
+    remote_key: z.string().min(1),
+    display_name: z.string().optional(),
+    default_branch: z.string().nullable().optional(),
+    branch: z.string().min(1),
+    commit: z.string().nullable().optional(),
+    dirty: z.boolean().optional(),
+    files: z.array(z.object({ path: z.string().min(1), hash: sha256 })),
+    branches: z.array(z.string()).optional(),
+    skipped: z.number().int().nonnegative().optional(),
   }),
 } as const satisfies Record<CallName, z.ZodType>;
 

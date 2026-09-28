@@ -1,5 +1,6 @@
 import { RPC_DEADLINE_MS, RpcWork } from "@cerebrium/contracts/rpc";
 import { Capability, EventAction } from "@cerebrium/contracts/vocab";
+import { CODE_COMMIT, CODE_MANIFEST, CODE_UPLOAD } from "@/application/use-cases/contracts/code";
 import { APPLY_CANDIDATE, RETRY_CANDIDATE } from "@/application/use-cases/contracts/consolidation";
 import { SUBMIT_JOB } from "@/application/use-cases/contracts/jobs";
 import {
@@ -32,18 +33,21 @@ export const CALL_SURFACE = {
     kind: "read",
     action: EventAction.SEARCH,
     capability: Capability.READ,
+    code: true,
   },
   fetch_nodes: {
     token: READ_SURFACE.fetch_nodes,
     kind: "read",
     action: EventAction.GET,
     capability: Capability.READ,
+    code: true,
   },
   lookup_code: {
     token: READ_SURFACE.lookup_code,
     kind: "read",
     action: EventAction.CODE_LOOKUP,
     capability: Capability.READ,
+    code: true,
   },
   stats_snapshot: {
     token: READ_SURFACE.stats_snapshot,
@@ -110,6 +114,7 @@ export const CALL_SURFACE = {
     action: EventAction.WRITE,
     capability: Capability.WRITE,
     work: RpcWork.GENERATIVE,
+    code: true,
   },
   update_memory: {
     token: UPDATE_MEMORY,
@@ -134,6 +139,7 @@ export const CALL_SURFACE = {
     kind: "write",
     action: EventAction.LINK,
     capability: Capability.WRITE,
+    code: true,
   },
   record_checkpoint: {
     token: RECORD_CHECKPOINT,
@@ -173,6 +179,30 @@ export const CALL_SURFACE = {
     kind: "write",
     action: EventAction.CODE_INDEX,
     capability: Capability.ADMIN,
+    work: RpcWork.INDEXING,
+  },
+  // A client indexing a branch. Plain WRITE, not ADMIN: the host reads nothing of its own
+  // here, it only stores what the caller sent. The manifest and the uploads accompany the
+  // commit, which is the one audited step.
+  code_manifest: {
+    token: CODE_MANIFEST,
+    kind: "write",
+    action: EventAction.CODE_INDEX,
+    audit: false,
+    capability: Capability.WRITE,
+  },
+  code_upload: {
+    token: CODE_UPLOAD,
+    kind: "write",
+    action: EventAction.CODE_INDEX,
+    audit: false,
+    capability: Capability.WRITE,
+  },
+  code_commit: {
+    token: CODE_COMMIT,
+    kind: "write",
+    action: EventAction.CODE_INDEX,
+    capability: Capability.WRITE,
     work: RpcWork.INDEXING,
   },
   // `client` is NOT in this call's argument schema. The identity rides in the transport's
@@ -218,6 +248,12 @@ export function callAction(name: CallName): EventAction {
 
 export function callCapability(name: CallName): Capability {
   return CALL_SURFACE[name].capability;
+}
+
+// A call whose code reads are scoped to the caller's repo and branch, which travel in the
+// transport's `meta`, never in the arguments.
+export function isCodeAware(name: CallName): boolean {
+  return "code" in CALL_SURFACE[name];
 }
 
 // False only for a call that accompanies another rather than being one of its own.

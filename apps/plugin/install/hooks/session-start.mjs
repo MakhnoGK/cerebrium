@@ -3,6 +3,15 @@
 //
 //   node session-start.mjs --host claude|codex        -> SessionStart additionalContext
 //   node session-start.mjs --host antigravity         -> PreInvocation ephemeralMessage
+//
+// When the session opens inside a checkout listed in ~/.cerebrium/plugin-index.json, it
+// also starts a background index of that checkout on the Cerebrium host.
+
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { clearTimeout, setTimeout } from "node:timers";
 
 const REMINDER =
   "Cerebrium is this machine's durable cross-session memory (MCP server `cerebrium`). " +
@@ -24,10 +33,21 @@ function readStdin() {
       return;
     }
     let data = "";
+    // A host that leaves stdin open must not stall the session.
+    const timer = setTimeout(() => {
+      process.stdin.destroy();
+      resolve(data);
+    }, 1000);
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", () => resolve(""));
+    process.stdin.on("end", () => {
+      clearTimeout(timer);
+      resolve(data);
+    });
+    process.stdin.on("error", () => {
+      clearTimeout(timer);
+      resolve("");
+    });
   });
 }
 
@@ -39,11 +59,42 @@ function invocationNum(raw) {
   }
 }
 
+function sessionCwd(raw) {
+  try {
+    const cwd = JSON.parse(raw || "{}").cwd;
+    return typeof cwd === "string" && cwd.length ? cwd : process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
+
+// Never fails the hook: indexing is a side effect the reminder does not wait for.
+function indexOnHost(cwd) {
+  try {
+    const home = process.env.CEREBRIUM_HOME || join(homedir(), ".cerebrium");
+    const config = JSON.parse(readFileSync(join(home, "plugin-index.json"), "utf8"));
+    const repos = Array.isArray(config.repos) ? config.repos : [];
+    const repo = repos.find((r) => cwd === r || cwd.startsWith(`${r}/`));
+
+    if (!repo || typeof config.bundle !== "string" || !existsSync(config.bundle)) return;
+
+    spawn(process.execPath, [config.bundle, repo, "--detach", "--quiet", "--min-interval", "60"], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+  } catch {
+    // no config, unreadable config, or no node to spawn
+  }
+}
+
 const host = hostArg(process.argv.slice(2));
+const input = await readStdin();
+
+if (host !== "antigravity" || invocationNum(input) === 0) indexOnHost(sessionCwd(input));
 
 if (host === "antigravity") {
   // PreInvocation fires before every model call; the reminder belongs on the first one.
-  const invocation = invocationNum(await readStdin());
+  const invocation = invocationNum(input);
   const payload = invocation > 0 ? {} : { injectSteps: [{ ephemeralMessage: REMINDER }] };
   process.stdout.write(JSON.stringify(payload));
 } else {

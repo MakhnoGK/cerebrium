@@ -1,9 +1,10 @@
 import "reflect-metadata";
 import { container } from "tsyringe";
+import { afterAll } from "vitest";
 import { PG_TOKEN } from "@/db/postgres/database";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
-import { standingPgDatabase, TEST_BACKEND, TEST_PG_URL } from "@test/pg";
+import { releasePgDatabases, standingPgDatabase, TEST_BACKEND, TEST_PG_URL } from "@test/pg";
 
 // The suite wires itself through the same buildContainer the three hosts use, so a token
 // cannot be registered in production and missing here (or the reverse).
@@ -34,4 +35,8 @@ buildContainer({
 
 if (TEST_BACKEND === "postgres") {
   container.register(PG_TOKEN, { useValue: standingPgDatabase("local-null") });
+}
+
+if (TEST_PG_URL !== null) {
+  afterAll(releasePgDatabases);
 }

@@ -275,6 +275,9 @@ export interface SymbolFacets {
   signature: string | null;
   start_line: number;
   end_line: number;
+  // Set by the per-branch index: the repo identity and the branch the symbol was read from.
+  remote_key?: string;
+  branch?: string;
 }
 
 export interface SymbolLookup {

@@ -11,13 +11,17 @@ import {
 import {
   EDGES_REPO_TOKEN,
   SEARCH_REPO_TOKEN,
+  STORE_TOKEN,
+  type BranchScope,
   type EdgesRepo,
   type SearchRepo,
+  type Store,
 } from "@/domain/ports/storage";
 import {
   BEST_CHUNK_CHARS,
   byScore,
   CANDIDATE_CAP,
+  EDGE_WEIGHTS,
   fuse,
   FUSE_CAP,
   memoryFactor,
@@ -29,7 +33,12 @@ import {
   TRAVERSABLE,
   type Entry,
 } from "@/application/retrieval";
-import { EmbeddingService, isRevoked, PrincipalTrustService } from "@/application/services";
+import {
+  CodeReadService,
+  EmbeddingService,
+  isRevoked,
+  PrincipalTrustService,
+} from "@/application/services";
 import {
   SEARCH_MEMORY,
   useCase,
@@ -51,6 +60,8 @@ export class LocalSearchMemory implements SearchMemory {
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     private readonly retrieval: RetrievalConfig,
     private readonly trust: PrincipalTrustService,
+    @inject(STORE_TOKEN) private readonly store: Store,
+    private readonly code: CodeReadService,
   ) {}
 
   async invoke(args: SearchQuery): Promise<SearchOutcome> {
@@ -68,12 +79,20 @@ export class LocalSearchMemory implements SearchMemory {
       };
     }
 
+    const code = await this.codeScopes(args);
+
     if (mode === "text") {
-      return await this.textSearch(args, text, history, penalty);
+      return await this.textSearch(args, text, history, penalty, code);
     }
 
-    const { ftsRows, ftsTotal, ftsChunks } = await this.textCandidates(args, text, history, mode);
-    const vecRows = await this.vectorCandidates(args, history);
+    const { ftsRows, ftsTotal, ftsChunks } = await this.textCandidates(
+      args,
+      text,
+      history,
+      mode,
+      code,
+    );
+    const vecRows = await this.vectorCandidates(args, history, code);
 
     const entries = fuse({
       ftsRows,
@@ -88,7 +107,9 @@ export class LocalSearchMemory implements SearchMemory {
     await this.applyTrust(entries);
 
     if ((args.expand_graph ?? true) && entries.size) {
-      for (const entry of await this.expandByRank(entries, args.as_of, args.valid_at)) {
+      const expanded = await this.expandByRank(entries, args.as_of, args.valid_at);
+
+      for (const entry of [...expanded, ...(await this.expandIntoCode(entries, code))]) {
         entries.set(entry.row.id, entry);
       }
     }
@@ -132,7 +153,7 @@ export class LocalSearchMemory implements SearchMemory {
     return {
       results,
       total_matches: mode === "vector" ? vecRows.length : ftsTotal,
-      notes: await this.contextNotes(ranked),
+      notes: [...(await this.contextNotes(ranked)), ...(code?.notes ?? [])],
       audit: {
         mode,
         query: args.query,
@@ -151,6 +172,62 @@ export class LocalSearchMemory implements SearchMemory {
     };
   }
 
+  // The branches this search may read code from, on a store with the per-branch index. The
+  // index is searched directly only when symbols are asked for; otherwise code arrives
+  // through the notes that link to it.
+  private async codeScopes(
+    args: SearchQuery,
+  ): Promise<{ scopes: BranchScope[]; notes: string[]; direct: boolean } | null> {
+    if (!this.store.capabilities.branchCode) return null;
+
+    const direct = this.wantsSymbols(args);
+
+    if (!direct && args.expand_graph === false) return null;
+
+    const resolved = await this.code.scopes({
+      ...(args.code_context === undefined ? {} : { code_context: args.code_context }),
+      ...(args.as_of === undefined ? {} : { as_of: args.as_of }),
+    });
+
+    return { scopes: resolved.scopes, notes: direct ? resolved.notes : [], direct };
+  }
+
+  // One hop from the direct hits into the code their notes document, resolved on the
+  // branches this search reads. Spent like a graph hit: never above the best direct one.
+  private async expandIntoCode(
+    entries: Map<string, Entry>,
+    code: { scopes: BranchScope[] } | null,
+  ): Promise<Entry[]> {
+    if (!code?.scopes.length) return [];
+
+    const seeds = [...entries.values()].filter((e) => e.row.type !== "symbol");
+    const topScore = Math.max(0, ...seeds.map((s) => s.score));
+
+    if (topScore <= 0) return [];
+
+    const scoreOf = new Map(seeds.map((s) => [s.row.id, s.score]));
+    const best = new Map<string, Entry>();
+
+    for (const ref of await this.code.resolveRefs([...scoreOf.keys()], code.scopes)) {
+      if (entries.has(ref.row.id)) continue;
+
+      const score =
+        this.retrieval.graphBase * (scoreOf.get(ref.src) ?? 0) * (EDGE_WEIGHTS[ref.type] ?? 0.5);
+      const held = best.get(ref.row.id);
+
+      if (!held || held.score < score) {
+        best.set(ref.row.id, {
+          row: ref.row,
+          score,
+          matched: "graph",
+          via: { node: ref.src, edge: ref.type },
+        });
+      }
+    }
+
+    return [...best.values()];
+  }
+
   private wantsSymbols(args: SearchQuery): boolean {
     if (args.types?.includes("symbol")) {
       return true;
@@ -164,6 +241,7 @@ export class LocalSearchMemory implements SearchMemory {
     text: TextQuery,
     history: boolean,
     mode: string,
+    code: { scopes: BranchScope[]; direct: boolean } | null,
   ): Promise<{
     ftsRows: SearchRow[];
     ftsTotal: number;
@@ -183,11 +261,12 @@ export class LocalSearchMemory implements SearchMemory {
       asOf: args.as_of,
       validAt: args.valid_at,
     });
-    const ftsRows = rows.slice(0, FUSE_CAP);
+    const codeRows = await this.codeTextRows(code, text);
+    const ftsRows = byTextRank([...rows, ...codeRows]).slice(0, FUSE_CAP);
 
     return {
       ftsRows,
-      ftsTotal: total,
+      ftsTotal: total + codeRows.length,
       ftsChunks: await this.searchRepo.bestFtsChunksFor(
         ftsRows.map((r) => r.id),
         text,
@@ -195,14 +274,18 @@ export class LocalSearchMemory implements SearchMemory {
     };
   }
 
-  private async vectorCandidates(args: SearchQuery, history: boolean): Promise<VectorRow[]> {
+  private async vectorCandidates(
+    args: SearchQuery,
+    history: boolean,
+    code: { scopes: BranchScope[]; direct: boolean } | null,
+  ): Promise<VectorRow[]> {
     try {
       const qvec =
         args.query_vector ?? (await this.provider.embed([args.query], EmbeddingRole.QUERY))[0];
 
       if (!qvec) return [];
 
-      return await this.searchRepo.vectorSearch(qvec, {
+      const rows = await this.searchRepo.vectorSearch(qvec, {
         project: args.project,
         kinds: args.kinds,
         types: args.types,
@@ -211,6 +294,14 @@ export class LocalSearchMemory implements SearchMemory {
         asOf: args.as_of,
         validAt: args.valid_at,
       });
+
+      if (!code?.direct || !code.scopes.length) return rows;
+
+      const codeRows = await this.code.vectorRows(code.scopes, qvec, FUSE_CAP);
+
+      return [...rows, ...codeRows]
+        .sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id))
+        .slice(0, FUSE_CAP);
     } catch {
       // Provider unavailable -> skip the vector branch; FTS still answers (graceful degradation).
       return [];
@@ -224,8 +315,9 @@ export class LocalSearchMemory implements SearchMemory {
     text: TextQuery,
     history: boolean,
     penalty: number,
+    code: { scopes: BranchScope[]; notes: string[]; direct: boolean } | null,
   ): Promise<SearchOutcome> {
-    const { rows, total } = await this.searchRepo.search({
+    const found = await this.searchRepo.search({
       text,
       project: args.project,
       kinds: args.kinds,
@@ -235,6 +327,9 @@ export class LocalSearchMemory implements SearchMemory {
       asOf: args.as_of,
       validAt: args.valid_at,
     });
+    const codeRows = await this.codeTextRows(code, text);
+    const rows = byTextRank([...found.rows, ...codeRows]);
+    const total = found.total + codeRows.length;
 
     const now = Date.parse(this.clock.now());
     const best = Math.min(...rows.map((r) => r.text_rank));
@@ -286,7 +381,7 @@ export class LocalSearchMemory implements SearchMemory {
     return {
       results: ranked,
       total_matches: total,
-      notes: [],
+      notes: code?.notes ?? [],
       audit: {
         mode: "text",
         query: args.query,
@@ -296,6 +391,15 @@ export class LocalSearchMemory implements SearchMemory {
         folded: [],
       },
     };
+  }
+
+  private async codeTextRows(
+    code: { scopes: BranchScope[]; direct: boolean } | null,
+    text: TextQuery,
+  ): Promise<SearchRow[]> {
+    if (!code?.direct || !code.scopes.length) return [];
+
+    return this.code.textRows(code.scopes, text, CANDIDATE_CAP);
   }
 
   // The weight multiplies what its principal wrote, and a revoked principal's nodes leave
@@ -396,4 +500,8 @@ export class LocalSearchMemory implements SearchMemory {
 
     return notes;
   }
+}
+
+function byTextRank(rows: SearchRow[]): SearchRow[] {
+  return rows.sort((a, b) => a.text_rank - b.text_rank || a.id.localeCompare(b.id));
 }

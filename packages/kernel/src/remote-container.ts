@@ -1,4 +1,5 @@
 import { container, type DependencyContainer } from "tsyringe";
+import type { CodeContext } from "@cerebrium/contracts/code";
 import { CONFIG_FILE_TOKEN, CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import {
   DaemonConfig,
@@ -20,6 +21,7 @@ export interface RemoteContainerOptions {
   into?: DependencyContainer;
   // Refuse to fall back to the local daemon's socket when no kernel URL is configured.
   requireUrl?: boolean;
+  codeContext?: () => Promise<CodeContext | null>;
 }
 
 export class KernelUrlMissingError extends Error {
@@ -36,6 +38,7 @@ export function buildRemoteContainer({
   source,
   into,
   requireUrl = false,
+  codeContext,
 }: RemoteContainerOptions = {}): DependencyContainer {
   const target = into ?? container;
 
@@ -45,12 +48,12 @@ export function buildRemoteContainer({
 
   if (explicit === null && requireUrl) throw new KernelUrlMissingError();
 
-  registerRemoteKernel(
-    target,
-    explicit === null
+  registerRemoteKernel(target, {
+    ...(explicit === null
       ? { socketPath: target.resolve(DaemonConfig).socketPath }
-      : { socketPath: explicit.url, token: explicit.token },
-  );
+      : { socketPath: explicit.url, token: explicit.token }),
+    ...(codeContext === undefined ? {} : { codeContext }),
+  });
 
   return target;
 }

@@ -9,7 +9,8 @@ export const metadata = {
     "it call / what's in this file': pass `name` to resolve a symbol (simple or qualified) or `file` to list a file's " +
     "symbols. Returns compact symbol envelopes with their signature and `defines`/`calls`/`imports` neighbor stubs, so you " +
     "can navigate structure in one call. Envelopes only — fetch a symbol's raw source with `get`. For 'find code about Y' " +
-    "(by meaning, no exact name), use `search` with `types:['symbol']` instead.",
+    "(by meaning, no exact name), use `search` with `types:['symbol']` instead. Against a Cerebrium host, code is read " +
+    "from the branch your working directory is on (or the repo's default branch, said so in `notes`).",
 
   schema: {
     session_id: sessionIdSchema,
@@ -24,6 +25,10 @@ export const metadata = {
       .optional()
       .describe("List the symbols defined in a file (exact repo-relative path or a path suffix)."),
     repo: z.string().optional().describe("Scope to one indexed repo; omit to search across all."),
+    branch: z
+      .string()
+      .optional()
+      .describe("Read this branch instead of your checkout's (Cerebrium host only)."),
     limit: z
       .number()
       .int()

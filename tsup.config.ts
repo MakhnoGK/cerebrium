@@ -34,6 +34,7 @@ export default defineConfig({
     "stats-cli": "apps/host/src/stats-cli.ts",
     "service-cli": "apps/host/src/service-cli.ts",
     "read-worker": "apps/host/src/read-worker.ts",
+    "code-worker": "apps/host/src/code-worker.ts",
     "embed-worker": "apps/host/src/embed-worker.ts",
     healthcheck: "apps/host/src/healthcheck.ts",
     "import-sqlite": "apps/host/src/import-sqlite.ts",

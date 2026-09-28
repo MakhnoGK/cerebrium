@@ -4,11 +4,14 @@ import {
   CHUNKS_REPO_TOKEN,
   CODE_REPO_TOKEN,
   NODES_REPO_TOKEN,
+  STORE_TOKEN,
   type ChunksRepo,
   type CodeRepo,
   type NodesRepo,
+  type Store,
 } from "@/domain/ports/storage";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
+import { CodeReadService } from "@/application/services";
 import {
   FETCH_NODES,
   useCase,
@@ -25,6 +28,8 @@ export class LocalFetchNodes implements FetchNodes {
     @inject(CHUNKS_REPO_TOKEN) private readonly chunks: ChunksRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
+    @inject(STORE_TOKEN) private readonly store: Store,
+    private readonly branches: CodeReadService,
   ) {}
 
   async invoke(args: FetchNodesArgs): Promise<FetchNodesResult> {
@@ -39,7 +44,11 @@ export class LocalFetchNodes implements FetchNodes {
       const full = await this.nodes.fullNode(id);
 
       if (!full) {
-        not_found.push(id);
+        const symbol = await this.symbol(id, args);
+
+        if (symbol) nodes.push(symbol);
+        else not_found.push(id);
+
         continue;
       }
 
@@ -106,6 +115,25 @@ export class LocalFetchNodes implements FetchNodes {
     await this.uses.recordUse(used, this.clock.now());
 
     return { nodes, not_found, used };
+  }
+
+  // A symbol of the per-branch index lives outside `nodes`. It has one revision and no
+  // headings, so the narrowing and history options have nothing to act on.
+  private async symbol(
+    id: string,
+    args: FetchNodesArgs,
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!this.store.capabilities.branchCode) return undefined;
+
+    const node = await this.branches.fetch(id, args.code_context);
+
+    if (!node) return undefined;
+
+    if (args.sections !== undefined || args.outline === true) {
+      throw new Error(`symbol ${id} has no sections; fetch it without \`sections\`/\`outline\`.`);
+    }
+
+    return node;
   }
 
   private reject(args: FetchNodesArgs): void {

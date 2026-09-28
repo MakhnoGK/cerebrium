@@ -2,7 +2,13 @@
 import "reflect-metadata";
 import { readFileSync } from "node:fs";
 import { PgDatabase, redactUrl } from "@cerebrium/kernel/db/postgres/database";
-import { importSqlite, verifyImport } from "@cerebrium/kernel/db/postgres/import-sqlite";
+import {
+  importSqlite,
+  parseRepoMap,
+  remapCodeRefs,
+  verifyImport,
+  type RepoMap,
+} from "@cerebrium/kernel/db/postgres/import-sqlite";
 import { openDatabaseReadonly } from "@cerebrium/kernel/db/sqlite/database";
 import { isMainModule } from "@cerebrium/kernel/runtime/is-main";
 
@@ -11,6 +17,7 @@ import-sqlite — copy authored memory from a SQLite store into a Postgres one.
 
   npm run import:sqlite -- --from PATH --to URL [--verify] [--verify-only]
   node dist/import-sqlite.js --from PATH --to-file PATH [--verify]     (in the host image)
+  node dist/import-sqlite.js --remap-code-refs --repo-map FILE --to-file PATH
 
   --from PATH     SQLite store to read, opened READ-ONLY. Use a copy made with
                   sqlite3 memory.db ".backup copy.db", never the live file.
@@ -19,6 +26,12 @@ import-sqlite — copy authored memory from a SQLite store into a Postgres one.
                   appears in a process listing.
   --verify        After importing, compare per-table counts and content hashes.
   --verify-only   Compare without importing.
+  --repo-map FILE JSON object of old local repo name -> remote_key (host/owner/repo), built
+                  on the machine that had the checkouts. code_refs of a repo it names get
+                  that remote_key, so they resolve against the per-branch code index.
+  --remap-code-refs
+                  Only fill in remote_key on the code_refs already in the target, from
+                  --repo-map. Nothing else is read or written.
   --help          This text.
 
 Copied: authored nodes (invalidated included), revisions, search text, chunks and their
@@ -45,6 +58,31 @@ async function main(): Promise<void> {
   const from = arg(argv, "--from");
   const toFile = arg(argv, "--to-file");
   const to = toFile ? readFileSync(toFile, "utf8").trim() : arg(argv, "--to");
+  const mapFile = arg(argv, "--repo-map");
+  const repoMap: RepoMap | undefined = mapFile
+    ? parseRepoMap(readFileSync(mapFile, "utf8"))
+    : undefined;
+
+  if (argv.includes("--remap-code-refs")) {
+    if (!to || !repoMap) {
+      console.error(
+        "import-sqlite: --remap-code-refs needs --repo-map FILE and --to URL (or --to-file)",
+      );
+      process.exitCode = 2;
+      return;
+    }
+
+    const target = new PgDatabase({ url: to, poolMax: 2, readOnly: false });
+
+    try {
+      console.log(`to: ${redactUrl(to)}`);
+      console.table(await remapCodeRefs(target, repoMap));
+    } finally {
+      await target.close();
+    }
+
+    return;
+  }
 
   if (!from || !to) {
     console.error(
@@ -62,7 +100,7 @@ async function main(): Promise<void> {
 
     if (!argv.includes("--verify-only")) {
       const started = Date.now();
-      const report = await importSqlite(source, target);
+      const report = await importSqlite(source, target, repoMap ? { repoMap } : {});
 
       console.log(`imported in ${String(Date.now() - started)} ms`);
       console.table(report.tables);
@@ -70,7 +108,7 @@ async function main(): Promise<void> {
     }
 
     if (argv.includes("--verify") || argv.includes("--verify-only")) {
-      const verified = await verifyImport(source, target);
+      const verified = await verifyImport(source, target, repoMap ? { repoMap } : {});
 
       console.table(verified.tables);
       console.log(verified.ok ? "verify: OK" : "verify: MISMATCH");

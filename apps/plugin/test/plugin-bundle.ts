@@ -13,6 +13,7 @@ export interface Metafile {
 export interface PluginBundle {
   dir: string;
   server: string;
+  index: string;
   metafile: Metafile;
 }
 
@@ -29,6 +30,7 @@ export function pluginBundle(): Promise<PluginBundle> {
     return {
       dir,
       server: join(dir, "server.js"),
+      index: join(dir, "index.js"),
       metafile: JSON.parse(readFileSync(join(dir, "metafile-esm.json"), "utf8")) as Metafile,
     };
   })();
@@ -41,9 +43,13 @@ export interface Exited {
   stderr: string;
 }
 
-export function runToExit(server: string, env: Record<string, string>): Promise<Exited> {
+export function runToExit(
+  server: string,
+  env: Record<string, string>,
+  args: string[] = [],
+): Promise<Exited> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [server], {
+    const child = spawn(process.execPath, [server, ...args], {
       env: { PATH: process.env.PATH ?? "", ...env },
       stdio: ["ignore", "ignore", "pipe"],
     });

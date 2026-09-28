@@ -1,5 +1,6 @@
 import { container, instanceCachingFactory, type DependencyContainer } from "tsyringe";
 import { CLOCK_TOKEN } from "@/domain/ports/clock";
+import { CODE_PARSER_TOKEN } from "@/domain/ports/code-parser";
 import { CONFIG_FILE_TOKEN, CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
@@ -22,6 +23,7 @@ import {
   STORE_BACKENDS,
 } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
+import { InProcessCodeParser } from "@/code/unit-parser";
 import { resolveRoles } from "@/consolidation/roles";
 import { NoEmbeddingProvider } from "@/embeddings/worker-provider";
 import { SystemClock } from "@/runtime/system-clock";
@@ -58,6 +60,7 @@ export const KERNEL_TOKENS = {
   configSource: CONFIG_SOURCE_TOKEN,
   configFile: CONFIG_FILE_TOKEN,
   clock: CLOCK_TOKEN,
+  codeParser: CODE_PARSER_TOKEN,
   processProbe: PROCESS_PROBE_TOKEN,
   workerOptions: WORKER_OPTIONS_TOKEN,
   embeddingProvider: EMBEDDING_PROVIDER_TOKEN,
@@ -110,6 +113,7 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
   }
 
   target.registerSingleton(CLOCK_TOKEN, SystemClock);
+  target.register(CODE_PARSER_TOKEN, { useValue: new InProcessCodeParser() });
   target.registerSingleton(PROCESS_PROBE_TOKEN, SystemProcessProbe);
 
   target.register(WORKER_OPTIONS_TOKEN, {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { instanceCachingFactory, type DependencyContainer } from "tsyringe";
 import {
+  BRANCH_CODE_REPO_TOKEN,
   CHUNKS_REPO_TOKEN,
   CODE_REPO_TOKEN,
   CONSOLIDATION_REPO_TOKEN,
@@ -17,6 +18,7 @@ import {
   STATS_REPO_TOKEN,
   STORE_TOKEN,
 } from "@/domain/ports/storage";
+import { PgBranchCodeRepo } from "@/db/postgres/branch-code";
 import { PgChunksRepo } from "@/db/postgres/chunks";
 import { PgCodeRepo } from "@/db/postgres/code";
 import { PgConsolidationRepo } from "@/db/postgres/consolidation";
@@ -64,6 +66,7 @@ export function registerPostgresRepositories(
     }),
   });
   c.register(CHUNKS_REPO_TOKEN, { useClass: PgChunksRepo });
+  c.register(BRANCH_CODE_REPO_TOKEN, { useClass: PgBranchCodeRepo });
   c.register(CODE_REPO_TOKEN, { useClass: PgCodeRepo });
   c.register(CONSOLIDATION_REPO_TOKEN, { useClass: PgConsolidationRepo });
   c.register(EDGES_REPO_TOKEN, { useClass: PgEdgesRepo });

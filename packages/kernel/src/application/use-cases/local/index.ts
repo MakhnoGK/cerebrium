@@ -1,5 +1,6 @@
 // Importing this module is what registers the local implementations against the tokens in
 // `contracts`. A host imports it once; nothing imports the classes by name.
+import "@/application/use-cases/local/branch-code";
 import "@/application/use-cases/local/consolidation";
 import "@/application/use-cases/local/fetch-nodes";
 import "@/application/use-cases/local/invalidate-memory";

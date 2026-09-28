@@ -1,32 +1,14 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { langForPath, SKIP_DIRS, SKIP_FILES } from "@cerebrium/contracts/code";
+import type { SymbolDirEntry } from "@cerebrium/contracts/types";
 import { type CodeRepo } from "@/domain/ports/storage";
 import type { FileExtract } from "@/code/extract";
 import { compileIgnore } from "@/code/ignore";
-import { langForPath } from "@/code/languages";
 
-// Directories never worth walking, independent of .gitignore.
-const SKIP_DIRS = new Set([
-  "node_modules",
-  // Composer's third-party tree. Its absence here is why one PHP repo put 98,748 Laravel
-  // symbols in the mirror, against 2,328 for this project's own code.
-  "vendor",
-  ".git",
-  "dist",
-  "build",
-  "coverage",
-  ".next",
-  "out",
-  ".turbo",
-  ".cache",
-  ".vscode-test",
-]);
-// Generated files that carry a known grammar but no authored code. `_ide_helper` is
-// Laravel's IDE stub, tens of thousands of symbols describing the framework.
-const SKIP_FILES = [/^_ide_helper/];
+export { looksBinary, MAX_BYTES } from "@cerebrium/contracts/code";
 
-export const MAX_BYTES = 1_000_000;
 // Yield the event loop this often during a long index so a big repo can't
 // monopolize the shared DB — other server processes' writes (and this process's
 // own embedding worker) get scheduling gaps between per-file transactions.
@@ -38,25 +20,6 @@ export function sha256(buf: Buffer): string {
 
 export function yieldToLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
-}
-
-// Real binaries are saturated with NUL bytes; a source occasionally carries one inside
-// a string literal (e.g. a "\0" separator). Flag only a high NUL fraction, not the
-// first NUL, so a legal source is never dropped.
-export function looksBinary(buf: Buffer): boolean {
-  const n = Math.min(buf.length, 8000);
-
-  if (n === 0) {
-    return false;
-  }
-
-  let nulls = 0;
-
-  for (let i = 0; i < n; i++) {
-    if (buf[i] === 0) nulls++;
-  }
-
-  return nulls / n > 0.1;
 }
 
 interface Candidate {
@@ -125,14 +88,14 @@ function pathNameKey(path: string, name: string): string {
   return `${path}\0${name}`;
 }
 
-export async function buildResolver(code: CodeRepo, name: string): Promise<Resolver> {
+export function resolverFrom(entries: SymbolDirEntry[]): Resolver {
   const r: Resolver = {
     byQualified: new Map(),
     byPathName: new Map(),
     moduleByPath: new Map(),
     byName: new Map(),
   };
-  for (const e of await code.repoSymbolDirectory(name)) {
+  for (const e of entries) {
     if (!r.byQualified.has(e.qualified)) r.byQualified.set(e.qualified, e.node_id);
     const key = pathNameKey(e.path, e.name);
     if (!r.byPathName.has(key)) r.byPathName.set(key, e.node_id);
@@ -140,6 +103,10 @@ export async function buildResolver(code: CodeRepo, name: string): Promise<Resol
     else if (!r.byName.has(e.name)) r.byName.set(e.name, e.node_id); // modules excluded — they collide on basenames
   }
   return r;
+}
+
+export async function buildResolver(code: CodeRepo, name: string): Promise<Resolver> {
+  return resolverFrom(await code.repoSymbolDirectory(name));
 }
 
 export function resolveImports(

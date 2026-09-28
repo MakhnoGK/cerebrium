@@ -1,3 +1,4 @@
+import type { CodeContext } from "@cerebrium/contracts/code";
 import type { SymbolLookup } from "@cerebrium/contracts/types";
 import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/use-case";
 
@@ -11,6 +12,7 @@ export interface FetchNodesArgs {
   sections?: string[];
   outline?: boolean;
   include_revisions?: boolean;
+  code_context?: CodeContext;
 }
 
 // `nodes` stays `unknown[]`: its shape varies by node kind (symbol source, mirror facets,
@@ -32,11 +34,15 @@ export interface LookupCodeArgs {
   name?: string;
   file?: string;
   repo?: string;
+  branch?: string;
   limit: number;
+  code_context?: CodeContext;
 }
 
 export interface LookupCodeResult {
   symbols: SymbolLookup[];
+  // Which branches were read, when the per-branch index answered.
+  notes?: string[];
 }
 
 export type LookupCode = UseCase<LookupCodeArgs, LookupCodeResult>;

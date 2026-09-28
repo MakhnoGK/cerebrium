@@ -7,7 +7,15 @@ import { ACTIVE_SPACE, toVectorLiteral } from "@/db/postgres/internal";
 // Copies authored memory from a SQLite store into a Postgres one. Idempotent by id: rows
 // that exist are updated where they are mutable and left alone where they are append-only,
 // so a re-run converges instead of duplicating. The code mirror is not copied; authored
-// edges into it are kept as `code_refs` for the code index to re-link later.
+// edges into it are kept as `code_refs`, resolved per branch by the host's code index. A
+// repo map names each old local repo's `remote_key`; a repo it does not name keeps none.
+
+// Old local repo name -> remote_key (host/owner/repo).
+export type RepoMap = Record<string, string>;
+
+export interface ImportOptions {
+  repoMap?: RepoMap;
+}
 
 export interface ImportReport {
   tables: Record<string, number>;
@@ -86,7 +94,12 @@ function candidates(source: Database.Database, authored: Set<string>): Row[] {
   );
 }
 
-function codeRefs(source: Database.Database): { refs: Row[]; external: number; other: number } {
+const CODE_REF_KEY = ["src", "type", "repo", "path", "qualified"];
+
+function codeRefs(
+  source: Database.Database,
+  repoMap?: RepoMap,
+): { refs: Row[]; external: number; other: number } {
   const rows = source
     .prepare(
       `SELECT e.src, e.type, e.valid_from, e.invalidated_at, d.origin AS dst_origin,
@@ -120,6 +133,7 @@ function codeRefs(source: Database.Database): { refs: Row[]; external: number; o
       symbol_live: row.dst_invalidated == null ? 1 : 0,
       valid_from: row.valid_from,
       invalidated_at: row.invalidated_at,
+      ...(repoMap === undefined ? {} : { remote_key: repoMap[row.repo as string] ?? null }),
     });
   }
 
@@ -185,11 +199,12 @@ async function upsert(
 export async function importSqlite(
   source: Database.Database,
   target: PgDatabase,
+  opts: ImportOptions = {},
 ): Promise<ImportReport> {
   const authored = authoredIds(source);
   const all = (sql: string) => source.prepare(sql).all() as Row[];
   const tables: Record<string, number> = {};
-  const { refs, external, other } = codeRefs(source);
+  const { refs, external, other } = codeRefs(source, opts.repoMap);
   const nonAuthoredEdges = (
     source
       .prepare(
@@ -261,13 +276,7 @@ export async function importSqlite(
       ["artifact_kind", "artifact_ref"],
       "update",
     );
-    tables.code_refs = await upsert(
-      target,
-      "code_refs",
-      refs,
-      ["src", "type", "repo", "qualified"],
-      "update",
-    );
+    tables.code_refs = await upsert(target, "code_refs", refs, CODE_REF_KEY, "update");
 
     const vecs = vectors(source);
 
@@ -306,6 +315,7 @@ function hashRows(rows: Row[], columns: string[]): string {
 export async function verifyImport(
   source: Database.Database,
   target: PgDatabase,
+  opts: ImportOptions = {},
 ): Promise<VerifyReport> {
   const tables: VerifyReport["tables"] = {};
   const targetSql: Record<string, string> = {
@@ -337,6 +347,30 @@ export async function verifyImport(
     };
   }
 
+  const refs = codeRefs(source, opts.repoMap).refs;
+  const refColumns = refs.length ? Object.keys(refs[0]!) : [];
+  const refKeys = new Set(refs.map((r) => keyOf(r, CODE_REF_KEY)));
+  const targetRefs = (
+    await target.query(
+      `SELECT src, type, repo, path, qualified, symbol_kind, symbol_live, valid_from,
+              invalidated_at, remote_key
+       FROM code_refs ORDER BY src, type, repo, path, qualified`,
+    )
+  ).rows as Row[];
+  const sourceRefs = [...refs].sort((a, b) =>
+    keyOf(a, CODE_REF_KEY) < keyOf(b, CODE_REF_KEY) ? -1 : 1,
+  );
+  const matchedRefs = targetRefs
+    .filter((r) => refKeys.has(keyOf(r, CODE_REF_KEY)))
+    .sort((a, b) => (keyOf(a, CODE_REF_KEY) < keyOf(b, CODE_REF_KEY) ? -1 : 1));
+
+  tables.code_refs = {
+    source: refs.length,
+    target: matchedRefs.length,
+    target_only: targetRefs.length - matchedRefs.length,
+    hash_match: hashRows(sourceRefs, refColumns) === hashRows(matchedRefs, refColumns),
+  };
+
   const vectorCount = (
     source
       .prepare(
@@ -361,4 +395,54 @@ export async function verifyImport(
   const ok = Object.values(tables).every((t) => t.source === t.target && t.hash_match !== false);
 
   return { ok, tables };
+}
+
+// Names the remote_key of every ref written under an old local repo name. Rows are updated
+// in place, never removed; a repo the map does not name is left as it is.
+export async function remapCodeRefs(
+  target: PgDatabase,
+  repoMap: RepoMap,
+): Promise<Record<string, number>> {
+  const updated: Record<string, number> = {};
+
+  await target.tx(async () => {
+    for (const [repo, remoteKey] of Object.entries(repoMap).sort()) {
+      updated[repo] =
+        (
+          await target.query(
+            `UPDATE code_refs SET remote_key = @remoteKey
+             WHERE repo = @repo AND remote_key IS DISTINCT FROM @remoteKey`,
+            { repo, remoteKey },
+          )
+        ).rowCount ?? 0;
+    }
+  });
+
+  return updated;
+}
+
+export function parseRepoMap(raw: string): RepoMap {
+  const parsed: unknown = JSON.parse(raw);
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("a repo map is a JSON object of old repo name -> remote_key");
+  }
+
+  const map: RepoMap = {};
+
+  for (const [repo, key] of Object.entries(parsed as Record<string, unknown>)) {
+    if (
+      typeof key !== "string" ||
+      !/^[^\s/]+(\/[^\s/]+)+$/.test(key) ||
+      key !== key.toLowerCase()
+    ) {
+      throw new Error(
+        `repo map: '${repo}' -> ${JSON.stringify(key)} is not a normalized remote_key`,
+      );
+    }
+
+    map[repo] = key;
+  }
+
+  return map;
 }

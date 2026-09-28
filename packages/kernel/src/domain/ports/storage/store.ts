@@ -5,6 +5,8 @@ export interface StoreCapabilities {
   codeIndex: boolean;
   // Per-principal tokens, which the network listener authenticates against.
   principalTokens: boolean;
+  // The per-branch index that clients upload into (`code_repos`, `code_units`, ...).
+  branchCode: boolean;
 }
 
 export const STORE_TOKEN = Symbol("Store");

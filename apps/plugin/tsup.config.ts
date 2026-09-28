@@ -3,7 +3,7 @@ import { defineConfig, type Options } from "tsup";
 // A Claude Code plugin is copied into the plugin cache without node_modules, so every
 // dependency is inlined and only node builtins stay external.
 export const PLUGIN_BUILD = {
-  entry: { server: "apps/plugin/src/plugin-server.ts" },
+  entry: { server: "apps/plugin/src/plugin-server.ts", index: "apps/plugin/src/index-cli.ts" },
   format: ["esm"],
   platform: "node",
   target: "node22",

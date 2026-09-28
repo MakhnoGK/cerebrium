@@ -781,7 +781,7 @@ describe("stats tool", () => {
 });
 
 describe.runIf(TEST_BACKEND === "postgres")("code tools on the postgres backend", () => {
-  it("should refuse code_index with a reason rather than index nothing", async () => {
+  it("should refuse code_index and point at the plugin, which uploads the checkout", async () => {
     const client = await connect();
     const sid = await startSession(client);
 
@@ -790,7 +790,7 @@ describe.runIf(TEST_BACKEND === "postgres")("code tools on the postgres backend"
     );
 
     expect(res.isError).toBe(true);
-    expect(res.text).toContain("not available on the postgres backend");
+    expect(res.text).toContain("Call code_index through cerebrium-plugin");
   });
 });
 
