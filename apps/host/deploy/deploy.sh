@@ -65,10 +65,11 @@ backup() {
   fi
 
   mkdir -p "$BACKUPS"
+  chmod 700 "$BACKUPS"
   name="$BACKUPS/$(date -u +%Y%m%dT%H%M%SZ)-$previous.dump"
   partial="$name.partial"
 
-  if ! compose "$previous" exec -T postgres pg_dump -Fc -U cerebrium cerebrium >"$partial"; then
+  if ! (umask 077 && compose "$previous" exec -T postgres pg_dump -Fc -U cerebrium cerebrium >"$partial"); then
     rm -f "$partial"
     echo "pg_dump failed; not deploying" >&2
     return 1

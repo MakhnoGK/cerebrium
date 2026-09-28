@@ -112,6 +112,21 @@ describe("deploy.sh backup", () => {
     expect(dumps).toHaveLength(1);
     expect(dumps[0]).toMatch(/^\d{8}T\d{6}Z-v1\.dump$/);
     expect(readFileSync(join(root, "backups", dumps[0]!), "utf8")).toBe("PGDMP-fake");
+    expect(statSync(join(root, "backups")).mode & 0o777).toBe(0o700);
+    expect(statSync(join(root, "backups", dumps[0]!)).mode & 0o777).toBe(0o600);
+  });
+
+  it("should close a backups directory that was created world-readable", () => {
+    // Given
+    mkdirSync(join(root, "backups"));
+    chmodSync(join(root, "backups"), 0o755);
+
+    // When
+    const res = run("backup v1");
+
+    // Then
+    expect(res.status).toBe(0);
+    expect(statSync(join(root, "backups")).mode & 0o777).toBe(0o700);
   });
 
   it("should stop the deploy and leave no partial file when pg_dump fails", () => {

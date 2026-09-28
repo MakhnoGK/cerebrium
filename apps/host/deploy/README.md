@@ -19,7 +19,7 @@ by `.github/workflows/release.yml`:
   current -> releases/<version>   # the release that last came up healthy
   releases/<version>/             # compose.yml, deploy.sh, README.md
   secrets/                        # pg_password, pg_url — mode 700, created by deploy.sh
-  backups/                        # <UTC>-<release>.dump, the 14 newest
+  backups/                        # <UTC>-<release>.dump, the 14 newest — mode 700, dumps 600
 ```
 
 - Docker is OrbStack (`~/.orbstack/bin/docker`); the compose project is `cerebrium`.
@@ -55,8 +55,17 @@ docker compose start daemon
 ```
 
 `--clean --if-exists` drops and recreates every object the dump holds, so the database ends
-up exactly as dumped. Rehearse into a scratch database first when in doubt
-(`createdb -U cerebrium scratch`, then `-d scratch`).
+up exactly as dumped. Rehearse into a scratch database first when in doubt:
+
+```bash
+docker compose exec -T postgres createdb -U cerebrium -T template0 --locale=C --encoding=UTF8 scratch
+docker compose exec -T postgres pg_restore --no-owner --exit-on-error -U cerebrium -d scratch < ~/cerebrium-host/backups/<dump>
+docker compose exec -T postgres dropdb -U cerebrium scratch
+```
+
+A scratch database must come from `template0`: the image's `template1` already holds the
+`paradedb`, `tiger` and `topology` schemas, so a restore into a copy of it reports "schema
+already exists" and carries on.
 
 ## Importing the Mac's store
 
@@ -72,12 +81,16 @@ URL is a mounted secret and Postgres needs no published port:
 
 ```bash
 docker cp /tmp/cerebrium-copy.db cerebrium-daemon-1:/data/import.db
+docker exec -u root cerebrium-daemon-1 chown 1000:1000 /data/import.db
 docker exec cerebrium-daemon-1 node dist/import-sqlite.js \
   --from /data/import.db --to-file /run/secrets/pg_url --verify
+docker exec cerebrium-daemon-1 rm -f /data/import.db /data/import.db-shm /data/import.db-wal
 ```
 
-Re-running converges; `--verify` compares per-table counts and content hashes and exits 1
-on a mismatch.
+`docker cp` keeps the file's owner from the Mac, which the container's `node` user (uid
+1000) cannot read, hence the `chown`. Re-running converges; `--verify` compares per-table
+counts and content hashes and exits 1 on a mismatch. Rows the host wrote itself (its own
+session and sweep runs) are reported as `target_only`, not failed.
 
 ## By hand
 
