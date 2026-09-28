@@ -244,6 +244,31 @@ describe.skipIf(TEST_BACKEND !== "postgres")("Code indexing through the plugin b
     expect(found.results.find((r) => r.id === hash!.id)?.via?.node).toBe(written.id);
   });
 
+  it("should split an upload of many small files into frames the host accepts", async () => {
+    // Given
+    for (let i = 0; i < 520; i++)
+      put(`src/many/f${String(i)}.ts`, `export const v${String(i)} = ${String(i)};\n`);
+    commit("many");
+    const { index } = await pluginBundle();
+
+    // When
+    const exited = await runToExit(
+      index,
+      {
+        HOME: dir,
+        CEREBRIUM_HOME: join(dir, "home"),
+        MEMORY_KERNEL_URL: url,
+        MEMORY_KERNEL_TOKEN_FILE: token,
+      },
+      [repo],
+    );
+
+    // Then
+    expect(exited.stderr).toBe("");
+    expect(exited.code).toBe(0);
+    expect(await sql("SELECT COUNT(*)::int AS c FROM code_branch_files")).toEqual([{ c: 522 }]);
+  });
+
   it("should index a checkout from the command line, as the git hooks do", async () => {
     // Given
     const { index } = await pluginBundle();

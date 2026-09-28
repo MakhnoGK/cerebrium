@@ -267,6 +267,7 @@ export interface CodeCommitResult {
 
 // One frame of uploads stays well under the kernel's 1 MB line cap.
 export const UPLOAD_FRAME_BYTES = 512 * 1024;
+export const UPLOAD_FRAME_BLOBS = 500;
 
 export interface CodeImportRef {
   name: string;

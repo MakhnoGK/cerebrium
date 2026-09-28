@@ -5,6 +5,7 @@ import {
   looksBinary,
   MAX_BYTES,
   sha256Hex,
+  UPLOAD_FRAME_BLOBS,
   UPLOAD_FRAME_BYTES,
   type CodeCommitArgs,
   type CodeCommitResult,
@@ -98,7 +99,9 @@ export async function indexCheckout(
       continue;
     }
 
-    if (frameBytes + content.length > UPLOAD_FRAME_BYTES) await flush();
+    if (frameBytes + content.length > UPLOAD_FRAME_BYTES || frame.length >= UPLOAD_FRAME_BLOBS) {
+      await flush();
+    }
 
     frame.push({ hash: file.hash, content });
     frameBytes += content.length;
