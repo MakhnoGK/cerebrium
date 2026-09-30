@@ -104,6 +104,22 @@ index node is *meant* to be long. Take it as a prompt to check whether the body 
 subject or several, and to give it headings either way — a body with headings can be read
 in parts, one without any can only be fetched whole.
 
+**Write for the reader who pays for every token.** A title is the fact in one line, at most
+~100 chars: a short status tag may lead it (`DONE 2026-09-28:`), the trail of earlier
+states, PR numbers and versions may not — that is what the body and the checkpoint hold.
+The first line is one sentence that stands on its own as the summary. The body holds only
+what is needed to act on the fact: no retelling of the session, no quoting the user beyond
+the words that are the decision. A checkpoint's summary is three or four sentences, its
+decisions and open threads one line each.
+
+```
+GOOD: title "DONE 2026-09-28: per-branch code index released (#78)"; body: what runs
+      where, the command that rolls it out, the number that proves it.
+BAD:  title "MR 5c PLAN, checked against dev b61838e — APPROVED 2026-09-28 by the owner
+      (all 17 points): parse unit = (blob, path), deterministic ids, versioned branch
+      files, …" — a paragraph in the title, and a body that replays the conversation.
+```
+
 Episodic vs semantic, the decision rule:
 - "We deployed X and hit error Y" -> **episodic** `event_note`.
 - "X must be deployed before Y" -> **semantic** `fact`/`decision`.

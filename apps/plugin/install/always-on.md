@@ -50,6 +50,16 @@ Every session/node/candidate id is opaque. Copy it exactly from the tool that re
 never synthesize one. References to invalidated nodes are rejected, with the terminal live
 successor named when there is exactly one; retry with that returned id only after checking it.
 
+## Write for the reader who pays for every token
+
+- **Title**: the fact in one line, at most ~100 chars. A short status tag may lead it
+  (`DONE 2026-09-28:`); the trail of earlier states, PR numbers and versions does not
+  belong there.
+- **First line**: one sentence that stands on its own as the summary.
+- **Body**: only what is needed to act on the fact. No retelling of the session, no quoting
+  the user beyond the words that are the decision.
+- **Checkpoint**: a summary of three or four sentences; one line per decision and open thread.
+
 ## Code is a mirror, not authored knowledge
 
 `symbol` nodes are derived from source and maintained only by `code_index` — never
