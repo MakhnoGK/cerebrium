@@ -358,6 +358,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
   const { candidate, members } = view;
   const kind = kindOf(candidate);
   const proposal = candidate.proposal;
+  const retired = members.some((node) => node.invalidated);
   const [editing, setEditing] = useState(false);
 
   const reject = () => onDecide("Rejected", { decision: "reject" });
@@ -405,7 +406,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
         ) : (
           generates(kind) && (
             <p className="waiting muted">
-              Waiting for the model — proposals are written 10 per sweep.
+              Waiting for the model — it works through the queue one candidate at a time.
             </p>
           )
         )}
@@ -427,8 +428,15 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
 
         {error && <Notice tone="err">{error}</Notice>}
 
+        {retired && (
+          <Notice tone="warn">
+            A member was retired after this was detected, so there is nothing left to consolidate.
+            Reject it; the next sweep dismisses it anyway.
+          </Notice>
+        )}
+
         <div className="actions">
-          {kind === "distill" && (
+          {!retired && kind === "distill" && (
             <>
               <button
                 type="button"
@@ -449,7 +457,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
               </button>
             </>
           )}
-          {kind === "merge" && (
+          {!retired && kind === "merge" && (
             <>
               <button
                 type="button"
@@ -481,7 +489,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
               </button>
             </>
           )}
-          {(kind === "link" || kind === "documents") && (
+          {!retired && (kind === "link" || kind === "documents") && (
             <button
               type="button"
               className="btn btn-primary"
@@ -490,7 +498,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
               Apply
             </button>
           )}
-          {kind === "prune" && (
+          {!retired && kind === "prune" && (
             <button
               type="button"
               className="btn btn-danger"
@@ -503,10 +511,10 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
               Retire node
             </button>
           )}
-          <button type="button" className="btn" onClick={reject}>
+          <button type="button" className={retired ? "btn btn-primary" : "btn"} onClick={reject}>
             Reject
           </button>
-          {generates(kind) && (
+          {!retired && generates(kind) && (
             <button type="button" className="btn" disabled={retrying} onClick={onRetry}>
               {retrying ? "Regenerating…" : "Regenerate"}
             </button>

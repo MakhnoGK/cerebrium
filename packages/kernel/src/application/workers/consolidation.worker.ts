@@ -290,6 +290,9 @@ export class ConsolidationWorker {
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
+      await this.report(runId, "retired", result);
+      await this.consolidationRepo.dismissRetiredCandidates(this.ownerId, now);
+
       await this.report(runId, "backfill", result);
       await this.backfillProposals(now, result);
 
