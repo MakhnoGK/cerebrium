@@ -188,6 +188,22 @@ export async function waitForOwnership(opts: {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+// A sweep that generated something cleanly, with more of the same queued, is followed by
+// another at once instead of after the interval. One that failed, or that got nowhere, waits:
+// a model that is down, or a candidate it cannot write, must not keep it spinning.
+export function sweepAgain(swept: ConsolidationTickResult, workLeft: boolean): boolean {
+  const generated =
+    swept.proposals_backfilled +
+    swept.annotated +
+    swept.rejected +
+    swept.distilled +
+    swept.distill_suggested +
+    swept.merged +
+    swept.merge_suggested;
+
+  return workLeft && swept.generation_failures === 0 && (generated > 0 || swept.yielded === true);
+}
+
 export async function runDaemon(
   queue: EmbeddingQueueRepo,
   worker: EmbeddingWorker,
@@ -268,6 +284,10 @@ export async function runDaemon(
       const swept = await consolidation.tick({ shouldYield: busy });
 
       opts.onSwept?.(swept);
+
+      if (sweepAgain(swept, await consolidation.hasGenerativeWork().catch(() => false))) {
+        lastConsolidateMs = -Infinity;
+      }
 
       const total =
         swept.distilled +
