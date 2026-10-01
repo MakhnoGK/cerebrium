@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  agentEnv,
   buildArgs,
   DENIED_TOOLS,
   parseEnvelope,
@@ -74,6 +75,38 @@ const spawnerFor =
   (child: ChildProcess): Spawner =>
   () =>
     child;
+
+describe("agentEnv", () => {
+  it("should strip every credential that would bill the run outside the subscription", () => {
+    // Given
+    const base = {
+      PATH: "/usr/bin",
+      ANTHROPIC_API_KEY: "sk-ant-api",
+      ANTHROPIC_AUTH_TOKEN: "t",
+      ANTHROPIC_BASE_URL: "https://proxy",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      CLAUDE_CODE_USE_VERTEX: "1",
+      CLAUDE_CODE_USE_FOUNDRY: "1",
+    };
+
+    // When
+    const env = agentEnv(base, null);
+
+    // Then
+    expect(env).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("should authenticate with the given subscription token and no inherited one", () => {
+    // Given
+    const base = { PATH: "/usr/bin", CLAUDE_CODE_OAUTH_TOKEN: "inherited" };
+
+    // When
+    const env = agentEnv(base, "sk-ant-oat-own");
+
+    // Then
+    expect(env).toEqual({ PATH: "/usr/bin", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-own" });
+  });
+});
 
 describe("buildArgs", () => {
   it("should restrict the run to the one server it is handed when it builds the command", () => {

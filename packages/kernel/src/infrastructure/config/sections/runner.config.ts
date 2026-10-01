@@ -1,4 +1,4 @@
-import { bool, configSection, int, num, SectionOf, str } from "@/domain/ports/config";
+import { bool, configSection, int, nullableStr, num, SectionOf, str } from "@/domain/ports/config";
 
 // The runner host. Disabled by default: it is the only part of Cerebrium that spends the
 // owner's subscription budget, and the budget is shared with their own interactive
@@ -11,6 +11,10 @@ import { bool, configSection, int, num, SectionOf, str } from "@/domain/ports/co
 //
 // `maxBudgetUsd` here is a per-run ceiling the task's own cap is clamped to, so a task
 // cannot raise its allowance past what the deployment permits.
+//
+// `oauthTokenFile` names a file holding a `claude setup-token` token. When it is set, a run
+// is authenticated with that token and nothing else, and the runner claims no job while the
+// file is empty.
 @configSection()
 export class RunnerConfig extends SectionOf("runner", {
   enabled: bool(false).env("MEMORY_RUNNER"),
@@ -19,4 +23,5 @@ export class RunnerConfig extends SectionOf("runner", {
   cwd: str("/tmp").env("MEMORY_RUNNER_CWD"),
   idleMs: int(300_000).positive().env("MEMORY_RUNNER_IDLE_MS"),
   maxBudgetUsd: num(1).env("MEMORY_RUNNER_MAX_BUDGET_USD"),
+  oauthTokenFile: nullableStr(null).env("MEMORY_RUNNER_OAUTH_TOKEN_FILE"),
 }) {}

@@ -82,6 +82,23 @@ describe("deploy.sh secrets", () => {
   });
 });
 
+describe("deploy.sh runner token", () => {
+  it("should leave an empty token file for the runner, and never touch one already filled", () => {
+    // Given
+    run("ensure_secrets");
+    const file = join(root, "secrets/claude_oauth_token");
+    const empty = readFileSync(file, "utf8");
+    writeFileSync(file, "sk-ant-oat-test");
+
+    // When
+    run("ensure_secrets");
+
+    // Then
+    expect(empty).toBe("");
+    expect(readFileSync(file, "utf8")).toBe("sk-ant-oat-test");
+  });
+});
+
 describe("deploy.sh backup", () => {
   it("should skip the dump when there is no previous release", () => {
     // Given / When

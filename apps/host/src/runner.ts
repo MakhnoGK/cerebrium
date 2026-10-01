@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 import "reflect-metadata";
+import { readFileSync } from "node:fs";
 import { buildContainer } from "@cerebrium/kernel/container";
 import { newId } from "@cerebrium/kernel/core/ids";
-import {
-  DaemonConfig,
-  DatabaseConfig,
-  RunnerConfig,
-} from "@cerebrium/kernel/infrastructure/config";
+import { DaemonConfig, RunnerConfig } from "@cerebrium/kernel/infrastructure/config";
 import { runAgent, type AgentRunOutcome } from "@cerebrium/kernel/runtime/agent-run";
 import { resolveServerPath } from "@cerebrium/kernel/runtime/ensure-daemon";
 import { isMainModule } from "@cerebrium/kernel/runtime/is-main";
@@ -67,11 +64,23 @@ function payloadOf(job: JobRow): Record<string, unknown> {
   }
 }
 
+// The subscription token, when the install names a file for it: null means no file is
+// configured, "" means one is but it holds nothing yet.
+function readOauthToken(file: string | null): string | null {
+  if (file === null) return null;
+
+  try {
+    return readFileSync(file, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 export async function runOnce(deps: {
   socketPath: string;
   owner: string;
   serverPath: string;
-  dbPath: string;
+  oauthTokenFile: string | null;
   client: string;
   cwd: string;
   cli: string;
@@ -81,6 +90,13 @@ export async function runOnce(deps: {
   log: (line: string) => void;
 }): Promise<"ran" | "idle"> {
   const call = callFor(deps.socketPath);
+  const oauthToken = readOauthToken(deps.oauthTokenFile);
+
+  if (oauthToken === "") {
+    deps.log(`no subscription token in ${deps.oauthTokenFile ?? ""}; claiming nothing`);
+
+    return "idle";
+  }
 
   const job = (await call("job_claim", {
     kinds: [...TASK_KINDS],
@@ -145,10 +161,10 @@ export async function runOnce(deps: {
         server: {
           command: process.execPath,
           args: [deps.serverPath],
-          env: { MEMORY_DB_PATH: deps.dbPath, CEREBRIUM_HOME: cerebriumHome() },
+          env: { MEMORY_KERNEL_URL: deps.socketPath, CEREBRIUM_HOME: cerebriumHome() },
         },
       },
-      { cli: deps.cli },
+      { cli: deps.cli, oauthToken },
     );
   } catch (err) {
     outcome = {
@@ -300,7 +316,7 @@ async function main(): Promise<void> {
     socketPath: container.resolve(DaemonConfig).socketPath,
     owner,
     serverPath: resolveServerPath(),
-    dbPath: container.resolve(DatabaseConfig).path,
+    oauthTokenFile: runner.oauthTokenFile,
     client: runner.client,
     cwd: runner.cwd,
     cli: runner.cli,

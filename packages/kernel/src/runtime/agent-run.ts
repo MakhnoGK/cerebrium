@@ -21,6 +21,27 @@ export const DENIED_TOOLS: readonly string[] = [
   "Task",
 ];
 
+// Credentials the CLI prefers over a subscription login. Any of them in the child's env
+// would move the run onto metered billing.
+export const METERED_ENV: readonly string[] = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+export function agentEnv(base: NodeJS.ProcessEnv, oauthToken: string | null): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = Object.fromEntries(
+    Object.entries(base).filter(
+      ([key]) => !METERED_ENV.includes(key) && key !== "CLAUDE_CODE_OAUTH_TOKEN",
+    ),
+  );
+
+  return oauthToken === null ? env : { ...env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken };
+}
+
 export interface AgentRunSpec {
   prompt: string;
   // Always explicit. Inheriting the session default costs 6.6x for identical work
@@ -118,10 +139,14 @@ export function buildArgs(spec: AgentRunSpec, mcpConfigPath: string): string[] {
   ];
 }
 
-export type Spawner = (cmd: string, args: string[], opts: { cwd: string }) => ChildProcess;
+export type Spawner = (
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; env: NodeJS.ProcessEnv },
+) => ChildProcess;
 
 const defaultSpawn: Spawner = (cmd, args, opts) =>
-  spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"], env: process.env });
+  spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"], env: opts.env });
 
 function usageOf(envelope: CliEnvelope): AgentUsage | null {
   const u = envelope.usage;
@@ -138,7 +163,7 @@ function usageOf(envelope: CliEnvelope): AgentUsage | null {
 
 export async function runAgent(
   spec: AgentRunSpec,
-  opts: { cli?: string; spawner?: Spawner; now?: () => number } = {},
+  opts: { cli?: string; spawner?: Spawner; now?: () => number; oauthToken?: string | null } = {},
 ): Promise<AgentRunOutcome> {
   const cli = opts.cli ?? "claude";
   const spawner = opts.spawner ?? defaultSpawn;
@@ -170,7 +195,10 @@ export async function runAgent(
       let child: ChildProcess;
 
       try {
-        child = spawner(cli, buildArgs(spec, configPath), { cwd: spec.cwd });
+        child = spawner(cli, buildArgs(spec, configPath), {
+          cwd: spec.cwd,
+          env: agentEnv(process.env, opts.oauthToken ?? null),
+        });
       } catch (err) {
         resolve({
           exit: "spawn_failed",
