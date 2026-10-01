@@ -88,6 +88,37 @@ export class SqliteEdgesRepo extends BaseRepo implements EdgesRepo {
     });
   }
 
+  async insertSystemEdgeIfUnconnected(
+    type: EdgeType,
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): Promise<boolean> {
+    return this.tx(() => {
+      const info = this.db
+        .prepare(
+          `INSERT INTO edges (src, dst, type, provenance, weight, valid_from, session_id)
+           SELECT @src, @dst, @type, 'system', @weight, @ts, @session
+           WHERE @src != @dst
+             AND EXISTS (SELECT 1 FROM nodes WHERE id = @src AND invalidated_at IS NULL)
+             AND EXISTS (SELECT 1 FROM nodes WHERE id = @dst AND invalidated_at IS NULL)
+             AND NOT EXISTS (
+               SELECT 1 FROM edges e
+               WHERE e.invalidated_at IS NULL
+                 AND ((e.src = @src AND e.dst = @dst) OR (e.src = @dst AND e.dst = @src))
+             )
+           ON CONFLICT(src, dst, type) DO UPDATE SET
+             invalidated_at = NULL, valid_from = excluded.valid_from, weight = excluded.weight,
+             provenance = excluded.provenance, session_id = excluded.session_id`,
+        )
+        .run({ src, dst, type, weight, ts, session: session_id });
+
+      return info.changes > 0;
+    });
+  }
+
   // Whether anything already relates these two, in either direction and of any type. Used
   // before proposing or deriving a link, so a known relationship is not restated.
   async pairIsConnected(a: string, b: string): Promise<boolean> {

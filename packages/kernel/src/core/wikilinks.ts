@@ -24,6 +24,13 @@ export function wikilinkTargets(content: string): string[] {
   return [...out];
 }
 
+const NODE_ID = /^[0-7][0-9a-hjkmnp-tv-z]{25}$/;
+
+// A wikilink written as a node id, `[[01M3…]]`, slugified to lower case; null for a title.
+export function idTarget(slug: string): string | null {
+  return NODE_ID.test(slug) ? slug.toUpperCase() : null;
+}
+
 export type SlugIndex = Map<string, string[]>;
 
 export type Resolution =

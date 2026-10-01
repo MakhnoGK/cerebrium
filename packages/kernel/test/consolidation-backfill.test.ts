@@ -25,6 +25,7 @@ const stub: ConsolidationProvider = {
     }),
   reconcile: () => Promise.reject(new Error("not used")),
   annotate: () => Promise.reject(new Error("not used")),
+  relate: () => Promise.reject(new Error("not used")),
 };
 
 const rejectStub: ConsolidationProvider = {
@@ -41,6 +42,7 @@ const rejectStub: ConsolidationProvider = {
     }),
   reconcile: () => Promise.reject(new Error("not used")),
   annotate: () => Promise.reject(new Error("not used")),
+  relate: () => Promise.reject(new Error("not used")),
 };
 
 async function mk(s: string, title: string): Promise<string> {

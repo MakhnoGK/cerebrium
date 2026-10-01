@@ -3,6 +3,7 @@
 import { ConsolidationKind } from "@cerebrium/contracts/vocab";
 import {
   ConsolidationRecommendation,
+  LinkRelation,
   ReconcileAction,
   type AnnotateResult,
   type AnnotateTask,
@@ -10,6 +11,9 @@ import {
   type ConsolidationTask,
   type ReconcileResult,
   type ReconcileTask,
+  type RelateRecord,
+  type RelateResult,
+  type RelateTask,
 } from "@/domain/ports/consolidation-provider";
 
 export const SYSTEM_PROMPT =
@@ -223,4 +227,61 @@ export function parseAnnotate(raw: string): AnnotateResult {
 // FTS index, so it widens matching without polluting what `get` returns.
 export function annotationFtsText(a: AnnotateResult): string {
   return [...a.keywords, ...a.tags, a.context].filter(Boolean).join(" ").trim();
+}
+
+export const RELATE_SYSTEM_PROMPT =
+  "You judge how two records, A and B, in an AI agent's durable memory relate. Pick ONE " +
+  "relation: 'references' — one record cites, depends on or builds on the other; " +
+  "'relates_to' — same topic, system or piece of work, neither depends on the other; " +
+  "'supersedes' — one record is a newer version of the same fact and makes the other " +
+  "outdated; 'duplicate_of' — both state the same fact and keeping one loses nothing; " +
+  "'none' — they only share vocabulary and are about different things. For a directed " +
+  "relation set from to the record that cites, the newer one, or the duplicate to fold " +
+  "away; for relates_to and none set from to 'a'. When torn between two, pick the weaker " +
+  "(none < relates_to < references); pick supersedes or duplicate_of only when certain. " +
+  "Return JSON: relation, from ('a'|'b'), reason (one sentence).";
+
+export const RELATE_SCHEMA = {
+  type: "object",
+  properties: {
+    relation: { type: "string", enum: Object.values(LinkRelation) },
+    from: { type: "string", enum: ["a", "b"] },
+    reason: { type: "string" },
+  },
+  required: ["relation", "from", "reason"],
+} as const;
+
+const RELATE_RECORD_CHARS = 3_000;
+
+function relateRecord(label: string, r: RelateRecord): string {
+  return `[${label}] ${r.type}, written ${r.created_at.slice(0, 10)}: ${r.title}\n${clip(r.content, RELATE_RECORD_CHARS)}`;
+}
+
+export function relatePrompt(task: RelateTask): string {
+  const scope = task.project ? ` (project: ${task.project})` : "";
+
+  return `Two records${scope}:\n\n${relateRecord("A", task.a)}\n\n${relateRecord("B", task.b)}`;
+}
+
+export function parseRelate(raw: string): RelateResult {
+  let obj: unknown;
+
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    throw new Error("relate provider returned invalid JSON");
+  }
+
+  const o = obj as Record<string, unknown>;
+  const relation = Object.values(LinkRelation).find((r) => r === o.relation);
+
+  if (relation === undefined) {
+    throw new Error(`relate provider returned an unknown relation: ${String(o.relation)}`);
+  }
+
+  return {
+    relation,
+    from: o.from === "b" ? "b" : "a",
+    reason: typeof o.reason === "string" ? o.reason : "",
+  };
 }

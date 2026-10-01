@@ -73,6 +73,16 @@ export interface ActivityEntry {
   detail: unknown;
 }
 
+export interface IntegrityCounters {
+  wikilinks_by_id: number;
+  wikilinks_dangling_id: number;
+  reattached: number;
+  links_typed: number;
+  links_dropped: number;
+  links_to_review: number;
+  edges_repointed: number;
+}
+
 export interface ConsolidationRunSummary {
   id: string;
   started_at: string;
@@ -90,6 +100,7 @@ export interface ConsolidationRunSummary {
   documents_linked: number;
   generation_failures: number;
   last_error: string | null;
+  integrity: IntegrityCounters | null;
 }
 
 export interface ActivityPage {
@@ -104,6 +115,8 @@ export interface SweptNotice {
   distill_suggested: number;
   merge_suggested: number;
   prune_suggested: number;
+  reattached: number;
+  links_typed: number;
   yielded: boolean;
 }
 

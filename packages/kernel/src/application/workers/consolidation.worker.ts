@@ -11,9 +11,11 @@ import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
   CONSOLIDATION_PROVIDER_TOKEN,
   ConsolidationRecommendation,
+  LinkRelation,
   type ConsolidationProvider,
   type ConsolidationResult,
   type ConsolidationTask,
+  type RelateResult,
 } from "@/domain/ports/consolidation-provider";
 import {
   CONSOLIDATION_REPORTER_TOKEN,
@@ -36,6 +38,7 @@ import {
   type EdgesRepo,
   type EmbeddingQueueRepo,
   type NodesRepo,
+  type RelationInput,
   type Store,
   type SweepSeed,
 } from "@/domain/ports/storage";
@@ -47,6 +50,7 @@ import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
 import {
   citedSymbolNames,
+  idTarget,
   repoBelongsToProject,
   resolveTarget,
   slugify,
@@ -118,6 +122,13 @@ interface NeighbourPair {
 }
 
 const MAX_ERROR_CHARS = 500;
+const REATTACH_CANDIDATES = 3;
+
+interface Judgement {
+  a: RelationInput;
+  b: RelationInput;
+  verdict: RelateResult;
+}
 
 // Bounded, so a provider that answers with a whole HTML error page cannot dominate the
 // tick result an operator reads.
@@ -155,7 +166,9 @@ export class ConsolidationWorker {
     revisions: number;
     codeIndex: string | null;
     dangling: number;
+    danglingById: number;
   } | null = null;
+  private readonly unrelated = new Set<string>();
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -243,6 +256,15 @@ export class ConsolidationWorker {
       annotated: 0,
       generation_failures: 0,
       last_error: null,
+      integrity: {
+        wikilinks_by_id: 0,
+        wikilinks_dangling_id: 0,
+        reattached: 0,
+        links_typed: 0,
+        links_dropped: 0,
+        links_to_review: 0,
+        edges_repointed: 0,
+      },
     };
 
     if (!(await this.holdLease())) {
@@ -293,8 +315,19 @@ export class ConsolidationWorker {
       await this.report(runId, "retired", result);
       await this.consolidationRepo.dismissRetiredCandidates(this.ownerId, now);
 
+      await this.report(runId, "integrity", result);
+      await this.repointStranded(now, result);
+      await this.reattach(now, result);
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
       await this.report(runId, "backfill", result);
       await this.backfillProposals(now, result);
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
+      await this.report(runId, "retype", result);
+      await this.retypeLinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -488,6 +521,7 @@ export class ConsolidationWorker {
       this.lastCitationScan.codeIndex === codeIndex
     ) {
       result.wikilinks_dangling = this.lastCitationScan.dangling;
+      result.integrity!.wikilinks_dangling_id = this.lastCitationScan.danglingById;
 
       return;
     }
@@ -502,10 +536,15 @@ export class ConsolidationWorker {
       await breath();
 
       for (const target of wikilinkTargets(row.content)) {
-        const dst = await this.wikilinkTarget(live, retired, target);
+        const id = idTarget(target);
+        const dst =
+          id === null
+            ? await this.wikilinkTarget(live, retired, target)
+            : await this.idWikilinkTarget(id);
 
         if (dst === null) {
-          result.wikilinks_dangling++;
+          if (id === null) result.wikilinks_dangling++;
+          else result.integrity!.wikilinks_dangling_id++;
           continue;
         }
 
@@ -515,13 +554,19 @@ export class ConsolidationWorker {
           await this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, dst, this.ownerId, now)
         ) {
           result.wikilinks_linked++;
+          if (id !== null) result.integrity!.wikilinks_by_id++;
         }
       }
 
       await this.proposeDocuments(now, result, symbols, row);
     }
 
-    this.lastCitationScan = { revisions, codeIndex, dangling: result.wikilinks_dangling };
+    this.lastCitationScan = {
+      revisions,
+      codeIndex,
+      dangling: result.wikilinks_dangling,
+      danglingById: result.integrity!.wikilinks_dangling_id,
+    };
   }
 
   // Cited symbols, by name. On the per-branch index a citation is kept as a ref to what the
@@ -652,6 +697,17 @@ export class ConsolidationWorker {
     if (gone.kind !== "exact" && gone.kind !== "prefix") return null;
 
     const successors = await this.nodeReferences.terminalLiveSuccessors(gone.id);
+
+    return successors.length === 1 ? successors[0]! : null;
+  }
+
+  private async idWikilinkTarget(id: string): Promise<string | null> {
+    const state = await this.nodesRepo.referenceState(id);
+
+    if (state === "live") return id;
+    if (state === "missing") return null;
+
+    const successors = await this.nodeReferences.terminalLiveSuccessors(id);
 
     return successors.length === 1 ? successors[0]! : null;
   }
@@ -908,6 +964,205 @@ export class ConsolidationWorker {
     }
   }
 
+  private async repointStranded(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.reattach === Posture.OFF) return;
+
+    const breath = breather(this.batch.msPerBreath);
+
+    for (const edge of await this.consolidationRepo.strandedSystemEdges(this.batch.repoint)) {
+      await breath();
+
+      const successors = await this.nodeReferences.terminalLiveSuccessors(edge.dst);
+
+      if (successors.length !== 1) continue;
+
+      const successor = successors[0]!;
+
+      await this.edgesRepo.invalidateEdge(edge.src, edge.dst, edge.type, now);
+
+      if (
+        successor !== edge.src &&
+        (await this.edgesRepo.insertSystemEdgeIfUnconnected(
+          edge.type,
+          edge.src,
+          successor,
+          this.ownerId,
+          now,
+          edge.weight,
+        ))
+      ) {
+        result.integrity!.edges_repointed++;
+      }
+    }
+  }
+
+  private async reattach(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.reattach === Posture.OFF) return;
+
+    const lonely = (
+      await this.consolidationRepo.edgelessNodes(this.batch.reattach + this.unrelated.size)
+    ).filter((node) => !this.unrelated.has(node.id));
+
+    for (const node of lonely.slice(0, this.batch.reattach)) {
+      if (node.kind === MemoryKind.EPISODIC) {
+        const anchor = await this.consolidationRepo.anchorCheckpoint(node.id);
+
+        if (
+          anchor !== null &&
+          (await this.edgesRepo.insertSystemEdgeIfUnconnected(
+            EdgeType.RELATES_TO,
+            node.id,
+            anchor,
+            this.ownerId,
+            now,
+            1,
+          ))
+        ) {
+          result.integrity!.reattached++;
+          continue;
+        }
+      }
+
+      if (!this.consolidator.enabled) continue;
+
+      let failed = false;
+      let attached = false;
+
+      for (const nb of await this.consolidationRepo.neighboursOf(node.id, {
+        minScore: 0,
+        k: 40,
+        capPerNode: REATTACH_CANDIDATES,
+      })) {
+        if (!(await this.holdLease())) return;
+
+        const judged = await this.judge(node.id, nb.id, result);
+
+        if (judged === null) {
+          failed = true;
+          continue;
+        }
+
+        if (judged.verdict.relation === LinkRelation.NONE) continue;
+
+        await this.applyRelation(judged, nb.score, now, result);
+        result.integrity!.reattached++;
+        attached = true;
+        break;
+      }
+
+      if (!attached && !failed) this.unrelated.add(node.id);
+    }
+  }
+
+  // `suggest` has nothing to review that `auto` does not already send there, so it acts as
+  // `auto`.
+  private async retypeLinks(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.retype === Posture.OFF) return;
+
+    for (const link of await this.consolidationRepo.untypedLinks(this.batch.retype)) {
+      if (link.connected) {
+        await this.edgesRepo.invalidateEdge(link.src, link.dst, EdgeType.SIMILAR_TO, now);
+        result.integrity!.links_dropped++;
+        continue;
+      }
+
+      if (!this.consolidator.enabled) continue;
+      if (!(await this.holdLease())) return;
+
+      const judged = await this.judge(link.src, link.dst, result);
+
+      if (judged === null) continue;
+
+      await this.edgesRepo.invalidateEdge(link.src, link.dst, EdgeType.SIMILAR_TO, now);
+
+      if (judged.verdict.relation === LinkRelation.NONE) {
+        result.integrity!.links_dropped++;
+        continue;
+      }
+
+      await this.applyRelation(judged, link.weight, now, result);
+      result.integrity!.links_typed++;
+    }
+  }
+
+  private async judge(
+    aId: string,
+    bId: string,
+    result: ConsolidationTickResult,
+  ): Promise<Judgement | null> {
+    const [a, b] = await this.consolidationRepo.relationInputs([aId, bId]);
+
+    if (!a || !b) return null;
+
+    try {
+      const verdict = await this.consolidator.relate({
+        project: a.project ?? b.project,
+        a: { title: a.title, type: a.type, created_at: a.created_at, content: a.content },
+        b: { title: b.title, type: b.type, created_at: b.created_at, content: b.content },
+      });
+
+      return { a, b, verdict };
+    } catch (err) {
+      result.generation_failures++;
+      result.last_error = errorText(err);
+
+      return null;
+    }
+  }
+
+  // supersedes and duplicate_of retire or hide a node, so they go to review and the pair
+  // keeps a relates_to meanwhile.
+  private async applyRelation(
+    { a, b, verdict }: Judgement,
+    weight: number,
+    now: string,
+    result: ConsolidationTickResult,
+  ): Promise<void> {
+    const [from, to] = verdict.from === "a" ? [a, b] : [b, a];
+    const edge = (type: EdgeType, src: string, dst: string) =>
+      this.edgesRepo.insertSystemEdgeIfUnconnected(type, src, dst, this.ownerId, now, weight);
+
+    if (verdict.relation === LinkRelation.REFERENCES) {
+      await edge(EdgeType.REFERENCES, from.id, to.id);
+      return;
+    }
+
+    await edge(EdgeType.RELATES_TO, a.id, b.id);
+
+    if (verdict.relation === LinkRelation.DUPLICATE_OF) {
+      const id = await this.consolidationRepo.insertCandidate({
+        kind: ConsolidationKind.MERGE,
+        project: to.project,
+        member_ids: [from.id, to.id],
+        canonical_id: to.id,
+        score: weight,
+        detected_at: now,
+      });
+
+      if (id) result.integrity!.links_to_review++;
+    }
+
+    if (verdict.relation === LinkRelation.SUPERSEDES) {
+      const id = await this.consolidationRepo.insertCandidate({
+        kind: ConsolidationKind.SUPERSEDE,
+        project: from.project,
+        member_ids: [to.id, from.id],
+        canonical_id: from.id,
+        score: weight,
+        proposal: {
+          recommendation: ConsolidationRecommendation.APPLY,
+          reason: verdict.reason,
+          title: from.title,
+          summary: "",
+          body: "",
+        },
+        detected_at: now,
+      });
+
+      if (id) result.integrity!.links_to_review++;
+    }
+  }
+
   // Backfill proposals for pending distill/merge candidates that were queued before a
   // generation provider was available (e.g., detected under `manual`, then switched to
   // `http`). Provider-gated; leaves a candidate untouched on generation failure (retried
@@ -919,6 +1174,13 @@ export class ConsolidationWorker {
     if (!this.consolidator.enabled) return false;
 
     if ((await this.consolidationRepo.pendingNeedingProposal(1)).length > 0) return true;
+
+    if (
+      this.posture.retype !== Posture.OFF &&
+      (await this.consolidationRepo.untypedLinks(1)).length > 0
+    ) {
+      return true;
+    }
 
     return (
       this.posture.annotate !== Posture.OFF &&

@@ -9,6 +9,7 @@ import type {
   ConsolidationProvider,
   ConsolidationResult,
   ReconcileResult,
+  RelateResult,
 } from "@/domain/ports/consolidation-provider";
 import { type SearchRepo } from "@/domain/ports/storage";
 import { ConsolidationWorker } from "@/application/workers";
@@ -34,6 +35,10 @@ class FakeAnnotator implements ConsolidationProvider {
   annotate(task: AnnotateTask): Promise<AnnotateResult> {
     this.calls++;
     return Promise.resolve(this.fn(task));
+  }
+
+  relate(): Promise<RelateResult> {
+    return Promise.reject(new Error("not used"));
   }
 }
 
@@ -182,6 +187,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
       generate: () => Promise.reject(new Error("no")),
       reconcile: () => Promise.reject(new Error("no")),
       annotate: () => Promise.reject(new Error("model down")),
+      relate: () => Promise.reject(new Error("not used")),
     };
     const env = setup({ consolidator: boom });
     const id = await writeFact(await session());

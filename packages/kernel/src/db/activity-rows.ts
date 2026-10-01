@@ -1,10 +1,22 @@
-import type { ActivityEntry } from "@cerebrium/contracts/dashboard";
+import type {
+  ActivityEntry,
+  ConsolidationRunSummary,
+  IntegrityCounters,
+} from "@cerebrium/contracts/dashboard";
 
 // Shared by both backends: the SELECT lists and the row shapes they return.
 
 export const RUN_SUMMARY_COLUMNS = `id, started_at, ended_at, stage, links_added, links_pruned,
   distilled, distill_suggested, merged, merge_suggested, pruned, annotated,
-  proposals_backfilled, documents_linked, generation_failures, last_error`;
+  proposals_backfilled, documents_linked, generation_failures, last_error, integrity`;
+
+export type RunSummaryRow = Omit<ConsolidationRunSummary, "integrity"> & {
+  integrity: string | null;
+};
+
+export function runSummaryOf(row: RunSummaryRow): ConsolidationRunSummary {
+  return { ...row, integrity: parsed(row.integrity) as IntegrityCounters | null };
+}
 
 export interface EventRow {
   id: string;

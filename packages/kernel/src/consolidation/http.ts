@@ -7,6 +7,8 @@ import {
   type ConsolidationTask,
   type ReconcileResult,
   type ReconcileTask,
+  type RelateResult,
+  type RelateTask,
 } from "@/domain/ports/consolidation-provider";
 import {
   ANNOTATE_SCHEMA,
@@ -14,10 +16,14 @@ import {
   annotatePrompt,
   parseAnnotate,
   parseReconcile,
+  parseRelate,
   parseResult,
   RECONCILE_SCHEMA,
   RECONCILE_SYSTEM_PROMPT,
   reconcilePrompt,
+  RELATE_SCHEMA,
+  RELATE_SYSTEM_PROMPT,
+  relatePrompt,
   RESULT_SCHEMA,
   SYSTEM_PROMPT,
   taskPrompt,
@@ -105,6 +111,17 @@ export class HttpConsolidator implements ConsolidationProvider {
         annotatePrompt(task),
         ANNOTATE_SCHEMA,
         this.roles[GenerationRole.ANNOTATE],
+      ),
+    );
+  }
+
+  async relate(task: RelateTask): Promise<RelateResult> {
+    return parseRelate(
+      await this.chat(
+        RELATE_SYSTEM_PROMPT,
+        relatePrompt(task),
+        RELATE_SCHEMA,
+        this.roles[GenerationRole.GENERATE],
       ),
     );
   }

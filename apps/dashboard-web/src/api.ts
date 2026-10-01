@@ -70,7 +70,7 @@ export function fetchActivity(
   return getJson<ActivityPage>(`/api/activity?${params.toString()}`, signal);
 }
 
-export type CandidateKind = "distill" | "merge" | "link" | "prune" | "documents";
+export type CandidateKind = "distill" | "merge" | "link" | "prune" | "documents" | "supersede";
 
 export interface CandidateQuery {
   kind?: CandidateKind | null;

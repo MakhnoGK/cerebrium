@@ -109,7 +109,14 @@ describe("StatsRepo graph integrity", () => {
 
     // When / Then
     const snap = (await env.stats.techStats(env.clock.t)).graph;
-    expect(snap).toEqual({ dangling_edges: 0, repointable_edges: 0, detached_nodes: 0 });
+    expect(snap).toEqual({
+      dangling_edges: 0,
+      repointable_edges: 0,
+      detached_nodes: 0,
+      edgeless_nodes: 2,
+      untyped_links: 0,
+      typed_links: 0,
+    });
   });
 
   it("should count an edge left pointing at a superseded node, and call it repointable", async () => {

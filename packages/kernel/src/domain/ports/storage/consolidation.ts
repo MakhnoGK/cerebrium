@@ -7,6 +7,7 @@ import type {
 import type {
   ConsolidationKind,
   ConsolidationStatus,
+  EdgeType,
   MemoryKind,
 } from "@cerebrium/contracts/vocab";
 import type {
@@ -27,6 +28,36 @@ export interface DuplicatePair {
   score: number;
   same_session: boolean;
   youngest_created_at: string;
+}
+
+export interface EdgelessNode {
+  id: string;
+  kind: MemoryKind;
+  project: string | null;
+}
+
+// `connected`: another live edge already joins the pair.
+export interface UntypedLink {
+  src: string;
+  dst: string;
+  weight: number;
+  connected: boolean;
+}
+
+export interface RelationInput {
+  id: string;
+  title: string;
+  type: string;
+  project: string | null;
+  created_at: string;
+  content: string;
+}
+
+export interface StrandedEdge {
+  src: string;
+  dst: string;
+  type: EdgeType;
+  weight: number;
 }
 
 export type ResolvedStatus = Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>;
@@ -75,6 +106,15 @@ export interface ConsolidationRepo extends ConsolidationReporter {
     limit: number;
   }): Promise<{ src: string; dst: string }[]>;
   candidateInputs(ids: string[]): Promise<{ id: string; title: string; content: string }[]>;
+  // Live authored nodes with no live edge to another live authored node.
+  edgelessNodes(limit: number): Promise<EdgelessNode[]>;
+  // The checkpoint of the node's own session, else the newest earlier one of its project.
+  anchorCheckpoint(id: string): Promise<string | null>;
+  // Live similar_to edges between live authored nodes, strongest first.
+  untypedLinks(limit: number): Promise<UntypedLink[]>;
+  relationInputs(ids: string[]): Promise<RelationInput[]>;
+  // Live system edges from a live authored node into a retired one that has a superseder.
+  strandedSystemEdges(limit: number): Promise<StrandedEdge[]>;
   staleEpisodicClusters(opts: {
     minScore: number;
     minCluster: number;

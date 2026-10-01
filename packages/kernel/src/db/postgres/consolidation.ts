@@ -12,10 +12,14 @@ import {
   pairKey,
   type ConsolidationRepo,
   type DuplicatePair,
+  type EdgelessNode,
+  type RelationInput,
   type ResolvedStatus,
+  type StrandedEdge,
   type SweepSeed,
+  type UntypedLink,
 } from "@/domain/ports/storage";
-import { RUN_SUMMARY_COLUMNS } from "@/db/activity-rows";
+import { RUN_SUMMARY_COLUMNS, runSummaryOf, type RunSummaryRow } from "@/db/activity-rows";
 import { PgBaseRepo } from "@/db/postgres/base";
 import { ACTIVE_SPACE, LATEST_REVISION } from "@/db/postgres/internal";
 import { newId } from "@/core/ids";
@@ -361,6 +365,95 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
     );
   }
 
+  async edgelessNodes(limit: number): Promise<EdgelessNode[]> {
+    return this.all(
+      `SELECT n.id AS id, n.memory_kind AS kind, n.project AS project FROM nodes n
+       WHERE n.memory_kind IN ('semantic', 'episodic') AND n.invalidated_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM edges e JOIN nodes o ON o.id = e.dst
+           WHERE e.src = n.id AND e.dst <> n.id AND e.invalidated_at IS NULL
+             AND o.memory_kind IN ('semantic', 'episodic') AND o.invalidated_at IS NULL
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM edges e JOIN nodes o ON o.id = e.src
+           WHERE e.dst = n.id AND e.src <> n.id AND e.invalidated_at IS NULL
+             AND o.memory_kind IN ('semantic', 'episodic') AND o.invalidated_at IS NULL
+         )
+       ORDER BY n.id LIMIT @limit`,
+      { limit },
+    );
+  }
+
+  async anchorCheckpoint(id: string): Promise<string | null> {
+    return (
+      (
+        await this.one<{ id: string }>(
+          `SELECT c.id AS id FROM nodes n
+           JOIN nodes c ON c.memory_kind = 'episodic' AND c.type = 'checkpoint'
+             AND c.invalidated_at IS NULL AND c.id <> n.id
+             AND (c.created_by_session = n.created_by_session
+                  OR (c.project IS NOT DISTINCT FROM n.project AND c.created_at <= n.created_at))
+           WHERE n.id = @id
+           ORDER BY CASE WHEN c.created_by_session = n.created_by_session THEN 0 ELSE 1 END,
+                    c.created_at DESC, c.id DESC
+           LIMIT 1`,
+          { id },
+        )
+      )?.id ?? null
+    );
+  }
+
+  async untypedLinks(limit: number): Promise<UntypedLink[]> {
+    return this.all(
+      `WITH live AS (
+         SELECT id FROM nodes
+         WHERE memory_kind IN ('semantic', 'episodic') AND invalidated_at IS NULL
+       )
+       SELECT e.src AS src, e.dst AS dst, e.weight AS weight,
+              EXISTS (
+                SELECT 1 FROM edges o
+                WHERE o.invalidated_at IS NULL AND o.type <> 'similar_to'
+                  AND ((o.src = e.src AND o.dst = e.dst) OR (o.src = e.dst AND o.dst = e.src))
+              ) AS connected
+       FROM edges e JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
+       WHERE e.type = 'similar_to' AND e.invalidated_at IS NULL
+       ORDER BY e.weight DESC, e.src, e.dst LIMIT @limit`,
+      { limit },
+    );
+  }
+
+  async relationInputs(ids: string[]): Promise<RelationInput[]> {
+    if (!ids.length) return [];
+
+    const rows = await this.all<RelationInput>(
+      `SELECT n.id AS id, n.title AS title, n.type AS type, n.project AS project,
+              n.created_at AS created_at, lr.content AS content
+       FROM nodes n ${LATEST_REVISION} WHERE n.id = ANY(@ids)`,
+      { ids },
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    return ids.flatMap((id) => byId.get(id) ?? []);
+  }
+
+  async strandedSystemEdges(limit: number): Promise<StrandedEdge[]> {
+    return this.all(
+      `SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight FROM edges e
+       JOIN nodes s ON s.id = e.src
+       JOIN nodes d ON d.id = e.dst
+       WHERE e.invalidated_at IS NULL AND e.provenance = 'system'
+         AND e.type NOT IN ('supersedes', 'similar_to')
+         AND s.memory_kind IN ('semantic', 'episodic') AND s.invalidated_at IS NULL
+         AND d.memory_kind IN ('semantic', 'episodic') AND d.invalidated_at IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM edges x WHERE x.dst = d.id AND x.type = 'supersedes'
+             AND x.invalidated_at IS NULL
+         )
+       ORDER BY e.src, e.dst, e.type LIMIT @limit`,
+      { limit },
+    );
+  }
+
   async candidateInputs(ids: string[]): Promise<{ id: string; title: string; content: string }[]> {
     if (!ids.length) return [];
 
@@ -659,11 +752,13 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
   }
 
   async recentRuns(limit: number): Promise<ConsolidationRunSummary[]> {
-    return this.all(
-      `SELECT ${RUN_SUMMARY_COLUMNS} FROM consolidation_runs
-       ORDER BY started_at DESC, id DESC LIMIT @limit`,
-      { limit },
-    );
+    return (
+      await this.all<RunSummaryRow>(
+        `SELECT ${RUN_SUMMARY_COLUMNS} FROM consolidation_runs
+         ORDER BY started_at DESC, id DESC LIMIT @limit`,
+        { limit },
+      )
+    ).map(runSummaryOf);
   }
 
   async reportTick(runId: string, result: ConsolidationTickResult): Promise<void> {
@@ -674,14 +769,14 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
         documents_linked, documents_suggested,
         distilled, distill_suggested, merged, merge_suggested, merge_delayed,
         pruned, prune_suggested, proposals_backfilled, rejected, annotated,
-        generation_failures, last_error, stage_ms
+        generation_failures, last_error, stage_ms, integrity
       ) VALUES (
         @id, @started_at, @updated_at, @ended_at, @stage,
         @links_added, @links_suggested, @links_pruned, @wikilinks_linked, @wikilinks_dangling,
         @documents_linked, @documents_suggested,
         @distilled, @distill_suggested, @merged, @merge_suggested, @merge_delayed,
         @pruned, @prune_suggested, @proposals_backfilled, @rejected, @annotated,
-        @generation_failures, @last_error, @stage_ms
+        @generation_failures, @last_error, @stage_ms, @integrity
       )
       ON CONFLICT (id) DO UPDATE SET
         updated_at = excluded.updated_at,
@@ -706,7 +801,8 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
         annotated = excluded.annotated,
         generation_failures = excluded.generation_failures,
         last_error = excluded.last_error,
-        stage_ms = excluded.stage_ms
+        stage_ms = excluded.stage_ms,
+        integrity = excluded.integrity
       WHERE consolidation_runs.ended_at IS NULL`,
       {
         id: runId,
@@ -715,6 +811,7 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
         ended_at: result.ended_at || null,
         stage: result.stage || "unknown",
         stage_ms: result.stage_ms ? JSON.stringify(result.stage_ms) : null,
+        integrity: result.integrity ? JSON.stringify(result.integrity) : null,
         links_added: result.links_added,
         links_suggested: result.links_suggested,
         links_pruned: result.links_pruned,

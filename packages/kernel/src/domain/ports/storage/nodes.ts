@@ -6,6 +6,9 @@ export const NODES_REPO_TOKEN = Symbol("NodesRepo");
 export interface NodesRepo extends UseRecorder {
   exists(id: string): Promise<boolean>;
   referenceState(id: string): Promise<"live" | "invalidated" | "missing">;
+  collapseProfile(
+    id: string,
+  ): Promise<{ type: string; revisions: number; inbound: number } | undefined>;
   nodeOrigin(id: string): Promise<{ memory_kind: string; origin: string | null } | undefined>;
   envelope(id: string): Promise<Envelope | undefined>;
   fullNode(

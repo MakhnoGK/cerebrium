@@ -59,6 +59,8 @@ function NoticeSummary({ notice }: { notice: SweptNotice }) {
     ["distill", notice.distill_suggested],
     ["merge", notice.merge_suggested],
     ["prune", notice.prune_suggested],
+    ["reattached", notice.reattached],
+    ["typed links", notice.links_typed],
   ];
   const nonZero = parts.filter(([, n]) => n > 0);
   return (
@@ -102,6 +104,12 @@ function RunsTable({ runs }: { runs: ConsolidationRunSummary[] }) {
             <th className="num" title="documents linked">
               Docs
             </th>
+            <th
+              className="num"
+              title="reattached / links typed / dropped / sent to review / repointed"
+            >
+              Integrity
+            </th>
             <th className="num" title="generation failures">
               Gen fail
             </th>
@@ -141,6 +149,13 @@ function RunsTable({ runs }: { runs: ConsolidationRunSummary[] }) {
                 <td className="num">{run.annotated}</td>
                 <td className="num">{run.proposals_backfilled}</td>
                 <td className="num">{run.documents_linked}</td>
+                <td className="num nowrap">
+                  {run.integrity
+                    ? `${String(run.integrity.reattached)} / ${String(run.integrity.links_typed)} / ` +
+                      `${String(run.integrity.links_dropped)} / ${String(run.integrity.links_to_review)} / ` +
+                      String(run.integrity.edges_repointed)
+                    : "—"}
+                </td>
                 <td className="num">
                   {run.generation_failures > 0 ? (
                     <Badge tone="err">{run.generation_failures}</Badge>

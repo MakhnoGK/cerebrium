@@ -9,6 +9,7 @@ import {
   type ConsolidationResult,
   type ReconcileResult,
   type ReconcileTask,
+  type RelateResult,
 } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN, EmbeddingProvider } from "@/domain/ports/embedding-provider";
 import { STORE_TOKEN, type Store } from "@/domain/ports/storage";
@@ -38,6 +39,10 @@ class FakeJudge implements ConsolidationProvider {
   }
 
   annotate(): Promise<AnnotateResult> {
+    return Promise.reject(new Error("not used"));
+  }
+
+  relate(): Promise<RelateResult> {
     return Promise.reject(new Error("not used"));
   }
 }
@@ -223,6 +228,7 @@ describe("Write-time reconcile", () => {
       generate: () => Promise.reject(new Error("no")),
       reconcile: () => Promise.reject(new Error("provider down")),
       annotate: () => Promise.reject(new Error("not used")),
+      relate: () => Promise.reject(new Error("not used")),
     };
 
     container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, boom);

@@ -28,6 +28,7 @@ import {
   type SuggestCandidatesArgs,
   type SuggestCandidatesResult,
 } from "@/application/use-cases/contracts";
+import { ConsolidationThresholdsConfig } from "@/infrastructure/config";
 
 @useCase(SUGGEST_CANDIDATES)
 export class LocalSuggestCandidates implements SuggestCandidates {
@@ -86,7 +87,27 @@ export class LocalApplyCandidate implements ApplyCandidate {
     @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly codeRefs: CodeRefService,
+    private readonly thresholds: ConsolidationThresholdsConfig,
   ) {}
+
+  private async refuseProtected(ids: string[], action: string): Promise<void> {
+    for (const id of ids) {
+      const profile = await this.nodes.collapseProfile(id);
+
+      if (!profile) continue;
+
+      if (
+        profile.revisions >= this.thresholds.protectRevisions ||
+        profile.inbound >= this.thresholds.protectInbound
+      ) {
+        throw new Error(
+          `${id} is hand-maintained (${String(profile.revisions)} revisions, ` +
+            `${String(profile.inbound)} inbound links) and cannot be ${action} here; ` +
+            "mark it duplicate or have an agent revise it.",
+        );
+      }
+    }
+  }
 
   // On the per-branch index the citation becomes a code ref; elsewhere, an edge.
   private async applyDocuments(note: string, symbol: string, session: string, now: string) {
@@ -175,6 +196,8 @@ export class LocalApplyCandidate implements ApplyCandidate {
             return recorded ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
           }
 
+          await this.refuseProtected([survivor, loser], "merged");
+
           const merged = args.override ?? candidate.proposal;
           const applied = await this.nodes.applyMerge({
             survivorId: survivor,
@@ -184,6 +207,25 @@ export class LocalApplyCandidate implements ApplyCandidate {
             merged: merged ? { title: merged.title, body: merged.body } : undefined,
           });
           return applied ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+        }
+
+        if (candidate.kind === ConsolidationKind.SUPERSEDE) {
+          const [older, newer] = candidate.member_ids;
+          if (!older || !newer) throw new Error(`supersede candidate ${args.id} is malformed.`);
+          if (
+            (await this.nodes.referenceState(older)) !== "live" ||
+            (await this.nodes.referenceState(newer)) !== "live"
+          ) {
+            return ConsolidationStatus.DISMISSED;
+          }
+
+          await this.refuseProtected([older], "superseded");
+          await this.nodes.invalidateNode(older, {
+            ts: now,
+            superseded_by: newer,
+            session_id: args.session_id,
+          });
+          return ConsolidationStatus.APPLIED;
         }
 
         const [target] = candidate.member_ids;

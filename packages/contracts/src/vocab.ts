@@ -66,6 +66,8 @@ export enum ConsolidationKind {
   // A note citing a symbol in prose. Proposed rather than applied: the citation is
   // authored, but which symbol it means is inferred.
   DOCUMENTS = "documents",
+  // members [older, newer]: the newer record replaces the older one.
+  SUPERSEDE = "supersede",
 }
 
 // Per-behaviour consolidation posture. `suggest` routes to the candidate queue for an

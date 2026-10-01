@@ -33,6 +33,20 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
     return row.invalidated_at === null ? "live" : "invalidated";
   }
 
+  async collapseProfile(
+    id: string,
+  ): Promise<{ type: string; revisions: number; inbound: number } | undefined> {
+    return this.one(
+      `SELECT n.type AS type,
+              (SELECT COUNT(*) FROM revisions r WHERE r.node_id = n.id) AS revisions,
+              (SELECT COUNT(*) FROM edges e JOIN nodes s ON s.id = e.src
+                WHERE e.dst = n.id AND e.invalidated_at IS NULL AND s.invalidated_at IS NULL
+                  AND s.memory_kind <> 'mirror') AS inbound
+       FROM nodes n WHERE n.id = @id`,
+      { id },
+    );
+  }
+
   async nodeOrigin(
     id: string,
   ): Promise<{ memory_kind: string; origin: string | null } | undefined> {

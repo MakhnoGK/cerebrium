@@ -56,6 +56,8 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
   // a backticked name is only taken when it matches exactly one symbol inside the note's
   // own project, and the edge it writes is additive and soft-reversible.
   documents: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_DOCUMENTS"),
+  reattach: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_REATTACH"),
+  retype: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_RETYPE"),
 }) {}
 
 // `mergeSim` is deliberately higher than the write-time dedup probe so merge stays
@@ -83,6 +85,8 @@ export class ConsolidationThresholdsConfig extends SectionOf("consolidation.thre
   minCluster: int(3).min(2).env("MEMORY_CONSOLIDATE_MIN_CLUSTER"),
   mergeBurstMs: int(3_600_000).nonNegative().env("MEMORY_CONSOLIDATE_MERGE_BURST_MS"),
   maxLinkDegree: int(5).positive().env("MEMORY_CONSOLIDATE_MAX_LINK_DEGREE"),
+  protectRevisions: int(5).positive().env("MEMORY_CONSOLIDATE_PROTECT_REVISIONS"),
+  protectInbound: int(10).positive().env("MEMORY_CONSOLIDATE_PROTECT_INBOUND"),
 }) {}
 
 // Per-sweep ceilings; each bounds the work (and generation calls) in one tick.
@@ -95,6 +99,9 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   prune: int(200).positive().env("MEMORY_CONSOLIDATE_PRUNE_BATCH"),
   annotate: int(50).positive().env("MEMORY_CONSOLIDATE_ANNOTATE_BATCH"),
   backfill: int(10).positive().env("MEMORY_CONSOLIDATE_BACKFILL_BATCH"),
+  reattach: int(20).positive().env("MEMORY_CONSOLIDATE_REATTACH_BATCH"),
+  retype: int(20).positive().env("MEMORY_CONSOLIDATE_RETYPE_BATCH"),
+  repoint: int(200).positive().env("MEMORY_CONSOLIDATE_REPOINT_BATCH"),
   // Note->symbol citations acted on per sweep. This caps the writes, not the work: the scan
   // walks every authored body and every backticked name regardless, so the ceiling only
   // decides how many of the resolved pairs get an edge. Each one is an insert plus a queue

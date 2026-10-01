@@ -21,6 +21,7 @@ export interface ConsolidationProvider {
   generate(task: ConsolidationTask): Promise<ConsolidationResult>;
   reconcile(task: ReconcileTask): Promise<ReconcileResult>;
   annotate(task: AnnotateTask): Promise<AnnotateResult>;
+  relate(task: RelateTask): Promise<RelateResult>;
 }
 
 // A generation task handed to a ConsolidationProvider: a cluster of records to fold
@@ -94,6 +95,34 @@ export interface AnnotateResult {
   keywords: string[];
   tags: string[];
   context: string;
+}
+
+export interface RelateRecord {
+  title: string;
+  type: string;
+  created_at: string;
+  content: string;
+}
+
+export interface RelateTask {
+  project: string | null;
+  a: RelateRecord;
+  b: RelateRecord;
+}
+
+// `from` names the source of a directed relation: the citing, newer or duplicate record.
+export interface RelateResult {
+  relation: LinkRelation;
+  from: "a" | "b";
+  reason: string;
+}
+
+export enum LinkRelation {
+  NONE = "none",
+  RELATES_TO = "relates_to",
+  REFERENCES = "references",
+  SUPERSEDES = "supersedes",
+  DUPLICATE_OF = "duplicate_of",
 }
 
 export enum ConsolidationRecommendation {
