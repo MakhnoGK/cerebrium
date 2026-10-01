@@ -32,6 +32,18 @@ services:
       MEMORY_STORE_BACKEND: postgres
       MEMORY_PG_URL_FILE: /run/secrets/pg_url
       MEMORY_RPC_LISTEN: 0.0.0.0:7433
+      # Ollama runs natively on the host for the GPU; host.docker.internal is its loopback.
+      MEMORY_CONSOLIDATE: http
+      MEMORY_CONSOLIDATE_URL: http://host.docker.internal:11434/api/chat
+      MEMORY_CONSOLIDATE_MODEL: gemma4:12b-it-qat
+      MEMORY_CONSOLIDATE_TIMEOUT_MS: "180000"
+      MEMORY_CONSOLIDATE_INTERVAL_MS: "1800000"
+      MEMORY_CONSOLIDATE_ANNOTATE_BATCH: "10"
+      MEMORY_CONSOLIDATE_BACKFILL_BATCH: "10"
+      MEMORY_PRINCIPALS: >-
+        {"cerebrium-runner": {"capabilities": {"read": "auto", "write": "suggest",
+        "consolidate": "off", "admin": "off"}, "quota": {"windowMs": 3600000, "writes": 60},
+        "weight": 0.8}}
     ports:
       # The tailnet address only: the listener has tokens but no TLS.
       - "${CEREBRIUM_RPC_BIND:-100.92.157.103}:7433:7433"
@@ -49,7 +61,25 @@ services:
       start_interval: 5s
     stop_grace_period: 30s
 
+  runner:
+    image: ghcr.io/makhnogk/cerebrium:${CEREBRIUM_TAG:?set CEREBRIUM_TAG}
+    restart: unless-stopped
+    depends_on:
+      daemon:
+        condition: service_healthy
+    command: ["node", "dist/runner.js"]
+    environment:
+      MEMORY_RUNNER: "true"
+      MEMORY_RUNNER_OAUTH_TOKEN_FILE: /run/secrets/claude_oauth_token
+    secrets:
+      - claude_oauth_token
+    volumes:
+      - data:/data
+    stop_grace_period: 30s
+
 secrets:
+  claude_oauth_token:
+    file: ${CEREBRIUM_SECRETS:?set CEREBRIUM_SECRETS}/claude_oauth_token
   pg_password:
     file: ${CEREBRIUM_SECRETS:?set CEREBRIUM_SECRETS}/pg_password
   pg_url:

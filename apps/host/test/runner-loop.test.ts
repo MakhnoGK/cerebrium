@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { JobKind } from "@cerebrium/contracts/vocab";
 import * as agentRun from "@cerebrium/kernel/runtime/agent-run";
@@ -9,7 +12,7 @@ const DEPS = {
   socketPath: "/tmp/x.sock",
   owner: "runner-1",
   serverPath: "/x/server.js",
-  dbPath: "/x/memory.db",
+  oauthTokenFile: null,
   client: "cerebrium-runner",
   cwd: "/tmp",
   cli: "claude",
@@ -96,6 +99,50 @@ describe("runner loop", () => {
     const spec = spawned.mock.calls[0]![0];
     expect(spec.client).toBe("cerebrium-runner");
     expect(spec.server.args).toEqual(["/x/server.js"]);
+  });
+
+  it("should point the spawned run's server at the daemon socket, never at a store", async () => {
+    // Given
+    harness([{ id: "job-1", kind: JobKind.AGENT_SELFTEST, payload_json: "{}" }]);
+    const spawned = vi.spyOn(agentRun, "runAgent").mockResolvedValue(OUTCOME);
+
+    // When
+    await runOnce(DEPS);
+
+    // Then
+    const env = spawned.mock.calls[0]![0].server.env;
+    expect(env.MEMORY_KERNEL_URL).toBe("/tmp/x.sock");
+    expect(env.MEMORY_DB_PATH).toBeUndefined();
+  });
+
+  it("should claim nothing while the subscription token file is empty", async () => {
+    // Given
+    const file = join(mkdtempSync(join(tmpdir(), "runner-token-")), "token");
+    writeFileSync(file, "\n");
+    const calls = harness([{ id: "job-1", kind: JobKind.AGENT_SELFTEST, payload_json: "{}" }]);
+    const spawned = vi.spyOn(agentRun, "runAgent");
+
+    // When
+    const did = await runOnce({ ...DEPS, oauthTokenFile: file });
+
+    // Then
+    expect(did).toBe("idle");
+    expect(calls.some((c) => c.method === "job_claim")).toBe(false);
+    expect(spawned).not.toHaveBeenCalled();
+  });
+
+  it("should hand the run the subscription token from its file", async () => {
+    // Given
+    const file = join(mkdtempSync(join(tmpdir(), "runner-token-")), "token");
+    writeFileSync(file, "sk-ant-oat-test\n");
+    harness([{ id: "job-1", kind: JobKind.AGENT_SELFTEST, payload_json: "{}" }]);
+    const spawned = vi.spyOn(agentRun, "runAgent").mockResolvedValue(OUTCOME);
+
+    // When
+    await runOnce({ ...DEPS, oauthTokenFile: file });
+
+    // Then
+    expect(spawned.mock.calls[0]![1]).toMatchObject({ oauthToken: "sk-ant-oat-test" });
   });
 
   it("should fail the job rather than hold its lease when it claims a kind it cannot run", async () => {

@@ -32,6 +32,9 @@ RUN apt-get update \
   && mkdir /data \
   && chown node:node /data
 
+# The runner's agent CLI.
+RUN npm install -g @anthropic-ai/claude-code@2.1.286 && npm cache clean --force
+
 WORKDIR /app
 
 COPY --from=build /app/package.json ./

@@ -40,6 +40,11 @@ ensure_secrets() {
     echo "generated a Postgres password in $SECRETS"
   fi
 
+  # Filled by hand with a `claude setup-token` token; the runner claims nothing while empty.
+  if [[ ! -e "$SECRETS/claude_oauth_token" ]]; then
+    (umask 022 && : >"$SECRETS/claude_oauth_token")
+  fi
+
   local password
   password="$(cat "$SECRETS/pg_password")"
   (umask 022 && printf 'postgres://cerebrium:%s@postgres:5432/cerebrium' "$password" >"$SECRETS/pg_url")

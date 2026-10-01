@@ -31,9 +31,15 @@ by `.github/workflows/release.yml`:
 - The first deploy generates the database password into `secrets/` (never printed) and
   the connection URL the daemon reads from `MEMORY_PG_URL_FILE`.
 - This store is the one being written: every machine's agents reach it through the plugin.
-  The consolidation sweep runs here on its default postures. The generation provider stays
-  `manual` until the host runs its own inference, so distill and merge clusters queue for
-  an agent to author through `consolidate_apply`.
+  The consolidation sweep runs here on its default postures every 30 minutes.
+- Generation is Ollama, run natively on the host for the GPU and reached from the daemon at
+  `host.docker.internal:11434`, which is the host's loopback. While it is down the sweep
+  records generation failures and detection still runs.
+- The `runner` service runs agent tasks with `claude -p` from the same image. It reaches the
+  daemon over the socket in `cerebrium-data`, writes as `cerebrium-runner` (profile in
+  `MEMORY_PRINCIPALS`: writes go to review, 60 an hour), and is authenticated only with the
+  subscription token in `secrets/claude_oauth_token`. API-key and cloud-provider variables
+  are stripped from the CLI's env, and while the file is empty it claims no job.
 - The daemon applies pending migrations when it opens the store, so there is no separate
   migrate step. Migrations are forward-only: rolling back past one leaves the older code on
   a newer schema.
@@ -134,6 +140,31 @@ cold rollback and are not used.
    --token-file ~/.cerebrium/host-token --index-repo <each checkout> --apply --verify`.
 8. **Check** — in a fresh session, `session_start`, `search` and `code_lookup` answer from
    the host.
+
+## Ollama
+
+Once, on the host: install Ollama (the macOS app, or `brew install ollama` +
+`brew services start ollama`), keep its default loopback bind, and pull the model the daemon
+asks for:
+
+```bash
+ollama pull gemma4:12b-it-qat
+```
+
+## The runner's subscription token
+
+The runner draws on the owner's Claude subscription, never on API billing. Turn off extra
+usage on claude.ai first, then create a long-lived token on any machine with a browser and
+write it into the existing file in place, so the container's mount sees it:
+
+```bash
+claude setup-token
+# the host's login shell is fish, hence bash -c; paste the token at the prompt
+ssh -t hk-obrio@<host> /bin/bash -c "'read -rsp token: t && printf %s \"\$t\" > ~/cerebrium-host/secrets/claude_oauth_token'"
+```
+
+The runner reads the file before every claim, so no restart is needed. Check one run with
+`docker exec cerebrium-runner-1 node dist/runner.js --once agent.selftest`.
 
 ## By hand
 
