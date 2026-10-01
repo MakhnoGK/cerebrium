@@ -101,6 +101,19 @@ describe("runner loop", () => {
     expect(spec.server.args).toEqual(["/x/server.js"]);
   });
 
+  it("should claim only the kinds it is given", async () => {
+    // Given
+    const calls = harness([]);
+
+    // When
+    await runOnce({ ...DEPS, kinds: [JobKind.AGENT_SELFTEST] });
+
+    // Then
+    expect(calls.find((c) => c.method === "job_claim")?.params.kinds).toEqual([
+      JobKind.AGENT_SELFTEST,
+    ]);
+  });
+
   it("should point the spawned run's server at the daemon socket, never at a store", async () => {
     // Given
     harness([{ id: "job-1", kind: JobKind.AGENT_SELFTEST, payload_json: "{}" }]);
