@@ -1,6 +1,6 @@
 import { inject } from "tsyringe";
 import { decodeCursor, encodeCursor, pageSizeOf, splitOverfetch } from "@cerebrium/contracts/page";
-import { ConsolidationKind, ConsolidationStatus } from "@cerebrium/contracts/vocab";
+import { ConsolidationKind, ConsolidationStatus, EdgeType } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { ConsolidationRecommendation } from "@/domain/ports/consolidation-provider";
 import {
@@ -12,6 +12,7 @@ import {
   type NodesRepo,
 } from "@/domain/ports/storage";
 import { InvalidCursorError } from "@/application/errors";
+import { CodeRefService } from "@/application/services/code-ref.service";
 import {
   APPLY_CANDIDATE,
   RETRY_CANDIDATE,
@@ -84,7 +85,20 @@ export class LocalApplyCandidate implements ApplyCandidate {
     @inject(EDGES_REPO_TOKEN) private readonly edges: EdgesRepo,
     @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
+    private readonly codeRefs: CodeRefService,
   ) {}
+
+  // On the per-branch index the citation becomes a code ref; elsewhere, an edge.
+  private async applyDocuments(note: string, symbol: string, session: string, now: string) {
+    const target = await this.codeRefs.target(symbol);
+
+    if (!target) return this.edges.insertSystemDocumentsIfLive(note, symbol, session, now);
+    if ((await this.nodes.referenceState(note)) !== "live") return false;
+
+    await this.codeRefs.record(note, EdgeType.DOCUMENTS, target, now);
+
+    return true;
+  }
 
   async invoke(args: ApplyCandidateArgs): Promise<ApplyCandidateResult> {
     const current = await this.consolidation.getCandidate(args.id);
@@ -108,12 +122,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
           const [note, symbol] = candidate.member_ids;
           if (!note || !symbol) throw new Error(`documents candidate ${args.id} is malformed.`);
 
-          const inserted = await this.edges.insertSystemDocumentsIfLive(
-            note,
-            symbol,
-            args.session_id,
-            now,
-          );
+          const inserted = await this.applyDocuments(note, symbol, args.session_id, now);
           return inserted ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
         }
 

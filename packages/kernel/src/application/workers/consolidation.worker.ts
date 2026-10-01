@@ -21,20 +21,25 @@ import {
   type ConsolidationTickResult,
 } from "@/domain/ports/consolidation-reporter";
 import {
+  BRANCH_CODE_REPO_TOKEN,
   CODE_REPO_TOKEN,
   CONSOLIDATION_REPO_TOKEN,
   EDGES_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
   NODES_REPO_TOKEN,
   pairKey,
+  STORE_TOKEN,
+  type BranchCodeRepo,
   type CodeRepo,
   type ConsolidationRepo,
   type DuplicatePair,
   type EdgesRepo,
   type EmbeddingQueueRepo,
   type NodesRepo,
+  type Store,
   type SweepSeed,
 } from "@/domain/ports/storage";
+import type { CodeRefTarget } from "@/application/services/code-ref.service";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
@@ -93,6 +98,14 @@ function breather(budgetMs: number): () => Promise<void> {
 
     last = Date.now();
   };
+}
+
+// A symbol a note can cite by name; `ref` is set on the per-branch index, where the
+// citation is kept as a code ref rather than an edge.
+interface CitableSymbol {
+  node_id: string;
+  repo: string;
+  ref: CodeRefTarget | null;
 }
 
 // A neighbour hit, carrying the seed it was found from: the seed's kind decides whether
@@ -154,7 +167,9 @@ export class ConsolidationWorker {
     @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidationRepo: ConsolidationRepo,
     @inject(EDGES_REPO_TOKEN) private readonly edgesRepo: EdgesRepo,
     @inject(CODE_REPO_TOKEN) private readonly codeRepo: CodeRepo,
+    @inject(BRANCH_CODE_REPO_TOKEN) private readonly branchCode: BranchCodeRepo,
     @inject(NODES_REPO_TOKEN) private readonly nodesRepo: NodesRepo,
+    @inject(STORE_TOKEN) private readonly store: Store,
 
     private readonly sessionService: SessionService,
     private readonly nodeReferences: NodeReferenceService,
@@ -461,7 +476,9 @@ export class ConsolidationWorker {
   // code. Both need every live body, so they share the read and the watermark.
   private async resolveCitations(now: string, result: ConsolidationTickResult): Promise<void> {
     const revisions = await this.consolidationRepo.revisionCount();
-    const codeIndex = await this.consolidationRepo.codeIndexWatermark();
+    const codeIndex = this.store.capabilities.branchCode
+      ? await this.branchCode.indexWatermark()
+      : await this.consolidationRepo.codeIndexWatermark();
 
     if (
       this.lastCitationScan?.revisions === revisions &&
@@ -504,23 +521,57 @@ export class ConsolidationWorker {
     this.lastCitationScan = { revisions, codeIndex, dangling: result.wikilinks_dangling };
   }
 
-  // Cited symbols, by name, excluding repos whose root is gone: a detached repo cannot be
-  // checked against source, so nothing new should be linked into it.
-  private async citableSymbolIndex(): Promise<Map<string, { node_id: string; repo: string }[]>> {
+  // Cited symbols, by name. On the per-branch index a citation is kept as a ref to what the
+  // symbol is, so each carries that target. On the local mirror, repos whose root is gone are
+  // left out: a detached repo cannot be checked against source.
+  private async citableSymbolIndex(): Promise<Map<string, CitableSymbol[]>> {
+    const index = new Map<string, CitableSymbol[]>();
+
+    if (this.store.capabilities.branchCode) {
+      for (const s of await this.branchCode.citableSymbols()) {
+        const ref: CodeRefTarget = {
+          repo: s.repo,
+          remote_key: s.remote_key,
+          path: s.path,
+          qualified: s.qualified,
+          symbol_kind: s.kind,
+        };
+
+        index.set(s.name, [...(index.get(s.name) ?? []), { node_id: s.id, repo: s.repo, ref }]);
+      }
+
+      return index;
+    }
+
     const attached = new Set(
       (await this.codeRepo.allRepoProvenance())
         .filter((provenance) => !provenance.detached)
         .map((provenance) => provenance.repo),
     );
-    const index = new Map<string, { node_id: string; repo: string }[]>();
 
     for (const symbol of await this.consolidationRepo.citableSymbols()) {
       if (!attached.has(symbol.repo)) continue;
 
-      index.set(symbol.name, [...(index.get(symbol.name) ?? []), symbol]);
+      index.set(symbol.name, [...(index.get(symbol.name) ?? []), { ...symbol, ref: null }]);
     }
 
     return index;
+  }
+
+  private async cited(note: string, symbol: CitableSymbol): Promise<boolean> {
+    return symbol.ref
+      ? this.branchCode.hasRef(note, symbol.ref.remote_key!, symbol.ref.path, symbol.ref.qualified)
+      : this.edgesRepo.pairIsConnected(note, symbol.node_id);
+  }
+
+  private async linkDocuments(note: string, symbol: CitableSymbol, now: string): Promise<boolean> {
+    if (!symbol.ref) {
+      return this.edgesRepo.insertSystemDocumentsIfLive(note, symbol.node_id, this.ownerId, now);
+    }
+
+    await this.branchCode.insertRef({ src: note, type: EdgeType.DOCUMENTS, ...symbol.ref }, now);
+
+    return true;
   }
 
   // Proposed, never applied: the citation is authored but which symbol it means is
@@ -528,7 +579,7 @@ export class ConsolidationWorker {
   private async proposeDocuments(
     now: string,
     result: ConsolidationTickResult,
-    symbols: Map<string, { node_id: string; repo: string }[]>,
+    symbols: Map<string, CitableSymbol[]>,
     row: { id: string; project: string | null; content: string },
   ): Promise<void> {
     const posture = this.posture.documents;
@@ -540,20 +591,21 @@ export class ConsolidationWorker {
     for (const name of citedSymbolNames(row.content)) {
       if (result.documents_linked + result.documents_suggested >= this.batch.documents) return;
 
-      const targets = new Set(
+      const targets = new Map(
         (symbols.get(name) ?? [])
           .filter((symbol) => repoBelongsToProject(symbol.repo, row.project))
-          .map((symbol) => symbol.node_id),
+          .map((symbol) => [symbol.node_id, symbol]),
       );
 
       if (targets.size !== 1) continue;
 
-      const symbol = [...targets][0]!;
+      const target = [...targets.values()][0]!;
+      const symbol = target.node_id;
 
-      if (await this.edgesRepo.pairIsConnected(row.id, symbol)) continue;
+      if (await this.cited(row.id, target)) continue;
 
       if (posture === Posture.AUTO) {
-        if (await this.edgesRepo.insertSystemDocumentsIfLive(row.id, symbol, this.ownerId, now)) {
+        if (await this.linkDocuments(row.id, target, now)) {
           result.documents_linked++;
           await this.consolidationRepo.resolvePendingByMembers(
             ConsolidationKind.DOCUMENTS,
