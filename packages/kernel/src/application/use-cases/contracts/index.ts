@@ -14,3 +14,4 @@ export * from "@/application/use-cases/contracts/search";
 export * from "@/application/use-cases/contracts/session";
 export * from "@/application/use-cases/contracts/subscriptions";
 export * from "@/application/use-cases/contracts/activity";
+export * from "@/application/use-cases/contracts/graph";

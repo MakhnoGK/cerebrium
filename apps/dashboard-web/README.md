@@ -11,6 +11,10 @@ The web dashboard's UI (React, Vite, TanStack Query), served by `apps/dashboard-
 - **Review** — pending consolidation candidates with the model's proposal and the members side
   by side, to apply, edit, reject or regenerate; and the runner's writes under a `suggest`
   posture, to keep or undo.
+- **Graph** — the whole memory graph in 2D (sigma.js, ForceAtlas2 in a worker), coloured by
+  type or project; retired nodes and cited code symbols on request; an integrity overlay
+  (dangling edges, detached islands, edgeless nodes); click a node for its details and links;
+  nodes flash as the activity stream touches them.
 
 `npm run build:dashboard` builds it into `apps/dashboard-web/dist`;
 `npm run dev:dashboard` serves it with `/api` proxied to `localhost:7480`.

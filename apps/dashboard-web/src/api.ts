@@ -11,6 +11,7 @@ import type {
   ReviewPage,
   SweptNotice,
 } from "@cerebrium/contracts/dashboard";
+import type { GraphQuery, GraphSnapshot } from "@cerebrium/contracts/graph";
 
 export const ACTIVITY_PAGE_SIZE = 100;
 
@@ -110,6 +111,30 @@ export function fetchReviews(signal?: AbortSignal): Promise<ReviewPage> {
 
 export function decideReview(body: ReviewDecisionBody): Promise<ReviewDecisionResult> {
   return postJson<ReviewDecisionResult>("/api/reviews/decision", body);
+}
+
+export function fetchGraph(query: GraphQuery, signal?: AbortSignal): Promise<GraphSnapshot> {
+  const params = new URLSearchParams();
+  if (query.invalidated) params.set("invalidated", "1");
+  if (query.symbols) params.set("symbols", "1");
+  const qs = params.toString();
+  return getJson<GraphSnapshot>(`/api/graph${qs ? `?${qs}` : ""}`, signal);
+}
+
+export type ActivityListener = (entry: ActivityEntry) => void;
+
+// Fans the stream's activity out to whichever views want it live.
+export class ActivityBus {
+  private readonly listeners = new Set<ActivityListener>();
+
+  on(listener: ActivityListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  emit(entry: ActivityEntry): void {
+    for (const listener of this.listeners) listener(entry);
+  }
 }
 
 export function errorMessage(error: unknown): string {

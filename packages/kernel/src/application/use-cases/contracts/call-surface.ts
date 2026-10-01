@@ -90,6 +90,13 @@ export const CALL_SURFACE = {
     audit: false,
     capability: Capability.READ,
   },
+  graph_snapshot: {
+    token: READ_SURFACE.graph_snapshot,
+    kind: "read",
+    action: EventAction.STATS,
+    audit: false,
+    capability: Capability.READ,
+  },
 
   // Writes — NEVER retried. None of these is idempotent: a retried `write_memory` after a
   // timeout creates a second node, and a retried `apply_candidate` resolves twice.

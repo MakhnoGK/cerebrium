@@ -7,6 +7,7 @@ import {
   CONSOLIDATION_REPO_TOKEN,
   EDGES_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
+  GRAPH_REPO_TOKEN,
   JOBS_REPO_TOKEN,
   NODES_REPO_TOKEN,
   PRINCIPAL_TOKENS_REPO_TOKEN,
@@ -25,6 +26,7 @@ import { PgConsolidationRepo } from "@/db/postgres/consolidation";
 import { PG_TOKEN, PgDatabase } from "@/db/postgres/database";
 import { PgEdgesRepo } from "@/db/postgres/edges";
 import { PgEmbeddingQueueRepo } from "@/db/postgres/embedding-queue";
+import { PgGraphRepo } from "@/db/postgres/graph";
 import { PgJobsRepo } from "@/db/postgres/jobs";
 import { PgNodesRepo } from "@/db/postgres/nodes";
 import { PgPrincipalTokensRepo } from "@/db/postgres/principal-tokens";
@@ -71,6 +73,7 @@ export function registerPostgresRepositories(
   c.register(CONSOLIDATION_REPO_TOKEN, { useClass: PgConsolidationRepo });
   c.register(EDGES_REPO_TOKEN, { useClass: PgEdgesRepo });
   c.register(EMBEDDING_QUEUE_REPO_TOKEN, { useClass: PgEmbeddingQueueRepo });
+  c.register(GRAPH_REPO_TOKEN, { useClass: PgGraphRepo });
   c.register(JOBS_REPO_TOKEN, { useClass: PgJobsRepo });
   c.register(NODES_REPO_TOKEN, { useClass: PgNodesRepo });
   c.register(PRINCIPALS_REPO_TOKEN, { useClass: PgPrincipalsRepo });

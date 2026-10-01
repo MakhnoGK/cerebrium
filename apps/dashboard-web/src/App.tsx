@@ -1,8 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { DashboardStatus, SweptNotice } from "@cerebrium/contracts/dashboard";
 import { useActivityLog } from "./activity-log";
-import { errorMessage, fetchActivity, fetchStatus, useStream, type StreamState } from "./api";
+import {
+  ActivityBus,
+  errorMessage,
+  fetchActivity,
+  fetchStatus,
+  useStream,
+  type StreamState,
+} from "./api";
 import { Activity } from "./components/Activity";
 import { Dot, NowProvider } from "./components/common";
 import { Consolidation, type ReceivedNotice } from "./components/Consolidation";
@@ -10,11 +17,14 @@ import { Overview } from "./components/Overview";
 import { CANDIDATES_KEY, Review } from "./components/Review";
 import { useBacklogTrend, type Tone } from "./health";
 
+const GraphView = lazy(() => import("./components/Graph"));
+
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "activity", label: "Activity" },
   { id: "consolidation", label: "Consolidation" },
   { id: "review", label: "Review" },
+  { id: "graph", label: "Graph" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -53,6 +63,12 @@ export function App() {
   const [notices, setNotices] = useState<ReceivedNotice[]>([]);
   const noticeSeq = useRef(0);
   const [reviewCount, setReviewCount] = useState(0);
+  const [activity] = useState(() => new ActivityBus());
+  const [graphOpened, setGraphOpened] = useState(tab === "graph");
+
+  useEffect(() => {
+    if (tab === "graph") setGraphOpened(true);
+  }, [tab]);
 
   const status = useQuery({
     queryKey: STATUS_KEY,
@@ -70,7 +86,10 @@ export function App() {
 
   const stream = useStream({
     onStatus: (next: DashboardStatus) => queryClient.setQueryData(STATUS_KEY, next),
-    onActivity: log.push,
+    onActivity: (entry) => {
+      log.push(entry);
+      activity.emit(entry);
+    },
     onConsolidation: (notice: SweptNotice) => {
       noticeSeq.current += 1;
       const received = { key: noticeSeq.current, at: new Date().toISOString(), notice };
@@ -138,6 +157,13 @@ export function App() {
           <div hidden={tab !== "review"}>
             <Review onCount={setReviewCount} />
           </div>
+          {graphOpened && (
+            <div hidden={tab !== "graph"}>
+              <Suspense fallback={<p className="loading">Loading the graph…</p>}>
+                <GraphView active={tab === "graph"} activity={activity} />
+              </Suspense>
+            </div>
+          )}
         </main>
       </div>
     </NowProvider>

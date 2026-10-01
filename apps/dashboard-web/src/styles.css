@@ -949,3 +949,134 @@ td.what {
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* Graph */
+
+.graph-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--gap);
+  align-items: start;
+}
+
+.graph-canvas {
+  position: relative;
+  height: calc(100vh - 150px);
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.graph-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.graph-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+}
+
+.graph-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  list-style: none;
+}
+
+.graph-legend li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.graph-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.graph-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.graph-tags,
+.graph-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 12px;
+}
+
+.graph-summary {
+  margin: 0;
+}
+
+.graph-subhead {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.graph-neighbors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.graph-neighbors li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.graph-neighbors .edge-type {
+  flex: none;
+}
+
+.graph-neighbors .link-btn {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  text-align: left;
+}
+
+.graph-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .graph-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-canvas {
+    height: 70vh;
+  }
+
+  .graph-side {
+    max-height: none;
+  }
+}

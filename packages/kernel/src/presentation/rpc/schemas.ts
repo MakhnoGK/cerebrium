@@ -73,6 +73,11 @@ const SCHEMAS = {
     limit: z.number().int().positive().optional(),
     before: iso.optional(),
   }),
+  graph_snapshot: z.object({
+    session_id: ulid.optional(),
+    invalidated: z.boolean().optional(),
+    symbols: z.boolean().optional(),
+  }),
 
   // Writes
   //
