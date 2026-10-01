@@ -53,6 +53,7 @@ describe("Read surface naming", () => {
       "list_reviews",
       "lookup_code",
       "operator_snapshot",
+      "recent_activity",
       "search_memory",
       "stats_snapshot",
       "suggest_candidates",

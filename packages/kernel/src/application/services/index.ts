@@ -1,5 +1,6 @@
 export { AgentRunService } from "@/application/services/agent-run.service";
 export { ActivityMonitor } from "@/application/services/activity.service";
+export { ActivityFeed } from "@/application/services/activity-feed.service";
 export { BranchCodeService } from "@/application/services/branch-code.service";
 export { CodeIndexService } from "@/application/services/code-index.service";
 export {

@@ -5,6 +5,8 @@ import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/us
 // depends on, and nothing does that yet.
 export enum NotificationTopic {
   CONSOLIDATION = "consolidation",
+  // Every audited call, as it is recorded.
+  ACTIVITY = "activity",
 }
 
 export interface SubscribeEventsArgs {

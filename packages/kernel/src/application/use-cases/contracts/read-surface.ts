@@ -1,3 +1,4 @@
+import { RECENT_ACTIVITY } from "@/application/use-cases/contracts/activity";
 import { SUGGEST_CANDIDATES } from "@/application/use-cases/contracts/consolidation";
 import { JOB_STATUS } from "@/application/use-cases/contracts/jobs";
 import { OPERATOR_SNAPSHOT, STATS_SNAPSHOT } from "@/application/use-cases/contracts/operations";
@@ -20,6 +21,7 @@ export const READ_SURFACE = {
   job_status: JOB_STATUS,
   stats_snapshot: STATS_SNAPSHOT,
   operator_snapshot: OPERATOR_SNAPSHOT,
+  recent_activity: RECENT_ACTIVITY,
 } as const;
 
 export type ReadName = keyof typeof READ_SURFACE;

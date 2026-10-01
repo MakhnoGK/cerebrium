@@ -1,7 +1,9 @@
 import { injectable } from "tsyringe";
+import type { ActivityEntry } from "@cerebrium/contracts/dashboard";
 import type { EventAction } from "@cerebrium/contracts/vocab";
 import type { SessionsRepo } from "@/domain/ports/storage";
 import type { Writer } from "@/domain/writer";
+import { activityOf, type EventRow } from "@/db/activity-rows";
 import { PgBaseRepo } from "@/db/postgres/base";
 import { newId } from "@/core/ids";
 
@@ -56,5 +58,19 @@ export class PgSessionsRepo extends PgBaseRepo implements SessionsRepo {
         ts,
       },
     );
+  }
+
+  async recentEvents(limit: number, before: string | null): Promise<ActivityEntry[]> {
+    const rows = await this.all<EventRow>(
+      `SELECT e.id, e.ts, e.action, e.session_id, e.node_id, e.detail,
+              s.client, s.principal_id AS principal
+       FROM events e LEFT JOIN sessions s ON s.id = e.session_id
+       WHERE (@before::text IS NULL OR e.ts < @before)
+       ORDER BY e.ts DESC, e.id DESC
+       LIMIT @limit`,
+      { before, limit },
+    );
+
+    return rows.map(activityOf);
   }
 }

@@ -77,6 +77,23 @@ services:
       - data:/data
     stop_grace_period: 30s
 
+  dashboard:
+    image: ghcr.io/makhnogk/cerebrium:${CEREBRIUM_TAG:?set CEREBRIUM_TAG}
+    restart: unless-stopped
+    depends_on:
+      daemon:
+        condition: service_healthy
+    command: ["node", "dist/dashboard.js"]
+    environment:
+      DASHBOARD_PORT: "7480"
+      DASHBOARD_OLLAMA_URL: http://host.docker.internal:11434
+    ports:
+      # The tailnet address only: the dashboard has no login.
+      - "${CEREBRIUM_RPC_BIND:-100.92.157.103}:7480:7480"
+    volumes:
+      - data:/data
+    stop_grace_period: 10s
+
 secrets:
   claude_oauth_token:
     file: ${CEREBRIUM_SECRETS:?set CEREBRIUM_SECRETS}/claude_oauth_token

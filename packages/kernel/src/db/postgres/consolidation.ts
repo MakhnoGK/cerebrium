@@ -1,4 +1,5 @@
 import { injectable } from "tsyringe";
+import type { ConsolidationRunSummary } from "@cerebrium/contracts/dashboard";
 import type {
   ConsolidationCandidate,
   ConsolidationProposal,
@@ -14,6 +15,7 @@ import {
   type ResolvedStatus,
   type SweepSeed,
 } from "@/domain/ports/storage";
+import { RUN_SUMMARY_COLUMNS } from "@/db/activity-rows";
 import { PgBaseRepo } from "@/db/postgres/base";
 import { ACTIVE_SPACE, LATEST_REVISION } from "@/db/postgres/internal";
 import { newId } from "@/core/ids";
@@ -641,6 +643,14 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
 
       return { candidate, status };
     });
+  }
+
+  async recentRuns(limit: number): Promise<ConsolidationRunSummary[]> {
+    return this.all(
+      `SELECT ${RUN_SUMMARY_COLUMNS} FROM consolidation_runs
+       ORDER BY started_at DESC, id DESC LIMIT @limit`,
+      { limit },
+    );
   }
 
   async reportTick(runId: string, result: ConsolidationTickResult): Promise<void> {

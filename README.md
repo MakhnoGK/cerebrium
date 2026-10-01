@@ -32,8 +32,8 @@ apps/
                    image and the files each release deploys to the GPU laptop
   plugin/          cerebrium-plugin — the stdio MCP server agents launch, the skill, the
                    always-on rules and session hooks, the pi extension, the installer
-  dashboard-api/   web dashboard backend (NestJS), scaffold only
-  dashboard-web/   web dashboard UI (React), scaffold only
+  dashboard-api/   web dashboard backend (NestJS)
+  dashboard-web/   web dashboard UI (React)
 ```
 
 The kernel keeps clean-architecture layers, no ORM, and one directory per MCP tool:

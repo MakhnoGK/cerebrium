@@ -5,6 +5,7 @@ import { parseHostPort } from "@cerebrium/contracts/rpc";
 import { JobKind } from "@cerebrium/contracts/vocab";
 import { CallPipeline } from "@cerebrium/kernel/application/call-pipeline";
 import {
+  ActivityFeed,
   ActivityMonitor,
   ModelWarmupService,
   PrincipalQuotaService,
@@ -528,6 +529,15 @@ async function main(): Promise<void> {
   // was not connected reads the run from `consolidation_runs` instead, so nothing here has
   // to be durable.
   const subscriptions = container.resolve(SubscriptionService);
+
+  container.resolve(ActivityFeed).listen((entry) => {
+    if (subscriptions.subscribers === 0) return;
+
+    rpc.notify("activity.recorded", { ...entry }, (client) =>
+      subscriptions.wants(client, NotificationTopic.ACTIVITY),
+    );
+  });
+
   const publishSweep = (swept: ConsolidationTickResult): void => {
     if (swept.stage === "failed" || subscriptions.subscribers === 0) return;
 

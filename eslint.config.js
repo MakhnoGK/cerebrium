@@ -25,6 +25,14 @@ const HOST_BOUNDARY = {
   group: ["@/*", "@plugin/*"],
   message: "the host reaches the kernel as '@cerebrium/kernel/…' and may not depend on the plugin.",
 };
+const DASHBOARD_API_BOUNDARY = {
+  group: ["@/*", "@host/*", "@plugin/*"],
+  message: "the dashboard backend talks to the kernel over its socket, never to its internals.",
+};
+const DASHBOARD_WEB_BOUNDARY = {
+  group: ["@/*", "@cerebrium/kernel/*", "@host/*", "@plugin/*"],
+  message: "the browser app reaches Cerebrium only through the dashboard API.",
+};
 const PLUGIN_BOUNDARY = {
   group: ["@/*", "@host/*"],
   message: "the plugin reaches the kernel as '@cerebrium/kernel/…' and may not depend on the host.",
@@ -111,6 +119,25 @@ export default tseslint.config(
   { files: within("packages/kernel"), rules: restrict(PARENT_RELATIVE, KERNEL_BOUNDARY) },
   { files: within("apps/host"), rules: restrict(PARENT_RELATIVE, HOST_BOUNDARY) },
   { files: within("apps/plugin"), rules: restrict(PARENT_RELATIVE, PLUGIN_BOUNDARY) },
+  {
+    files: within("apps/dashboard-api"),
+    rules: {
+      ...restrict(PARENT_RELATIVE, DASHBOARD_API_BOUNDARY),
+      // A Nest module is a decorated class with nothing in its body.
+      "@typescript-eslint/no-extraneous-class": ["error", { allowWithDecorator: true }],
+    },
+  },
+  {
+    // The browser app has its own compiler settings (DOM, JSX).
+    files: within("apps/dashboard-web"),
+    languageOptions: {
+      parserOptions: {
+        project: ["./apps/dashboard-web/tsconfig.json"],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: restrict(PARENT_RELATIVE, DASHBOARD_WEB_BOUNDARY),
+  },
   {
     // Tests exercise error paths and cast raw rows freely; keep the strong async and
     // any rules, relax the ones that only add ceremony to fixtures.

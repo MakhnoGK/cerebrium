@@ -11,6 +11,7 @@
       "@cerebrium/kernel/*": ["packages/kernel/src/*"],
       "@host/*": ["apps/host/src/*"],
       "@plugin/*": ["apps/plugin/*"],
+      "@dashboard-api/*": ["apps/dashboard-api/src/*"],
       "@test/*": ["packages/kernel/test/*"],
       "@scripts/*": ["packages/kernel/scripts/*"]
     },
@@ -33,5 +34,13 @@
     "vitest.config.ts",
     "vitest.pg.config.ts"
   ],
-  "exclude": ["node_modules", "**/node_modules", "dist", "**/dist", ".tmp", "**/test/fixtures"]
+  "exclude": [
+    "node_modules",
+    "**/node_modules",
+    "dist",
+    "**/dist",
+    ".tmp",
+    "**/test/fixtures",
+    "apps/dashboard-web"
+  ]
 }

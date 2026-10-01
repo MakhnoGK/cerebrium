@@ -82,6 +82,14 @@ export const CALL_SURFACE = {
     action: EventAction.JOB_STATUS,
     capability: Capability.READ,
   },
+  // Reading the log is not itself logged: a dashboard polling it would fill it.
+  recent_activity: {
+    token: READ_SURFACE.recent_activity,
+    kind: "read",
+    action: EventAction.STATS,
+    audit: false,
+    capability: Capability.READ,
+  },
 
   // Writes — NEVER retried. None of these is idempotent: a retried `write_memory` after a
   // timeout creates a second node, and a retried `apply_candidate` resolves twice.

@@ -14,7 +14,7 @@ An npm-workspaces monorepo. Each workspace is one deliverable or one shared laye
 - `packages/kernel` (`@/*` inside it, `@cerebrium/kernel/*` from an app) — the memory kernel: storage, retrieval, code index, consolidation, use cases, and their MCP and RPC presentation. Tests in `packages/kernel/test` (`@test/*`), dev tooling in `packages/kernel/scripts` (`@scripts/*`). May not depend on an app.
 - `apps/host` (`@host/*`) — cerebrium-host: the daemon, the runner, their workers and CLIs, the container (`apps/host/Dockerfile`) and the files the release copies to the GPU laptop (`apps/host/deploy/`).
 - `apps/plugin` (`@plugin/*`) — cerebrium-plugin: the stdio MCP server agents launch (`src/server.ts`), the skill (`skill/`), the rules and hooks (`install/`), and the installer (`scripts/agent-*.ts`).
-- `apps/dashboard-api`, `apps/dashboard-web` — the web dashboard (NestJS BFF, React UI). Scaffolds only.
+- `apps/dashboard-api`, `apps/dashboard-web` — the web dashboard (NestJS BFF over the daemon socket, React UI); the dashboard-api may import contracts and `@cerebrium/kernel/runtime/*`, the web app contracts only.
 
 The host and the plugin never import each other. Every bin is still bundled flat into the root `dist/`, which is what the local install and every agent host point at. The one exception is cerebrium-plugin's remote-only server (`apps/plugin/src/plugin-server.ts`), built by `apps/plugin/tsup.config.ts` into `apps/plugin/dist/server.js` as one self-contained file: it is composed from `packages/kernel/src/remote-container.ts`, never from `container.ts`, and `apps/plugin/test/plugin-bundle.test.ts` fails if a storage backend, model runtime, parser or any non-builtin import reaches it.
 
