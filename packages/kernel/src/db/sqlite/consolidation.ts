@@ -792,6 +792,22 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
     return info.changes > 0;
   }
 
+  async dismissRetiredCandidates(resolvedBy: string, ts: string): Promise<number> {
+    const info = this.db
+      .prepare(
+        `UPDATE consolidation_candidates
+         SET status = 'dismissed', resolved_at = ?, resolved_by = ?
+         WHERE status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM json_each(consolidation_candidates.member_ids) m
+             JOIN nodes n ON n.id = m.value
+             WHERE n.invalidated_at IS NOT NULL)`,
+      )
+      .run(ts, resolvedBy);
+
+    return Promise.resolve(info.changes);
+  }
+
   async resolveCandidateAtomically(
     id: string,
     resolvedBy: string,

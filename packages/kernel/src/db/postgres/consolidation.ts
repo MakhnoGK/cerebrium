@@ -612,6 +612,19 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
     );
   }
 
+  async dismissRetiredCandidates(resolvedBy: string, ts: string): Promise<number> {
+    return this.run(
+      `UPDATE consolidation_candidates c
+       SET status = 'dismissed', resolved_at = @ts, resolved_by = @resolvedBy
+       WHERE c.status = 'pending'
+         AND EXISTS (
+           SELECT 1 FROM nodes n
+           WHERE n.id IN (SELECT jsonb_array_elements_text(c.member_ids::jsonb))
+             AND n.invalidated_at IS NOT NULL)`,
+      { ts, resolvedBy },
+    );
+  }
+
   // One transaction: the writes `operation` makes through other repositories nest inside
   // it as savepoints, so they commit or roll back with the resolution.
   async resolveCandidateAtomically(

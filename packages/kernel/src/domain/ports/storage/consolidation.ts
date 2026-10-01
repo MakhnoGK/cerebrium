@@ -108,6 +108,9 @@ export interface ConsolidationRepo extends ConsolidationReporter {
     resolvedBy: string,
     ts: string,
   ): Promise<boolean>;
+  // Dismisses every pending candidate one of whose members has been retired since it was
+  // detected. Returns how many.
+  dismissRetiredCandidates(resolvedBy: string, ts: string): Promise<number>;
   // Runs `operation` and the candidate's resolution in one transaction, so the writes it
   // performs through other repositories commit or roll back together with it.
   resolveCandidateAtomically(
