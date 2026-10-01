@@ -4,6 +4,7 @@ import {
   ConsolidationKind,
   ConsolidationStatus,
   EdgeType,
+  EventAction,
   MemoryKind,
   Posture,
 } from "@cerebrium/contracts/vocab";
@@ -30,6 +31,7 @@ import {
   EMBEDDING_QUEUE_REPO_TOKEN,
   NODES_REPO_TOKEN,
   pairKey,
+  SESSIONS_REPO_TOKEN,
   STORE_TOKEN,
   type BranchCodeRepo,
   type CodeRepo,
@@ -39,9 +41,11 @@ import {
   type EmbeddingQueueRepo,
   type NodesRepo,
   type RelationInput,
+  type SessionsRepo,
   type Store,
   type SweepSeed,
 } from "@/domain/ports/storage";
+import { ActivityFeed } from "@/application/services/activity-feed.service";
 import type { CodeRefTarget } from "@/application/services/code-ref.service";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
@@ -169,6 +173,7 @@ export class ConsolidationWorker {
     danglingById: number;
   } | null = null;
   private readonly unrelated = new Set<string>();
+  private principal: string | null = null;
 
   constructor(
     @inject(CONSOLIDATION_PROVIDER_TOKEN)
@@ -183,9 +188,11 @@ export class ConsolidationWorker {
     @inject(BRANCH_CODE_REPO_TOKEN) private readonly branchCode: BranchCodeRepo,
     @inject(NODES_REPO_TOKEN) private readonly nodesRepo: NodesRepo,
     @inject(STORE_TOKEN) private readonly store: Store,
+    @inject(SESSIONS_REPO_TOKEN) private readonly sessionsRepo: SessionsRepo,
 
     private readonly sessionService: SessionService,
     private readonly nodeReferences: NodeReferenceService,
+    private readonly feed: ActivityFeed,
 
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
 
@@ -273,7 +280,12 @@ export class ConsolidationWorker {
 
     this.currentRun = runId;
 
-    await this.sessionService.startSession(this.ownerId, null, now, CONSOLIDATION_WRITER);
+    this.principal = await this.sessionService.startSession(
+      this.ownerId,
+      null,
+      now,
+      CONSOLIDATION_WRITER,
+    );
 
     this.stageMark = null;
 
@@ -992,6 +1004,12 @@ export class ConsolidationWorker {
         ))
       ) {
         result.integrity!.edges_repointed++;
+        await this.logIntegrity(now, edge.src, {
+          op: "repoint",
+          relation: edge.type,
+          from: edge.dst,
+          to: successor,
+        });
       }
     }
   }
@@ -1019,6 +1037,12 @@ export class ConsolidationWorker {
           ))
         ) {
           result.integrity!.reattached++;
+          await this.logIntegrity(now, node.id, {
+            op: "reattach",
+            relation: EdgeType.RELATES_TO,
+            to: anchor,
+            via: "checkpoint",
+          });
           continue;
         }
       }
@@ -1046,6 +1070,7 @@ export class ConsolidationWorker {
 
         await this.applyRelation(judged, nb.score, now, result);
         result.integrity!.reattached++;
+        await this.logJudgement(now, "reattach", judged);
         attached = true;
         break;
       }
@@ -1063,6 +1088,7 @@ export class ConsolidationWorker {
       if (link.connected) {
         await this.edgesRepo.invalidateEdge(link.src, link.dst, EdgeType.SIMILAR_TO, now);
         result.integrity!.links_dropped++;
+        await this.logIntegrity(now, link.src, { op: "drop", to: link.dst, via: "redundant" });
         continue;
       }
 
@@ -1074,6 +1100,7 @@ export class ConsolidationWorker {
       if (judged === null) continue;
 
       await this.edgesRepo.invalidateEdge(link.src, link.dst, EdgeType.SIMILAR_TO, now);
+      await this.logJudgement(now, "retype", judged);
 
       if (judged.verdict.relation === LinkRelation.NONE) {
         result.integrity!.links_dropped++;
@@ -1083,6 +1110,39 @@ export class ConsolidationWorker {
       await this.applyRelation(judged, link.weight, now, result);
       result.integrity!.links_typed++;
     }
+  }
+
+  private async logJudgement(now: string, op: string, { a, b, verdict }: Judgement) {
+    const [from, to] = verdict.from === "a" ? [a, b] : [b, a];
+
+    await this.logIntegrity(now, from.id, {
+      op,
+      relation: verdict.relation,
+      to: to.id,
+      titles: [from.title.slice(0, 80), to.title.slice(0, 80)],
+      reason: verdict.reason,
+    });
+  }
+
+  private async logIntegrity(now: string, nodeId: string, detail: Record<string, unknown>) {
+    await this.sessionsRepo.logEvent(
+      EventAction.GRAPH_INTEGRITY,
+      this.ownerId,
+      nodeId,
+      detail,
+      now,
+    );
+    this.feed.publish({
+      id: null,
+      ts: now,
+      action: EventAction.GRAPH_INTEGRITY,
+      session_id: this.ownerId,
+      node_id: nodeId,
+      principal: this.principal,
+      client: CONSOLIDATION_WRITER.client,
+      ok: true,
+      detail,
+    });
   }
 
   private async judge(

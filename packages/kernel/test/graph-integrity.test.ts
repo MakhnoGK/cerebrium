@@ -1,6 +1,7 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
-import { ConsolidationKind, EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
+import type { ActivityEntry } from "@cerebrium/contracts/dashboard";
+import { ConsolidationKind, EdgeType, EventAction, MemoryKind } from "@cerebrium/contracts/vocab";
 import {
   ConsolidationRecommendation,
   LinkRelation,
@@ -8,6 +9,7 @@ import {
   type RelateResult,
   type RelateTask,
 } from "@/domain/ports/consolidation-provider";
+import { ActivityFeed } from "@/application/services";
 import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
 import { ConsolidateApplyTool } from "@/presentation/mcp/tools/consolidate-apply";
@@ -123,6 +125,30 @@ describe("Link typing", () => {
     expect(await liveEdge(a, b, EdgeType.SIMILAR_TO)).toBe(false);
     expect(await liveEdge(a, b, EdgeType.RELATES_TO)).toBe(true);
     expect((await env.stats.techStats(env.clock.t)).graph.untyped_links).toBe(0);
+  });
+
+  it("should record each judgement in the activity log, live and in history", async () => {
+    // Given
+    const [a, b] = await twins();
+    const heard: ActivityEntry[] = [];
+    const unlisten = container.resolve(ActivityFeed).listen((e) => heard.push(e));
+
+    // When
+    await sweep();
+    unlisten();
+
+    // Then
+    const logged = (await env.sessions.recentEvents(50, null)).filter(
+      (e) => e.action === (EventAction.GRAPH_INTEGRITY as string),
+    );
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      node_id: a,
+      detail: { op: "retype", relation: LinkRelation.RELATES_TO, to: b },
+    });
+    expect(heard.filter((e) => e.action === (EventAction.GRAPH_INTEGRITY as string))).toHaveLength(
+      1,
+    );
   });
 
   it("should point a references edge from the record the model names as the source", async () => {
