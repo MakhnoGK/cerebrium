@@ -30,9 +30,10 @@ by `.github/workflows/release.yml`:
   releases before Postgres used. Both volumes survive every deploy and rollback.
 - The first deploy generates the database password into `secrets/` (never printed) and
   the connection URL the daemon reads from `MEMORY_PG_URL_FILE`.
-- Until the cutover (plan Phase 7) the Mac's SQLite store is the one being written, and
-  this one is a copy: every consolidation posture is `off` here, so the daemon adds nothing
-  the source does not have and a re-import converges.
+- This store is the one being written: every machine's agents reach it through the plugin.
+  The consolidation sweep runs here on its default postures. The generation provider stays
+  `manual` until the host runs its own inference, so distill and merge clusters queue for
+  an agent to author through `consolidate_apply`.
 - The daemon applies pending migrations when it opens the store, so there is no separate
   migrate step. Migrations are forward-only: rolling back past one leaves the older code on
   a newer schema.
@@ -97,6 +98,43 @@ docker exec cerebrium-daemon-1 rm -f /data/import.db /data/import.db-shm /data/i
 counts and content hashes and exits 1 on a mismatch. Rows the host wrote itself (its own
 session and sweep runs) are reported as `target_only`, not failed.
 
+## The cutover from the Mac's store
+
+Done once, in this order. The Mac's `~/.cerebrium/memory.db` and its launchd agents stay as a
+cold rollback and are not used.
+
+1. **Freeze** — on the Mac, stop the local daemon and runner (`node dist/service-cli.js
+   uninstall all` from the live checkout keeps the store and removes only the agents), close
+   the agent sessions that hold the local `cerebrium` entry, then take the copy:
+   `sqlite3 ~/.cerebrium/memory.db ".backup /tmp/cerebrium-final.db"`.
+2. **Dump** — on the host, `pg_dump -Fc` the running store into `backups/` (the rehearsal
+   copy, kept for rollback).
+3. **Recreate** — stop the daemon, rename the database to `cerebrium_rehearsal` (kept for
+   rollback, never dropped), create an empty one from `template0`, start the daemon so it
+   migrates the empty schema:
+
+   ```bash
+   cd ~/cerebrium-host/current
+   export CEREBRIUM_TAG=$(basename "$(readlink ~/cerebrium-host/current)") CEREBRIUM_SECRETS=~/cerebrium-host/secrets
+   docker compose stop daemon
+   docker compose exec -T postgres psql -U cerebrium -d postgres -c 'ALTER DATABASE cerebrium RENAME TO cerebrium_rehearsal'
+   docker compose exec -T postgres createdb -U cerebrium -T template0 --locale=C --encoding=UTF8 cerebrium
+   docker compose start daemon
+   ```
+
+4. **Import** — the copy, filtered to the projects that move, as in *Importing the Mac's
+   store* with `--projects 'cerebrium,toonspace*' --global --repo-map /data/repo-map.json
+   --verify`. The repo map comes from `npm run code:repo-map` on the Mac.
+5. **Host-only rows** — nodes an agent wrote straight to the host before the cutover are
+   not in the Mac's copy. Copy them from `cerebrium_rehearsal` by id, with their revisions,
+   text, chunks, vectors, edges, code_refs, events and sessions.
+6. **Tokens** — issue one per machine (principal `mac`) as in *By hand*; the session's
+   `client` names the agent host. The new database has none of the old tokens.
+7. **Switch** — on the Mac, `npm run agent:setup -- --kernel tcp://100.92.157.103:7433
+   --token-file ~/.cerebrium/host-token --index-repo <each checkout> --apply --verify`.
+8. **Check** — in a fresh session, `session_start`, `search` and `code_lookup` answer from
+   the host.
+
 ## By hand
 
 Run on the host.
@@ -108,7 +146,7 @@ docker compose -p cerebrium logs -f daemon                      # daemon log
 docker exec cerebrium-daemon-1 node dist/healthcheck.js         # probe by hand
 ```
 
-Tokens for the network listener (one per machine × agent host) are kept as a sha256 in
+Tokens for the network listener (one per machine) are kept as a sha256 in
 Postgres and revoked, never deleted. The value is printed once, so it can go straight to
 the client machine without landing on the host's disk:
 

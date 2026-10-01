@@ -5,21 +5,17 @@ import { fileURLToPath } from "node:url";
 import { stableNodePath } from "@cerebrium/kernel/runtime/launch-agent";
 import { applyHost, type Applied } from "@plugin/scripts/agent-apply";
 import {
-  applyHostEntry,
-  HOST_ENTRY,
-  HOST_ENTRY_HOSTS,
-  hostEntryProblems,
-  planHostEntry,
-  type HostEntryHost,
-  type HostEntryInput,
-} from "@plugin/scripts/agent-host-entry";
-import {
   DEFAULT_ENV_KEYS,
   defaultEnv,
   discoverEnv,
   HOSTS,
+  isHostEnv,
+  KERNEL_ENV_KEYS,
+  kernelEnv,
+  kernelProblems,
   pending,
   planAll,
+  TRIAL_ENTRY,
   type HostId,
   type HostPlan,
   type PlanInput,
@@ -27,7 +23,7 @@ import {
 } from "@plugin/scripts/agent-hosts";
 import { applyIndexRepos, planIndexRepos } from "@plugin/scripts/agent-index-repos";
 import { assertNativeRuntime, resolveNodeRuntime } from "@plugin/scripts/agent-runtime";
-import { verify, verifyHostEntry } from "@plugin/scripts/agent-verify";
+import { verify } from "@plugin/scripts/agent-verify";
 
 // Reports — and with --apply, installs — what each agent host needs to use Cerebrium as
 // memory. See install/README.md for the procedure this checks against.
@@ -49,14 +45,15 @@ agent-setup — report or install what each agent host needs to use Cerebrium as
   --check      Exit non-zero if a detected host is missing a surface.
   --help       This text.
 
-Trial entry for a Cerebrium host (claude and codex only):
+Against a Cerebrium host:
 
-  npm run agent:setup -- --kernel tcp://HOST:PORT --token-file PATH [--host claude|codex] [--apply] [--verify]
+  npm run agent:setup -- --kernel tcp://HOST:PORT --token-file PATH [--host H] [--apply] [--verify]
 
-  Registers a second MCP server, ${HOST_ENTRY}, that runs apps/plugin/dist/server.js against
-  the host. It never touches the cerebrium entry or any other surface. Its env holds the
-  URL and the token file's path; the token itself is never read into config or output.
-  --verify opens a real session on the host through the plugin bundle.
+  The cerebrium entry of every host runs apps/plugin/dist/server.js against that host. Its
+  env holds the URL and the token file's path; the token itself is never read into config
+  or output. Once registered, a later run without the two flags keeps them. --apply also
+  removes the ${TRIAL_ENTRY} trial entry from Claude Code and Codex. --verify opens a real
+  session on the host through the plugin bundle.
 
   --index-repo PATH (repeatable) opts a checkout into the host's per-branch code index:
   it is listed in ~/.cerebrium/plugin-index.json, the session-start hook indexes it in the
@@ -118,13 +115,12 @@ function outcomeGlyph(applied: Applied): string {
 function report(
   plans: HostPlan[],
   env: Record<string, string>,
-  discovered: boolean,
+  source: string,
   nodePath: string,
 ): void {
-  const source = discovered ? "reused from an existing registration" : "defaults";
-  process.stdout.write(`\nNode runtime (.nvmrc): ${nodePath}\n`);
+  process.stdout.write(`\nNode runtime: ${nodePath}\n`);
   process.stdout.write(`\nEnvironment (${source}):\n`);
-  for (const key of DEFAULT_ENV_KEYS) {
+  for (const key of isHostEnv(env) ? KERNEL_ENV_KEYS : DEFAULT_ENV_KEYS) {
     if (env[key] !== undefined) process.stdout.write(`  ${key}=${env[key]}\n`);
   }
 
@@ -146,77 +142,27 @@ function report(
   );
 }
 
-async function hostEntry(repoRoot: string, home: string, nodePath: string): Promise<void> {
-  const tokenFile = option("token-file", "");
-  if (tokenFile === "") {
-    process.stderr.write("--kernel needs --token-file PATH (a mode-600 file holding the token)\n");
+function indexRepos(repoRoot: string, home: string, input: PlanInput): void {
+  const repos = options("index-repo");
+  if (repos.length === 0) return;
+  if (!isHostEnv(input.env)) {
+    process.stderr.write("--index-repo needs a host-backed entry (--kernel and --token-file)\n");
     process.exitCode = 2;
     return;
   }
-  const requested = option("host", "all");
-  const hosts: HostEntryHost[] =
-    requested === "all"
-      ? [...HOST_ENTRY_HOSTS]
-      : HOST_ENTRY_HOSTS.filter((h) => h === requested).map((h) => h);
-  if (hosts.length === 0) {
-    process.stderr.write(
-      `${HOST_ENTRY} is set up for ${HOST_ENTRY_HOSTS.join(" and ")} only; "${requested}" is not one.\n`,
-    );
-    process.exitCode = 2;
-    return;
-  }
-
-  const input: HostEntryInput = {
+  const request = {
     home,
     repoRoot,
-    nodePath,
-    kernelUrl: option("kernel", ""),
-    tokenFile: resolve(tokenFile),
-    hasCommand,
+    nodePath: input.nodePath,
+    kernelUrl: input.env.MEMORY_KERNEL_URL!,
+    tokenFile: input.env.MEMORY_KERNEL_TOKEN_FILE ?? "",
+    repos,
   };
-  const problems = hostEntryProblems(input);
-  if (problems.length > 0) {
-    for (const problem of problems) process.stderr.write(`${problem}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  process.stdout.write(
-    `\n${HOST_ENTRY} -> ${input.kernelUrl} (token file ${input.tokenFile}, node ${nodePath})\n`,
-  );
-  for (const host of hosts) {
-    if (flag("apply")) {
-      const applied = applyHostEntry(host, input, { force: false, run });
-      process.stdout.write(`  ${outcomeGlyph(applied)} ${host}: ${applied.detail}\n`);
-      if (applied.outcome === "failed" || applied.outcome === "skipped") process.exitCode = 1;
-    }
-    const planned = planHostEntry(host, input);
-    process.stdout.write(`  ${GLYPH[planned.status]} ${host}: ${planned.detail}\n`);
-    process.stdout.write(`    ${planned.target}\n`);
-  }
-
-  const indexRepos = options("index-repo");
-  if (indexRepos.length > 0) {
-    const request = {
-      home,
-      repoRoot,
-      nodePath,
-      kernelUrl: input.kernelUrl,
-      tokenFile: input.tokenFile,
-      repos: indexRepos,
-    };
-    const outcomes = flag("apply") ? applyIndexRepos(request) : planIndexRepos(request);
-    process.stdout.write("\nCode index on the host:\n");
-    for (const o of outcomes) {
-      process.stdout.write(`  ${o.ok ? "✓" : flag("apply") ? "✗" : "·"} ${o.repo}: ${o.detail}\n`);
-      if (!o.ok && flag("apply")) process.exitCode = 1;
-    }
-  }
-
-  if (flag("verify")) {
-    const result = await verifyHostEntry(input);
-    if (!result.ok) process.exitCode = 1;
-    process.stdout.write(`\n  ${result.ok ? "✓" : "✗"} ${result.name}: ${result.detail}\n`);
+  const outcomes = flag("apply") ? applyIndexRepos(request) : planIndexRepos(request);
+  process.stdout.write("\nCode index on the host:\n");
+  for (const o of outcomes) {
+    process.stdout.write(`  ${o.ok ? "✓" : flag("apply") ? "✗" : "·"} ${o.repo}: ${o.detail}\n`);
+    if (!o.ok && flag("apply")) process.exitCode = 1;
   }
 }
 
@@ -237,11 +183,6 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  if (option("kernel", "") !== "") {
-    await hostEntry(repoRoot, home, stableNodePath(nodePath));
-    return;
-  }
-
   const requested = option("host", "all");
   const hosts: HostId[] =
     requested === "all" ? [...HOSTS] : HOSTS.filter((h) => h === requested).map((h) => h);
@@ -252,18 +193,49 @@ async function main(): Promise<void> {
     return;
   }
 
-  const base: PlanInput = { home, repoRoot, nodePath, env: {}, hasCommand };
-  const discovered = discoverEnv(base);
-  const env = discovered ?? defaultEnv(home, repoRoot);
-  const input: PlanInput = { ...base, env };
-
-  if (flag("apply")) {
-    try {
-      assertNativeRuntime(repoRoot, nodePath);
-    } catch (err) {
-      process.stderr.write(`Runtime preflight failed: ${String(err)}\n`);
+  const kernelUrl = option("kernel", "");
+  const tokenFile = option("token-file", "");
+  if ((kernelUrl === "") !== (tokenFile === "")) {
+    process.stderr.write("--kernel and --token-file go together\n");
+    process.exitCode = 2;
+    return;
+  }
+  if (kernelUrl !== "") {
+    const problems = kernelProblems(kernelUrl, resolve(tokenFile));
+    if (problems.length > 0) {
+      for (const problem of problems) process.stderr.write(`${problem}\n`);
       process.exitCode = 1;
       return;
+    }
+  }
+
+  const base: PlanInput = { home, repoRoot, nodePath, env: {}, hasCommand };
+  const discovered = kernelUrl === "" ? discoverEnv(base) : null;
+  const env =
+    kernelUrl !== ""
+      ? kernelEnv(kernelUrl, resolve(tokenFile))
+      : (discovered ?? defaultEnv(home, repoRoot));
+  const input: PlanInput = {
+    ...base,
+    env,
+    nodePath: isHostEnv(env) ? stableNodePath(nodePath) : nodePath,
+  };
+  const source =
+    kernelUrl !== ""
+      ? "from --kernel and --token-file"
+      : discovered !== null
+        ? "reused from an existing registration"
+        : "defaults";
+
+  if (flag("apply")) {
+    if (!isHostEnv(env)) {
+      try {
+        assertNativeRuntime(repoRoot, nodePath);
+      } catch (err) {
+        process.stderr.write(`Runtime preflight failed: ${String(err)}\n`);
+        process.exitCode = 1;
+        return;
+      }
     }
     let unresolved = false;
     for (const host of hosts) {
@@ -282,10 +254,14 @@ async function main(): Promise<void> {
   const plans = planAll(input, hosts);
 
   if (flag("json")) {
-    process.stdout.write(`${JSON.stringify({ repoRoot, home, nodePath, env, plans }, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ repoRoot, home, nodePath: input.nodePath, env, plans }, null, 2)}\n`,
+    );
   } else {
-    report(plans, env, discovered !== null, nodePath);
+    report(plans, env, source, input.nodePath);
   }
+
+  indexRepos(repoRoot, home, input);
 
   if (flag("verify")) {
     process.stdout.write("\nVerification:\n");

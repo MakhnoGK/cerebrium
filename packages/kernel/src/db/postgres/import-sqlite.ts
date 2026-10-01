@@ -13,13 +13,25 @@ import { ACTIVE_SPACE, toVectorLiteral } from "@/db/postgres/internal";
 // Old local repo name -> remote_key (host/owner/repo).
 export type RepoMap = Record<string, string>;
 
+// Which projects reach the target: exact names and `prefix*` patterns, plus project-less
+// nodes when `global`. Rows that touch a node outside it are left behind.
+export interface ProjectScope {
+  projects: string[];
+  global: boolean;
+}
+
 export interface ImportOptions {
   repoMap?: RepoMap;
+  scope?: ProjectScope;
 }
 
 export interface ImportReport {
   tables: Record<string, number>;
-  dropped: { edges_to_external_mirrors: number; edges_not_authored: number };
+  dropped: {
+    edges_to_external_mirrors: number;
+    edges_not_authored: number;
+    out_of_scope_nodes: number;
+  };
 }
 
 export interface VerifyReport {
@@ -78,12 +90,72 @@ function keyOf(row: Row, columns: string[]): string {
 
 type Row = Record<string, unknown>;
 
-function authoredIds(source: Database.Database): Set<string> {
-  return new Set(
-    (source.prepare(`SELECT n.id FROM nodes n WHERE ${AUTHORED}`).all() as { id: string }[]).map(
-      (r) => r.id,
-    ),
+export function inScope(scope: ProjectScope, project: string | null): boolean {
+  if (project === null || project === "") return scope.global;
+
+  return scope.projects.some((pattern) =>
+    pattern.endsWith("*") ? project.startsWith(pattern.slice(0, -1)) : project === pattern,
   );
+}
+
+export function parseScope(raw: string, global: boolean): ProjectScope {
+  const projects = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (!projects.length) throw new Error("--projects names no project");
+
+  return { projects, global };
+}
+
+function authoredIds(source: Database.Database, scope?: ProjectScope): Set<string> {
+  const rows = source.prepare(`SELECT n.id, n.project FROM nodes n WHERE ${AUTHORED}`).all() as {
+    id: string;
+    project: string | null;
+  }[];
+
+  return new Set(rows.filter((r) => !scope || inScope(scope, r.project)).map((r) => r.id));
+}
+
+// The authored node ids a scoped import carries; null when nothing is scoped out.
+function scopedIds(source: Database.Database, scope?: ProjectScope): Set<string> | null {
+  return scope ? authoredIds(source, scope) : null;
+}
+
+const NODE_COLUMN: Record<string, string> = {
+  nodes: "id",
+  revisions: "node_id",
+  node_text: "node_id",
+  chunks: "node_id",
+  revision_annotations: "node_id",
+};
+
+function keepRow(table: string, row: Row, ids: Set<string>): boolean {
+  const column = NODE_COLUMN[table];
+
+  if (column) return ids.has(row[column] as string);
+
+  switch (table) {
+    case "edges":
+      return ids.has(row.src as string) && ids.has(row.dst as string);
+    case "events":
+      return row.node_id == null || ids.has(row.node_id as string);
+    case "review_decisions": {
+      const ref = row.artifact_ref as string;
+      const members = row.artifact_kind === "edge" ? ref.split("|").slice(0, 2) : [ref];
+
+      return members.every((id) => ids.has(id));
+    }
+    default:
+      return true;
+  }
+}
+
+function sourceRows(source: Database.Database, table: string, ids: Set<string> | null): Row[] {
+  const rows = source.prepare(SOURCE[table]!).all() as Row[];
+
+  return ids ? rows.filter((row) => keepRow(table, row, ids)) : rows;
 }
 
 function candidates(source: Database.Database, authored: Set<string>): Row[] {
@@ -99,6 +171,7 @@ const CODE_REF_KEY = ["src", "type", "repo", "path", "qualified"];
 function codeRefs(
   source: Database.Database,
   repoMap?: RepoMap,
+  ids: Set<string> | null = null,
 ): { refs: Row[]; external: number; other: number } {
   const rows = source
     .prepare(
@@ -117,6 +190,8 @@ function codeRefs(
   let other = 0;
 
   for (const row of rows) {
+    if (ids && !ids.has(row.src as string)) continue;
+
     if (row.repo == null) {
       if (row.dst_origin !== "repo") external++;
       else other++;
@@ -142,10 +217,11 @@ function codeRefs(
 
 function vectors(
   source: Database.Database,
+  ids: Set<string> | null,
 ): { chunk_id: string; embedding: string; model_version: string; ts: string }[] {
   const rows = source
     .prepare(
-      `SELECT v.chunk_id AS chunk_id, v.embedding AS embedding,
+      `SELECT v.chunk_id AS chunk_id, c.node_id AS node_id, v.embedding AS embedding,
               COALESCE(m.model_version, '1') AS model_version, COALESCE(m.ts, '') AS ts
        FROM chunk_vec v
        JOIN chunks c ON c.id = v.chunk_id
@@ -154,18 +230,26 @@ function vectors(
        WHERE ${AUTHORED}
        ORDER BY v.chunk_id`,
     )
-    .all() as { chunk_id: string; embedding: Buffer; model_version: string; ts: string }[];
+    .all() as {
+    chunk_id: string;
+    node_id: string;
+    embedding: Buffer;
+    model_version: string;
+    ts: string;
+  }[];
 
-  return rows.map((r) => ({
-    chunk_id: r.chunk_id,
-    embedding: toVectorLiteral(
-      Array.from(
-        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
+  return rows
+    .filter((r) => !ids || ids.has(r.node_id))
+    .map((r) => ({
+      chunk_id: r.chunk_id,
+      embedding: toVectorLiteral(
+        Array.from(
+          new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
+        ),
       ),
-    ),
-    model_version: r.model_version,
-    ts: r.ts,
-  }));
+      model_version: r.model_version,
+      ts: r.ts,
+    }));
 }
 
 async function upsert(
@@ -201,10 +285,11 @@ export async function importSqlite(
   target: PgDatabase,
   opts: ImportOptions = {},
 ): Promise<ImportReport> {
-  const authored = authoredIds(source);
-  const all = (sql: string) => source.prepare(sql).all() as Row[];
+  const ids = scopedIds(source, opts.scope);
+  const authored = ids ?? authoredIds(source);
+  const rows = (table: string) => sourceRows(source, table, ids);
   const tables: Record<string, number> = {};
-  const { refs, external, other } = codeRefs(source, opts.repoMap);
+  const { refs, external, other } = codeRefs(source, opts.repoMap, ids);
   const nonAuthoredEdges = (
     source
       .prepare(
@@ -216,42 +301,24 @@ export async function importSqlite(
   ).c;
 
   await target.tx(async () => {
-    tables.nodes = await upsert(target, "nodes", all(SOURCE.nodes!), ["id"], "update");
+    tables.nodes = await upsert(target, "nodes", rows("nodes"), ["id"], "update");
     tables.revisions = await upsert(
       target,
       "revisions",
-      all(SOURCE.revisions!),
+      rows("revisions"),
       ["node_id", "rev"],
       "ignore",
     );
-    tables.node_text = await upsert(
-      target,
-      "node_text",
-      all(SOURCE.node_text!),
-      ["node_id"],
-      "update",
-    );
-    tables.chunks = await upsert(target, "chunks", all(SOURCE.chunks!), ["id"], "update");
-    tables.edges = await upsert(
-      target,
-      "edges",
-      all(SOURCE.edges!),
-      ["src", "dst", "type"],
-      "update",
-    );
-    tables.sessions = await upsert(target, "sessions", all(SOURCE.sessions!), ["id"], "update");
-    tables.principals = await upsert(
-      target,
-      "principals",
-      all(SOURCE.principals!),
-      ["id"],
-      "update",
-    );
-    tables.events = await upsert(target, "events", all(SOURCE.events!), ["id"], "ignore");
+    tables.node_text = await upsert(target, "node_text", rows("node_text"), ["node_id"], "update");
+    tables.chunks = await upsert(target, "chunks", rows("chunks"), ["id"], "update");
+    tables.edges = await upsert(target, "edges", rows("edges"), ["src", "dst", "type"], "update");
+    tables.sessions = await upsert(target, "sessions", rows("sessions"), ["id"], "update");
+    tables.principals = await upsert(target, "principals", rows("principals"), ["id"], "update");
+    tables.events = await upsert(target, "events", rows("events"), ["id"], "ignore");
     tables.revision_annotations = await upsert(
       target,
       "revision_annotations",
-      all(SOURCE.revision_annotations!),
+      rows("revision_annotations"),
       ["node_id", "rev"],
       "ignore",
     );
@@ -265,20 +332,20 @@ export async function importSqlite(
     tables.consolidation_runs = await upsert(
       target,
       "consolidation_runs",
-      all(SOURCE.consolidation_runs!),
+      rows("consolidation_runs"),
       ["id"],
       "update",
     );
     tables.review_decisions = await upsert(
       target,
       "review_decisions",
-      all(SOURCE.review_decisions!),
+      rows("review_decisions"),
       ["artifact_kind", "artifact_ref"],
       "update",
     );
     tables.code_refs = await upsert(target, "code_refs", refs, CODE_REF_KEY, "update");
 
-    const vecs = vectors(source);
+    const vecs = vectors(source, ids);
 
     for (const v of vecs) {
       await target.query(
@@ -295,7 +362,11 @@ export async function importSqlite(
 
   return {
     tables,
-    dropped: { edges_to_external_mirrors: external, edges_not_authored: other + nonAuthoredEdges },
+    dropped: {
+      edges_to_external_mirrors: external,
+      edges_not_authored: other + nonAuthoredEdges,
+      out_of_scope_nodes: ids ? authoredIds(source).size - ids.size : 0,
+    },
   };
 }
 
@@ -318,6 +389,7 @@ export async function verifyImport(
   opts: ImportOptions = {},
 ): Promise<VerifyReport> {
   const tables: VerifyReport["tables"] = {};
+  const ids = scopedIds(source, opts.scope);
   const targetSql: Record<string, string> = {
     nodes: "SELECT * FROM nodes ORDER BY id",
     revisions: "SELECT * FROM revisions ORDER BY node_id, rev",
@@ -332,8 +404,8 @@ export async function verifyImport(
     review_decisions: "SELECT * FROM review_decisions ORDER BY artifact_kind, artifact_ref",
   };
 
-  for (const [table, sql] of Object.entries(SOURCE)) {
-    const from = source.prepare(sql).all() as Row[];
+  for (const table of Object.keys(SOURCE)) {
+    const from = sourceRows(source, table, ids);
     const all = (await target.query(targetSql[table]!)).rows as Row[];
     const columns = from.length ? Object.keys(from[0]!) : [];
     const keys = new Set(from.map((r) => keyOf(r, KEYS[table]!)));
@@ -347,7 +419,7 @@ export async function verifyImport(
     };
   }
 
-  const refs = codeRefs(source, opts.repoMap).refs;
+  const refs = codeRefs(source, opts.repoMap, ids).refs;
   const refColumns = refs.length ? Object.keys(refs[0]!) : [];
   const refKeys = new Set(refs.map((r) => keyOf(r, CODE_REF_KEY)));
   const targetRefs = (
@@ -374,11 +446,11 @@ export async function verifyImport(
   const vectorCount = (
     source
       .prepare(
-        `SELECT COUNT(*) AS c FROM chunk_vec v JOIN chunks c ON c.id = v.chunk_id
+        `SELECT c.node_id AS node_id FROM chunk_vec v JOIN chunks c ON c.id = v.chunk_id
          JOIN nodes n ON n.id = c.node_id WHERE ${AUTHORED}`,
       )
-      .get() as { c: number }
-  ).c;
+      .all() as { node_id: string }[]
+  ).filter((r) => !ids || ids.has(r.node_id)).length;
   const targetVectors = (
     await target.query<{ c: number }>(
       `SELECT COUNT(*) AS c FROM chunk_vectors WHERE space_id = ${ACTIVE_SPACE}`,

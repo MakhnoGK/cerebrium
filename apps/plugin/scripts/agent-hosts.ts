@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { parseKernelTarget } from "@cerebrium/contracts/rpc";
 import { ToolName } from "@cerebrium/kernel/presentation/mcp/tools/contracts/tool-name";
 
 // Plans what each agent host still needs to use Cerebrium as memory. Read-only: it
@@ -102,6 +103,75 @@ export function pluginRoot(repoRoot: string): string {
   return join(repoRoot, "apps", "plugin");
 }
 
+export function pluginServerPath(repoRoot: string): string {
+  return join(pluginRoot(repoRoot), "dist", "server.js");
+}
+
+export const KERNEL_ENV_KEYS = ["MEMORY_KERNEL_URL", "MEMORY_KERNEL_TOKEN_FILE"] as const;
+
+/** The trial entry the host-backed `cerebrium` entry replaces. */
+export const TRIAL_ENTRY = "cerebrium-host";
+
+export function kernelEnv(kernelUrl: string, tokenFile: string): Record<string, string> {
+  return { MEMORY_KERNEL_URL: kernelUrl, MEMORY_KERNEL_TOKEN_FILE: tokenFile };
+}
+
+/** An env naming a Cerebrium host runs the plugin bundle; any other runs the local one. */
+export function isHostEnv(env: Record<string, string>): boolean {
+  return (env.MEMORY_KERNEL_URL ?? "") !== "";
+}
+
+export function entryServerPath(repoRoot: string, env: Record<string, string>): string {
+  return isHostEnv(env) ? pluginServerPath(repoRoot) : serverPath(repoRoot);
+}
+
+function sameEnv(actual: Record<string, unknown>, wanted: Record<string, string>): boolean {
+  const keys = Object.keys(actual);
+
+  return (
+    keys.length === Object.keys(wanted).length && keys.every((key) => actual[key] === wanted[key])
+  );
+}
+
+/** Every reason a host entry could not work, checked without reading the token. */
+export function kernelProblems(kernelUrl: string, tokenFile: string): string[] {
+  const problems: string[] = [];
+
+  try {
+    if (parseKernelTarget(kernelUrl).kind !== "tcp") {
+      problems.push(`--kernel ${kernelUrl} is not a tcp://host:port URL`);
+    }
+  } catch (err) {
+    problems.push(`--kernel ${kernelUrl}: ${(err as Error).message}`);
+  }
+
+  let mode: number;
+
+  try {
+    const stat = lstatSync(tokenFile);
+
+    if (!stat.isFile()) {
+      problems.push(`--token-file ${tokenFile} is not a regular file`);
+
+      return problems;
+    }
+    mode = stat.mode & 0o777;
+  } catch {
+    problems.push(`--token-file ${tokenFile} does not exist`);
+
+    return problems;
+  }
+
+  if ((mode & 0o077) !== 0) {
+    problems.push(
+      `--token-file ${tokenFile} is readable by others (mode ${mode.toString(8)}); ` +
+        `run chmod 600 on it`,
+    );
+  }
+
+  return problems;
+}
+
 export function skillRoot(repoRoot: string): string {
   return join(pluginRoot(repoRoot), "skill");
 }
@@ -143,7 +213,7 @@ export function desiredMcp(
   env: Record<string, string>,
   nodePath: string,
 ): McpEntry {
-  return { command: nodePath, args: [serverPath(repoRoot)], env };
+  return { command: nodePath, args: [entryServerPath(repoRoot, env)], env };
 }
 
 export function alwaysOnBlock(repoRoot: string): string {
@@ -214,23 +284,64 @@ function state(
   return { surface, status, target, detail };
 }
 
-/** A JSON `mcpServers` entry is current when it launches this working tree's bundle. */
-function mcpState(
-  entry: unknown,
-  target: string,
-  repoRoot: string,
-  nodePath: string,
+/**
+ * A `cerebrium` entry is current when it launches this working tree's bundle on this
+ * runtime; a host-backed one must also name the same host and token file.
+ */
+function entryCurrent(
+  input: PlanInput,
+  command: unknown,
+  args: unknown,
+  env: Record<string, unknown>,
+): boolean {
+  const exactArgs =
+    Array.isArray(args) &&
+    args.length === 1 &&
+    args[0] === entryServerPath(input.repoRoot, input.env);
+  const exactEnv = !isHostEnv(input.env) || sameEnv(env, input.env);
+  return exactArgs && command === input.nodePath && exactEnv;
+}
+
+function currentDetail(input: PlanInput): string {
+  return isHostEnv(input.env)
+    ? `runs the plugin bundle against ${input.env.MEMORY_KERNEL_URL}`
+    : "registered against this working tree and Node runtime";
+}
+
+/** Whether the trial entry is still registered in Claude Code or Codex. */
+export function trialRegistered(host: "claude" | "codex", home: string): boolean {
+  if (host === "codex") {
+    const toml = readText(join(home, ".codex", "config.toml")) ?? "";
+    return tomlSection(toml, `mcp_servers.${TRIAL_ENTRY}`) !== null;
+  }
+  const file = readJson(join(home, ".claude.json"));
+  return file.state === "valid" && record(file.value.mcpServers)[TRIAL_ENTRY] !== undefined;
+}
+
+/** A host-backed entry supersedes the trial one, so a leftover trial entry is stale. */
+function withoutTrial(
+  host: "claude" | "codex",
+  input: PlanInput,
+  surface: SurfaceState,
 ): SurfaceState {
+  if (!isHostEnv(input.env) || surface.status !== "ok" || !trialRegistered(host, input.home)) {
+    return surface;
+  }
+  return state(
+    "mcp",
+    "stale",
+    surface.target,
+    `the trial entry ${TRIAL_ENTRY} is still registered`,
+  );
+}
+
+/** A JSON `mcpServers` entry, checked the same way. */
+function mcpState(entry: unknown, target: string, input: PlanInput): SurfaceState {
   if (entry === undefined) return state("mcp", "missing", target, "no cerebrium server registered");
   const config = record(entry);
-  const exactArgs =
-    Array.isArray(config.args) &&
-    config.args.length === 1 &&
-    config.args[0] === serverPath(repoRoot);
-  const exactRuntime = config.command === nodePath;
-  return exactArgs && exactRuntime
-    ? state("mcp", "ok", target, "registered against this working tree and Node runtime")
-    : state("mcp", "stale", target, "registered against a different path or Node runtime");
+  return entryCurrent(input, config.command, config.args, record(config.env))
+    ? state("mcp", "ok", target, currentDetail(input))
+    : state("mcp", "stale", target, "registered against a different bundle, runtime or env");
 }
 
 export function tomlSection(text: string, name: string): string | null {
@@ -402,7 +513,11 @@ function planClaude(input: PlanInput): HostPlan {
     surfaces: [
       mcp.state === "conflict"
         ? jsonConflict("mcp", claudeJson)
-        : mcpState(record(mcp.value.mcpServers).cerebrium, claudeJson, repoRoot, input.nodePath),
+        : withoutTrial(
+            "claude",
+            input,
+            mcpState(record(mcp.value.mcpServers).cerebrium, claudeJson, input),
+          ),
       skillLinkState(join(dir, "skills", "cerebrium"), repoRoot),
       rulesState(join(dir, "CLAUDE.md"), repoRoot),
       hooks.state === "conflict"
@@ -428,8 +543,12 @@ function planCodex(input: PlanInput): HostPlan {
   const registered = section !== null;
   const pointsHere =
     section !== null &&
-    tomlString(section, "command") === input.nodePath &&
-    JSON.stringify(tomlStringArray(section, "args")) === JSON.stringify([serverPath(repoRoot)]);
+    entryCurrent(
+      input,
+      tomlString(section, "command"),
+      tomlStringArray(section, "args"),
+      codexEnv(toml) ?? {},
+    );
   const hooks = readJson(hooksJson);
   const hookPresent =
     hooks.state === "missing" ? null : JSON.stringify(hooks.value).includes(hookScript(repoRoot));
@@ -450,13 +569,17 @@ function planCodex(input: PlanInput): HostPlan {
     detected: existsSync(dir) || input.hasCommand("codex"),
     surfaces: [
       registered
-        ? state(
-            "mcp",
-            pointsHere ? "ok" : "stale",
-            configToml,
-            pointsHere
-              ? "registered against this working tree and Node runtime"
-              : "registered against another path or Node runtime",
+        ? withoutTrial(
+            "codex",
+            input,
+            state(
+              "mcp",
+              pointsHere ? "ok" : "stale",
+              configToml,
+              pointsHere
+                ? currentDetail(input)
+                : "registered against a different bundle, runtime or env",
+            ),
           )
         : state("mcp", "missing", configToml, "no [mcp_servers.cerebrium] table"),
       skillLinkState(join(dir, "skills", "cerebrium"), repoRoot),
@@ -499,7 +622,7 @@ function planAntigravity(input: PlanInput): HostPlan {
     surfaces: [
       mcp.state === "conflict"
         ? jsonConflict("mcp", mcpJson)
-        : mcpState(record(mcp.value.mcpServers).cerebrium, mcpJson, repoRoot, input.nodePath),
+        : mcpState(record(mcp.value.mcpServers).cerebrium, mcpJson, input),
       skills.state === "conflict"
         ? jsonConflict("skill", skillsJson)
         : declared
@@ -569,12 +692,7 @@ function planPi(input: PlanInput): HostPlan {
       extension,
       bridge.state === "conflict"
         ? jsonConflict("mcp", bridgePath)
-        : mcpState(
-            bridge.state === "missing" ? undefined : bridge.value,
-            bridgePath,
-            repoRoot,
-            input.nodePath,
-          ),
+        : mcpState(bridge.state === "missing" ? undefined : bridge.value, bridgePath, input),
       piDelivered("skill", extension, "skill/ offered to pi's discovery at session start"),
       piDelivered("rules", extension, "always-on block chained onto pi's system prompt"),
       piDelivered(
@@ -644,16 +762,19 @@ function piEnv(file: JsonFile): Record<string, string> | null {
   );
 }
 
-/** Reads only the `env` inline table of `[mcp_servers.cerebrium]` — not a TOML parser. */
-export function codexEnv(toml: string): Record<string, string> | null {
-  const table = toml.split("[mcp_servers.cerebrium]")[1];
-  if (table === undefined) return null;
-  const section = table.split(/^\[/m)[0] ?? "";
-  const inline = /env\s*=\s*\{([^}]*)\}/.exec(section);
-  const body = inline?.[1] ?? "";
+/** Codex writes the env as a `[…env]` subtable; an inline `env = {…}` is read as well. */
+export function codexServerEnv(toml: string, name: string): Record<string, string> | null {
+  const section = tomlSection(toml, `mcp_servers.${name}`);
+  if (section === null) return null;
+  const table = tomlSection(toml, `mcp_servers.${name}.env`);
+  const body = table ?? /env\s*=\s*\{([^}]*)\}/.exec(section)?.[1] ?? "";
   const env: Record<string, string> = {};
   for (const match of body.matchAll(/"?([A-Z_][A-Z0-9_]*)"?\s*=\s*"([^"]*)"/g)) {
     env[match[1]!] = match[2]!;
   }
   return env;
+}
+
+export function codexEnv(toml: string): Record<string, string> | null {
+  return codexServerEnv(toml, "cerebrium");
 }

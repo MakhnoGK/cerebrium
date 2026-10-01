@@ -18,16 +18,19 @@ import {
   antigravityPermissionAllowList,
   antigravityPermissionTargets,
   desiredMcp,
+  entryServerPath,
   HOOK_SCRIPT_SUFFIX,
   hookCommand,
+  isHostEnv,
   pending,
   piBridgeConfig,
   piExtension,
   piSettings,
   planHost,
-  serverPath,
   skillPath,
   skillRoot,
+  TRIAL_ENTRY,
+  trialRegistered,
   upsertManagedBlock,
   type HostId,
   type PlanInput,
@@ -267,8 +270,40 @@ function cerebriumEntry(input: PlanInput): CliEntry {
     name: "cerebrium",
     env: input.env,
     command: input.nodePath,
-    args: [serverPath(input.repoRoot)],
+    args: [entryServerPath(input.repoRoot, input.env)],
   };
+}
+
+/** Registers the `cerebrium` entry, then drops the trial entry a host-backed one replaces. */
+function registerCerebrium(
+  cli: "claude" | "codex",
+  extra: string[],
+  input: PlanInput,
+  opts: ApplyOptions,
+  mcp: SurfaceState,
+): Applied[] {
+  const out = [
+    registerViaCli(
+      cli,
+      extra,
+      cerebriumEntry(input),
+      input.hasCommand,
+      opts,
+      mcp.status === "stale",
+      "--env",
+    ),
+  ];
+  if (out[0]!.outcome === "failed" || out[0]!.outcome === "skipped") return out;
+  if (!isHostEnv(input.env) || !trialRegistered(cli, input.home)) {
+    return out;
+  }
+  try {
+    opts.run(cli, ["mcp", "remove", TRIAL_ENTRY, ...extra]);
+    out.push(done("mcp", "updated", `${cli} mcp remove ${TRIAL_ENTRY}`));
+  } catch (err) {
+    out.push(done("mcp", "failed", `${cli} mcp remove ${TRIAL_ENTRY} failed: ${String(err)}`));
+  }
+  return out;
 }
 
 function applyClaude(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[]): Applied[] {
@@ -277,19 +312,7 @@ function applyClaude(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[])
   const out: Applied[] = [];
 
   const mcp = has("mcp");
-  if (mcp) {
-    out.push(
-      registerViaCli(
-        "claude",
-        ["-s", "user"],
-        cerebriumEntry(input),
-        input.hasCommand,
-        opts,
-        mcp.status === "stale",
-        "--env",
-      ),
-    );
-  }
+  if (mcp) out.push(...registerCerebrium("claude", ["-s", "user"], input, opts, mcp));
   if (has("skill")) {
     out.push(
       ensureSymlink(join(dir, "skills", "cerebrium"), skillPath(input.repoRoot), opts.force),
@@ -306,19 +329,7 @@ function applyCodex(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[]):
   const out: Applied[] = [];
 
   const mcp = has("mcp");
-  if (mcp) {
-    out.push(
-      registerViaCli(
-        "codex",
-        [],
-        cerebriumEntry(input),
-        input.hasCommand,
-        opts,
-        mcp.status === "stale",
-        "--env",
-      ),
-    );
-  }
+  if (mcp) out.push(...registerCerebrium("codex", [], input, opts, mcp));
   if (has("skill")) {
     out.push(
       ensureSymlink(join(dir, "skills", "cerebrium"), skillPath(input.repoRoot), opts.force),

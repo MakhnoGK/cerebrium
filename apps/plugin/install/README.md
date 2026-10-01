@@ -204,22 +204,24 @@ at the same instant used to race, and the loser died on the migration ledger's p
 Fixed — the ledger is now read inside the write transaction — but it is why the store should
 be created once, by whichever host you set up first, before you open a second.
 
-## Trying a Cerebrium host
+## Against a Cerebrium host
 
-A machine can try the host while its local memory stays the one in use: `npm run agent:setup
--- --kernel tcp://HOST:PORT --token-file PATH --apply` adds a second MCP server,
-`cerebrium-host`, to Claude Code and Codex. It runs the thin plugin bundle
-(`apps/plugin/dist/server.js`) and leaves the `cerebrium` entry, the skill, the rules and the
-hook as they are. The token file must be mode 600; only its path goes into the entry. Add
-`--verify` to open a real session on the host through it. Antigravity and pi are not
-covered: Antigravity would need its own `mcp(cerebrium-host/*)` grants, and pi runs one
-server per bridge config. See the README's cerebrium-plugin section for the Claude Code plugin.
+`npm run agent:setup -- --kernel tcp://HOST:PORT --token-file PATH --apply` points the
+`cerebrium` entry of every host — Claude Code, Codex, Antigravity and pi — at a Cerebrium
+host. Each entry runs the thin plugin bundle (`apps/plugin/dist/server.js`) under the stable
+Node alias on `PATH`, since the bundle loads no native addon, and its env is exactly
+`MEMORY_KERNEL_URL` and `MEMORY_KERNEL_TOKEN_FILE`. The token file must be mode 600; only its
+path goes into the entry, and the token is never printed. The skill, the rules, the hook and
+Antigravity's `mcp(cerebrium/*)` grants stay as they are, because the server keeps its name.
+A later run without the two flags reuses the host it finds registered. `--apply` also removes
+the old `cerebrium-host` trial entry from Claude Code and Codex. Add `--verify` to open a
+real session on the host through the plugin bundle.
 
 Code is indexed on the host per branch, from the checkouts on this machine. Add
-`--index-repo PATH` (repeatable) to the same command to opt a checkout in: it is listed in
+`--index-repo PATH` (repeatable) to opt a checkout in: it is listed in
 `~/.cerebrium/plugin-index.json`, the session-start hook indexes it in the background when a
 session opens inside it, and `post-commit`/`post-checkout`/`post-merge`/`post-rewrite` hooks
 in that repo's `.git/hooks` re-index it (`apps/plugin/dist/index.js`, detached and
 rate-limited, never blocking git). A hook that was already there is kept as
-`<name>.cerebrium-prev` and still runs first. `code_index` through `cerebrium-host` indexes
-the checkout it is called from at any time.
+`<name>.cerebrium-prev` and still runs first. `code_index` indexes the checkout it is called
+from at any time.

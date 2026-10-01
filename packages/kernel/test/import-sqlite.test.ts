@@ -9,7 +9,7 @@ import {
   type EdgesRepo,
   type NodesRepo,
 } from "@/domain/ports/storage";
-import { importSqlite, remapCodeRefs, verifyImport } from "@/db/postgres/import-sqlite";
+import { importSqlite, inScope, remapCodeRefs, verifyImport } from "@/db/postgres/import-sqlite";
 import { registerSqliteRepositories } from "@/db/sqlite";
 import { DB_TOKEN } from "@/db/sqlite/base";
 import { openDatabase } from "@/db/sqlite/database";
@@ -89,7 +89,102 @@ async function withCodeRef() {
   return db;
 }
 
+// Notes in an in-scope project, a prefixed one, an out-of-scope one and none, linked in a
+// chain so every edge but one crosses into the out-of-scope note.
+async function acrossProjects() {
+  const db = openDatabase(":memory:");
+  const scope = container.createChildContainer();
+
+  scope.register(DB_TOKEN, { useValue: db });
+  registerSqliteRepositories(scope);
+
+  const nodes = scope.resolve<NodesRepo>(NODES_REPO_TOKEN);
+  const ids: Record<string, string> = {};
+
+  for (const [title, project] of [
+    ["Kept", "keep"],
+    ["Prefixed", "keep-sub"],
+    ["Left", "other"],
+    ["Global", null],
+  ] as const) {
+    const { id } = await nodes.createNode({
+      memory_kind: MemoryKind.SEMANTIC,
+      type: "fact",
+      title,
+      content: `${title} body`,
+      project,
+      session_id: "s",
+      ts: TS,
+    });
+
+    ids[title] = id;
+  }
+
+  const edges = scope.resolve<EdgesRepo>(EDGES_REPO_TOKEN);
+
+  await edges.insertEdge(ids.Kept!, ids.Prefixed!, EdgeType.RELATES_TO, "agent", "s", TS);
+  await edges.insertEdge(ids.Kept!, ids.Left!, EdgeType.RELATES_TO, "agent", "s", TS);
+  db.prepare(
+    `INSERT INTO events (id, session_id, action, node_id, detail, ts)
+     VALUES ('e1', 's', 'write', ?, NULL, ?), ('e2', 's', 'write', ?, NULL, ?)`,
+  ).run(ids.Kept, TS, ids.Left, TS);
+
+  return { db, ids };
+}
+
+const SCOPE = { projects: ["keep*"], global: false };
+
+it("should match exact names, prefix patterns and project-less nodes only when global", () => {
+  // Given
+  const scope = { projects: ["cerebrium", "toonspace*"], global: true };
+
+  // When
+  const matched = ["cerebrium", "toonspace", "toonspace-builder", "cerebrium-x", "obrio", null].map(
+    (project) => inScope(scope, project),
+  );
+
+  // Then
+  expect(matched).toEqual([true, true, true, false, false, true]);
+  expect(inScope({ ...scope, global: false }, null)).toBe(false);
+});
+
 describePostgres("SQLite import", (fresh) => {
+  it("should carry only in-scope nodes and the rows that touch nothing else, and verify them", async () => {
+    // Given
+    const { db: source, ids } = await acrossProjects();
+    const target = fresh();
+
+    // When
+    const report = await importSqlite(source, target, { scope: SCOPE });
+    const verified = await verifyImport(source, target, { scope: SCOPE });
+    const nodes = await target.query("SELECT title FROM nodes ORDER BY title");
+    const edges = await target.query("SELECT src, dst FROM edges");
+    const events = await target.query("SELECT id FROM events");
+
+    // Then
+    expect(verified.ok).toBe(true);
+    expect(report.dropped.out_of_scope_nodes).toBe(2);
+    expect(nodes.rows).toEqual([{ title: "Kept" }, { title: "Prefixed" }]);
+    expect(edges.rows).toEqual([{ src: ids.Kept, dst: ids.Prefixed }]);
+    expect(events.rows).toEqual([{ id: "e1" }]);
+  });
+
+  it("should carry project-less nodes when the scope is global", async () => {
+    // Given
+    const { db: source } = await acrossProjects();
+    const target = fresh();
+    const scope = { ...SCOPE, global: true };
+
+    // When
+    await importSqlite(source, target, { scope });
+    const verified = await verifyImport(source, target, { scope });
+    const nodes = await target.query("SELECT title FROM nodes ORDER BY title");
+
+    // Then
+    expect(verified.ok).toBe(true);
+    expect(nodes.rows).toEqual([{ title: "Global" }, { title: "Kept" }, { title: "Prefixed" }]);
+  });
+
   it("should carry a note's code link under the repo's remote_key and verify it", async () => {
     // Given
     const source = await withCodeRef();
