@@ -7,12 +7,14 @@ import { Activity } from "./components/Activity";
 import { Dot, NowProvider } from "./components/common";
 import { Consolidation, type ReceivedNotice } from "./components/Consolidation";
 import { Overview } from "./components/Overview";
+import { CANDIDATES_KEY, Review } from "./components/Review";
 import { useBacklogTrend, type Tone } from "./health";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "activity", label: "Activity" },
   { id: "consolidation", label: "Consolidation" },
+  { id: "review", label: "Review" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -50,6 +52,7 @@ export function App() {
   const [tab, setTab] = useTab();
   const [notices, setNotices] = useState<ReceivedNotice[]>([]);
   const noticeSeq = useRef(0);
+  const [reviewCount, setReviewCount] = useState(0);
 
   const status = useQuery({
     queryKey: STATUS_KEY,
@@ -73,6 +76,7 @@ export function App() {
       const received = { key: noticeSeq.current, at: new Date().toISOString(), notice };
       setNotices((prev) => [received, ...prev].slice(0, 20));
       void queryClient.invalidateQueries({ queryKey: HEAD_KEY });
+      void queryClient.invalidateQueries({ queryKey: CANDIDATES_KEY });
     },
     onOpen: (reconnected) => {
       if (reconnected) void queryClient.invalidateQueries();
@@ -103,6 +107,11 @@ export function App() {
                 {t.id === "activity" && log.paused && log.buffered > 0 && (
                   <span className="tab-count">{log.buffered}</span>
                 )}
+                {t.id === "review" && reviewCount > 0 && (
+                  <span className="tab-count" title={`${reviewCount} waiting for review`}>
+                    {reviewCount}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -125,6 +134,9 @@ export function App() {
               loading={head.isPending}
               error={headError}
             />
+          </div>
+          <div hidden={tab !== "review"}>
+            <Review onCount={setReviewCount} />
           </div>
         </main>
       </div>

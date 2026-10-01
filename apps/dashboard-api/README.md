@@ -9,6 +9,11 @@ at `/`.
   passed on.
 - `GET /api/activity?limit=&before=` — the audit log, newest first, and the latest sweep
   runs (`recent_activity`).
+- `GET /api/consolidation/candidates?kind=&cursor=` — pending candidates, 20 a page, each with
+  its member nodes; `POST …/:id/decision` (`apply` or `reject`, optional `override` and, for
+  merge, `collapse`) and `POST …/:id/retry` (drop the proposal so the model writes it again).
+- `GET /api/reviews` and `POST /api/reviews/decision` — writes that landed under a `suggest`
+  posture (the runner's), kept or undone.
 - `GET /api/stream` — server-sent events: every audited call as it is recorded
   (`activity`), each finished sweep (`consolidation`) and a fresh status every 5 s
   (`status`).

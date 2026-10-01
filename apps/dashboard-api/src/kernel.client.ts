@@ -45,11 +45,17 @@ export class KernelClient implements OnModuleDestroy {
     ) as Promise<T>;
   }
 
+  // Writes are attributed to a session; the dashboard keeps one for its lifetime.
+  async sessionId(): Promise<string> {
+    this.session ??= (await this.call<{ session_id: string }>("start_session", {})).session_id;
+
+    return this.session;
+  }
+
   async subscribe(): Promise<boolean> {
     try {
-      this.session ??= (await this.call<{ session_id: string }>("start_session", {})).session_id;
       await this.call("subscribe_events", {
-        session_id: this.session,
+        session_id: await this.sessionId(),
         topics: ["activity", "consolidation"],
       });
 

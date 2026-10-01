@@ -8,6 +8,9 @@ The web dashboard's UI (React, Vite, TanStack Query), served by `apps/dashboard-
 - **Activity** — the live action log: history from `/api/activity` with live calls from
   `/api/stream` on top; filter by action or principal, errors only, pause.
 - **Consolidation** — the sweep runs and live sweep notices.
+- **Review** — pending consolidation candidates with the model's proposal and the members side
+  by side, to apply, edit, reject or regenerate; and the runner's writes under a `suggest`
+  posture, to keep or undo.
 
 `npm run build:dashboard` builds it into `apps/dashboard-web/dist`;
 `npm run dev:dashboard` serves it with `/api` proxied to `localhost:7480`.

@@ -9,6 +9,8 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { isMainModule } from "@cerebrium/kernel/runtime/is-main";
 import { ApiController } from "./api.controller";
 import { KernelClient } from "./kernel.client";
+import { ReviewController } from "./review.controller";
+import { ReviewService } from "./review.service";
 import { OLLAMA_URL, StatusService } from "./status.service";
 
 export interface DashboardOptions {
@@ -22,7 +24,7 @@ export class DashboardModule {
   static with(options: DashboardOptions): DynamicModule {
     return {
       module: DashboardModule,
-      controllers: [ApiController],
+      controllers: [ApiController, ReviewController],
       providers: [
         {
           provide: KernelClient,
@@ -30,6 +32,7 @@ export class DashboardModule {
         },
         { provide: OLLAMA_URL, useValue: options.ollamaUrl },
         StatusService,
+        ReviewService,
       ],
     };
   }

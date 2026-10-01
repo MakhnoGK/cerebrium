@@ -1,0 +1,831 @@
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type SyntheticEvent,
+} from "react";
+import type {
+  CandidateDecisionBody,
+  CandidateView,
+  NodePreview,
+  ReviewItemView,
+  ReviewNode,
+} from "@cerebrium/contracts/dashboard";
+import type { ConsolidationCandidate, ConsolidationProposal } from "@cerebrium/contracts/types";
+import {
+  decideCandidate,
+  decideReview,
+  errorMessage,
+  fetchCandidates,
+  fetchReviews,
+  retryCandidate,
+  type CandidateKind,
+} from "../api";
+import { absoluteTime, clockTime, relativeTime, truncate } from "../format";
+import type { Tone } from "../health";
+import { Badge, Card, Empty, ErrorText, Mono, Notice, RelTime, useNow } from "./common";
+
+export const CANDIDATES_KEY = ["review", "candidates"] as const;
+export const REVIEWS_KEY = ["review", "runner"] as const;
+
+const KINDS: CandidateKind[] = ["distill", "merge", "link", "prune", "documents"];
+
+const KIND_TONE: Record<CandidateKind, Tone> = {
+  distill: "info",
+  merge: "info",
+  link: "neutral",
+  documents: "neutral",
+  prune: "warn",
+};
+
+type ProposalFilter = "all" | "has" | "waiting";
+
+type Draft = Required<CandidateDecisionBody>["override"];
+
+function kindOf(candidate: ConsolidationCandidate): CandidateKind {
+  return candidate.kind as string as CandidateKind;
+}
+
+function generates(kind: CandidateKind): boolean {
+  return kind === "distill" || kind === "merge";
+}
+
+function matchesProposal(view: CandidateView, filter: ProposalFilter): boolean {
+  const { candidate } = view;
+  if (filter === "has") return candidate.proposal !== null;
+  if (filter === "waiting") return generates(kindOf(candidate)) && candidate.proposal === null;
+  return true;
+}
+
+function describe(view: CandidateView): string {
+  return truncate(view.members[0]?.title ?? view.candidate.id, 60);
+}
+
+function nodeName(node: ReviewNode | undefined): string {
+  return node ? node.title || node.id : "?";
+}
+
+function describeItem(item: ReviewItemView): string {
+  return item.artifact === "edge"
+    ? `${nodeName(item.src)} —${item.edge_type ?? "?"}→ ${nodeName(item.dst)}`
+    : nodeName(item.node);
+}
+
+function itemKey(item: ReviewItemView): string {
+  return `${item.artifact}:${item.ref}`;
+}
+
+interface Outcome {
+  key: number;
+  tone: Tone;
+  text: string;
+}
+
+function useOutcomes(): [Outcome[], (tone: Tone, text: string) => void] {
+  const [outcomes, setOutcomes] = useState<Outcome[]>([]);
+  const seq = useRef(0);
+  const push = useCallback((tone: Tone, text: string) => {
+    seq.current += 1;
+    const key = seq.current;
+    setOutcomes((prev) => [{ key, tone, text }, ...prev].slice(0, 3));
+  }, []);
+  return [outcomes, push];
+}
+
+function useIdSet() {
+  const [ids, setIds] = useState<ReadonlySet<string>>(() => new Set());
+  const add = useCallback((id: string) => setIds((prev) => new Set(prev).add(id)), []);
+  const remove = useCallback(
+    (id: string) =>
+      setIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      }),
+    [],
+  );
+  return { ids, add, remove };
+}
+
+function useErrors() {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const set = useCallback(
+    (id: string, message: string | null) =>
+      setErrors((prev) => {
+        if (message === null && !(id in prev)) return prev;
+        const next = { ...prev };
+        if (message === null) delete next[id];
+        else next[id] = message;
+        return next;
+      }),
+    [],
+  );
+  return [errors, set] as const;
+}
+
+export function Review({ onCount }: { onCount: (count: number) => void }) {
+  const candidates = useCandidates();
+  const runner = useRunnerReviews();
+  const total = candidates.loaded.length + runner.pendingTotal;
+
+  useEffect(() => onCount(total), [onCount, total]);
+
+  return (
+    <div className="stack">
+      <CandidatesSection state={candidates} />
+      <RunnerSection state={runner} />
+    </div>
+  );
+}
+
+interface DecisionVars {
+  view: CandidateView;
+  label: string;
+  body: CandidateDecisionBody;
+}
+
+function useCandidates() {
+  const queryClient = useQueryClient();
+  const [kind, setKind] = useState<CandidateKind | "">("");
+  const [proposal, setProposal] = useState<ProposalFilter>("all");
+  const hidden = useIdSet();
+  const retrying = useIdSet();
+  const [errors, setError] = useErrors();
+  const [outcomes, pushOutcome] = useOutcomes();
+
+  const query = useInfiniteQuery({
+    queryKey: [...CANDIDATES_KEY, kind],
+    queryFn: ({ pageParam, signal }) =>
+      fetchCandidates({ kind: kind || null, cursor: pageParam }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+  });
+
+  const all = useMemo(() => (query.data?.pages ?? []).flatMap((p) => p.candidates), [query.data]);
+  const loaded = useMemo(
+    () => all.filter((v) => !hidden.ids.has(v.candidate.id)),
+    [all, hidden.ids],
+  );
+  const shown = useMemo(() => all.filter((v) => matchesProposal(v, proposal)), [all, proposal]);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: CANDIDATES_KEY });
+
+  const decide = useMutation({
+    mutationFn: ({ view, body }: DecisionVars) => decideCandidate(view.candidate.id, body),
+    onMutate: ({ view }) => {
+      setError(view.candidate.id, null);
+      hidden.add(view.candidate.id);
+    },
+    onSuccess: (result, { view, label }) => {
+      pushOutcome("ok", `${label} (${result.status}) · ${describe(view)}`);
+    },
+    onError: (error, { view }) => {
+      hidden.remove(view.candidate.id);
+      setError(view.candidate.id, errorMessage(error));
+    },
+    onSettled: invalidate,
+  });
+
+  const retry = useMutation({
+    mutationFn: (view: CandidateView) => retryCandidate(view.candidate.id),
+    onMutate: (view) => {
+      setError(view.candidate.id, null);
+      retrying.add(view.candidate.id);
+    },
+    onSuccess: (_result, view) => {
+      pushOutcome("info", `Proposal cleared · ${describe(view)} — rewritten on a later sweep`);
+    },
+    onError: (error, view) => setError(view.candidate.id, errorMessage(error)),
+    onSettled: (_result, _error, view) => {
+      retrying.remove(view.candidate.id);
+      return invalidate();
+    },
+  });
+
+  return {
+    query,
+    kind,
+    setKind,
+    proposal,
+    setProposal,
+    loaded,
+    shown,
+    hidden: hidden.ids,
+    retrying: retrying.ids,
+    errors,
+    outcomes,
+    decide: decide.mutate,
+    retry: retry.mutate,
+  };
+}
+
+type CandidatesState = ReturnType<typeof useCandidates>;
+
+function Outcomes({ outcomes }: { outcomes: Outcome[] }) {
+  return (
+    <ul className="outcomes" aria-live="polite">
+      {outcomes.map((o) => (
+        <li key={o.key} className={`toast toast-${o.tone}`}>
+          {o.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CandidatesSection({ state }: { state: CandidatesState }) {
+  const { query, loaded, shown, hidden } = state;
+  const visibleCount = shown.filter((v) => !hidden.has(v.candidate.id)).length;
+  const error = query.isError ? errorMessage(query.error) : null;
+  const perKind = useMemo(() => {
+    const counts = new Map<CandidateKind, number>();
+    for (const v of loaded) {
+      const kind = kindOf(v.candidate);
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+    return KINDS.flatMap((k) => {
+      const n = counts.get(k);
+      return n ? [[k, n] as const] : [];
+    });
+  }, [loaded]);
+
+  return (
+    <section className="review-section" aria-labelledby="candidates-title">
+      <header className="section-head">
+        <h2 id="candidates-title">Consolidation candidates</h2>
+        {perKind.length > 0 && (
+          <ul className="chips" aria-label="Loaded per kind">
+            {perKind.map(([kind, n]) => (
+              <li key={kind}>
+                {kind} <span className="num">{n}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </header>
+
+      <div className="toolbar">
+        <label>
+          Kind
+          <select
+            value={state.kind}
+            onChange={(e) => state.setKind(e.target.value as CandidateKind | "")}
+          >
+            <option value="">All</option>
+            {KINDS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Proposal
+          <select
+            value={state.proposal}
+            onChange={(e) => state.setProposal(e.target.value as ProposalFilter)}
+          >
+            <option value="all">All</option>
+            <option value="has">Has proposal</option>
+            <option value="waiting">Waiting for model</option>
+          </select>
+        </label>
+        <span className="toolbar-count muted">
+          {visibleCount.toLocaleString()} shown of {loaded.length.toLocaleString()} loaded
+          {query.hasNextPage ? " · more available" : ""}
+        </span>
+      </div>
+
+      <Outcomes outcomes={state.outcomes} />
+
+      {error && (
+        <Notice tone={query.data ? "warn" : "err"}>Cannot load candidates: {error}.</Notice>
+      )}
+
+      {!query.data ? (
+        query.isPending && <p className="loading">Loading candidates…</p>
+      ) : visibleCount === 0 ? (
+        <Empty>
+          {loaded.length === 0 ? "No pending candidates." : "No candidates match the filters."}
+        </Empty>
+      ) : null}
+
+      {shown.map((view) => (
+        <CandidateCard
+          key={view.candidate.id}
+          view={view}
+          hidden={hidden.has(view.candidate.id)}
+          retrying={state.retrying.has(view.candidate.id)}
+          error={state.errors[view.candidate.id] ?? null}
+          onDecide={(label, body) => state.decide({ view, label, body })}
+          onRetry={() => state.retry(view)}
+        />
+      ))}
+
+      {query.data && (query.hasNextPage || query.isFetchNextPageError) && (
+        <div className="pager">
+          {query.isFetchNextPageError && (
+            <span className="error-text">{errorMessage(query.error)}</span>
+          )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void query.fetchNextPage()}
+            disabled={query.isFetchingNextPage}
+          >
+            {query.isFetchingNextPage ? "Loading…" : "Load more"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface CardProps {
+  view: CandidateView;
+  hidden: boolean;
+  retrying: boolean;
+  error: string | null;
+  onDecide: (label: string, body: CandidateDecisionBody) => void;
+  onRetry: () => void;
+}
+
+function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: CardProps) {
+  const { candidate, members } = view;
+  const kind = kindOf(candidate);
+  const proposal = candidate.proposal;
+  const [editing, setEditing] = useState(false);
+
+  const reject = () => onDecide("Rejected", { decision: "reject" });
+
+  const submitDraft = (draft: Draft) => {
+    if (kind === "merge") {
+      if (!window.confirm(MERGE_CONFIRM)) return;
+      onDecide("Merged", { decision: "apply", collapse: true, override: draft });
+    } else {
+      onDecide("Applied", { decision: "apply", override: draft });
+    }
+  };
+
+  return (
+    <article
+      className="card candidate"
+      hidden={hidden}
+      aria-label={`${kind} candidate: ${describe(view)}`}
+    >
+      <header className="candidate-head">
+        <Badge tone={KIND_TONE[kind]}>{kind}</Badge>
+        <span className="muted">
+          score <span className="num">{candidate.score.toFixed(2)}</span>
+        </span>
+        {candidate.project && <span className="muted">{candidate.project}</span>}
+        <span className="muted">
+          detected <RelTime iso={candidate.detected_at} />
+        </span>
+        {candidate.attempts > 0 && (
+          <Badge tone={candidate.last_error ? "err" : "neutral"}>
+            {candidate.attempts} attempt{candidate.attempts === 1 ? "" : "s"}
+          </Badge>
+        )}
+        <Mono text={candidate.id} max={12} />
+      </header>
+      <div className="card-body">
+        {candidate.last_error && (
+          <div className="sub">
+            Last error: <ErrorText text={candidate.last_error} max={200} />
+          </div>
+        )}
+
+        {proposal ? (
+          <ProposalBlock proposal={proposal} />
+        ) : (
+          generates(kind) && (
+            <p className="waiting muted">
+              Waiting for the model — proposals are written 10 per sweep.
+            </p>
+          )
+        )}
+
+        <div className="members">
+          {members.map((node, index) => (
+            <Member key={node.id} node={node} role={memberRole(kind, candidate, node, index)} />
+          ))}
+        </div>
+
+        {editing && (
+          <ProposalEditor
+            initial={proposal}
+            submitLabel={kind === "merge" ? "Merge into one" : "Apply"}
+            onSubmit={submitDraft}
+            onCancel={() => setEditing(false)}
+          />
+        )}
+
+        {error && <Notice tone="err">{error}</Notice>}
+
+        <div className="actions">
+          {kind === "distill" && (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!proposal}
+                title={proposal ? undefined : "No proposal yet"}
+                onClick={() => onDecide("Applied", { decision: "apply" })}
+              >
+                Apply
+              </button>
+              <button
+                type="button"
+                className="btn"
+                aria-pressed={editing}
+                onClick={() => setEditing(!editing)}
+              >
+                Edit &amp; apply
+              </button>
+            </>
+          )}
+          {kind === "merge" && (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => onDecide("Marked duplicate", { decision: "apply", collapse: false })}
+              >
+                Mark duplicate
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={!proposal}
+                title={proposal ? undefined : "No proposal yet"}
+                onClick={() => {
+                  if (window.confirm(MERGE_CONFIRM)) {
+                    onDecide("Merged", { decision: "apply", collapse: true });
+                  }
+                }}
+              >
+                Merge into one
+              </button>
+              <button
+                type="button"
+                className="btn"
+                aria-pressed={editing}
+                onClick={() => setEditing(!editing)}
+              >
+                Edit &amp; merge
+              </button>
+            </>
+          )}
+          {(kind === "link" || kind === "documents") && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => onDecide("Applied", { decision: "apply" })}
+            >
+              Apply
+            </button>
+          )}
+          {kind === "prune" && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => {
+                if (window.confirm("Retire this node? It is invalidated (soft-deleted).")) {
+                  onDecide("Retired", { decision: "apply" });
+                }
+              }}
+            >
+              Retire node
+            </button>
+          )}
+          <button type="button" className="btn" onClick={reject}>
+            Reject
+          </button>
+          {generates(kind) && (
+            <button type="button" className="btn" disabled={retrying} onClick={onRetry}>
+              {retrying ? "Regenerating…" : "Regenerate"}
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+const MERGE_CONFIRM =
+  "Merge into one note? The kept note is rewritten and the duplicate is retired.";
+
+function ProposalBlock({ proposal }: { proposal: ConsolidationProposal }) {
+  return (
+    <div className="proposal">
+      {proposal.recommendation && (
+        <div className="proposal-verdict">
+          <Badge tone={proposal.recommendation === "apply" ? "ok" : "warn"}>
+            model: {proposal.recommendation}
+          </Badge>
+          {proposal.reason && <span>{proposal.reason}</span>}
+        </div>
+      )}
+      <h3 className="proposal-title">{proposal.title}</h3>
+      {proposal.summary && <p className="proposal-summary">{proposal.summary}</p>}
+      <Clamp text={proposal.body} lines={12} />
+    </div>
+  );
+}
+
+function memberRole(
+  kind: CandidateKind,
+  candidate: ConsolidationCandidate,
+  node: NodePreview,
+  index: number,
+): [Tone, string] | null {
+  if (kind === "merge" && candidate.canonical_id) {
+    return node.id === candidate.canonical_id ? ["ok", "keeps"] : ["warn", "duplicate"];
+  }
+  if (kind === "link" && candidate.canonical_id) {
+    return node.id === candidate.canonical_id ? ["info", "target"] : ["neutral", "source"];
+  }
+  if (kind === "documents") return index === 1 ? ["info", "code symbol"] : ["neutral", "note"];
+  return null;
+}
+
+function Member({ node, role }: { node: NodePreview; role: [Tone, string] | null }) {
+  const gone = !node.found || node.invalidated;
+  return (
+    <div className={gone ? "member member-gone" : "member"}>
+      <div className="member-head">
+        {role && <Badge tone={role[0]}>{role[1]}</Badge>}
+        {!node.found && <Badge tone="err">not found</Badge>}
+        {node.invalidated && <Badge tone="err">invalidated</Badge>}
+        <strong className="member-title">{node.title ?? "(untitled)"}</strong>
+      </div>
+      <div className="member-meta sub muted">
+        {node.type && <span>{node.type}</span>}
+        {node.project && <span>{node.project}</span>}
+        <Mono text={node.id} max={18} />
+      </div>
+      {node.content ? (
+        <Clamp text={node.content} lines={6} />
+      ) : (
+        <span className="sub muted">No content.</span>
+      )}
+    </div>
+  );
+}
+
+function Clamp({ text, lines }: { text: string; lines: number }) {
+  const [open, setOpen] = useState(false);
+  const long = text.split("\n").length > lines || text.length > lines * 90;
+  const clamped = long && !open;
+  return (
+    <div className="clamp">
+      <pre
+        className={clamped ? "clamp-text clamp-on" : "clamp-text"}
+        style={clamped ? { WebkitLineClamp: lines } : undefined}
+      >
+        {text}
+      </pre>
+      {long && (
+        <button
+          type="button"
+          className="link-btn"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface EditorProps {
+  initial: ConsolidationProposal | null;
+  submitLabel: string;
+  onSubmit: (draft: Draft) => void;
+  onCancel: () => void;
+}
+
+function ProposalEditor({ initial, submitLabel, onSubmit, onCancel }: EditorProps) {
+  const id = useId();
+  const [draft, setDraft] = useState<Draft>({
+    title: initial?.title ?? "",
+    summary: initial?.summary ?? "",
+    body: initial?.body ?? "",
+  });
+  const valid = draft.title.trim() !== "" && draft.body.trim() !== "";
+  const field = (key: keyof Draft) => ({
+    id: `${id}-${key}`,
+    value: draft[key],
+    onChange: (e: { target: { value: string } }) =>
+      setDraft((prev) => ({ ...prev, [key]: e.target.value })),
+  });
+
+  const submit = (e: SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (valid) onSubmit(draft);
+  };
+
+  return (
+    <form className="editor" onSubmit={submit}>
+      <label htmlFor={`${id}-title`}>Title</label>
+      <input type="text" required {...field("title")} />
+      <label htmlFor={`${id}-summary`}>Summary</label>
+      <textarea rows={2} {...field("summary")} />
+      <label htmlFor={`${id}-body`}>Body</label>
+      <textarea rows={10} required {...field("body")} />
+      <div className="actions">
+        <button type="submit" className="btn btn-primary" disabled={!valid}>
+          {submitLabel}
+        </button>
+        <button type="button" className="btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+interface ReviewVars {
+  item: ReviewItemView;
+  decision: "kept" | "undone";
+}
+
+function useRunnerReviews() {
+  const queryClient = useQueryClient();
+  const hidden = useIdSet();
+  const [errors, setError] = useErrors();
+  const [outcomes, pushOutcome] = useOutcomes();
+
+  const query = useQuery({
+    queryKey: REVIEWS_KEY,
+    queryFn: ({ signal }) => fetchReviews(signal),
+    refetchInterval: 60_000,
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ item, decision }: ReviewVars) =>
+      decideReview({ artifact: item.artifact, ref: item.ref, decision }),
+    onMutate: ({ item }) => {
+      setError(itemKey(item), null);
+      hidden.add(itemKey(item));
+    },
+    onSuccess: (result, { item, decision }) => {
+      const what = truncate(describeItem(item), 80);
+      if (decision === "kept") pushOutcome("ok", `Kept · ${what}`);
+      else if (result.undone) pushOutcome("ok", `Undone · ${what}`);
+      else pushOutcome("warn", `Recorded as undone, but nothing was removed · ${what}`);
+    },
+    onError: (error, { item }) => {
+      hidden.remove(itemKey(item));
+      setError(itemKey(item), errorMessage(error));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: REVIEWS_KEY }),
+  });
+
+  const items = query.data?.items ?? [];
+  const hiddenPresent = items.filter((i) => hidden.ids.has(itemKey(i))).length;
+  const pending = query.data?.pending;
+  const pendingTotal = pending ? Math.max(0, pending.edges + pending.nodes - hiddenPresent) : 0;
+
+  return {
+    query,
+    items,
+    pendingTotal,
+    hidden: hidden.ids,
+    errors,
+    outcomes,
+    decide: decide.mutate,
+  };
+}
+
+type RunnerState = ReturnType<typeof useRunnerReviews>;
+
+function RunnerSection({ state }: { state: RunnerState }) {
+  const { query, items, hidden } = state;
+  const pending = query.data?.pending;
+  const visible = items.filter((i) => !hidden.has(itemKey(i)));
+  const error = query.isError ? errorMessage(query.error) : null;
+
+  return (
+    <Card
+      title="Runner writes under review"
+      tone={state.pendingTotal > 0 ? "warn" : undefined}
+      aside={
+        pending && (
+          <span className="sub muted">
+            <span className="num">{pending.edges}</span> edges ·{" "}
+            <span className="num">{pending.nodes}</span> nodes pending
+          </span>
+        )
+      }
+    >
+      <Outcomes outcomes={state.outcomes} />
+      {error && (
+        <Notice tone={query.data ? "warn" : "err"}>Cannot load runner writes: {error}.</Notice>
+      )}
+      {!query.data ? (
+        query.isPending && <p className="loading">Loading runner writes…</p>
+      ) : visible.length === 0 ? (
+        <Empty>Nothing to review — every runner write has been kept or undone.</Empty>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Principal</th>
+                <th>What</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <RunnerRow
+                  key={itemKey(item)}
+                  item={item}
+                  hidden={hidden.has(itemKey(item))}
+                  error={state.errors[itemKey(item)] ?? null}
+                  onDecide={(decision) => state.decide({ item, decision })}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function RunnerRow({
+  item,
+  hidden,
+  error,
+  onDecide,
+}: {
+  item: ReviewItemView;
+  hidden: boolean;
+  error: string | null;
+  onDecide: (decision: "kept" | "undone") => void;
+}) {
+  const now = useNow();
+  return (
+    <tr hidden={hidden} className={error ? "row-err" : undefined}>
+      <td className="num nowrap" title={`${absoluteTime(item.at)} · ${relativeTime(item.at, now)}`}>
+        {clockTime(item.at, now)}
+      </td>
+      <td>{item.principal ?? <span className="muted">—</span>}</td>
+      <td className="what">
+        <ReviewWhat item={item} />
+      </td>
+      <td>
+        <div className="actions">
+          <button type="button" className="btn" onClick={() => onDecide("kept")}>
+            Keep
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={() => {
+              if (window.confirm(`Undo this ${item.artifact}? ${describeItem(item)}`)) {
+                onDecide("undone");
+              }
+            }}
+          >
+            Undo
+          </button>
+        </div>
+        {error && <ErrorText text={error} max={160} />}
+      </td>
+    </tr>
+  );
+}
+
+function NodeName({ node }: { node: ReviewNode | undefined }) {
+  if (!node) return <span className="muted">?</span>;
+  return <span title={`${node.type} · ${node.id}`}>{node.title || node.id}</span>;
+}
+
+function ReviewWhat({ item }: { item: ReviewItemView }) {
+  if (item.artifact === "edge") {
+    if (!item.src && !item.dst) return <Mono text={item.ref} max={60} />;
+    return (
+      <>
+        <NodeName node={item.src} />{" "}
+        <code className="mono edge-type">—{item.edge_type ?? "?"}→</code>{" "}
+        <NodeName node={item.dst} />
+      </>
+    );
+  }
+  if (!item.node) return <Mono text={item.ref} max={60} />;
+  return (
+    <>
+      <NodeName node={item.node} /> <Badge tone="neutral">{item.node.type}</Badge>
+    </>
+  );
+}
