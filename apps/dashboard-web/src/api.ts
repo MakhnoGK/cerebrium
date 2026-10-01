@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type {
   ActivityEntry,
   ActivityPage,
+  CandidateDecisionBody,
+  CandidateDecisionResult,
+  CandidatePage,
   DashboardStatus,
+  ReviewDecisionBody,
+  ReviewDecisionResult,
+  ReviewPage,
   SweptNotice,
 } from "@cerebrium/contracts/dashboard";
 
@@ -18,11 +24,31 @@ export class HttpError extends Error {
   }
 }
 
+async function failure(res: Response, path: string): Promise<HttpError> {
+  try {
+    const body = (await res.json()) as { message?: unknown };
+    if (typeof body.message === "string" && body.message) {
+      return new HttpError(res.status, body.message);
+    }
+  } catch {
+    // not JSON
+  }
+  return new HttpError(res.status, `${path} answered ${res.status} ${res.statusText}`.trim());
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, { signal, headers: { Accept: "application/json" } });
-  if (!res.ok) {
-    throw new HttpError(res.status, `${path} answered ${res.status} ${res.statusText}`.trim());
-  }
+  if (!res.ok) throw await failure(res, path);
+  return (await res.json()) as T;
+}
+
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw await failure(res, path);
   return (await res.json()) as T;
 }
 
@@ -42,6 +68,48 @@ export function fetchActivity(
   const params = new URLSearchParams({ limit: String(query.limit ?? ACTIVITY_PAGE_SIZE) });
   if (query.before) params.set("before", query.before);
   return getJson<ActivityPage>(`/api/activity?${params.toString()}`, signal);
+}
+
+export type CandidateKind = "distill" | "merge" | "link" | "prune" | "documents";
+
+export interface CandidateQuery {
+  kind?: CandidateKind | null;
+  cursor?: string | null;
+}
+
+export function fetchCandidates(
+  query: CandidateQuery = {},
+  signal?: AbortSignal,
+): Promise<CandidatePage> {
+  const params = new URLSearchParams();
+  if (query.kind) params.set("kind", query.kind);
+  if (query.cursor) params.set("cursor", query.cursor);
+  const qs = params.toString();
+  return getJson<CandidatePage>(`/api/consolidation/candidates${qs ? `?${qs}` : ""}`, signal);
+}
+
+export function decideCandidate(
+  id: string,
+  body: CandidateDecisionBody,
+): Promise<CandidateDecisionResult> {
+  return postJson<CandidateDecisionResult>(
+    `/api/consolidation/candidates/${encodeURIComponent(id)}/decision`,
+    body,
+  );
+}
+
+export function retryCandidate(id: string): Promise<{ status: string }> {
+  return postJson<{ status: string }>(
+    `/api/consolidation/candidates/${encodeURIComponent(id)}/retry`,
+  );
+}
+
+export function fetchReviews(signal?: AbortSignal): Promise<ReviewPage> {
+  return getJson<ReviewPage>("/api/reviews", signal);
+}
+
+export function decideReview(body: ReviewDecisionBody): Promise<ReviewDecisionResult> {
+  return postJson<ReviewDecisionResult>("/api/reviews/decision", body);
 }
 
 export function errorMessage(error: unknown): string {

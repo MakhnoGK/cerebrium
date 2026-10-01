@@ -1,4 +1,4 @@
-import type { TechStats } from "@cerebrium/contracts/types";
+import type { ConsolidationCandidate, TechStats } from "@cerebrium/contracts/types";
 
 // The wire between the dashboard's backend and its browser app. The backend shapes what the
 // kernel answers into these; nothing here is a kernel call.
@@ -113,3 +113,76 @@ export type StreamEvent =
   | { type: "activity"; data: ActivityEntry }
   | { type: "consolidation"; data: SweptNotice }
   | { type: "status"; data: DashboardStatus };
+
+// A node as the review screens show it: enough to compare members side by side.
+export interface NodePreview {
+  id: string;
+  found: boolean;
+  title: string | null;
+  type: string | null;
+  memory_kind: string | null;
+  project: string | null;
+  content: string | null;
+  invalidated: boolean;
+}
+
+export interface CandidateView {
+  candidate: ConsolidationCandidate;
+  // In `member_ids` order; for documents the second is a code symbol.
+  members: NodePreview[];
+}
+
+export interface CandidatePage {
+  candidates: CandidateView[];
+  next_cursor: string | null;
+}
+
+// `collapse` applies to merge only: false records the pair as duplicates and keeps both;
+// true rewrites the survivor from `override` (or the proposal) and retires the other.
+export interface CandidateDecisionBody {
+  decision: "apply" | "reject";
+  override?: { title: string; summary: string; body: string };
+  collapse?: boolean;
+}
+
+export interface CandidateDecisionResult {
+  id: string;
+  status: string;
+  kind: string;
+}
+
+export interface ReviewNode {
+  id: string;
+  type: string;
+  title: string;
+}
+
+// A write that already landed under a `suggest` posture: a node, or an edge `src|dst|type`.
+export interface ReviewItemView {
+  artifact: "edge" | "node";
+  ref: string;
+  principal: string | null;
+  at: string;
+  edge_type?: string;
+  src?: ReviewNode;
+  dst?: ReviewNode;
+  node?: ReviewNode;
+}
+
+export interface ReviewPage {
+  items: ReviewItemView[];
+  pending: { edges: number; nodes: number };
+}
+
+export interface ReviewDecisionBody {
+  artifact: "edge" | "node";
+  ref: string;
+  decision: "kept" | "undone";
+  note?: string;
+}
+
+export interface ReviewDecisionResult {
+  ref: string;
+  decision: string;
+  undone: boolean;
+}
