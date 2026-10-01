@@ -88,6 +88,8 @@ export async function runOnce(deps: {
   // what one run is allowed to spend past what the install permits.
   maxBudgetUsd: number;
   log: (line: string) => void;
+  // The kinds this call may claim; every registered task when omitted.
+  kinds?: readonly string[];
 }): Promise<"ran" | "idle"> {
   const call = callFor(deps.socketPath);
   const oauthToken = readOauthToken(deps.oauthTokenFile);
@@ -99,7 +101,7 @@ export async function runOnce(deps: {
   }
 
   const job = (await call("job_claim", {
-    kinds: [...TASK_KINDS],
+    kinds: [...(deps.kinds ?? TASK_KINDS)],
     owner: deps.owner,
   })) as JobRow | null;
 
@@ -337,7 +339,7 @@ async function main(): Promise<void> {
 
     deps.log(`enqueued ${once} as ${job.id}`);
 
-    const did = await runOnce(deps);
+    const did = await runOnce({ ...deps, kinds: [once] });
 
     deps.log(did === "ran" ? "done" : "nothing was claimable");
 
