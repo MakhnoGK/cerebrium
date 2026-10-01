@@ -909,6 +909,20 @@ export class ConsolidationWorker {
   // generation provider was available (e.g., detected under `manual`, then switched to
   // `http`). Provider-gated; leaves a candidate untouched on generation failure (retried
   // next sweep). Bounded by `backfillBatch` so a tick stays reasonable.
+  // Whether a generating sweep has queued work left: a proposal to write or a note to
+  // annotate. Detection is cheap and runs on the interval; this is what keeps the model busy
+  // between intervals.
+  async hasGenerativeWork(): Promise<boolean> {
+    if (!this.consolidator.enabled) return false;
+
+    if ((await this.consolidationRepo.pendingNeedingProposal(1)).length > 0) return true;
+
+    return (
+      this.posture.annotate !== Posture.OFF &&
+      (await this.consolidationRepo.unannotatedSemantic(1)).length > 0
+    );
+  }
+
   private async backfillProposals(now: string, result: ConsolidationTickResult): Promise<void> {
     if (!this.consolidator.enabled) {
       return;

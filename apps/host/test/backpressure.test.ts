@@ -2,7 +2,8 @@ import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ActivityMonitor } from "@cerebrium/kernel/application/services";
 import { CLOCK_TOKEN } from "@cerebrium/kernel/domain/ports/clock";
-import { runDaemon } from "@host/daemon";
+import type { ConsolidationTickResult } from "@cerebrium/kernel/domain/ports/consolidation-reporter";
+import { runDaemon, sweepAgain } from "@host/daemon";
 import { setup, type TestEnv } from "@test/helpers";
 
 let env: TestEnv;
@@ -11,13 +12,15 @@ beforeEach(() => {
   env = setup();
 });
 
-// A sweep that records whether it ran and whether it was told to stop.
-function sweeper(yieldAfter = Number.POSITIVE_INFINITY) {
+// A sweep that records whether it ran and whether it was told to stop. `generated` is what
+// each sweep reports writing, and `queued` how many sweeps' worth of work is left after it.
+function sweeper(yieldAfter = Number.POSITIVE_INFINITY, generated = 0, queued = 0) {
   const calls: { yieldedAt: number | null }[] = [];
 
   return {
     calls,
     stop: () => Promise.resolve(),
+    hasGenerativeWork: () => Promise.resolve(calls.length < queued),
     tick: (opts: { shouldYield?: () => boolean } = {}) => {
       let yieldedAt: number | null = null;
 
@@ -41,7 +44,7 @@ function sweeper(yieldAfter = Number.POSITIVE_INFINITY) {
         merge_delayed: 0,
         pruned: 0,
         prune_suggested: 0,
-        proposals_backfilled: 0,
+        proposals_backfilled: generated,
         rejected: 0,
         annotated: 0,
         generation_failures: 0,
@@ -56,6 +59,7 @@ async function loop(opts: {
   busy?: () => boolean;
   consolidation: ReturnType<typeof sweeper>;
   onSwept?: (result: { links_added: number }) => void;
+  intervalMs?: number;
 }) {
   let clock = 0;
   let ticks = 0;
@@ -64,8 +68,9 @@ async function loop(opts: {
     ...(opts.busy === undefined ? {} : { busy: opts.busy }),
     ...(opts.onSwept === undefined ? {} : { onSwept: opts.onSwept }),
     consolidation: opts.consolidation as never,
-    consolidateIntervalMs: 0,
+    consolidateIntervalMs: opts.intervalMs ?? 0,
     idleExitMs: 50,
+    ...(opts.intervalMs === undefined ? {} : { resident: true, stopped: () => ticks >= 10 }),
     nowMs: () => (clock += 100),
     sleepMs: () => {
       ticks++;
@@ -95,6 +100,64 @@ describe("Announcing a sweep", () => {
     // Then
     expect(announced).toHaveLength(consolidation.calls.length);
     expect(announced.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Sweeping while there is generative work", () => {
+  it("should sweep again at once while work is queued, then wait for the interval", async () => {
+    // Given
+    const consolidation = sweeper(Number.POSITIVE_INFINITY, 1, 3);
+
+    // When
+    await loop({ consolidation, intervalMs: 1e9 });
+
+    // Then
+    expect(consolidation.calls).toHaveLength(3);
+  });
+
+  it("should wait for the interval when a sweep generated nothing", async () => {
+    // Given
+    const consolidation = sweeper(Number.POSITIVE_INFINITY, 0, 3);
+
+    // When
+    await loop({ consolidation, intervalMs: 1e9 });
+
+    // Then
+    expect(consolidation.calls).toHaveLength(1);
+  });
+});
+
+describe("sweepAgain", () => {
+  const RESULT: ConsolidationTickResult = {
+    links_added: 0,
+    wikilinks_linked: 0,
+    wikilinks_dangling: 0,
+    documents_linked: 0,
+    documents_suggested: 0,
+    links_suggested: 0,
+    links_pruned: 0,
+    distilled: 0,
+    distill_suggested: 0,
+    merged: 0,
+    merge_suggested: 0,
+    merge_delayed: 0,
+    pruned: 0,
+    prune_suggested: 0,
+    proposals_backfilled: 2,
+    rejected: 0,
+    annotated: 0,
+    generation_failures: 0,
+    last_error: null,
+    started_at: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("should go again only with work left, nothing failed, and something written", () => {
+    // When / Then
+    expect(sweepAgain(RESULT, true)).toBe(true);
+    expect(sweepAgain(RESULT, false)).toBe(false);
+    expect(sweepAgain({ ...RESULT, generation_failures: 1 }, true)).toBe(false);
+    expect(sweepAgain({ ...RESULT, proposals_backfilled: 0 }, true)).toBe(false);
+    expect(sweepAgain({ ...RESULT, proposals_backfilled: 0, yielded: true }, true)).toBe(true);
   });
 });
 

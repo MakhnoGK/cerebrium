@@ -31,7 +31,8 @@ by `.github/workflows/release.yml`:
 - The first deploy generates the database password into `secrets/` (never printed) and
   the connection URL the daemon reads from `MEMORY_PG_URL_FILE`.
 - This store is the one being written: every machine's agents reach it through the plugin.
-  The consolidation sweep runs here on its default postures every 30 minutes.
+  The consolidation sweep runs here on its default postures. Detection runs every 5 minutes;
+  while proposals or annotations are queued and the model answers, sweeps run back to back.
 - Generation is Ollama, run natively on the host for the GPU and reached from the daemon at
   `host.docker.internal:11434`, which is the host's loopback. While it is down the sweep
   records generation failures and detection still runs.
