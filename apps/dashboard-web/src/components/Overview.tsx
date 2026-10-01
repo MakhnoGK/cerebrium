@@ -355,6 +355,16 @@ function GraphCard({ status }: { status: DashboardStatus }) {
         />
         <Metric label="Repointable" value={g.repointable_edges} />
         <Metric label="Detached" value={g.detached_nodes} />
+        <Metric label="Edgeless" value={g.edgeless_nodes} />
+        <Metric label="Untyped links" value={g.untyped_links} />
+        <Metric
+          label="Typed"
+          text={
+            g.typed_links + g.untyped_links === 0
+              ? "—"
+              : `${String(Math.round((100 * g.typed_links) / (g.typed_links + g.untyped_links)))}%`
+          }
+        />
       </div>
     </Card>
   );

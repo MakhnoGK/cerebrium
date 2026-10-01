@@ -3,6 +3,7 @@ import {
   type ConsolidationProvider,
   type ConsolidationResult,
   type ReconcileResult,
+  type RelateResult,
 } from "@/domain/ports/consolidation-provider";
 
 // The default, offline, test-safe provider: no autonomous generation. `enabled` is
@@ -30,6 +31,12 @@ export class ManualConsolidator implements ConsolidationProvider {
   annotate(): Promise<AnnotateResult> {
     return Promise.reject(
       new Error("manual consolidation provider does not annotate — no generation backend"),
+    );
+  }
+
+  relate(): Promise<RelateResult> {
+    return Promise.reject(
+      new Error("manual consolidation provider does not judge links — no generation backend"),
     );
   }
 }

@@ -76,6 +76,34 @@ export class PgEdgesRepo extends PgBaseRepo implements EdgesRepo {
     return inserted > 0;
   }
 
+  async insertSystemEdgeIfUnconnected(
+    type: EdgeType,
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): Promise<boolean> {
+    const inserted = await this.run(
+      `INSERT INTO edges (src, dst, type, provenance, weight, valid_from, session_id)
+       SELECT @src::text, @dst::text, @type::text, 'system', @weight::float8, @ts::text, @session::text
+       WHERE @src::text <> @dst::text
+         AND EXISTS (SELECT 1 FROM nodes WHERE id = @src AND invalidated_at IS NULL)
+         AND EXISTS (SELECT 1 FROM nodes WHERE id = @dst AND invalidated_at IS NULL)
+         AND NOT EXISTS (
+           SELECT 1 FROM edges e
+           WHERE e.invalidated_at IS NULL
+             AND ((e.src = @src AND e.dst = @dst) OR (e.src = @dst AND e.dst = @src))
+         )
+       ON CONFLICT (src, dst, type) DO UPDATE SET
+         invalidated_at = NULL, valid_from = excluded.valid_from, weight = excluded.weight,
+         provenance = excluded.provenance, session_id = excluded.session_id`,
+      { src, dst, type, weight, ts, session: session_id },
+    );
+
+    return inserted > 0;
+  }
+
   async pairIsConnected(a: string, b: string): Promise<boolean> {
     return (
       (await this.one(

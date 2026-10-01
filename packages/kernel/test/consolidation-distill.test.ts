@@ -51,6 +51,7 @@ const stubProvider: ConsolidationProvider = {
     }),
   reconcile: () => Promise.reject(new Error("not used")),
   annotate: () => Promise.reject(new Error("not used")),
+  relate: () => Promise.reject(new Error("not used")),
 };
 
 afterEach(() => {

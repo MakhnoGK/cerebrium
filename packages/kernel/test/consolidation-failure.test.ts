@@ -24,6 +24,7 @@ function failing(opts: { generate?: string; annotate?: string }): ConsolidationP
       opts.annotate
         ? Promise.reject(new Error(opts.annotate))
         : Promise.resolve({ keywords: [], tags: [], context: "" }),
+    relate: () => Promise.reject(new Error("not used")),
   };
 }
 

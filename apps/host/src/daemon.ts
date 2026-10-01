@@ -199,7 +199,9 @@ export function sweepAgain(swept: ConsolidationTickResult, workLeft: boolean): b
     swept.distilled +
     swept.distill_suggested +
     swept.merged +
-    swept.merge_suggested;
+    swept.merge_suggested +
+    (swept.integrity?.links_typed ?? 0) +
+    (swept.integrity?.links_dropped ?? 0);
 
   return workLeft && swept.generation_failures === 0 && (generated > 0 || swept.yielded === true);
 }
@@ -295,7 +297,11 @@ export async function runDaemon(
         swept.pruned +
         swept.links_added +
         swept.wikilinks_linked +
-        swept.annotated;
+        swept.annotated +
+        (swept.integrity?.reattached ?? 0) +
+        (swept.integrity?.links_typed ?? 0) +
+        (swept.integrity?.links_dropped ?? 0) +
+        (swept.integrity?.edges_repointed ?? 0);
       const failures = swept.generation_failures;
       if (total > 0 || failures > 0 || swept.yielded) {
         process.stderr.write(
@@ -570,6 +576,8 @@ async function main(): Promise<void> {
         distill_suggested: swept.distill_suggested,
         merge_suggested: swept.merge_suggested,
         prune_suggested: swept.prune_suggested,
+        reattached: swept.integrity?.reattached ?? 0,
+        links_typed: swept.integrity?.links_typed ?? 0,
         yielded: swept.yielded === true,
       },
       (client) => subscriptions.wants(client, NotificationTopic.CONSOLIDATION),

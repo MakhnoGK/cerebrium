@@ -218,10 +218,26 @@ export class PgStatsRepo extends PgBaseRepo implements StatsRepo {
       { semantic: params.semantic, episodic: params.episodic },
     );
 
+    const links = await this.one<{ untyped: number; typed: number; edgeless: number }>(
+      `WITH live AS (SELECT id FROM nodes
+                   WHERE memory_kind IN (@semantic, @episodic) AND invalidated_at IS NULL),
+       le AS (SELECT e.src, e.dst, e.type FROM edges e
+                JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
+               WHERE e.invalidated_at IS NULL AND e.src <> e.dst)
+       SELECT (SELECT COUNT(*) FROM le WHERE type = @similar) AS untyped,
+              (SELECT COUNT(*) FROM le WHERE type <> @similar) AS typed,
+              (SELECT COUNT(*) FROM live
+                WHERE id NOT IN (SELECT src FROM le) AND id NOT IN (SELECT dst FROM le)) AS edgeless`,
+      { semantic: params.semantic, episodic: params.episodic, similar: EdgeType.SIMILAR_TO },
+    );
+
     return {
       dangling_edges: dangling?.all_edges ?? 0,
       repointable_edges: dangling?.repointable ?? 0,
       detached_nodes: detached?.c ?? 0,
+      edgeless_nodes: links?.edgeless ?? 0,
+      untyped_links: links?.untyped ?? 0,
+      typed_links: links?.typed ?? 0,
     };
   }
 }

@@ -32,7 +32,7 @@ import { Badge, Card, Empty, ErrorText, Mono, Notice, RelTime, useNow } from "./
 export const CANDIDATES_KEY = ["review", "candidates"] as const;
 export const REVIEWS_KEY = ["review", "runner"] as const;
 
-const KINDS: CandidateKind[] = ["distill", "merge", "link", "prune", "documents"];
+const KINDS: CandidateKind[] = ["distill", "merge", "supersede", "link", "prune", "documents"];
 
 const KIND_TONE: Record<CandidateKind, Tone> = {
   distill: "info",
@@ -40,6 +40,7 @@ const KIND_TONE: Record<CandidateKind, Tone> = {
   link: "neutral",
   documents: "neutral",
   prune: "warn",
+  supersede: "warn",
 };
 
 type ProposalFilter = "all" | "has" | "waiting";
@@ -363,9 +364,13 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
 
   const reject = () => onDecide("Rejected", { decision: "reject" });
 
+  const survivor = members.find((node) => node.id === candidate.canonical_id);
+  const confirmMerge = (body: string) =>
+    window.prompt(mergeConfirm(survivor?.content?.length ?? 0, body.length)) === CONFIRM_WORD;
+
   const submitDraft = (draft: Draft) => {
     if (kind === "merge") {
-      if (!window.confirm(MERGE_CONFIRM)) return;
+      if (!confirmMerge(draft.body)) return;
       onDecide("Merged", { decision: "apply", collapse: true, override: draft });
     } else {
       onDecide("Applied", { decision: "apply", override: draft });
@@ -402,7 +407,11 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
         )}
 
         {proposal ? (
-          <ProposalBlock proposal={proposal} />
+          kind === "supersede" ? (
+            <Verdict proposal={proposal} />
+          ) : (
+            <ProposalBlock proposal={proposal} />
+          )
         ) : (
           generates(kind) && (
             <p className="waiting muted">
@@ -472,7 +481,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
                 disabled={!proposal}
                 title={proposal ? undefined : "No proposal yet"}
                 onClick={() => {
-                  if (window.confirm(MERGE_CONFIRM)) {
+                  if (proposal && confirmMerge(proposal.body)) {
                     onDecide("Merged", { decision: "apply", collapse: true });
                   }
                 }}
@@ -496,6 +505,19 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
               onClick={() => onDecide("Applied", { decision: "apply" })}
             >
               Apply
+            </button>
+          )}
+          {!retired && kind === "supersede" && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => {
+                if (window.confirm(SUPERSEDE_CONFIRM)) {
+                  onDecide("Superseded", { decision: "apply" });
+                }
+              }}
+            >
+              Retire older
             </button>
           )}
           {!retired && kind === "prune" && (
@@ -525,20 +547,35 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
   );
 }
 
-const MERGE_CONFIRM =
-  "Merge into one note? The kept note is rewritten and the duplicate is retired.";
+const CONFIRM_WORD = "MERGE";
+
+function mergeConfirm(currentChars: number, proposedChars: number): string {
+  return (
+    `The kept note (${currentChars.toLocaleString()} chars) is rewritten to the proposal ` +
+    `(${proposedChars.toLocaleString()} chars) and the duplicate is retired. ` +
+    `Type ${CONFIRM_WORD} to continue.`
+  );
+}
+
+const SUPERSEDE_CONFIRM =
+  "Retire the older note? It is invalidated and its links move to the newer one.";
+
+function Verdict({ proposal }: { proposal: ConsolidationProposal }) {
+  if (!proposal.recommendation) return null;
+  return (
+    <div className="proposal-verdict">
+      <Badge tone={proposal.recommendation === "apply" ? "ok" : "warn"}>
+        model: {proposal.recommendation}
+      </Badge>
+      {proposal.reason && <span>{proposal.reason}</span>}
+    </div>
+  );
+}
 
 function ProposalBlock({ proposal }: { proposal: ConsolidationProposal }) {
   return (
     <div className="proposal">
-      {proposal.recommendation && (
-        <div className="proposal-verdict">
-          <Badge tone={proposal.recommendation === "apply" ? "ok" : "warn"}>
-            model: {proposal.recommendation}
-          </Badge>
-          {proposal.reason && <span>{proposal.reason}</span>}
-        </div>
-      )}
+      <Verdict proposal={proposal} />
       <h3 className="proposal-title">{proposal.title}</h3>
       {proposal.summary && <p className="proposal-summary">{proposal.summary}</p>}
       <Clamp text={proposal.body} lines={12} />
@@ -554,6 +591,9 @@ function memberRole(
 ): [Tone, string] | null {
   if (kind === "merge" && candidate.canonical_id) {
     return node.id === candidate.canonical_id ? ["ok", "keeps"] : ["warn", "duplicate"];
+  }
+  if (kind === "supersede" && candidate.canonical_id) {
+    return node.id === candidate.canonical_id ? ["ok", "newer"] : ["warn", "older"];
   }
   if (kind === "link" && candidate.canonical_id) {
     return node.id === candidate.canonical_id ? ["info", "target"] : ["neutral", "source"];

@@ -19,7 +19,7 @@ import type {
 } from "@cerebrium/contracts/dashboard";
 import { ReviewService } from "./review.service";
 
-const KINDS = ["distill", "merge", "link", "prune", "documents"];
+const KINDS = ["distill", "merge", "link", "prune", "documents", "supersede"];
 
 // Request bodies arrive as whatever the browser sent, whatever the parameter type says.
 function oneOf(value: unknown, allowed: string[]): boolean {

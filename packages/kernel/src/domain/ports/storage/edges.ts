@@ -40,6 +40,15 @@ export interface EdgesRepo {
     session_id: string,
     ts: string,
   ): Promise<boolean>;
+  // Revives a retired edge of the same type; refuses when any live edge joins the pair.
+  insertSystemEdgeIfUnconnected(
+    type: EdgeType,
+    src: string,
+    dst: string,
+    session_id: string,
+    ts: string,
+    weight: number,
+  ): Promise<boolean>;
   pairIsConnected(a: string, b: string): Promise<boolean>;
   insertSystemDocumentsIfLive(
     note: string,

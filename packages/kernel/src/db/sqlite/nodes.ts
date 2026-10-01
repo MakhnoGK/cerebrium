@@ -36,6 +36,23 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
     return row.invalidated_at === null ? "live" : "invalidated";
   }
 
+  async collapseProfile(
+    id: string,
+  ): Promise<{ type: string; revisions: number; inbound: number } | undefined> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT n.type AS type,
+                  (SELECT COUNT(*) FROM revisions r WHERE r.node_id = n.id) AS revisions,
+                  (SELECT COUNT(*) FROM edges e JOIN nodes s ON s.id = e.src
+                    WHERE e.dst = n.id AND e.invalidated_at IS NULL AND s.invalidated_at IS NULL
+                      AND s.memory_kind != 'mirror') AS inbound
+           FROM nodes n WHERE n.id = ?`,
+        )
+        .get(id) as { type: string; revisions: number; inbound: number } | undefined,
+    );
+  }
+
   // The mirror provenance of a node, or undefined if it doesn't exist. Lets the
   // invalidate guard tell a code mirror (origin='repo', indexer-only) from an
   // external mirror (agent-curated, retirable by hand) from an authored node.

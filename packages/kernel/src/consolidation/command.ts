@@ -8,15 +8,20 @@ import {
   type ConsolidationTask,
   type ReconcileResult,
   type ReconcileTask,
+  type RelateResult,
+  type RelateTask,
 } from "@/domain/ports/consolidation-provider";
 import {
   ANNOTATE_SYSTEM_PROMPT,
   annotatePrompt,
   parseAnnotate,
   parseReconcile,
+  parseRelate,
   parseResult,
   RECONCILE_SYSTEM_PROMPT,
   reconcilePrompt,
+  RELATE_SYSTEM_PROMPT,
+  relatePrompt,
   SYSTEM_PROMPT,
   taskPrompt,
 } from "@/consolidation/provider";
@@ -101,6 +106,19 @@ export class CommandConsolidator implements ConsolidationProvider {
       content: task.content,
     });
     return parseAnnotate(await this.runners[GenerationRole.ANNOTATE](input));
+  }
+
+  async relate(task: RelateTask): Promise<RelateResult> {
+    const input = JSON.stringify({
+      task: "relate",
+      system: RELATE_SYSTEM_PROMPT,
+      model: this.roles[GenerationRole.GENERATE].model,
+      project: task.project,
+      prompt: relatePrompt(task),
+      a: task.a,
+      b: task.b,
+    });
+    return parseRelate(await this.runners[GenerationRole.GENERATE](input));
   }
 }
 

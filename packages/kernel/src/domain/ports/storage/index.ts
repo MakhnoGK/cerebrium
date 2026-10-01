@@ -22,8 +22,12 @@ export {
   type ConsolidationRepo,
   pairKey,
   type DuplicatePair,
+  type EdgelessNode,
+  type RelationInput,
   type ResolvedStatus,
+  type StrandedEdge,
   type SweepSeed,
+  type UntypedLink,
 } from "@/domain/ports/storage/consolidation";
 export { EDGES_REPO_TOKEN, type EdgesRepo, type SubgraphEdge } from "@/domain/ports/storage/edges";
 export {

@@ -1,4 +1,4 @@
-import type { ConsolidationRunSummary } from "@cerebrium/contracts/dashboard";
+import type { ConsolidationRunSummary, IntegrityCounters } from "@cerebrium/contracts/dashboard";
 
 export interface ConsolidationTickResult {
   // Set when the sweep stopped between stages because a client was waiting. Not a failure:
@@ -27,6 +27,7 @@ export interface ConsolidationTickResult {
   annotated: number;
   generation_failures: number;
   last_error: string | null;
+  integrity?: IntegrityCounters;
   stage?: string;
   // Wall time of each completed stage, in ms. One row per run keeps only the last stage
   // name, so without this the cost of a sweep is not recoverable after it ends.

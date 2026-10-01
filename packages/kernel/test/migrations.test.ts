@@ -45,6 +45,7 @@ const MIGRATION_IDS = [
   "031_jobs.sql",
   "032_review_decisions.sql",
   "033_process_host.sql",
+  "034_integrity_counters.cjs",
 ];
 
 const dirs: string[] = [];
