@@ -1,4 +1,5 @@
 import { injectable } from "tsyringe";
+import type { ConsolidationRunSummary } from "@cerebrium/contracts/dashboard";
 import type {
   ConsolidationCandidate,
   ConsolidationProposal,
@@ -14,6 +15,7 @@ import {
   type ResolvedStatus,
   type SweepSeed,
 } from "@/domain/ports/storage";
+import { RUN_SUMMARY_COLUMNS } from "@/db/activity-rows";
 import { BaseRepo } from "@/db/sqlite/base";
 import { LATEST_REVISION } from "@/db/sqlite/internal";
 import { newId } from "@/core/ids";
@@ -811,6 +813,17 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
 
       return { candidate, status };
     });
+  }
+
+  async recentRuns(limit: number): Promise<ConsolidationRunSummary[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT ${RUN_SUMMARY_COLUMNS} FROM consolidation_runs
+           ORDER BY started_at DESC, id DESC LIMIT ?`,
+        )
+        .all(limit) as ConsolidationRunSummary[],
+    );
   }
 
   async reportTick(runId: string, result: ConsolidationTickResult): Promise<void> {

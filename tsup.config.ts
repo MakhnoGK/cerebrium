@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { defineConfig } from "tsup";
 
-const WORKSPACES = ["packages/contracts", "packages/kernel", "apps/host", "apps/plugin"];
+const WORKSPACES = [
+  "packages/contracts",
+  "packages/kernel",
+  "apps/host",
+  "apps/plugin",
+  "apps/dashboard-api",
+];
 
 // tsup externalizes only the root package.json's dependencies on its own, and those are
 // declared per workspace. The workspaces themselves are source and must be bundled.
@@ -38,6 +44,7 @@ export default defineConfig({
     "embed-worker": "apps/host/src/embed-worker.ts",
     healthcheck: "apps/host/src/healthcheck.ts",
     "import-sqlite": "apps/host/src/import-sqlite.ts",
+    dashboard: "apps/dashboard-api/src/main.ts",
   },
   format: ["esm"],
   platform: "node",

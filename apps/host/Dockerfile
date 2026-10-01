@@ -22,7 +22,10 @@ COPY packages/contracts/src packages/contracts/src
 COPY packages/kernel/src packages/kernel/src
 COPY apps/host/src apps/host/src
 COPY apps/plugin/src apps/plugin/src
-RUN npm run build:bins && npm prune --omit=dev
+COPY apps/dashboard-api/src apps/dashboard-api/src
+COPY apps/dashboard-web/index.html apps/dashboard-web/vite.config.ts apps/dashboard-web/tsconfig.json apps/dashboard-web/
+COPY apps/dashboard-web/src apps/dashboard-web/src
+RUN npm run build:bins && npm run build:dashboard && npm prune --omit=dev
 
 FROM node:26-bookworm-slim
 
@@ -40,6 +43,7 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/dist dist
+COPY --from=build /app/apps/dashboard-web/dist dist/dashboard-web
 
 ENV NODE_ENV=production \
   CEREBRIUM_HOME=/data \

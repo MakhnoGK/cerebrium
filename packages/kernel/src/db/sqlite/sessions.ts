@@ -1,7 +1,9 @@
 import { injectable } from "tsyringe";
+import type { ActivityEntry } from "@cerebrium/contracts/dashboard";
 import type { EventAction } from "@cerebrium/contracts/vocab";
 import type { SessionsRepo } from "@/domain/ports/storage";
 import type { Writer } from "@/domain/writer";
+import { activityOf, type EventRow } from "@/db/activity-rows";
 import { BaseRepo } from "@/db/sqlite/base";
 import { newId } from "@/core/ids";
 
@@ -59,5 +61,20 @@ export class SqliteSessionsRepo extends BaseRepo implements SessionsRepo {
         detail == null ? null : JSON.stringify(detail),
         ts,
       );
+  }
+
+  async recentEvents(limit: number, before: string | null): Promise<ActivityEntry[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT e.id, e.ts, e.action, e.session_id, e.node_id, e.detail,
+                s.client, s.principal_id AS principal
+         FROM events e LEFT JOIN sessions s ON s.id = e.session_id
+         WHERE (@before IS NULL OR e.ts < @before)
+         ORDER BY e.ts DESC, e.id DESC
+         LIMIT @limit`,
+      )
+      .all({ before, limit }) as EventRow[];
+
+    return Promise.resolve(rows.map(activityOf));
   }
 }

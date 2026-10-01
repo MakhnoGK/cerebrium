@@ -6,6 +6,7 @@ import { principalOfWriter } from "@/domain/writer";
 import { auditDetail } from "@/application/audit-detail";
 import { CapabilityDeniedError } from "@/application/errors";
 import {
+  ActivityFeed,
   ActivityMonitor,
   PrincipalPolicyService,
   PrincipalQuotaService,
@@ -60,6 +61,7 @@ export class CallPipeline {
     private readonly activity: ActivityMonitor,
     private readonly policy: PrincipalPolicyService,
     private readonly quotas: PrincipalQuotaService,
+    private readonly feed: ActivityFeed,
   ) {}
 
   useReadDispatcher(dispatch: ReadDispatcher | undefined): void {
@@ -97,11 +99,11 @@ export class CallPipeline {
       const review = this.authorize(name, principal);
       const result = await this.run(container, name, args, writer);
 
-      await this.record(name, session, result, null, review, args);
+      await this.record(name, session, result, null, review, args, writer);
 
       return result;
     } catch (error) {
-      await this.record(name, session, null, error as Error, false, args);
+      await this.record(name, session, null, error as Error, false, args, writer);
 
       throw error;
     }
@@ -162,6 +164,7 @@ export class CallPipeline {
     error: Error | null,
     review: boolean,
     args: unknown,
+    writer: Writer,
   ): Promise<void> {
     // `start_session` mints the very session it is attributed to, so its id is in the
     // result rather than the arguments.
@@ -171,15 +174,23 @@ export class CallPipeline {
       return;
     }
 
+    const node = error === null ? nodeOf(result) : {};
+    const detail = detailOf(error, review, error === null ? auditDetail(name, args, result) : null);
+
     await this.events.invoke({
-      events: [
-        {
-          action: callAction(name),
-          session_id: attributed,
-          ...(error === null ? nodeOf(result) : {}),
-          detail: detailOf(error, review, error === null ? auditDetail(name, args, result) : null),
-        },
-      ],
+      events: [{ action: callAction(name), session_id: attributed, ...node, detail }],
+    });
+
+    this.feed.publish({
+      id: null,
+      ts: this.clock.now(),
+      action: callAction(name),
+      session_id: attributed,
+      node_id: node.node_id ?? null,
+      principal: this.policy.principalOf(writer),
+      client: writer.client ?? null,
+      ok: error === null,
+      detail,
     });
   }
 }

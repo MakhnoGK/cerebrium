@@ -1,3 +1,5 @@
+import type { ConsolidationRunSummary } from "@cerebrium/contracts/dashboard";
+
 export interface ConsolidationTickResult {
   // Set when the sweep stopped between stages because a client was waiting. Not a failure:
   // the completed stages stand and the rest happens on the next tick.
@@ -41,6 +43,8 @@ export interface ConsolidationReporter {
   // Close every run left open by a process that never got to close its own. Returns how
   // many there were.
   closeAbandonedRuns(reason: string): Promise<number>;
+  // The newest runs first.
+  recentRuns(limit: number): Promise<ConsolidationRunSummary[]>;
 }
 
 export const CONSOLIDATION_REPORTER_TOKEN = Symbol("ConsolidationReporter");

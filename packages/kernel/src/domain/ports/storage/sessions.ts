@@ -1,3 +1,4 @@
+import type { ActivityEntry } from "@cerebrium/contracts/dashboard";
 import type { EventAction } from "@cerebrium/contracts/vocab";
 import type { Writer } from "@/domain/writer";
 
@@ -20,4 +21,6 @@ export interface SessionsRepo {
     detail: unknown,
     ts: string,
   ): Promise<void>;
+  // The newest events first, each with the client and principal of its session.
+  recentEvents(limit: number, before: string | null): Promise<ActivityEntry[]>;
 }

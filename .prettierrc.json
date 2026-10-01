@@ -19,7 +19,16 @@
     "^@/(.*)$",
     "^@host/(.*)$",
     "^@plugin/(.*)$",
+    "^@dashboard-api/(.*)$",
     "^@test/(.*)$",
     "^[./]"
+  ],
+  "overrides": [
+    {
+      "files": "*.tsx",
+      "options": {
+        "importOrderParserPlugins": ["typescript", "jsx"]
+      }
+    }
   ]
 }

@@ -1,5 +1,13 @@
 # dashboard-web
 
-The web dashboard's UI (React), served from the host and backed by `apps/dashboard-api`.
+The web dashboard's UI (React, Vite, TanStack Query), served by `apps/dashboard-api`.
 
-Scaffold only. It is built after the cutover to the host (migration plan, Phase 8).
+- **Overview** — one banner that says what needs attention, and cards for the daemon, the
+  store, the embedding queue, generation, consolidation, jobs, the review backlog and graph
+  integrity.
+- **Activity** — the live action log: history from `/api/activity` with live calls from
+  `/api/stream` on top; filter by action or principal, errors only, pause.
+- **Consolidation** — the sweep runs and live sweep notices.
+
+`npm run build:dashboard` builds it into `apps/dashboard-web/dist`;
+`npm run dev:dashboard` serves it with `/api` proxied to `localhost:7480`.

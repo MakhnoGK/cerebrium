@@ -35,6 +35,9 @@ by `.github/workflows/release.yml`:
 - Generation is Ollama, run natively on the host for the GPU and reached from the daemon at
   `host.docker.internal:11434`, which is the host's loopback. While it is down the sweep
   records generation failures and detection still runs.
+- The `dashboard` service serves the web dashboard on `http://100.92.157.103:7480`, the
+  tailnet address only, with no login. It reads the daemon over the socket in
+  `cerebrium-data` as the `cerebrium-dashboard` client; see `apps/dashboard-api/README.md`.
 - The `runner` service runs agent tasks with `claude -p` from the same image. It reaches the
   daemon over the socket in `cerebrium-data`, writes as `cerebrium-runner` (profile in
   `MEMORY_PRINCIPALS`: writes go to review, 60 an hour), and is authenticated only with the

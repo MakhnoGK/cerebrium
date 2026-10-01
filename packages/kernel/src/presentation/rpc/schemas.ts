@@ -68,6 +68,11 @@ const SCHEMAS = {
     kind: z.string().optional(),
     limit: z.number().int().positive().optional(),
   }),
+  recent_activity: z.object({
+    session_id: ulid.optional(),
+    limit: z.number().int().positive().optional(),
+    before: iso.optional(),
+  }),
 
   // Writes
   //
