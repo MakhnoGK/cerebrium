@@ -235,10 +235,11 @@ export const RELATE_SYSTEM_PROMPT =
   "'relates_to' — same topic, system or piece of work, neither depends on the other; " +
   "'supersedes' — one record is a newer version of the same fact and makes the other " +
   "outdated; 'duplicate_of' — both state the same fact and keeping one loses nothing; " +
-  "'none' — they only share vocabulary and are about different things. For a directed " +
+  "'none' — they only share vocabulary and are about different things; two records about " +
+  "the same feature, component or project thread are at least relates_to. For a directed " +
   "relation set from to the record that cites, the newer one, or the duplicate to fold " +
-  "away; for relates_to and none set from to 'a'. When torn between two, pick the weaker " +
-  "(none < relates_to < references); pick supersedes or duplicate_of only when certain. " +
+  "away; for relates_to and none set from to 'a'. When unsure, pick relates_to; pick " +
+  "supersedes or duplicate_of only when certain. " +
   "Return JSON: relation, from ('a'|'b'), reason (one sentence).";
 
 export const RELATE_SCHEMA = {
