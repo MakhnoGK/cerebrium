@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { pluginServerPath } from "@plugin/scripts/agent-host-entry";
+import { kernelEnv, pluginServerPath } from "@plugin/scripts/agent-hosts";
 import { verifyHostEntry } from "@plugin/scripts/agent-verify";
 import { pluginBundle } from "./plugin-bundle";
 
@@ -76,8 +76,7 @@ describe("verifyHostEntry", () => {
       home: dir,
       repoRoot,
       nodePath: process.execPath,
-      kernelUrl: `tcp://127.0.0.1:${String(port)}`,
-      tokenFile,
+      env: kernelEnv(`tcp://127.0.0.1:${String(port)}`, tokenFile),
       hasCommand: () => false,
     });
 

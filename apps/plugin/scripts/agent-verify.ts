@@ -4,13 +4,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  hostEntryEnv,
-  pluginServerPath,
-  type HostEntryInput,
-} from "@plugin/scripts/agent-host-entry";
-import {
   hookScript,
+  isHostEnv,
   piExtension,
+  pluginServerPath,
   serverPath,
   type HostId,
   type PlanInput,
@@ -326,7 +323,7 @@ async function pluginBundle(input: PlanInput): Promise<VerifyResult> {
 }
 
 /** Opens a real session on the host through the plugin bundle, as the entry would. */
-export async function verifyHostEntry(input: HostEntryInput): Promise<VerifyResult> {
+export async function verifyHostEntry(input: PlanInput): Promise<VerifyResult> {
   const path = pluginServerPath(input.repoRoot);
   if (!existsSync(path)) {
     return { name: "host session", ok: false, detail: `${path} is missing — run npm run build` };
@@ -334,7 +331,7 @@ export async function verifyHostEntry(input: HostEntryInput): Promise<VerifyResu
   const scratch = mkdtempSync(join(tmpdir(), "cerebrium-verify-host-"));
   try {
     const { tools, call } = await speakTo(input.nodePath, path, {
-      ...hostEntryEnv(input),
+      ...input.env,
       CEREBRIUM_HOME: scratch,
     });
     const failed = call === undefined || call.error !== undefined || call.result?.isError === true;
@@ -343,7 +340,7 @@ export async function verifyHostEntry(input: HostEntryInput): Promise<VerifyResu
       ok: !failed && tools > 0,
       detail: failed
         ? `session_start failed: ${callText(call).slice(0, 300)}`
-        : `session_start answered by ${input.kernelUrl}; ${String(tools)} tools exposed`,
+        : `session_start answered by ${input.env.MEMORY_KERNEL_URL ?? "?"}; ${String(tools)} tools exposed`,
     };
   } catch (err) {
     return { name: "host session", ok: false, detail: `could not run it: ${String(err)}` };
@@ -353,7 +350,9 @@ export async function verifyHostEntry(input: HostEntryInput): Promise<VerifyResu
 }
 
 export async function verify(input: PlanInput, hosts: readonly HostId[]): Promise<VerifyResult[]> {
-  const results = [bundle(input), store(input), await server(input), await pluginBundle(input)];
+  const results = isHostEnv(input.env)
+    ? [await verifyHostEntry(input), await pluginBundle(input)]
+    : [bundle(input), store(input), await server(input), await pluginBundle(input)];
   for (const host of hosts) {
     results.push(host === "pi" ? await piBridge(input) : await hook(input, host));
   }

@@ -31,17 +31,6 @@ services:
       MEMORY_JOBS_CODE_INDEX_MS: "0"
       MEMORY_STORE_BACKEND: postgres
       MEMORY_PG_URL_FILE: /run/secrets/pg_url
-      # Until the cutover the Mac is the only writer; a sweep here would write edges and
-      # candidates into the imported copy that the source never had.
-      MEMORY_CONSOLIDATE_INTERVAL_MS: "86400000"
-      MEMORY_CONSOLIDATE_LINKS: "off"
-      MEMORY_CONSOLIDATE_LINK_PRUNE: "off"
-      MEMORY_CONSOLIDATE_DISTILL: "off"
-      MEMORY_CONSOLIDATE_MERGE: "off"
-      MEMORY_CONSOLIDATE_PRUNE: "off"
-      MEMORY_CONSOLIDATE_ANNOTATE: "off"
-      MEMORY_CONSOLIDATE_RECONCILE: "off"
-      MEMORY_CONSOLIDATE_DOCUMENTS: "off"
       MEMORY_RPC_LISTEN: 0.0.0.0:7433
     ports:
       # The tailnet address only: the listener has tokens but no TLS.

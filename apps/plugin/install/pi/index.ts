@@ -215,7 +215,9 @@ export default function (pi: ExtensionAPI): void {
     lines.push(
       `server: ${config === null ? "-" : [config.launch.command, ...config.launch.args].join(" ")}`,
     );
-    lines.push(`store: ${config?.launch.env.MEMORY_DB_PATH ?? "server default"}`);
+    lines.push(
+      `store: ${config?.launch.env.MEMORY_KERNEL_URL ?? config?.launch.env.MEMORY_DB_PATH ?? "server default"}`,
+    );
     lines.push(`session: ${state.sessionId ?? "none"} · ${state.calls} calls`);
     lines.push(`tools: ${registered.length}`);
 
