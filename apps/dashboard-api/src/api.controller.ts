@@ -1,10 +1,12 @@
 import { Controller, Get, Inject, Query, Sse, type MessageEvent } from "@nestjs/common";
 import { from, interval, map, merge, startWith, switchMap, type Observable } from "rxjs";
 import type { ActivityPage, DashboardStatus } from "@cerebrium/contracts/dashboard";
+import type { GraphSnapshot } from "@cerebrium/contracts/graph";
 import { KernelClient } from "./kernel.client";
 import { StatusService } from "./status.service";
 
 const STATUS_EVERY_MS = 5_000;
+const GRAPH_TIMEOUT_MS = 30_000;
 
 @Controller("api")
 export class ApiController {
@@ -29,6 +31,18 @@ export class ApiController {
       ...(Number.isInteger(n) && n > 0 ? { limit: n } : {}),
       ...(before ? { before } : {}),
     });
+  }
+
+  @Get("graph")
+  graph(
+    @Query("invalidated") invalidated?: string,
+    @Query("symbols") symbols?: string,
+  ): Promise<GraphSnapshot> {
+    return this.kernel.call<GraphSnapshot>(
+      "graph_snapshot",
+      { invalidated: invalidated === "1", symbols: symbols === "1" },
+      GRAPH_TIMEOUT_MS,
+    );
   }
 
   @Sse("stream")

@@ -6,6 +6,7 @@ import {
   CONSOLIDATION_REPO_TOKEN,
   EDGES_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
+  GRAPH_REPO_TOKEN,
   JOBS_REPO_TOKEN,
   NODES_REPO_TOKEN,
   PRINCIPAL_TOKENS_REPO_TOKEN,
@@ -23,6 +24,7 @@ import { SqliteCodeRepo } from "@/db/sqlite/code";
 import { SqliteConsolidationRepo } from "@/db/sqlite/consolidation";
 import { SqliteEdgesRepo } from "@/db/sqlite/edges";
 import { SqliteEmbeddingQueueRepo } from "@/db/sqlite/embedding-queue";
+import { SqliteGraphRepo } from "@/db/sqlite/graph";
 import { SqliteJobsRepo } from "@/db/sqlite/jobs";
 import { SqliteNodesRepo } from "@/db/sqlite/nodes";
 import { SqlitePrincipalTokensRepo } from "@/db/sqlite/principal-tokens";
@@ -60,6 +62,7 @@ export function registerSqliteRepositories(c: DependencyContainer): void {
   c.register(CONSOLIDATION_REPO_TOKEN, { useClass: SqliteConsolidationRepo });
   c.register(EDGES_REPO_TOKEN, { useClass: SqliteEdgesRepo });
   c.register(EMBEDDING_QUEUE_REPO_TOKEN, { useClass: SqliteEmbeddingQueueRepo });
+  c.register(GRAPH_REPO_TOKEN, { useClass: SqliteGraphRepo });
   c.register(JOBS_REPO_TOKEN, { useClass: SqliteJobsRepo });
   c.register(NODES_REPO_TOKEN, { useClass: SqliteNodesRepo });
   c.register(PRINCIPALS_REPO_TOKEN, { useClass: SqlitePrincipalsRepo });

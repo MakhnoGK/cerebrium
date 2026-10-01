@@ -7,13 +7,17 @@
   "description": "Web dashboard UI (React)",
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "sigma": "^3.0.3"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "graphology-types": "^0.24.8",
     "vite": "^7.3.6"
   }
 }

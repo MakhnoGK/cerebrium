@@ -4,6 +4,7 @@ import { CODE_REPO_TOKEN } from "@/domain/ports/storage/code";
 import { CONSOLIDATION_REPO_TOKEN } from "@/domain/ports/storage/consolidation";
 import { EDGES_REPO_TOKEN } from "@/domain/ports/storage/edges";
 import { EMBEDDING_QUEUE_REPO_TOKEN } from "@/domain/ports/storage/embedding-queue";
+import { GRAPH_REPO_TOKEN } from "@/domain/ports/storage/graph";
 import { JOBS_REPO_TOKEN } from "@/domain/ports/storage/jobs";
 import { NODES_REPO_TOKEN } from "@/domain/ports/storage/nodes";
 import { PRINCIPAL_TOKENS_REPO_TOKEN } from "@/domain/ports/storage/principal-tokens";
@@ -23,6 +24,7 @@ export const STORAGE_TOKENS = {
   consolidationRepo: CONSOLIDATION_REPO_TOKEN,
   edgesRepo: EDGES_REPO_TOKEN,
   embeddingQueueRepo: EMBEDDING_QUEUE_REPO_TOKEN,
+  graphRepo: GRAPH_REPO_TOKEN,
   jobsRepo: JOBS_REPO_TOKEN,
   nodesRepo: NODES_REPO_TOKEN,
   principalsRepo: PRINCIPALS_REPO_TOKEN,

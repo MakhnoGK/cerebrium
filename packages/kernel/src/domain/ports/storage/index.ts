@@ -30,6 +30,7 @@ export {
   type UntypedLink,
 } from "@/domain/ports/storage/consolidation";
 export { EDGES_REPO_TOKEN, type EdgesRepo, type SubgraphEdge } from "@/domain/ports/storage/edges";
+export { GRAPH_REPO_TOKEN, type GraphRepo } from "@/domain/ports/storage/graph";
 export {
   EMBEDDING_QUEUE_REPO_TOKEN,
   type EmbeddingQueueRepo,

@@ -4,6 +4,7 @@ import "@/application/use-cases/local/activity";
 import "@/application/use-cases/local/branch-code";
 import "@/application/use-cases/local/consolidation";
 import "@/application/use-cases/local/fetch-nodes";
+import "@/application/use-cases/local/graph";
 import "@/application/use-cases/local/invalidate-memory";
 import "@/application/use-cases/local/jobs";
 import "@/application/use-cases/local/link-nodes";

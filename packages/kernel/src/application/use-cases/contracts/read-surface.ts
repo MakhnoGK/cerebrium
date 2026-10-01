@@ -1,5 +1,6 @@
 import { RECENT_ACTIVITY } from "@/application/use-cases/contracts/activity";
 import { SUGGEST_CANDIDATES } from "@/application/use-cases/contracts/consolidation";
+import { GRAPH_SNAPSHOT } from "@/application/use-cases/contracts/graph";
 import { JOB_STATUS } from "@/application/use-cases/contracts/jobs";
 import { OPERATOR_SNAPSHOT, STATS_SNAPSHOT } from "@/application/use-cases/contracts/operations";
 import { FETCH_NODES, LOOKUP_CODE } from "@/application/use-cases/contracts/read";
@@ -22,6 +23,7 @@ export const READ_SURFACE = {
   stats_snapshot: STATS_SNAPSHOT,
   operator_snapshot: OPERATOR_SNAPSHOT,
   recent_activity: RECENT_ACTIVITY,
+  graph_snapshot: GRAPH_SNAPSHOT,
 } as const;
 
 export type ReadName = keyof typeof READ_SURFACE;

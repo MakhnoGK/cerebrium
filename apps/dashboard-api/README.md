@@ -14,6 +14,9 @@ at `/`.
   merge, `collapse`) and `POST …/:id/retry` (drop the proposal so the model writes it again).
 - `GET /api/reviews` and `POST /api/reviews/decision` — writes that landed under a `suggest`
   posture (the runner's), kept or undone.
+- `GET /api/graph?invalidated=1&symbols=1` — the whole authored graph for drawing it
+  (`graph_snapshot`): live nodes and edges, the retired nodes a live edge still points at,
+  and on request every retired node and the code symbols notes cite.
 - `GET /api/stream` — server-sent events: every audited call as it is recorded
   (`activity`), each finished sweep (`consolidation`) and a fresh status every 5 s
   (`status`).
