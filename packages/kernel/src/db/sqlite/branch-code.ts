@@ -119,7 +119,19 @@ export class SqliteBranchCodeRepo implements BranchCodeRepo {
     return refuse();
   }
 
+  async hasRef(): Promise<never> {
+    return refuse();
+  }
+
   async resolveRefs(): Promise<never> {
+    return refuse();
+  }
+
+  async citableSymbols(): Promise<never> {
+    return refuse();
+  }
+
+  async indexWatermark(): Promise<never> {
     return refuse();
   }
 

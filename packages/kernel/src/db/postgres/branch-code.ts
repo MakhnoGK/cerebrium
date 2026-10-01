@@ -4,6 +4,7 @@ import type {
   BranchCodeRepo,
   BranchFileChange,
   BranchScope,
+  CitableCodeSymbol,
   CodeBranchRow,
   CodeRefRow,
   CodeRepoRow,
@@ -620,6 +621,41 @@ export class PgBranchCodeRepo extends PgBaseRepo implements BranchCodeRepo {
          symbol_live = 1, invalidated_at = NULL`,
       { ...ref, ts },
     );
+  }
+
+  async hasRef(src: string, remoteKey: string, path: string, qualified: string): Promise<boolean> {
+    return (
+      (await this.one(
+        `SELECT 1 FROM code_refs
+         WHERE src = @src AND remote_key = @remoteKey AND path = @path AND qualified = @qualified
+           AND invalidated_at IS NULL
+         LIMIT 1`,
+        { src, remoteKey, path, qualified },
+      )) !== undefined
+    );
+  }
+
+  async citableSymbols(): Promise<CitableCodeSymbol[]> {
+    return this.all(
+      `SELECT DISTINCT ON (r.remote_key, u.path, s.qualified)
+              s.id, s.name, s.kind, s.qualified, u.path, r.remote_key, r.display_name AS repo
+       FROM code_branch_files f
+       JOIN code_branches b ON b.repo_id = f.repo_id AND b.branch = f.branch
+       JOIN code_repos r ON r.id = f.repo_id
+       JOIN code_units u ON u.id = f.unit_id
+       JOIN code_symbols s ON s.unit_id = u.id
+       WHERE f.invalidated_at IS NULL AND b.retired_at IS NULL
+       ORDER BY r.remote_key, u.path, s.qualified,
+                (f.branch = r.default_branch) DESC, b.indexed_at DESC`,
+    );
+  }
+
+  async indexWatermark(): Promise<string | null> {
+    const row = await this.one<{ files: number; gone: number }>(
+      "SELECT COUNT(*)::int AS files, COUNT(invalidated_at)::int AS gone FROM code_branch_files",
+    );
+
+    return row ? `${String(row.files)}:${String(row.gone)}` : null;
   }
 
   async resolveRefs(srcIds: string[], scopes: BranchScope[]): Promise<ResolvedCodeRef[]> {

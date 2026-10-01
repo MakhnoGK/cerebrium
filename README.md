@@ -1294,9 +1294,11 @@ bundle.
 
 What differs from SQLite:
 
-- **No code mirror.** `code_index`, `code_lookup` and `job_submit code.index` answer "not
-  available on the postgres backend", and the daemon schedules no index. Authored edges into
-  code carried over from SQLite sit in `code_refs`.
+- **Code is indexed per branch, not mirrored into nodes.** The plugin uploads a checkout's
+  files and the host parses them; the daemon schedules no index of its own. A note's link
+  into code — from `link`, from an applied `documents` candidate or from the sweep's
+  auto-citation — is a `code_refs` row keyed by repo, path and qualified name, resolved
+  against whichever branch a later read is on.
 - **Text ranking is BM25 over a stemmed (english) title and body.** Measured on a snapshot
   of the live store it scores above FTS5 on the text branch and level with it on hybrid.
 - **Vectors belong to a space.** A provider whose model is not the active space's is refused

@@ -86,6 +86,17 @@ export interface CodeRefRow {
   symbol_kind: string;
 }
 
+// A symbol a note can cite by name: one per (repo, path, qualified) across live branches.
+export interface CitableCodeSymbol {
+  id: string;
+  name: string;
+  kind: string;
+  repo: string;
+  remote_key: string;
+  path: string;
+  qualified: string;
+}
+
 export interface ResolvedCodeRef {
   src: string;
   type: string;
@@ -173,7 +184,12 @@ export interface BranchCodeRepo {
   ): Promise<(CodeSymbolRow & { distance: number })[]>;
 
   insertRef(ref: CodeRefRow, ts: string): Promise<void>;
+  // Whether `src` already has a live ref to this target, of any type.
+  hasRef(src: string, remoteKey: string, path: string, qualified: string): Promise<boolean>;
   resolveRefs(srcIds: string[], scopes: BranchScope[]): Promise<ResolvedCodeRef[]>;
+  citableSymbols(): Promise<CitableCodeSymbol[]>;
+  // Moves whenever a branch's files change, so a citation scan knows to rerun.
+  indexWatermark(): Promise<string | null>;
 
   pendingEmbeddings(limit: number): Promise<{ embed_hash: string; text: string }[]>;
   commitVectors(

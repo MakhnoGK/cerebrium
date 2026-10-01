@@ -3,6 +3,7 @@ export {
   type BranchCodeRepo,
   type BranchFileChange,
   type BranchScope,
+  type CitableCodeSymbol,
   type CodeBranchRow,
   type CodeRefRow,
   type CodeRepoRow,
