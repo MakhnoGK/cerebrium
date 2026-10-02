@@ -108,13 +108,17 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   candidateInputs(ids: string[]): Promise<{ id: string; title: string; content: string }[]>;
   // Live authored nodes with no live edge to another live authored node.
   edgelessNodes(limit: number): Promise<EdgelessNode[]>;
-  // The checkpoint of the node's own session, else the newest earlier one of its project.
+  // The checkpoint of the node's own session within its project family, else the newest
+  // earlier one of its project.
   anchorCheckpoint(id: string): Promise<string | null>;
   // Live similar_to edges between live authored nodes, strongest first.
   untypedLinks(limit: number): Promise<UntypedLink[]>;
   relationInputs(ids: string[]): Promise<RelationInput[]>;
   // Live system edges from a live authored node into a retired one that has a superseder.
   strandedSystemEdges(limit: number): Promise<StrandedEdge[]>;
+  // Live system similar_to/relates_to edges between authored nodes of different project
+  // families.
+  crossProjectSystemLinks(limit: number): Promise<StrandedEdge[]>;
   staleEpisodicClusters(opts: {
     minScore: number;
     minCluster: number;

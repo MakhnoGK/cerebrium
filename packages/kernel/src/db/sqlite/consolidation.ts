@@ -34,6 +34,13 @@ import { newId } from "@/core/ids";
 const CANDIDATE_COLS =
   "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by, attempts, last_error";
 
+// `toonspace` and `toonspace-builder` are one project family; a project-less node joins any.
+function sameProjectFamily(a: string, b: string): string {
+  const family = (p: string) => `substr(${p}, 1, instr(${p} || '-', '-') - 1)`;
+
+  return `(${a} IS NULL OR ${b} IS NULL OR ${family(a)} = ${family(b)})`;
+}
+
 interface Provenance {
   session: string;
   created_at: string;
@@ -318,6 +325,7 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
          JOIN chunks c ON c.id = knn.chunk_id
          JOIN nodes n ON n.id = c.node_id
          WHERE n.id != @node AND n.memory_kind = 'semantic' AND n.invalidated_at IS NULL
+           AND ${sameProjectFamily("n.project", "(SELECT project FROM nodes WHERE id = @node)")}
          GROUP BY n.id ORDER BY distance ASC LIMIT @cap`,
       )
       .all({ node: nodeId, seed, k, cap }) as { id: string; distance: number }[];
@@ -472,7 +480,8 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
         `SELECT c.id AS id FROM nodes n
          JOIN nodes c ON c.memory_kind = 'episodic' AND c.type = 'checkpoint'
            AND c.invalidated_at IS NULL AND c.id != n.id
-           AND (c.created_by_session = n.created_by_session
+           AND ((c.created_by_session = n.created_by_session
+                 AND ${sameProjectFamily("c.project", "n.project")})
                 OR (c.project IS n.project AND c.created_at <= n.created_at))
          WHERE n.id = ?
          ORDER BY CASE WHEN c.created_by_session = n.created_by_session THEN 0 ELSE 1 END,
@@ -536,6 +545,24 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
                SELECT 1 FROM edges x WHERE x.dst = d.id AND x.type = 'supersedes'
                  AND x.invalidated_at IS NULL
              )
+           ORDER BY e.src, e.dst, e.type LIMIT ?`,
+        )
+        .all(limit) as StrandedEdge[],
+    );
+  }
+
+  async crossProjectSystemLinks(limit: number): Promise<StrandedEdge[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight FROM edges e
+           JOIN nodes s ON s.id = e.src
+           JOIN nodes d ON d.id = e.dst
+           WHERE e.invalidated_at IS NULL AND e.provenance = 'system'
+             AND e.type IN ('similar_to', 'relates_to')
+             AND s.memory_kind IN ('semantic', 'episodic') AND s.invalidated_at IS NULL
+             AND d.memory_kind IN ('semantic', 'episodic') AND d.invalidated_at IS NULL
+             AND NOT ${sameProjectFamily("s.project", "d.project")}
            ORDER BY e.src, e.dst, e.type LIMIT ?`,
         )
         .all(limit) as StrandedEdge[],

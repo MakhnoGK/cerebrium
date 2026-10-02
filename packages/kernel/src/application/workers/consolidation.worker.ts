@@ -332,6 +332,7 @@ export class ConsolidationWorker {
 
       await this.report(runId, "integrity", result);
       await this.repointStranded(now, result);
+      await this.unlinkCrossProject(now, result);
       await this.reattach(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
@@ -1015,6 +1016,21 @@ export class ConsolidationWorker {
           to: successor,
         });
       }
+    }
+  }
+
+  private async unlinkCrossProject(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.reattach === Posture.OFF) return;
+
+    for (const edge of await this.consolidationRepo.crossProjectSystemLinks(this.batch.repoint)) {
+      await this.edgesRepo.invalidateEdge(edge.src, edge.dst, edge.type, now);
+      result.integrity!.links_dropped++;
+      await this.logIntegrity(now, edge.src, {
+        op: "drop",
+        relation: edge.type,
+        to: edge.dst,
+        via: "cross-project",
+      });
     }
   }
 
