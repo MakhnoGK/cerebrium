@@ -35,6 +35,11 @@ const EMBEDDED = `EXISTS (
   WHERE c.node_id = n.id AND c.stale = 0
 )`;
 
+// `toonspace` and `toonspace-builder` are one project family; a project-less node joins any.
+function sameProjectFamily(a: string, b: string): string {
+  return `(${a} IS NULL OR ${b} IS NULL OR split_part(${a}, '-', 1) = split_part(${b}, '-', 1))`;
+}
+
 interface Provenance {
   session: string;
   created_at: string;
@@ -265,12 +270,13 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
 
     if (!seed) return [];
 
-    return this.all(this.knn("n.memory_kind = 'semantic' AND n.invalidated_at IS NULL"), {
-      node: nodeId,
-      seed,
-      k,
-      cap,
-    });
+    return this.all(
+      this.knn(
+        `n.memory_kind = 'semantic' AND n.invalidated_at IS NULL
+         AND ${sameProjectFamily("n.project", "(SELECT project FROM nodes WHERE id = @node)")}`,
+      ),
+      { node: nodeId, seed, k, cap },
+    );
   }
 
   async sweepSeeds(limit: number): Promise<SweepSeed[]> {
@@ -391,7 +397,8 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
           `SELECT c.id AS id FROM nodes n
            JOIN nodes c ON c.memory_kind = 'episodic' AND c.type = 'checkpoint'
              AND c.invalidated_at IS NULL AND c.id <> n.id
-             AND (c.created_by_session = n.created_by_session
+             AND ((c.created_by_session = n.created_by_session
+                   AND ${sameProjectFamily("c.project", "n.project")})
                   OR (c.project IS NOT DISTINCT FROM n.project AND c.created_at <= n.created_at))
            WHERE n.id = @id
            ORDER BY CASE WHEN c.created_by_session = n.created_by_session THEN 0 ELSE 1 END,
@@ -449,6 +456,21 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
            SELECT 1 FROM edges x WHERE x.dst = d.id AND x.type = 'supersedes'
              AND x.invalidated_at IS NULL
          )
+       ORDER BY e.src, e.dst, e.type LIMIT @limit`,
+      { limit },
+    );
+  }
+
+  async crossProjectSystemLinks(limit: number): Promise<StrandedEdge[]> {
+    return this.all(
+      `SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight FROM edges e
+       JOIN nodes s ON s.id = e.src
+       JOIN nodes d ON d.id = e.dst
+       WHERE e.invalidated_at IS NULL AND e.provenance = 'system'
+         AND e.type IN ('similar_to', 'relates_to')
+         AND s.memory_kind IN ('semantic', 'episodic') AND s.invalidated_at IS NULL
+         AND d.memory_kind IN ('semantic', 'episodic') AND d.invalidated_at IS NULL
+         AND NOT ${sameProjectFamily("s.project", "d.project")}
        ORDER BY e.src, e.dst, e.type LIMIT @limit`,
       { limit },
     );

@@ -65,6 +65,7 @@ async function write(
   content: string,
   kind = MemoryKind.SEMANTIC,
   type = "fact",
+  project?: string,
 ): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
@@ -74,6 +75,7 @@ async function write(
       type,
       title,
       content,
+      project,
     })) as Envelope
   ).id;
 }
@@ -392,6 +394,100 @@ describe("Reattach", () => {
     // Then
     expect(asked).toBeGreaterThan(0);
     expect(relater.calls.length).toBe(asked);
+  });
+});
+
+describe("Project families", () => {
+  it("should link twins within a project family and not across families", async () => {
+    // Given
+    const cerebrium = await write("Retry budget", TWIN, MemoryKind.SEMANTIC, "fact", "cerebrium");
+    const toonspace = await write("Client retries", TWIN, MemoryKind.SEMANTIC, "fact", "toonspace");
+    const builder = await write(
+      "Builder retries",
+      TWIN,
+      MemoryKind.SEMANTIC,
+      "fact",
+      "toonspace-builder",
+    );
+
+    // When
+    await sweep();
+
+    // Then
+    expect(await env.edges.pairIsConnected(toonspace, builder)).toBe(true);
+    expect(await env.edges.pairIsConnected(cerebrium, toonspace)).toBe(false);
+    expect(await env.edges.pairIsConnected(cerebrium, builder)).toBe(false);
+  });
+
+  it("should drop a system link across families and keep an authored one", async () => {
+    // Given
+    const a = await write("Retry budget", TWIN, MemoryKind.SEMANTIC, "fact", "cerebrium");
+    const b = await write(
+      "Episode purchase",
+      "coins buy an episode",
+      MemoryKind.SEMANTIC,
+      "fact",
+      "toonspace-builder",
+    );
+    const c = await write(
+      "Host migration",
+      "only two projects move",
+      MemoryKind.SEMANTIC,
+      "fact",
+      "toonspace",
+    );
+    await env.edges.insertSystemEdgeIfUnconnected(
+      EdgeType.RELATES_TO,
+      a,
+      b,
+      session,
+      env.clock.t,
+      0.8,
+    );
+    await container
+      .resolve(LinkTool)
+      .invoke({ session_id: session, src: a, dst: c, type: EdgeType.REFERENCES });
+
+    // When
+    const result = await sweep();
+
+    // Then
+    expect(result.integrity?.links_dropped).toBeGreaterThanOrEqual(1);
+    expect(await liveEdge(a, b, EdgeType.RELATES_TO)).toBe(false);
+    expect(await liveEdge(a, c, EdgeType.REFERENCES)).toBe(true);
+    const logged = (await env.sessions.recentEvents(50, null)).filter(
+      (e) => e.action === (EventAction.GRAPH_INTEGRITY as string),
+    );
+    expect(logged).toContainEqual(
+      expect.objectContaining({
+        node_id: a,
+        detail: { op: "drop", relation: EdgeType.RELATES_TO, to: b, via: "cross-project" },
+      }),
+    );
+  });
+
+  it("should not anchor a record to its session's checkpoint from another family", async () => {
+    // Given
+    const checkpoint = await write(
+      "Block closed",
+      "the deploy block closed cleanly",
+      MemoryKind.EPISODIC,
+      "checkpoint",
+      "toonspace",
+    );
+    const record = await write(
+      "agent.selftest run completed",
+      "zebra quartz violin",
+      MemoryKind.EPISODIC,
+      "event_note",
+      "cerebrium",
+    );
+
+    // When
+    await sweep();
+
+    // Then
+    expect(await env.edges.pairIsConnected(record, checkpoint)).toBe(false);
   });
 });
 
