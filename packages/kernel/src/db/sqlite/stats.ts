@@ -13,6 +13,7 @@ import {
   type StatsRepo,
 } from "@/domain/ports/storage";
 import { BaseRepo, DB_TOKEN } from "@/db/sqlite/base";
+import { projectFamily } from "@/db/sqlite/internal";
 
 function walBytes(dbPath: string): number {
   if (dbPath === ":memory:" || !dbPath) return 0;
@@ -229,13 +230,13 @@ export class SqliteStatsRepo extends BaseRepo implements StatsRepo {
         supersedes: EdgeType.SUPERSEDES,
       }) as { all_edges: number; repointable: number | null };
 
-    // Live authored nodes unreachable from the densest hub — i.e. everything a graph
-    // view would render floating. Walks the undirected live subgraph, which is the
-    // authored side only (~200 nodes), never the mirror mass.
+    // Live authored nodes unreachable from every project family's densest hub — i.e.
+    // everything a graph view would render floating. Walks the undirected live subgraph,
+    // which is the authored side only, never the mirror mass.
     const detached = this.db
       .prepare(
         `WITH RECURSIVE
-         live AS (SELECT id FROM nodes
+         live AS (SELECT id, ${projectFamily("project")} AS family FROM nodes
                    WHERE memory_kind IN (@semantic, @episodic) AND invalidated_at IS NULL),
          le AS (SELECT e.src a, e.dst b FROM edges e
                   JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
@@ -244,8 +245,13 @@ export class SqliteStatsRepo extends BaseRepo implements StatsRepo {
                 SELECT e.dst, e.src FROM edges e
                   JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
                  WHERE e.invalidated_at IS NULL),
-         seed AS (SELECT a AS id FROM le GROUP BY a ORDER BY COUNT(*) DESC LIMIT 1),
-         reach(id) AS (SELECT id FROM seed
+         hubs AS (SELECT id FROM (
+                    SELECT le.a AS id,
+                           ROW_NUMBER() OVER (PARTITION BY l.family ORDER BY COUNT(*) DESC, le.a) AS r
+                      FROM le JOIN live l ON l.id = le.a
+                     GROUP BY le.a, l.family)
+                   WHERE r = 1),
+         reach(id) AS (SELECT id FROM hubs
                        UNION SELECT le.b FROM le JOIN reach ON le.a = reach.id)
          SELECT COUNT(*) AS c FROM live
           WHERE EXISTS (SELECT 1 FROM le) AND id NOT IN (SELECT id FROM reach)`,

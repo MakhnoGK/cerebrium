@@ -26,6 +26,16 @@ export const ENRICHED = `
 
 export const ACTIVE_SPACE = "(SELECT id FROM vector_spaces WHERE active)";
 
+// `toonspace` and `toonspace-builder` are one project family; NULL for a project-less node.
+export function projectFamily(column: string): string {
+  return `split_part(${column}, '-', 1)`;
+}
+
+// A project-less node belongs with any family.
+export function sameProjectFamily(a: string, b: string): string {
+  return `(${a} IS NULL OR ${b} IS NULL OR ${projectFamily(a)} = ${projectFamily(b)})`;
+}
+
 // pgvector's text form, which is also a JSON array.
 export function toVectorLiteral(vector: readonly number[]): string {
   return `[${vector.join(",")}]`;

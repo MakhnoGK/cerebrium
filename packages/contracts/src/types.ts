@@ -160,7 +160,7 @@ export interface TechStats {
   graph: {
     dangling_edges: number; // live edges from a live node into an invalidated one
     repointable_edges: number; // of those, the authored ones whose target has a live successor
-    detached_nodes: number; // live nodes no longer reachable from the graph's densest hub
+    detached_nodes: number; // live nodes reachable from no project family's densest hub
     edgeless_nodes: number; // live nodes with no live edge to another live node
     untyped_links: number; // live similar_to edges between live nodes
     typed_links: number; // every other live edge between live nodes
