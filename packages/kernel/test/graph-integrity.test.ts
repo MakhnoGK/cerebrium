@@ -89,9 +89,7 @@ async function sweep() {
   return container.resolve(ConsolidationWorker).tick();
 }
 
-beforeEach(async () => {
-  relater = new FakeRelater();
-  env = setup({ consolidator: relater });
+function posture(extra: Record<string, string> = {}) {
   container.register(ConsolidationPostureConfig, {
     useValue: new ConsolidationPostureConfig(
       new StaticConfigSource({
@@ -99,9 +97,30 @@ beforeEach(async () => {
         MEMORY_CONSOLIDATE_DISTILL: "off",
         MEMORY_CONSOLIDATE_ANNOTATE: "off",
         MEMORY_CONSOLIDATE_RECONCILE: "off",
+        ...extra,
       }),
     ),
   });
+}
+
+async function revise(id: string, times: number) {
+  for (let rev = 0; rev < times; rev++) {
+    await container.resolve(UpdateTool).invoke({
+      session_id: session,
+      id,
+      content: `${TWIN} (revision ${String(rev)})`,
+    });
+  }
+}
+
+function integrityEvents(heard: ActivityEntry[]) {
+  return heard.filter((e) => e.action === (EventAction.GRAPH_INTEGRITY as string));
+}
+
+beforeEach(async () => {
+  relater = new FakeRelater();
+  env = setup({ consolidator: relater });
+  posture();
   session = (await container.resolve(SessionStartTool).invoke({})).session_id;
 });
 
@@ -195,8 +214,78 @@ describe("Link typing", () => {
     expect(await liveEdge(a, b, EdgeType.RELATES_TO)).toBe(true);
   });
 
-  it("should retire the older note only once a supersede is applied", async () => {
+  it("should retire the older note at once when the model finds it superseded", async () => {
     // Given
+    const [a, b] = await twins();
+    relater.verdict = { relation: LinkRelation.SUPERSEDES, from: "b" };
+    const heard: ActivityEntry[] = [];
+    const unlisten = container.resolve(ActivityFeed).listen((e) => heard.push(e));
+
+    // When
+    const result = await sweep();
+    unlisten();
+
+    // Then
+    expect(result.integrity?.superseded).toBe(1);
+    expect((await env.nodes.envelope(a))?.invalidated).toBe(true);
+    expect(await liveEdge(b, a, EdgeType.SUPERSEDES)).toBe(true);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.SUPERSEDE }),
+    ).toHaveLength(0);
+    expect(integrityEvents(heard).find((e) => e.node_id === a)?.detail).toMatchObject({
+      op: "supersede",
+      to: b,
+    });
+  });
+
+  it("should keep a hand-maintained note the model finds superseded", async () => {
+    // Given
+    const [a, b] = await twins();
+    await revise(a, 4);
+    relater.verdict = { relation: LinkRelation.SUPERSEDES, from: "b" };
+    const heard: ActivityEntry[] = [];
+    const unlisten = container.resolve(ActivityFeed).listen((e) => heard.push(e));
+
+    // When
+    const result = await sweep();
+    unlisten();
+
+    // Then
+    expect(result.integrity?.superseded ?? 0).toBe(0);
+    expect((await env.nodes.envelope(a))?.invalidated).toBe(false);
+    expect(await liveEdge(a, b, EdgeType.RELATES_TO)).toBe(true);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.SUPERSEDE }),
+    ).toHaveLength(0);
+    expect(integrityEvents(heard).find((e) => e.node_id === a)?.detail).toMatchObject({
+      op: "supersede",
+      kept: "hand-maintained",
+      revisions: 5,
+    });
+  });
+
+  it("should settle a supersede candidate queued before the posture was auto", async () => {
+    // Given
+    const [a, b] = await twins();
+    const id = await env.consolidation.insertCandidate({
+      kind: ConsolidationKind.SUPERSEDE,
+      member_ids: [a, b],
+      canonical_id: b,
+      score: 1,
+      detected_at: env.clock.t,
+    });
+
+    // When
+    await sweep();
+
+    // Then
+    expect((await env.consolidation.getCandidate(id!))?.status).toBe("applied");
+    expect((await env.nodes.envelope(a))?.invalidated).toBe(true);
+  });
+
+  it("should queue a supersede for review under the suggest posture", async () => {
+    // Given
+    posture({ MEMORY_CONSOLIDATE_SUPERSEDE: "suggest" });
     const [a, b] = await twins();
     relater.verdict = { relation: LinkRelation.SUPERSEDES, from: "b" };
     await sweep();
@@ -377,13 +466,7 @@ describe("Collapse guard", () => {
   it("should refuse to collapse a merge into a hand-maintained note", async () => {
     // Given
     const [a, b] = await twins();
-    for (let rev = 0; rev < 4; rev++) {
-      await container.resolve(UpdateTool).invoke({
-        session_id: session,
-        id: b,
-        content: `${TWIN} (revision ${String(rev)})`,
-      });
-    }
+    await revise(b, 4);
     const id = await env.consolidation.insertCandidate({
       kind: ConsolidationKind.MERGE,
       member_ids: [a, b],
@@ -402,7 +485,7 @@ describe("Collapse guard", () => {
     });
 
     // Then
-    await expect(collapse).rejects.toThrow(/hand-maintained/);
+    await expect(collapse).rejects.toThrow(/hand-maintained.*mark it duplicate/);
     expect((await env.nodes.envelope(a))?.invalidated).toBe(false);
     expect((await env.consolidation.getCandidate(id!))?.status).toBe("pending");
   });

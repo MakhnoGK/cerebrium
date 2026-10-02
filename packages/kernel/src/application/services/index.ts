@@ -30,6 +30,10 @@ export {
 } from "@/application/services/principal-token.service";
 export { PrincipalQuotaService } from "@/application/services/principal-quota.service";
 export { isRevoked, PrincipalTrustService } from "@/application/services/principal-trust.service";
+export {
+  type HandMaintained,
+  NodeProtectionService,
+} from "@/application/services/node-protection.service";
 export { NodeReferenceService } from "@/application/services/node-reference.service";
 export { ReviewService } from "@/application/services/review.service";
 export {

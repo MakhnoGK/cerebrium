@@ -907,6 +907,45 @@ select {
   background: var(--err-bg);
 }
 
+.merge-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: var(--warn-bg);
+}
+
+.merge-confirm p {
+  margin: 0;
+}
+
+.action-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.action-hints div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.action-hints dt {
+  font-weight: 600;
+}
+
+.action-hints dt::after {
+  content: " —";
+}
+
+.action-hints dd {
+  margin: 0;
+}
+
 .editor {
   display: flex;
   flex-direction: column;

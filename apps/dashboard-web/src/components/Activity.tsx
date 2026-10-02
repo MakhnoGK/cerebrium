@@ -167,20 +167,38 @@ function Row({ entry }: { entry: ActivityEntry }) {
         <Mono text={entry.node_id} />
       </td>
       <td className="detail">
-        <Detail value={entry.detail} />
+        <Detail value={entry.detail} summary={summarize(entry)} />
       </td>
     </tr>
   );
 }
 
-function Detail({ value }: { value: unknown }) {
+function summarize(entry: ActivityEntry): string | null {
+  if (entry.action !== "graph_integrity") return null;
+  const d = entry.detail as Record<string, unknown> | null;
+  if (!d || typeof d.op !== "string") return null;
+  const titles = Array.isArray(d.titles) ? (d.titles as unknown[]).map(String) : [];
+  const verb =
+    d.op === "supersede"
+      ? d.kept
+        ? `kept (${String(d.kept)}), not superseded by`
+        : "superseded by"
+      : typeof d.relation === "string"
+        ? `${d.op} ${d.relation}`
+        : d.op;
+  const [from, to] = titles;
+  if (from && to) return `${truncate(from, 40)} — ${verb} → ${truncate(to, 40)}`;
+  return typeof d.via === "string" ? `${verb} (${d.via})` : verb;
+}
+
+function Detail({ value, summary }: { value: unknown; summary: string | null }) {
   if (value === null || value === undefined) return <span className="muted">—</span>;
   if (typeof value !== "object") return <span className="mono">{truncate(String(value), 80)}</span>;
   const compact = JSON.stringify(value);
   if (compact === "{}" || compact === "[]") return <span className="muted">—</span>;
   return (
     <details>
-      <summary className="mono">{truncate(compact, 60)}</summary>
+      <summary className={summary ? undefined : "mono"}>{summary ?? truncate(compact, 60)}</summary>
       <pre>{JSON.stringify(value, null, 2)}</pre>
     </details>
   );

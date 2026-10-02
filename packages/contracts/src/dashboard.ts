@@ -80,6 +80,7 @@ export interface IntegrityCounters {
   links_typed: number;
   links_dropped: number;
   links_to_review: number;
+  superseded?: number;
   edges_repointed: number;
 }
 

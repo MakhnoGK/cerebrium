@@ -106,7 +106,7 @@ function RunsTable({ runs }: { runs: ConsolidationRunSummary[] }) {
             </th>
             <th
               className="num"
-              title="reattached / links typed / dropped / sent to review / repointed"
+              title="reattached / links typed / dropped / superseded / sent to review / repointed"
             >
               Integrity
             </th>
@@ -152,7 +152,8 @@ function RunsTable({ runs }: { runs: ConsolidationRunSummary[] }) {
                 <td className="num nowrap">
                   {run.integrity
                     ? `${String(run.integrity.reattached)} / ${String(run.integrity.links_typed)} / ` +
-                      `${String(run.integrity.links_dropped)} / ${String(run.integrity.links_to_review)} / ` +
+                      `${String(run.integrity.links_dropped)} / ${String(run.integrity.superseded ?? 0)} / ` +
+                      `${String(run.integrity.links_to_review)} / ` +
                       String(run.integrity.edges_repointed)
                     : "—"}
                 </td>
