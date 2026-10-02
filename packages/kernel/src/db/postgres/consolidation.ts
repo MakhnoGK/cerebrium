@@ -21,7 +21,7 @@ import {
 } from "@/domain/ports/storage";
 import { RUN_SUMMARY_COLUMNS, runSummaryOf, type RunSummaryRow } from "@/db/activity-rows";
 import { PgBaseRepo } from "@/db/postgres/base";
-import { ACTIVE_SPACE, LATEST_REVISION } from "@/db/postgres/internal";
+import { ACTIVE_SPACE, LATEST_REVISION, sameProjectFamily } from "@/db/postgres/internal";
 import { newId } from "@/core/ids";
 
 const CANDIDATE_COLS =
@@ -34,11 +34,6 @@ const EMBEDDED = `EXISTS (
   SELECT 1 FROM chunks c JOIN chunk_vectors v ON v.chunk_id = c.id AND v.space_id = ${ACTIVE_SPACE}
   WHERE c.node_id = n.id AND c.stale = 0
 )`;
-
-// `toonspace` and `toonspace-builder` are one project family; a project-less node joins any.
-function sameProjectFamily(a: string, b: string): string {
-  return `(${a} IS NULL OR ${b} IS NULL OR split_part(${a}, '-', 1) = split_part(${b}, '-', 1))`;
-}
 
 interface Provenance {
   session: string;

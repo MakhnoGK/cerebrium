@@ -35,6 +35,16 @@ export const AUTHORED_VEC = "chunk_vec";
 export const CODE_VEC = "code_vec";
 export type VectorPool = typeof AUTHORED_VEC | typeof CODE_VEC;
 
+// `toonspace` and `toonspace-builder` are one project family; NULL for a project-less node.
+export function projectFamily(column: string): string {
+  return `substr(${column}, 1, instr(${column} || '-', '-') - 1)`;
+}
+
+// A project-less node belongs with any family.
+export function sameProjectFamily(a: string, b: string): string {
+  return `(${a} IS NULL OR ${b} IS NULL OR ${projectFamily(a)} = ${projectFamily(b)})`;
+}
+
 export function vectorPoolFor(db: Database.Database, nodeId: string): VectorPool {
   const row = db
     .prepare("SELECT memory_kind AS kind, origin FROM nodes WHERE id = ?")

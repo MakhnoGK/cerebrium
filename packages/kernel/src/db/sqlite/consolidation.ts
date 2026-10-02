@@ -21,7 +21,7 @@ import {
 } from "@/domain/ports/storage";
 import { RUN_SUMMARY_COLUMNS, runSummaryOf, type RunSummaryRow } from "@/db/activity-rows";
 import { BaseRepo } from "@/db/sqlite/base";
-import { LATEST_REVISION } from "@/db/sqlite/internal";
+import { LATEST_REVISION, sameProjectFamily } from "@/db/sqlite/internal";
 import { newId } from "@/core/ids";
 
 // The consolidation queue aggregate. Detection (in the daemon's
@@ -33,13 +33,6 @@ import { newId } from "@/core/ids";
 
 const CANDIDATE_COLS =
   "id, kind, status, project, member_ids, canonical_id, score, proposal, detected_at, resolved_at, resolved_by, attempts, last_error";
-
-// `toonspace` and `toonspace-builder` are one project family; a project-less node joins any.
-function sameProjectFamily(a: string, b: string): string {
-  const family = (p: string) => `substr(${p}, 1, instr(${p} || '-', '-') - 1)`;
-
-  return `(${a} IS NULL OR ${b} IS NULL OR ${family(a)} = ${family(b)})`;
-}
 
 interface Provenance {
   session: string;

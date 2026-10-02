@@ -10,7 +10,7 @@ import {
 } from "@/domain/ports/storage";
 import { PgBaseRepo } from "@/db/postgres/base";
 import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
-import { ACTIVE_SPACE } from "@/db/postgres/internal";
+import { ACTIVE_SPACE, projectFamily } from "@/db/postgres/internal";
 
 @injectable()
 export class PgStatsRepo extends PgBaseRepo implements StatsRepo {
@@ -201,7 +201,7 @@ export class PgStatsRepo extends PgBaseRepo implements StatsRepo {
 
     const detached = await this.one<{ c: number }>(
       `WITH RECURSIVE
-       live AS (SELECT id FROM nodes
+       live AS (SELECT id, ${projectFamily("project")} AS family FROM nodes
                  WHERE memory_kind IN (@semantic, @episodic) AND invalidated_at IS NULL),
        le AS (SELECT e.src a, e.dst b FROM edges e
                 JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
@@ -210,8 +210,13 @@ export class PgStatsRepo extends PgBaseRepo implements StatsRepo {
               SELECT e.dst, e.src FROM edges e
                 JOIN live s ON s.id = e.src JOIN live d ON d.id = e.dst
                WHERE e.invalidated_at IS NULL),
-       seed AS (SELECT a AS id FROM le GROUP BY a ORDER BY COUNT(*) DESC, a LIMIT 1),
-       reach(id) AS (SELECT id FROM seed
+       hubs AS (SELECT id FROM (
+                  SELECT le.a AS id,
+                         ROW_NUMBER() OVER (PARTITION BY l.family ORDER BY COUNT(*) DESC, le.a) AS r
+                    FROM le JOIN live l ON l.id = le.a
+                   GROUP BY le.a, l.family) ranked
+                 WHERE r = 1),
+       reach(id) AS (SELECT id FROM hubs
                      UNION SELECT le.b FROM le JOIN reach ON le.a = reach.id)
        SELECT COUNT(*) AS c FROM live
         WHERE EXISTS (SELECT 1 FROM le) AND id NOT IN (SELECT id FROM reach)`,

@@ -39,20 +39,28 @@ export interface GraphSnapshot {
 export interface GraphIntegrity {
   // Live authored nodes with no live edge to another live authored node.
   edgeless: ReadonlySet<string>;
-  // Live authored nodes unreachable from the densest hub; the edgeless ones included.
+  // Live authored nodes unreachable from every project family's densest hub; the edgeless
+  // ones included.
   detached: ReadonlySet<string>;
   // Indexes into `edges`: live edges from a live node into an invalidated one.
   dangling: ReadonlySet<number>;
+}
+
+// `toonspace` and `toonspace-builder` are one project family; project-less nodes form their own.
+export function projectFamily(project: string | null): string | null {
+  return project === null ? null : project.split("-", 1)[0]!;
 }
 
 // The same three measures `stats` reports as graph health, over a snapshot.
 export function graphIntegrity(snapshot: Pick<GraphSnapshot, "nodes" | "edges">): GraphIntegrity {
   const live = new Set<string>();
   const dead = new Set<string>();
+  const family = new Map<string, string | null>();
 
   for (const node of snapshot.nodes) {
     if (node.kind === "symbol") continue;
     (node.invalidated ? dead : live).add(node.id);
+    family.set(node.id, projectFamily(node.project));
   }
 
   const neighbors = new Map<string, Set<string>>();
@@ -84,33 +92,30 @@ export function graphIntegrity(snapshot: Pick<GraphSnapshot, "nodes" | "edges">)
     }
   });
 
-  let seed: string | null = null;
-  let best = -1;
+  const hubs = new Map<string | null, { id: string; degree: number }>();
 
   for (const [id, set] of neighbors) {
-    if (set.size > best || (set.size === best && seed !== null && id < seed)) {
-      seed = id;
-      best = set.size;
+    const key = family.get(id) ?? null;
+    const best = hubs.get(key);
+
+    if (!best || set.size > best.degree || (set.size === best.degree && id < best.id)) {
+      hubs.set(key, { id, degree: set.size });
     }
   }
 
-  const reached = new Set<string>();
+  const queue = [...hubs.values()].map((hub) => hub.id);
+  const reached = new Set(queue);
 
-  if (seed !== null) {
-    const queue = [seed];
-    reached.add(seed);
-
-    for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
-      for (const next of neighbors.get(id) ?? []) {
-        if (!reached.has(next)) {
-          reached.add(next);
-          queue.push(next);
-        }
+  for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
+    for (const next of neighbors.get(id) ?? []) {
+      if (!reached.has(next)) {
+        reached.add(next);
+        queue.push(next);
       }
     }
   }
 
-  const detached = new Set(seed === null ? [] : [...live].filter((id) => !reached.has(id)));
+  const detached = new Set(hubs.size === 0 ? [] : [...live].filter((id) => !reached.has(id)));
 
   return { edgeless, detached, dangling };
 }

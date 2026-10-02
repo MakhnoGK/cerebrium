@@ -25,14 +25,14 @@ describeStorage("graph snapshot", (backend) => {
   let edges: EdgesRepo;
   let graph: GraphRepo;
 
-  const write = async (title: string, kind = MemoryKind.SEMANTIC) =>
+  const write = async (title: string, kind = MemoryKind.SEMANTIC, project: string | null = "p") =>
     (
       await nodes.createNode({
         memory_kind: kind,
         type: kind === MemoryKind.SEMANTIC ? "fact" : "event_note",
         title,
         content: `# ${title}\n\n${title} opens the body.\n\nMore below.`,
-        project: "p",
+        project,
         session_id: "s",
         ts: T0,
       })
@@ -178,5 +178,26 @@ describeStorage("graph snapshot", (backend) => {
       detached: health.detached_nodes,
       dangling: health.dangling_edges,
     });
+  });
+
+  it("should measure detachment from each project family's hub", async () => {
+    // Given
+    const hub = await write("Hub");
+    for (const spoke of [await write("One"), await write("Two")]) await link(hub, spoke);
+    const builder = await write("Builder", MemoryKind.SEMANTIC, "q-builder");
+    await link(builder, await write("Q", MemoryKind.SEMANTIC, "q"));
+    await link(
+      await write("Loose", MemoryKind.SEMANTIC, null),
+      await write("Loose two", MemoryKind.SEMANTIC, null),
+    );
+    await link(await write("Island A"), await write("Island B"));
+
+    // When
+    const integrity = graphIntegrity(await graph.snapshot({ invalidated: true, symbols: false }));
+    const health = (await scope.resolve<StatsRepo>(STATS_REPO_TOKEN).techStats(T0)).graph;
+
+    // Then
+    expect(integrity.detached.size).toBe(2);
+    expect(health.detached_nodes).toBe(2);
   });
 });

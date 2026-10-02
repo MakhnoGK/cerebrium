@@ -10,7 +10,7 @@ export const metadata = {
     "separately, sessions, events); storage (DB + WAL bytes, page stats); " +
     "drain health (embedding provider, whether the background daemon is alive, and the current worker-lease holder); " +
     "graph integrity (edges still pointing at soft-deleted nodes, how many of those are authored edges whose target has " +
-    "a live successor, and live nodes stranded off the main graph — all three should read 0); " +
+    "a live successor, and live nodes stranded off their project family's graph — all three should read 0); " +
     "and generation (the configured backend, whether it generates at all, and what each role — generate, " +
     "reconcile, annotate — will actually be sent: model, host, deadline, and whether it inherits them). " +
     "Use it to answer 'how many items are in the queue right now', 'is the embedding backlog being worked off', " +
