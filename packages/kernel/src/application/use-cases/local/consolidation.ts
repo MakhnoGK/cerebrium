@@ -13,6 +13,7 @@ import {
 } from "@/domain/ports/storage";
 import { InvalidCursorError } from "@/application/errors";
 import { CodeRefService } from "@/application/services/code-ref.service";
+import { NodeProtectionService } from "@/application/services/node-protection.service";
 import {
   APPLY_CANDIDATE,
   RETRY_CANDIDATE,
@@ -28,7 +29,6 @@ import {
   type SuggestCandidatesArgs,
   type SuggestCandidatesResult,
 } from "@/application/use-cases/contracts";
-import { ConsolidationThresholdsConfig } from "@/infrastructure/config";
 
 @useCase(SUGGEST_CANDIDATES)
 export class LocalSuggestCandidates implements SuggestCandidates {
@@ -87,25 +87,19 @@ export class LocalApplyCandidate implements ApplyCandidate {
     @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     private readonly codeRefs: CodeRefService,
-    private readonly thresholds: ConsolidationThresholdsConfig,
+    private readonly protection: NodeProtectionService,
   ) {}
 
-  private async refuseProtected(ids: string[], action: string): Promise<void> {
+  private async refuseProtected(ids: string[], action: string, hint: string): Promise<void> {
     for (const id of ids) {
-      const profile = await this.nodes.collapseProfile(id);
+      const profile = await this.protection.handMaintained(id);
 
       if (!profile) continue;
 
-      if (
-        profile.revisions >= this.thresholds.protectRevisions ||
-        profile.inbound >= this.thresholds.protectInbound
-      ) {
-        throw new Error(
-          `${id} is hand-maintained (${String(profile.revisions)} revisions, ` +
-            `${String(profile.inbound)} inbound links) and cannot be ${action} here; ` +
-            "mark it duplicate or have an agent revise it.",
-        );
-      }
+      throw new Error(
+        `${id} is hand-maintained (${String(profile.revisions)} revisions, ` +
+          `${String(profile.inbound)} inbound links) and cannot be ${action} here; ${hint}`,
+      );
     }
   }
 
@@ -196,7 +190,11 @@ export class LocalApplyCandidate implements ApplyCandidate {
             return recorded ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
           }
 
-          await this.refuseProtected([survivor, loser], "merged");
+          await this.refuseProtected(
+            [survivor, loser],
+            "merged",
+            "mark it duplicate to keep both, or have an agent fold the other note into it.",
+          );
 
           const merged = args.override ?? candidate.proposal;
           const applied = await this.nodes.applyMerge({
@@ -219,7 +217,11 @@ export class LocalApplyCandidate implements ApplyCandidate {
             return ConsolidationStatus.DISMISSED;
           }
 
-          await this.refuseProtected([older], "superseded");
+          await this.refuseProtected(
+            [older],
+            "retired",
+            "reject to keep both linked, or have an agent fold the newer note into it.",
+          );
           await this.nodes.invalidateNode(older, {
             ts: now,
             superseded_by: newer,

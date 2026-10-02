@@ -47,6 +47,7 @@ import {
 } from "@/domain/ports/storage";
 import { ActivityFeed } from "@/application/services/activity-feed.service";
 import type { CodeRefTarget } from "@/application/services/code-ref.service";
+import { NodeProtectionService } from "@/application/services/node-protection.service";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
 import { annotationFtsText } from "@/consolidation/provider";
@@ -192,6 +193,7 @@ export class ConsolidationWorker {
 
     private readonly sessionService: SessionService,
     private readonly nodeReferences: NodeReferenceService,
+    private readonly protection: NodeProtectionService,
     private readonly feed: ActivityFeed,
 
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
@@ -270,6 +272,7 @@ export class ConsolidationWorker {
         links_typed: 0,
         links_dropped: 0,
         links_to_review: 0,
+        superseded: 0,
         edges_repointed: 0,
       },
     };
@@ -339,6 +342,7 @@ export class ConsolidationWorker {
       if (yielded(opts, result)) return await this.finish(runId, result);
 
       await this.report(runId, "retype", result);
+      await this.settleSupersedes(now, result);
       await this.retypeLinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
@@ -1170,8 +1174,6 @@ export class ConsolidationWorker {
     }
   }
 
-  // supersedes and duplicate_of retire or hide a node, so they go to review and the pair
-  // keeps a relates_to meanwhile.
   private async applyRelation(
     { a, b, verdict }: Judgement,
     weight: number,
@@ -1202,25 +1204,96 @@ export class ConsolidationWorker {
       if (id) result.integrity!.links_to_review++;
     }
 
-    if (verdict.relation === LinkRelation.SUPERSEDES) {
-      const id = await this.consolidationRepo.insertCandidate({
-        kind: ConsolidationKind.SUPERSEDE,
-        project: from.project,
-        member_ids: [to.id, from.id],
-        canonical_id: from.id,
-        score: weight,
-        proposal: {
-          recommendation: ConsolidationRecommendation.APPLY,
-          reason: verdict.reason,
-          title: from.title,
-          summary: "",
-          body: "",
-        },
-        detected_at: now,
-      });
+    if (verdict.relation !== LinkRelation.SUPERSEDES) return;
 
-      if (id) result.integrity!.links_to_review++;
+    if (this.posture.supersede === Posture.AUTO) {
+      await this.supersede(to.id, from.id, verdict.reason, now, result);
+      return;
     }
+
+    if (this.posture.supersede === Posture.OFF) return;
+
+    const id = await this.consolidationRepo.insertCandidate({
+      kind: ConsolidationKind.SUPERSEDE,
+      project: from.project,
+      member_ids: [to.id, from.id],
+      canonical_id: from.id,
+      score: weight,
+      proposal: {
+        recommendation: ConsolidationRecommendation.APPLY,
+        reason: verdict.reason,
+        title: from.title,
+        summary: "",
+        body: "",
+      },
+      detected_at: now,
+    });
+
+    if (id) result.integrity!.links_to_review++;
+  }
+
+  private async settleSupersedes(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.supersede !== Posture.AUTO) return;
+
+    const pending = await this.consolidationRepo.pendingCandidates({
+      kind: ConsolidationKind.SUPERSEDE,
+      limit: this.batch.retype,
+    });
+
+    for (const cand of pending) {
+      const [older, newer] = cand.member_ids;
+      const done =
+        older && newer
+          ? await this.supersede(older, newer, cand.proposal?.reason ?? null, now, result)
+          : false;
+
+      await this.consolidationRepo.resolveCandidate(
+        cand.id,
+        done ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED,
+        this.ownerId,
+        now,
+      );
+    }
+  }
+
+  private async supersede(
+    older: string,
+    newer: string,
+    reason: string | null,
+    now: string,
+    result: ConsolidationTickResult,
+  ): Promise<boolean> {
+    if (
+      (await this.nodesRepo.referenceState(older)) !== "live" ||
+      (await this.nodesRepo.referenceState(newer)) !== "live"
+    ) {
+      return false;
+    }
+
+    const inputs = await this.consolidationRepo.relationInputs([older, newer]);
+    const title = (id: string) => inputs.find((n) => n.id === id)?.title.slice(0, 80) ?? "";
+    const detail = {
+      op: "supersede",
+      to: newer,
+      titles: [title(older), title(newer)],
+      reason,
+    };
+    const kept = await this.protection.handMaintained(older);
+
+    if (kept) {
+      await this.logIntegrity(now, older, { ...detail, kept: "hand-maintained", ...kept });
+      return false;
+    }
+
+    await this.nodesRepo.invalidateNode(older, {
+      ts: now,
+      superseded_by: newer,
+      session_id: this.ownerId,
+    });
+    await this.logIntegrity(now, older, detail);
+    result.integrity!.superseded = (result.integrity!.superseded ?? 0) + 1;
+
+    return true;
   }
 
   // Backfill proposals for pending distill/merge candidates that were queued before a

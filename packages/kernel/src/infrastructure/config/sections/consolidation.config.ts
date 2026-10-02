@@ -58,6 +58,7 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
   documents: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_DOCUMENTS"),
   reattach: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_REATTACH"),
   retype: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_RETYPE"),
+  supersede: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_SUPERSEDE"),
 }) {}
 
 // `mergeSim` is deliberately higher than the write-time dedup probe so merge stays

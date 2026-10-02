@@ -70,6 +70,10 @@ function nodeName(node: ReviewNode | undefined): string {
   return node ? node.title || node.id : "?";
 }
 
+function previewName(node: NodePreview | undefined): string {
+  return node ? node.title || node.id : "?";
+}
+
 function describeItem(item: ReviewItemView): string {
   return item.artifact === "edge"
     ? `${nodeName(item.src)} —${item.edge_type ?? "?"}→ ${nodeName(item.dst)}`
@@ -361,20 +365,31 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
   const proposal = candidate.proposal;
   const retired = members.some((node) => node.invalidated);
   const [editing, setEditing] = useState(false);
+  const [merging, setMerging] = useState<{ draft: Draft; edited: boolean } | null>(null);
 
-  const reject = () => onDecide("Rejected", { decision: "reject" });
+  const rejectLabel = REJECT_LABEL[kind] ?? "Reject";
+  const reject = () => onDecide(rejectLabel, { decision: "reject" });
 
   const survivor = members.find((node) => node.id === candidate.canonical_id);
-  const confirmMerge = (body: string) =>
-    window.prompt(mergeConfirm(survivor?.content?.length ?? 0, body.length)) === CONFIRM_WORD;
+  const duplicate = members.find((node) => node.id !== candidate.canonical_id);
 
   const submitDraft = (draft: Draft) => {
     if (kind === "merge") {
-      if (!confirmMerge(draft.body)) return;
-      onDecide("Merged", { decision: "apply", collapse: true, override: draft });
+      setEditing(false);
+      setMerging({ draft, edited: true });
     } else {
       onDecide("Applied", { decision: "apply", override: draft });
     }
+  };
+
+  const confirmMerge = () => {
+    if (!merging) return;
+    setMerging(null);
+    onDecide("Merged", {
+      decision: "apply",
+      collapse: true,
+      ...(merging.edited ? { override: merging.draft } : {}),
+    });
   };
 
   return (
@@ -435,6 +450,16 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
           />
         )}
 
+        {merging && (
+          <MergeConfirm
+            survivor={survivor}
+            duplicate={duplicate}
+            body={merging.draft.body}
+            onConfirm={confirmMerge}
+            onCancel={() => setMerging(null)}
+          />
+        )}
+
         {error && <Notice tone="err">{error}</Notice>}
 
         {retired && (
@@ -473,17 +498,15 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
                 className="btn btn-primary"
                 onClick={() => onDecide("Marked duplicate", { decision: "apply", collapse: false })}
               >
-                Mark duplicate
+                Keep both, mark duplicate
               </button>
               <button
                 type="button"
                 className="btn btn-danger"
-                disabled={!proposal}
+                disabled={!proposal || merging !== null}
                 title={proposal ? undefined : "No proposal yet"}
                 onClick={() => {
-                  if (proposal && confirmMerge(proposal.body)) {
-                    onDecide("Merged", { decision: "apply", collapse: true });
-                  }
+                  if (proposal) setMerging({ draft: proposal, edited: false });
                 }}
               >
                 Merge into one
@@ -534,7 +557,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
             </button>
           )}
           <button type="button" className={retired ? "btn btn-primary" : "btn"} onClick={reject}>
-            Reject
+            {retired ? "Reject" : rejectLabel}
           </button>
           {!retired && generates(kind) && (
             <button type="button" className="btn" disabled={retrying} onClick={onRetry}>
@@ -542,18 +565,79 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
             </button>
           )}
         </div>
+
+        {!retired && ACTION_HINTS[kind] && (
+          <dl className="action-hints sub muted">
+            {ACTION_HINTS[kind].map(([action, effect]) => (
+              <div key={action}>
+                <dt>{action}</dt>
+                <dd>{effect}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </div>
     </article>
   );
 }
 
-const CONFIRM_WORD = "MERGE";
+const REJECT_LABEL: Partial<Record<CandidateKind, string>> = {
+  merge: "Not duplicates",
+  supersede: "Keep both",
+};
 
-function mergeConfirm(currentChars: number, proposedChars: number): string {
+const ACTION_HINTS: Partial<Record<CandidateKind, [string, string][]>> = {
+  merge: [
+    ["Keep both, mark duplicate", "nothing is rewritten; search shows the two as one result."],
+    ["Merge into one", "the kept note is rewritten to the merged text, the duplicate is retired."],
+    ["Not duplicates", "dismisses the suggestion; nothing changes."],
+  ],
+  supersede: [
+    ["Retire older", "the older note is retired and its links move to the newer one."],
+    ["Keep both", "dismisses the suggestion; the two stay related."],
+  ],
+};
+
+const LOSSY_RATIO = 0.7;
+
+interface MergeConfirmProps {
+  survivor: NodePreview | undefined;
+  duplicate: NodePreview | undefined;
+  body: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function MergeConfirm({ survivor, duplicate, body, onConfirm, onCancel }: MergeConfirmProps) {
+  const kept = survivor?.content?.length ?? 0;
+  const longest = Math.max(kept, duplicate?.content?.length ?? 0);
+  const lossy = longest > 0 && body.length < longest * LOSSY_RATIO;
+  const shorter = longest > 0 ? Math.round((1 - body.length / longest) * 100) : 0;
+
   return (
-    `The kept note (${currentChars.toLocaleString()} chars) is rewritten to the proposal ` +
-    `(${proposedChars.toLocaleString()} chars) and the duplicate is retired. ` +
-    `Type ${CONFIRM_WORD} to continue.`
+    <div className="merge-confirm" role="group" aria-label="Confirm merge">
+      <p>
+        <strong>{truncate(previewName(survivor), 80)}</strong> is rewritten to the merged text (
+        <span className="num">{kept.toLocaleString()}</span> →{" "}
+        <span className="num">{body.length.toLocaleString()}</span> chars).{" "}
+        <strong>{truncate(previewName(duplicate), 80)}</strong> is retired and its links move to the
+        kept note.
+      </p>
+      {lossy && (
+        <Notice tone="warn">
+          The merged text is {shorter}% shorter than the longer note — whatever it leaves out is
+          lost. Edit it first, or keep both and mark duplicate.
+        </Notice>
+      )}
+      <div className="actions">
+        <button type="button" className="btn btn-danger" onClick={onConfirm}>
+          Merge
+        </button>
+        <button type="button" className="btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
