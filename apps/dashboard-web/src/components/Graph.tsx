@@ -13,13 +13,17 @@ import {
 } from "@cerebrium/contracts/graph";
 import { errorMessage, fetchGraph, type ActivityBus } from "../api";
 import {
+  follow,
   layoutSettings,
   legendOf,
   movement,
   newGraph,
+  newLayoutGraph,
   paletteFor,
   positionsOf,
+  ringPieces,
   syncGraph,
+  syncLayout,
   type ColorBy,
   type EdgeAttrs,
   type MemoryGraph,
@@ -157,7 +161,10 @@ function edgeReducer(view: View, graph: MemoryGraph) {
     if (view.focus !== null && graph.hasNode(view.focus)) {
       const [src, dst] = graph.extremities(edge);
       if (src !== view.focus && dst !== view.focus) res.hidden = true;
-      else res.size = Math.max(data.size, 1);
+      else {
+        res.size = Math.max(data.size, 1);
+        if (!view.integrityOn) res.color = palette.edge;
+      }
     }
 
     return res;
@@ -206,7 +213,9 @@ export default function GraphView({
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<MemoryGraph>(newGraph());
   const sigmaRef = useRef<Sigma<NodeAttrs, EdgeAttrs> | null>(null);
-  const layoutRef = useRef<FA2Layout<NodeAttrs, EdgeAttrs> | null>(null);
+  const layoutGraphRef = useRef(newLayoutGraph());
+  const layoutRef = useRef<FA2Layout | null>(null);
+  const piecesRef = useRef<string[][]>([]);
   const pendingRef = useRef(new Map<string, boolean>());
   const frameRef = useRef(0);
   const viewRef = useRef<View>({
@@ -307,6 +316,15 @@ export default function GraphView({
     sigmaRef.current = sigma;
   }, [active]);
 
+  useEffect(() => {
+    const layout = layoutGraphRef.current;
+    const onMove = () => follow(graphRef.current, layout, piecesRef.current);
+    layout.on("eachNodeAttributesUpdated", onMove);
+    return () => {
+      layout.off("eachNodeAttributesUpdated", onMove);
+    };
+  }, []);
+
   useEffect(
     () => () => {
       cancelAnimationFrame(frameRef.current);
@@ -329,6 +347,10 @@ export default function GraphView({
     const graph = graphRef.current;
     const view = viewRef.current;
     syncGraph(graph, data, colorBy, palette);
+    const pieces = ringPieces(graph);
+    piecesRef.current = pieces;
+    syncLayout(layoutGraphRef.current, graph, new Set(pieces.flat()));
+    follow(graph, layoutGraphRef.current, pieces);
 
     view.integrity = integrity;
     view.danglingTargets = new Set(
@@ -346,9 +368,10 @@ export default function GraphView({
     }
     if (view.pulses.size) animate();
 
-    if (!layoutRef.current && graph.order > 0) {
-      layoutRef.current = new FA2Layout<NodeAttrs, EdgeAttrs>(graph, {
-        settings: layoutSettings(graph.order),
+    const layoutGraph = layoutGraphRef.current;
+    if (!layoutRef.current && layoutGraph.order > 0) {
+      layoutRef.current = new FA2Layout(layoutGraph, {
+        settings: layoutSettings(layoutGraph.order),
         getEdgeWeight: "pull",
       });
     }

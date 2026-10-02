@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import type { ForceAtlas2Settings } from "graphology-layout-forceatlas2";
-import type { GraphNode, GraphSnapshot } from "@cerebrium/contracts/graph";
+import type { GraphEdge, GraphNode, GraphSnapshot } from "@cerebrium/contracts/graph";
 import { truncate } from "./format";
 
 export type ColorBy = "type" | "project";
@@ -26,8 +26,8 @@ const LIGHT: Palette = {
   other: "#898781",
   symbol: "#b5b3ac",
   retired: "#d4d2cb",
-  edge: "#c3c6cc",
-  edgeFaint: "#e3e5e8",
+  edge: "#b6b7b9",
+  edgeFaint: "#ededee",
   dim: "#e6e7ea",
   pulse: "#3b5bdb",
   dangling: "#d03b3b",
@@ -42,8 +42,8 @@ const DARK: Palette = {
   other: "#898781",
   symbol: "#5c5f66",
   retired: "#3a3d44",
-  edge: "#3b414b",
-  edgeFaint: "#262a31",
+  edge: "#4c4f54",
+  edgeFaint: "#212429",
   dim: "#262a31",
   pulse: "#8098ff",
   dangling: "#d03b3b",
@@ -170,9 +170,9 @@ function seeded(id: string): [number, number] {
 }
 
 function sizeOf(degree: number, kind: GraphNode["kind"]): number {
-  const base = kind === "symbol" ? 1.2 : 1.8;
+  const base = kind === "symbol" ? 1 : 1.6;
 
-  return Math.min(9, base + Math.sqrt(degree));
+  return Math.min(7, base + 0.55 * Math.sqrt(degree));
 }
 
 export function layoutSettings(order: number): ForceAtlas2Settings {
@@ -180,7 +180,7 @@ export function layoutSettings(order: number): ForceAtlas2Settings {
     barnesHutOptimize: order > 400,
     barnesHutTheta: 0.6,
     scalingRatio: 40,
-    gravity: 0.1,
+    gravity: 0.05,
     strongGravityMode: true,
     outboundAttractionDistribution: true,
     slowDown: 2 + 1.5 * Math.log(order),
@@ -215,6 +215,54 @@ export function movement(before: Positions, after: Positions): number {
   const diagonal = Math.hypot(maxX - minX, maxY - minY);
 
   return n === 0 || diagonal === 0 ? 0 : sum / n / diagonal;
+}
+
+function rank(edge: GraphEdge): number {
+  const authored = edge.provenance === "agent";
+  switch (edge.type) {
+    case "relates_to":
+      return authored ? 6 : 3;
+    case "references":
+      return authored ? 5 : 3;
+    case "derived_from":
+    case "supersedes":
+    case "documents":
+      return 4;
+    case "duplicate_of":
+      return 1;
+    case "similar_to":
+      return 0;
+    default:
+      return 2;
+  }
+}
+
+// A spanning forest that prefers authored links: the edges the layout pulls along and draws
+// solid. Every other edge stays in the picture, faint.
+export function backbone(edges: readonly GraphEdge[]): Set<number> {
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    let root = id;
+    while (parent.has(root) && parent.get(root) !== root) root = parent.get(root) ?? root;
+    parent.set(id, root);
+    return root;
+  };
+
+  const order = edges
+    .map((edge, index) => ({ edge, index }))
+    .sort(
+      (a, b) => rank(b.edge) - rank(a.edge) || b.edge.weight - a.edge.weight || a.index - b.index,
+    );
+  const spine = new Set<number>();
+
+  for (const { edge, index } of order) {
+    const [a, b] = [find(edge.src), find(edge.dst)];
+    if (a === b) continue;
+    parent.set(a, b);
+    spine.add(index);
+  }
+
+  return spine;
 }
 
 // Brings `graph` to `snapshot` in place, so a running layout keeps every position it has.
@@ -257,13 +305,16 @@ export function syncGraph(
     }
   }
 
+  const spine = backbone(snapshot.edges);
+
   snapshot.edges.forEach((edge, index) => {
+    const onSpine = spine.has(index);
     graph.addDirectedEdgeWithKey(String(index), edge.src, edge.dst, {
-      size: 0.4 + 0.6 * Math.max(0, Math.min(1, edge.weight)),
-      color: edge.type === "similar_to" ? palette.edgeFaint : palette.edge,
+      size: 0.3 + 0.4 * Math.max(0, Math.min(1, edge.weight)),
+      color: onSpine ? palette.edge : palette.edgeFaint,
       relation: edge.type,
       index,
-      pull: edge.type === "similar_to" ? 0.5 : 1,
+      pull: onSpine ? 1 : 0.05,
     });
   });
 
@@ -281,4 +332,104 @@ export function syncGraph(
 
 export function newGraph(): MemoryGraph {
   return new Graph<NodeAttrs, EdgeAttrs>({ type: "directed", multi: true, allowSelfLoops: true });
+}
+
+export type LayoutGraph = Graph<{ x: number; y: number }, { pull: number }>;
+
+export function newLayoutGraph(): LayoutGraph {
+  return new Graph({ type: "directed", multi: true, allowSelfLoops: true });
+}
+
+const RING_MAX = 3;
+
+// The connected components small enough to sit on the ring: orphans, pairs and triples.
+export function ringPieces(graph: MemoryGraph): string[][] {
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    let root = id;
+    while (parent.get(root) !== root) root = parent.get(root) ?? root;
+    parent.set(id, root);
+    return root;
+  };
+
+  graph.forEachNode((id) => parent.set(id, id));
+  graph.forEachEdge((_, __, src, dst) => {
+    const [a, b] = [find(src), find(dst)];
+    if (a !== b) parent.set(a, b);
+  });
+
+  const groups = new Map<string, string[]>();
+  graph.forEachNode((id) => {
+    const root = find(id);
+    const group = groups.get(root);
+    if (group) group.push(id);
+    else groups.set(root, [id]);
+  });
+
+  const small = [...groups.values()].filter((g) => g.length <= RING_MAX);
+  if (small.length === groups.size) return [];
+
+  return small
+    .map((g) => g.sort())
+    .sort((a, b) => b.length - a.length || (a[0] ?? "").localeCompare(b[0] ?? ""));
+}
+
+// The physics runs on everything but the ring.
+export function syncLayout(
+  layout: LayoutGraph,
+  graph: MemoryGraph,
+  ring: ReadonlySet<string>,
+): void {
+  layout.clear();
+  graph.forEachNode((id, a) => {
+    if (!ring.has(id)) layout.addNode(id, { x: a.x, y: a.y });
+  });
+  graph.forEachEdge((_, a, src, dst) => {
+    if (layout.hasNode(src) && layout.hasNode(dst)) layout.addEdge(src, dst, { pull: a.pull });
+  });
+}
+
+// Copies the layout's positions into the picture and lays the ring around them.
+export function follow(graph: MemoryGraph, layout: LayoutGraph, pieces: string[][]): void {
+  let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
+  layout.forEachNode((_, a) => {
+    minX = Math.min(minX, a.x);
+    maxX = Math.max(maxX, a.x);
+    minY = Math.min(minY, a.y);
+    maxY = Math.max(maxY, a.y);
+  });
+
+  const [cx, cy] = layout.order ? [(minX + maxX) / 2, (minY + maxY) / 2] : [0, 0];
+  let radius = 0;
+  layout.forEachNode((_, a) => {
+    radius = Math.max(radius, Math.hypot(a.x - cx, a.y - cy));
+  });
+  radius = radius || 100;
+
+  const ring = new Map<string, [number, number]>();
+  const r = radius * 1.18;
+  pieces.forEach((piece, i) => {
+    const angle = (2 * Math.PI * i) / pieces.length - Math.PI / 2;
+    const [px, py] = [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+    piece.forEach((id, j) => {
+      const spin = (2 * Math.PI * j) / piece.length;
+      const d = piece.length > 1 ? radius * 0.015 : 0;
+      ring.set(id, [px + d * Math.cos(spin), py + d * Math.sin(spin)]);
+    });
+  });
+
+  graph.updateEachNodeAttributes(
+    (id, a) => {
+      const at = layout.hasNode(id) ? layout.getNodeAttributes(id) : null;
+      const slot = ring.get(id);
+      if (at) {
+        a.x = at.x;
+        a.y = at.y;
+      } else if (slot) {
+        [a.x, a.y] = slot;
+      }
+      return a;
+    },
+    { attributes: ["x", "y"] },
+  );
 }
