@@ -42,6 +42,51 @@ export function precisionAt1(ranked: string[], gold: Set<string>): number {
   return ranked.length > 0 && gold.has(ranked[0]!) ? 1 : 0;
 }
 
+// The mean paired difference b − a over the same queries, with a 95% band from resampling
+// those queries. Seeded, so a re-run prints the same band.
+export function pairedBootstrap(
+  a: number[],
+  b: number[],
+  iterations = 2000,
+  seed = 1,
+): { delta: number; low: number; high: number } {
+  if (a.length !== b.length) {
+    throw new Error("pairedBootstrap needs one score per query in each arm");
+  }
+
+  if (a.length === 0) return { delta: NaN, low: NaN, high: NaN };
+
+  const diffs = a.map((x, i) => b[i]! - x);
+  let state = seed >>> 0 || 1;
+  const next = (): number => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+
+    return state / 0x100000000;
+  };
+  const means: number[] = [];
+
+  for (let it = 0; it < iterations; it++) {
+    let sum = 0;
+
+    for (let draws = diffs.length; draws > 0; draws--) {
+      sum += diffs[Math.floor(next() * diffs.length)]!;
+    }
+
+    means.push(sum / diffs.length);
+  }
+
+  means.sort((x, y) => x - y);
+
+  return {
+    delta: diffs.reduce((s, d) => s + d, 0) / diffs.length,
+    low: means[Math.floor(0.025 * iterations)]!,
+    high: means[Math.ceil(0.975 * iterations) - 1]!,
+  };
+}
+
 export function recallAtK(ranked: string[], gold: Set<string>, k: number): number {
   const top = new Set(ranked.slice(0, k));
   let hit = 0;
