@@ -1230,7 +1230,9 @@ languages, docs, piped input and unindexed directories run as before, and so doe
 when Cerebrium is unreachable. It also loads `code_lookup`, `search`, `get` and
 `session_start` up front instead of behind tool search. The hook wiring in `hooks/register.ts`
 is checked by `claude plugin validate` and `claude plugin test apps/plugin/install/claude-mod`,
-which need a Claude Code install; the parsing in `hooks/code-nav.ts` is covered by vitest.
+and type-checked by `tsc -p apps/plugin/install/claude-mod` once Claude Code has loaded the mod
+and laid its types in `.claude-plugin/types/`; all three need a Claude Code install. The
+parsing in `hooks/code-nav.ts` is covered by vitest.
 
 Antigravity adds one host-specific surface: explicit Cerebrium permissions in the IDE and CLI
 settings. Setup merges the current tool grants into both active configs, preserves unrelated
