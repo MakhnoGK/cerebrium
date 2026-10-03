@@ -11,6 +11,7 @@ import {
   insertRevision,
   invalidateEdge,
   invalidateSystemSimilaritiesOf,
+  recordTitle,
   syncChunks,
   textPut,
 } from "@/db/postgres/internal";
@@ -105,6 +106,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
         },
       );
       await insertRevision(this.db, id, 1, input.content, input.session_id, null, input.ts);
+      await recordTitle(this.db, id, input.title, input.ts);
       await textPut(this.db, id, input.title, input.content);
       await syncChunks(this.db, id, 1, input.content, input.ts);
 
@@ -139,6 +141,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
         },
       );
       await insertRevision(this.db, id, 1, input.content, input.session_id, null, input.ts);
+      await recordTitle(this.db, id, input.title, input.ts);
       await textPut(this.db, id, input.title, input.content);
       await syncChunks(this.db, id, 1, input.content, input.ts);
 
@@ -305,6 +308,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
 
       if (fields.title !== undefined) {
         await this.db.query("UPDATE nodes SET title = @title WHERE id = @id", { title, id });
+        await recordTitle(this.db, id, title, fields.ts);
       }
 
       await insertRevision(

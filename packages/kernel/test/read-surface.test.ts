@@ -51,6 +51,7 @@ describe("Read surface naming", () => {
       "fetch_nodes",
       "graph_snapshot",
       "job_status",
+      "list_danglers",
       "list_reviews",
       "lookup_code",
       "operator_snapshot",

@@ -77,6 +77,14 @@ export function insertRevision(
   ).run(id, rev, content, session_id, reason, ts);
 }
 
+export function recordTitle(db: Database.Database, id: string, title: string, ts: string): void {
+  db.prepare("INSERT OR IGNORE INTO node_titles (node_id, title, since) VALUES (?, ?, ?)").run(
+    id,
+    title,
+    ts,
+  );
+}
+
 export function ftsPut(db: Database.Database, id: string, title: string, content: string): void {
   db.prepare("DELETE FROM node_fts WHERE node_id = ?").run(id);
   db.prepare("INSERT INTO node_fts (node_id, title, content) VALUES (?, ?, ?)").run(

@@ -71,6 +71,19 @@ export async function insertRevision(
   );
 }
 
+export async function recordTitle(
+  db: PgDatabase,
+  id: string,
+  title: string,
+  ts: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO node_titles (node_id, title, since) VALUES (@id, @title, @ts)
+     ON CONFLICT DO NOTHING`,
+    { id, title, ts },
+  );
+}
+
 export async function textPut(
   db: PgDatabase,
   id: string,

@@ -9,6 +9,11 @@ import type {
   ReviewPage,
 } from "@cerebrium/contracts/dashboard";
 import type { ConsolidationCandidate } from "@cerebrium/contracts/types";
+import type {
+  WikilinkDangler,
+  WikilinkFix,
+  WikilinkFixResult,
+} from "@cerebrium/contracts/wikilinks";
 import { KernelClient } from "./kernel.client";
 
 const PAGE = 20;
@@ -96,6 +101,20 @@ export class ReviewService {
     return this.kernel.call<{ status: string }>("retry_candidate", {
       session_id: await this.kernel.sessionId(),
       id,
+    });
+  }
+
+  danglers(): Promise<WikilinkDangler[]> {
+    return this.kernel.call<WikilinkDangler[]>("list_danglers", {});
+  }
+
+  async fixLink(body: WikilinkFix): Promise<WikilinkFixResult> {
+    return this.kernel.call<WikilinkFixResult>("fix_wikilink", {
+      session_id: await this.kernel.sessionId(),
+      node_id: body.node_id,
+      link: body.link,
+      action: body.action,
+      ...(body.target_id ? { target_id: body.target_id } : {}),
     });
   }
 

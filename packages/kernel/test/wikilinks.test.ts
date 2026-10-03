@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { resolveTarget, slugify, wikilinkTargets, type SlugIndex } from "@/core/wikilinks";
+import {
+  resolveTarget,
+  rewriteWikilink,
+  slugify,
+  wikilinks,
+  wikilinkTargets,
+  type SlugIndex,
+} from "@/core/wikilinks";
 
 function index(entries: [string, string[]][]): SlugIndex {
   return new Map(entries);
@@ -67,18 +74,69 @@ describe("resolveTarget", () => {
     ]);
 
     // When / Then
-    expect(resolveTarget(two, "alpha-node")).toEqual({ kind: "ambiguous" });
+    expect(resolveTarget(two, "alpha-node")).toEqual({ kind: "ambiguous", ids: ["A", "B"] });
   });
 
   it("should refuse to guess between two nodes sharing a title", () => {
     // Given / When / Then
     expect(resolveTarget(index([["alpha-node", ["A", "B"]]]), "alpha-node")).toEqual({
       kind: "ambiguous",
+      ids: ["A", "B"],
     });
   });
 
   it("should report a target that matches nothing", () => {
     // Given / When / Then
     expect(resolveTarget(index([["alpha-node", ["A"]]]), "gamma")).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("wikilinks", () => {
+  it("should keep the link as written beside its slug, once per slug", () => {
+    // Given
+    const body = "see [[Retry Budget]] and [[retry budget|the budget]] and [[Kafka#Topics]]";
+
+    // When / Then
+    expect(wikilinks(body)).toEqual([
+      { raw: "Retry Budget", slug: "retry-budget" },
+      { raw: "Kafka", slug: "kafka" },
+    ]);
+  });
+});
+
+describe("rewriteWikilink", () => {
+  it("should point every spelling of the link at the target and keep section and label", () => {
+    // Given
+    const body =
+      "[[Retry Budget]], [[retry budget#Limits]] and [[Retry budget|the budget]]; [[Kafka]]";
+
+    // When
+    const out = rewriteWikilink(body, "Retry Budget", "01M3Y0PABXG69N9ENZFCB9D8QS");
+
+    // Then
+    expect(out).toEqual({
+      content:
+        "[[01M3Y0PABXG69N9ENZFCB9D8QS]], [[01M3Y0PABXG69N9ENZFCB9D8QS#Limits]] and " +
+        "[[01M3Y0PABXG69N9ENZFCB9D8QS|the budget]]; [[Kafka]]",
+      count: 3,
+    });
+  });
+
+  it("should leave the label or the link text when unlinking", () => {
+    // Given
+    const body = "[[Retry Budget]] and [[Retry Budget|the budget]]";
+
+    // When / Then
+    expect(rewriteWikilink(body, "Retry Budget", null)).toEqual({
+      content: "Retry Budget and the budget",
+      count: 2,
+    });
+  });
+
+  it("should report nothing rewritten when the link is gone", () => {
+    expect(rewriteWikilink("no links here", "Retry Budget", null)).toEqual({
+      content: "no links here",
+      count: 0,
+    });
   });
 });

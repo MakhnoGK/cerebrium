@@ -6,6 +6,7 @@ import { OPERATOR_SNAPSHOT, STATS_SNAPSHOT } from "@/application/use-cases/contr
 import { FETCH_NODES, LOOKUP_CODE } from "@/application/use-cases/contracts/read";
 import { LIST_REVIEWS } from "@/application/use-cases/contracts/reviews";
 import { SEARCH_MEMORY } from "@/application/use-cases/contracts/search";
+import { LIST_DANGLERS } from "@/application/use-cases/contracts/wikilinks";
 
 // Use-case tokens are symbols, and a symbol cannot cross a worker or socket boundary. This
 // is the name every out-of-process caller uses instead, so the mapping lives in exactly one
@@ -24,6 +25,7 @@ export const READ_SURFACE = {
   operator_snapshot: OPERATOR_SNAPSHOT,
   recent_activity: RECENT_ACTIVITY,
   graph_snapshot: GRAPH_SNAPSHOT,
+  list_danglers: LIST_DANGLERS,
 } as const;
 
 export type ReadName = keyof typeof READ_SURFACE;

@@ -343,3 +343,17 @@ CREATE TABLE IF NOT EXISTS review_decisions (
 
 CREATE INDEX IF NOT EXISTS review_decisions_at ON review_decisions (decided_at);
 CREATE INDEX IF NOT EXISTS edges_provenance_live ON edges (provenance, invalidated_at);
+
+CREATE TABLE IF NOT EXISTS node_titles (
+  node_id TEXT NOT NULL REFERENCES nodes(id),
+  title TEXT NOT NULL,
+  since TEXT NOT NULL,
+  PRIMARY KEY (node_id, title)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS wikilink_ignores (
+  node_id TEXT NOT NULL REFERENCES nodes(id),
+  link TEXT NOT NULL,
+  ignored_at TEXT NOT NULL,
+  PRIMARY KEY (node_id, link)
+) STRICT;

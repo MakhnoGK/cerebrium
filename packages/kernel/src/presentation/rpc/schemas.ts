@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EdgeType, MemoryKind, ReviewArtifact, ReviewDecision } from "@cerebrium/contracts/vocab";
+import { WIKILINK_FIX_ACTIONS } from "@cerebrium/contracts/wikilinks";
 import { CALL_SURFACE, NotificationTopic, type CallName } from "@/application/use-cases";
 
 // Argument validation for the socket edge. The MCP layer validates its own edge with zod
@@ -78,6 +79,10 @@ const SCHEMAS = {
     invalidated: z.boolean().optional(),
     symbols: z.boolean().optional(),
   }),
+  list_danglers: z.object({
+    session_id: ulid.optional(),
+    limit: z.number().int().positive().optional(),
+  }),
 
   // Writes
   //
@@ -105,6 +110,12 @@ const SCHEMAS = {
     title: z.string().optional(),
     reason: z.string().optional(),
     ...eventWindow,
+  }),
+  fix_wikilink: session.extend({
+    node_id: ulid,
+    link: z.string().min(1),
+    action: z.enum(WIKILINK_FIX_ACTIONS),
+    target_id: ulid.optional(),
   }),
   invalidate_memory: session.extend({ id: ulid, superseded_by: ulid.optional() }),
   restore_memory: session.extend({ id: ulid }),

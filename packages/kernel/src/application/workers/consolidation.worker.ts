@@ -50,6 +50,7 @@ import type { CodeRefTarget } from "@/application/services/code-ref.service";
 import { NodeProtectionService } from "@/application/services/node-protection.service";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
+import { WikilinkResolverService } from "@/application/services/wikilink-resolver.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import type { Writer } from "@/runtime/client-identity";
 import { newId } from "@/core/ids";
@@ -57,10 +58,7 @@ import {
   citedSymbolNames,
   idTarget,
   repoBelongsToProject,
-  resolveTarget,
-  slugify,
   wikilinkTargets,
-  type SlugIndex,
 } from "@/core/wikilinks";
 import {
   ConsolidationBatchConfig,
@@ -70,18 +68,6 @@ import {
 } from "@/infrastructure/config";
 
 const CONSOLIDATION_LEASE = "consolidation";
-
-function slugIndexOf(rows: { id: string; title: string }[]): SlugIndex {
-  const index: SlugIndex = new Map();
-
-  for (const row of rows) {
-    const slug = slugify(row.title);
-
-    index.set(slug, [...(index.get(slug) ?? []), row.id]);
-  }
-
-  return index;
-}
 
 function breathe(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
@@ -193,6 +179,7 @@ export class ConsolidationWorker {
 
     private readonly sessionService: SessionService,
     private readonly nodeReferences: NodeReferenceService,
+    private readonly wikilinks: WikilinkResolverService,
     private readonly protection: NodeProtectionService,
     private readonly feed: ActivityFeed,
 
@@ -544,8 +531,7 @@ export class ConsolidationWorker {
     }
 
     const bodies = await this.consolidationRepo.authoredBodies();
-    const live = slugIndexOf(bodies);
-    const retired = slugIndexOf(await this.consolidationRepo.retiredAuthoredTitles());
+    const links = await this.wikilinks.index(bodies);
     const symbols = await this.citableSymbolIndex();
     const breath = breather(this.batch.msPerBreath);
 
@@ -554,10 +540,8 @@ export class ConsolidationWorker {
 
       for (const target of wikilinkTargets(row.content)) {
         const id = idTarget(target);
-        const dst =
-          id === null
-            ? await this.wikilinkTarget(live, retired, target)
-            : await this.idWikilinkTarget(id);
+        const outcome = await links.resolve(target);
+        const dst = "id" in outcome ? outcome.id : null;
 
         if (dst === null) {
           if (id === null) result.wikilinks_dangling++;
@@ -694,39 +678,6 @@ export class ConsolidationWorker {
 
       if (id) result.documents_suggested++;
     }
-  }
-
-  // A wikilink written before a supersede still names the retired title, so a target that
-  // no longer resolves live is followed forward — the same move `invalidate` makes when it
-  // repoints a retired node's referrers. More than one successor is not a guess to make.
-  private async wikilinkTarget(
-    live: SlugIndex,
-    retired: SlugIndex,
-    target: string,
-  ): Promise<string | null> {
-    const hit = resolveTarget(live, target);
-
-    if (hit.kind === "exact" || hit.kind === "prefix") return hit.id;
-    if (hit.kind === "ambiguous") return null;
-
-    const gone = resolveTarget(retired, target);
-
-    if (gone.kind !== "exact" && gone.kind !== "prefix") return null;
-
-    const successors = await this.nodeReferences.terminalLiveSuccessors(gone.id);
-
-    return successors.length === 1 ? successors[0]! : null;
-  }
-
-  private async idWikilinkTarget(id: string): Promise<string | null> {
-    const state = await this.nodesRepo.referenceState(id);
-
-    if (state === "live") return id;
-    if (state === "missing") return null;
-
-    const successors = await this.nodeReferences.terminalLiveSuccessors(id);
-
-    return successors.length === 1 ? successors[0]! : null;
   }
 
   // Retire similar_to edges the cap has already been exceeded by — the backlog the
