@@ -47,7 +47,7 @@
     "import:sqlite": "tsx apps/host/src/import-sqlite.ts",
     "code:repo-map": "tsx apps/plugin/scripts/code-repo-map.ts",
     "parity:pg": "vite-node --config vitest.config.ts packages/kernel/scripts/parity-gate.mts",
-    "smoke:scripts": "npm run service -- --help > /dev/null && npm run agent:setup -- --help > /dev/null && npm run eval:agents -- --help > /dev/null && npm run eval:retrieval -- --help > /dev/null && npm run calibrate:report -- --help > /dev/null && npm run report:readloop -- --help > /dev/null && npm run eval:encoding -- --help > /dev/null && npm run eval:embedding -- --help > /dev/null && npm run eval:roles -- --help > /dev/null && npm run gold:generate -- --help > /dev/null && npm run gold:adjudicate -- --help > /dev/null && npm run import:sqlite -- --help > /dev/null && npm run parity:pg -- --help > /dev/null",
+    "smoke:scripts": "npm run service -- --help > /dev/null && npm run agent:setup -- --help > /dev/null && npm run eval:agents -- --help > /dev/null && npm run eval:retrieval -- --help > /dev/null && npm run calibrate:report -- --help > /dev/null && npm run report:readloop -- --help > /dev/null && npm run eval:encoding -- --help > /dev/null && npm run eval:embedding -- --help > /dev/null && npm run eval:roles -- --help > /dev/null && npm run gold:generate -- --help > /dev/null && npm run gold:adjudicate -- --help > /dev/null && npm run import:sqlite -- --help > /dev/null && npm run parity:pg -- --help > /dev/null && npm run space:build -- --help > /dev/null && npm run space:report -- --help > /dev/null",
     "inspect": "MEMORY_DB_PATH=.tmp/dev.db npx @modelcontextprotocol/inspector tsx apps/plugin/src/server.ts",
     "test": "vitest run",
     "test:unit": "vitest run --exclude '**/e2e/**'",
@@ -58,6 +58,8 @@
     "test:watch": "vitest",
     "eval:encoding": "vite-node --config vitest.config.ts packages/kernel/scripts/eval-encoding.mts",
     "eval:embedding": "vite-node --config vitest.config.ts packages/kernel/scripts/embed-agreement.mts",
+    "space:build": "vite-node --config vitest.config.ts packages/kernel/scripts/space-build.mts",
+    "space:report": "vite-node --config vitest.config.ts packages/kernel/scripts/space-report.mts",
     "eval:roles": "vite-node --config vitest.config.ts packages/kernel/scripts/role-agreement.mts"
   },
   "devDependencies": {

@@ -439,7 +439,11 @@ function armScope(arm: Arm, shared: Shared): DependencyContainer {
     into: scope,
   });
   if (shared.db !== null) scope.register(DB_TOKEN, { useValue: shared.db });
-  scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: shared.provider });
+
+  // An arm that names its own embedding model embeds its queries with it.
+  if (!("MEMORY_EMBED_MODEL" in arm.env) && !("MEMORY_EMBED_PROVIDER" in arm.env)) {
+    scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: shared.provider });
+  }
 
   // `search` normally touches the session table through HintsService. Against a real store
   // this eval must not write a single byte, so the hint source is stubbed out and the tool

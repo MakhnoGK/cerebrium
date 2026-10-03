@@ -15,6 +15,7 @@ import { SEARCH_REPO_TOKEN } from "@/domain/ports/storage/search";
 import { SESSIONS_REPO_TOKEN } from "@/domain/ports/storage/sessions";
 import { STATS_REPO_TOKEN } from "@/domain/ports/storage/stats";
 import { STORE_TOKEN } from "@/domain/ports/storage/store";
+import { VECTOR_SPACES_REPO_TOKEN } from "@/domain/ports/storage/vector-spaces";
 
 // Every storage port a backend has to bind.
 export const STORAGE_TOKENS = {
@@ -35,4 +36,5 @@ export const STORAGE_TOKENS = {
   sessionsRepo: SESSIONS_REPO_TOKEN,
   statsRepo: STATS_REPO_TOKEN,
   store: STORE_TOKEN,
+  vectorSpacesRepo: VECTOR_SPACES_REPO_TOKEN,
 } as const;

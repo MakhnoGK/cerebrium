@@ -18,6 +18,7 @@ import {
   SESSIONS_REPO_TOKEN,
   STATS_REPO_TOKEN,
   STORE_TOKEN,
+  VECTOR_SPACES_REPO_TOKEN,
 } from "@/domain/ports/storage";
 import { PgBranchCodeRepo } from "@/db/postgres/branch-code";
 import { PgChunksRepo } from "@/db/postgres/chunks";
@@ -37,6 +38,7 @@ import { PgSearchRepo } from "@/db/postgres/search";
 import { PgSessionsRepo } from "@/db/postgres/sessions";
 import { PgStatsRepo } from "@/db/postgres/stats";
 import { PgStore } from "@/db/postgres/store";
+import { PgVectorSpacesRepo } from "@/db/postgres/vector-spaces";
 import { StorageConfig } from "@/infrastructure/config";
 
 export { PG_TOKEN, PgDatabase } from "@/db/postgres/database";
@@ -84,4 +86,5 @@ export function registerPostgresRepositories(
   c.register(SESSIONS_REPO_TOKEN, { useClass: PgSessionsRepo });
   c.register(STATS_REPO_TOKEN, { useClass: PgStatsRepo });
   c.register(STORE_TOKEN, { useClass: PgStore });
+  c.register(VECTOR_SPACES_REPO_TOKEN, { useClass: PgVectorSpacesRepo });
 }
