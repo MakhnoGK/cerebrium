@@ -440,6 +440,10 @@ export class ConsolidationWorker {
       return first;
     }
 
+    if (!(await this.holdLease())) {
+      return first;
+    }
+
     const retry = await this.runGeneration({ ...task, missing: first.missing });
 
     return retry.generated &&
