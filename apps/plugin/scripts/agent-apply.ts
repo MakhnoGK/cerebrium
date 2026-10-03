@@ -17,16 +17,20 @@ import {
   ANTIGRAVITY_PERMISSION_GRANTS,
   antigravityPermissionAllowList,
   antigravityPermissionTargets,
+  claudeModDir,
   desiredMcp,
   entryServerPath,
   HOOK_SCRIPT_SUFFIX,
   hookCommand,
   isHostEnv,
+  MOD_DIR_SUFFIX,
   pending,
   piBridgeConfig,
   piExtension,
   piSettings,
   planHost,
+  PLUGIN_DIRS_ENV,
+  pluginDirs,
   skillPath,
   skillRoot,
   TRIAL_ENTRY,
@@ -160,6 +164,15 @@ function writeClaudeHook(path: string, repoRoot: string): Applied {
       },
     ];
     settings.hooks = hooks;
+  });
+}
+
+function writeClaudeMod(path: string, repoRoot: string): Applied {
+  return updateJson("mod", path, (settings) => {
+    const others = pluginDirs(settings).filter((dir) => !dir.endsWith(MOD_DIR_SUFFIX));
+    const env = record(settings.env);
+    env[PLUGIN_DIRS_ENV] = [...others, claudeModDir(repoRoot)].join(":");
+    settings.env = env;
   });
 }
 
@@ -320,6 +333,7 @@ function applyClaude(input: PlanInput, opts: ApplyOptions, todo: SurfaceState[])
   }
   if (has("rules")) out.push(writeRules(join(dir, "CLAUDE.md"), input.repoRoot));
   if (has("hook")) out.push(writeClaudeHook(join(dir, "settings.json"), input.repoRoot));
+  if (has("mod")) out.push(writeClaudeMod(join(dir, "settings.json"), input.repoRoot));
   return out;
 }
 
