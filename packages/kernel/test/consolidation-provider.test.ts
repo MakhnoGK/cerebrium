@@ -1,3 +1,5 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConsolidationKind } from "@cerebrium/contracts/vocab";
 import type {
@@ -394,6 +396,47 @@ describe("Task prompt building (taskPrompt)", () => {
     expect(p).toContain("short");
     expect(longest).toBeGreaterThan(CLUSTER_CHARS / 2);
     expect(longest).toBeLessThanOrEqual(CLUSTER_CHARS);
+  });
+});
+
+describe("HttpConsolidator (default client)", () => {
+  let server: Server | undefined;
+
+  afterEach(() => {
+    server?.close();
+    server = undefined;
+  });
+
+  function backend(delayMs: number): string {
+    server = createServer((_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ message: { content: '{"title":"T","summary":"S","body":"B"}' } }));
+      }, delayMs);
+    }).listen(0);
+
+    return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/chat`;
+  }
+
+  it("should wait for a backend that sends its headers only when generation ends", async () => {
+    // Given
+    const url = backend(200);
+
+    // When
+    const out = await new HttpConsolidator({ url, timeoutMs: 5_000 }).generate(TASK);
+
+    // Then
+    expect(out).toMatchObject({ title: "T", body: "B" });
+  });
+
+  it("should still give up at the role's own timeout", async () => {
+    // Given
+    const url = backend(5_000);
+
+    // When / Then
+    await expect(new HttpConsolidator({ url, timeoutMs: 50 }).generate(TASK)).rejects.toThrow(
+      /timed out after 50ms/,
+    );
   });
 });
 
