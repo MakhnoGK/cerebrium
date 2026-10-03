@@ -9,6 +9,7 @@ import {
   type RelateResult,
   type RelateTask,
 } from "@/domain/ports/consolidation-provider";
+import { CONSOLIDATION_REPO_TOKEN, type ConsolidationRepo } from "@/domain/ports/storage";
 import { ActivityFeed } from "@/application/services";
 import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
@@ -86,9 +87,13 @@ async function liveEdge(src: string, dst: string, type: EdgeType): Promise<boole
   );
 }
 
+let consolidation: ConsolidationWorker | null;
+
+// One worker per test: a second instance would find the first one's lease and do nothing.
 async function sweep() {
   await env.worker.tick();
-  return container.resolve(ConsolidationWorker).tick();
+  consolidation ??= container.resolve(ConsolidationWorker);
+  return consolidation.tick();
 }
 
 function posture(extra: Record<string, string> = {}) {
@@ -120,6 +125,7 @@ function integrityEvents(heard: ActivityEntry[]) {
 }
 
 beforeEach(async () => {
+  consolidation = null;
   relater = new FakeRelater();
   env = setup({ consolidator: relater });
   posture();
@@ -488,6 +494,65 @@ describe("Project families", () => {
 
     // Then
     expect(await env.edges.pairIsConnected(record, checkpoint)).toBe(false);
+  });
+});
+
+describe("Recheck after a revision", () => {
+  it("should drop a typed link the model no longer sees once a note was revised", async () => {
+    // Given
+    const [a, b] = await twins();
+    await sweep();
+    env.clock.advanceMs(1_000);
+    await revise(a, 1);
+    relater.verdict = { relation: LinkRelation.NONE };
+
+    // When
+    const result = await sweep();
+
+    // Then
+    expect(result.integrity?.links_dropped).toBeGreaterThanOrEqual(1);
+    expect(await liveEdge(a, b, EdgeType.RELATES_TO)).toBe(false);
+  });
+
+  it("should keep a link the model still sees and not ask about it again", async () => {
+    // Given
+    const [a, b] = await twins();
+    await sweep();
+    env.clock.advanceMs(1_000);
+    await revise(a, 1);
+    const before = relater.calls.length;
+
+    // When
+    await sweep();
+    const asked = relater.calls.length;
+    await sweep();
+
+    // Then
+    expect(asked).toBe(before + 1);
+    expect(await liveEdge(a, b, EdgeType.RELATES_TO)).toBe(true);
+    expect(relater.calls.length).toBe(asked);
+  });
+
+  it("should keep a references link the source still states as a wikilink, without the model", async () => {
+    // Given
+    const target = await write("Kafka", "ingestion consumes kafka topics by tenant");
+    const source = await write("Plan", "builds on [[Kafka]]");
+    await sweep();
+    env.clock.advanceMs(1_000);
+    await container
+      .resolve(UpdateTool)
+      .invoke({ session_id: session, id: source, content: "builds on [[Kafka]] and retries" });
+    const asked = relater.calls.length;
+
+    // When
+    await sweep();
+
+    // Then
+    expect(await liveEdge(source, target, EdgeType.REFERENCES)).toBe(true);
+    expect(relater.calls.length).toBe(asked);
+    expect(
+      await container.resolve<ConsolidationRepo>(CONSOLIDATION_REPO_TOKEN).revisedLinks(10),
+    ).toEqual([]);
   });
 });
 

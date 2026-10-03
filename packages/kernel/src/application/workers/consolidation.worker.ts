@@ -332,6 +332,7 @@ export class ConsolidationWorker {
       await this.report(runId, "retype", result);
       await this.settleSupersedes(now, result);
       await this.retypeLinks(now, result);
+      await this.recheckLinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -1083,6 +1084,76 @@ export class ConsolidationWorker {
     }
   }
 
+  // A typed link is judged again once either note has been revised since it was made or last
+  // confirmed; a references link the source still states as a [[wikilink]] needs no model.
+  private async recheckLinks(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.retype === Posture.OFF) return;
+
+    const links = await this.consolidationRepo.revisedLinks(this.batch.retype);
+
+    if (!links.length) return;
+
+    const stated = await this.statedReferences(links);
+
+    for (const link of links) {
+      if (stated.has(`${link.src}\0${link.dst}`)) {
+        await this.consolidationRepo.markLinkChecked(link.src, link.dst, link.type, now);
+        continue;
+      }
+
+      if (!this.consolidator.enabled) continue;
+      if (!(await this.holdLease())) return;
+
+      const judged = await this.judge(link.src, link.dst, result);
+
+      if (judged === null) continue;
+
+      await this.logJudgement(now, "recheck", judged);
+
+      const { relation, from } = judged.verdict;
+      const holds =
+        (link.type === EdgeType.RELATES_TO && relation === LinkRelation.RELATES_TO) ||
+        (link.type === EdgeType.REFERENCES && relation === LinkRelation.REFERENCES && from === "a");
+
+      if (holds) {
+        await this.consolidationRepo.markLinkChecked(link.src, link.dst, link.type, now);
+        continue;
+      }
+
+      await this.edgesRepo.invalidateEdge(link.src, link.dst, link.type, now);
+
+      if (relation === LinkRelation.NONE) {
+        result.integrity!.links_dropped++;
+        continue;
+      }
+
+      await this.applyRelation(judged, link.weight, now, result);
+      result.integrity!.links_typed++;
+    }
+  }
+
+  private async statedReferences(links: { src: string; type: EdgeType }[]): Promise<Set<string>> {
+    const sources = new Set(links.filter((l) => l.type === EdgeType.REFERENCES).map((l) => l.src));
+    const stated = new Set<string>();
+
+    if (!sources.size) return stated;
+
+    const bodies = await this.consolidationRepo.authoredBodies();
+    const index = await this.wikilinks.index(bodies);
+
+    for (const body of bodies) {
+      if (!sources.has(body.id)) continue;
+
+      for (const target of wikilinkTargets(body.content)) {
+        const outcome = await index.resolve(target);
+
+        if ("id" in outcome) stated.add(`${body.id}\0${outcome.id}`);
+      }
+    }
+
+    return stated;
+  }
+
   private async logJudgement(now: string, op: string, { a, b, verdict }: Judgement) {
     const [from, to] = verdict.from === "a" ? [a, b] : [b, a];
 
@@ -1277,7 +1348,8 @@ export class ConsolidationWorker {
 
     if (
       this.posture.retype !== Posture.OFF &&
-      (await this.consolidationRepo.untypedLinks(1)).length > 0
+      ((await this.consolidationRepo.untypedLinks(1)).length > 0 ||
+        (await this.consolidationRepo.revisedLinks(1)).length > 0)
     ) {
       return true;
     }
