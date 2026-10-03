@@ -48,6 +48,7 @@ const MIGRATION_IDS = [
   "034_integrity_counters.cjs",
   "035_wikilink_titles.sql",
   "036_edge_checks.sql",
+  "037_wikilink_verdicts.sql",
 ];
 
 const dirs: string[] = [];

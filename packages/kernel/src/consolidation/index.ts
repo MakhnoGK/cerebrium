@@ -4,6 +4,7 @@ import {
   type ConsolidationResult,
   type ReconcileResult,
   type RelateResult,
+  type ResolveLinkResult,
 } from "@/domain/ports/consolidation-provider";
 import { CommandConsolidator } from "@/consolidation/command";
 import { HttpConsolidator } from "@/consolidation/http";
@@ -32,6 +33,10 @@ class DisabledConsolidator implements ConsolidationProvider {
   }
 
   relate(): Promise<RelateResult> {
+    return Promise.reject(new Error("consolidation is off"));
+  }
+
+  resolveLink(): Promise<ResolveLinkResult> {
     return Promise.reject(new Error("consolidation is off"));
   }
 }

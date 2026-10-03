@@ -45,6 +45,10 @@ class FakeRelater implements ConsolidationProvider {
     throw new Error("not used");
   }
 
+  resolveLink(): never {
+    throw new Error("not used");
+  }
+
   relate(task: RelateTask): Promise<RelateResult> {
     this.calls.push(task);
     if (this.fail) return Promise.reject(new Error("model down"));

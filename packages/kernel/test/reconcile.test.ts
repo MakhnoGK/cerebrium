@@ -45,6 +45,10 @@ class FakeJudge implements ConsolidationProvider {
   relate(): Promise<RelateResult> {
     return Promise.reject(new Error("not used"));
   }
+
+  resolveLink(): Promise<never> {
+    return Promise.reject(new Error("not used"));
+  }
 }
 
 const P = "billing";
@@ -229,6 +233,7 @@ describe("Write-time reconcile", () => {
       reconcile: () => Promise.reject(new Error("provider down")),
       annotate: () => Promise.reject(new Error("not used")),
       relate: () => Promise.reject(new Error("not used")),
+      resolveLink: () => Promise.reject(new Error("not used")),
     };
 
     container.registerInstance(CONSOLIDATION_PROVIDER_TOKEN, boom);

@@ -52,6 +52,7 @@ function slowProvider(holder: Holder, onGenerate?: () => void): ConsolidationPro
     reconcile: () => Promise.reject(new Error("not used")),
     annotate: () => Promise.reject(new Error("not used")),
     relate: () => Promise.reject(new Error("not used")),
+    resolveLink: () => Promise.reject(new Error("not used")),
   };
 }
 

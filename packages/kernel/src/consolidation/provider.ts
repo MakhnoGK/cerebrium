@@ -3,6 +3,7 @@
 import { ConsolidationKind } from "@cerebrium/contracts/vocab";
 import {
   ConsolidationRecommendation,
+  LinkConfidence,
   LinkRelation,
   ReconcileAction,
   type AnnotateResult,
@@ -14,6 +15,8 @@ import {
   type RelateRecord,
   type RelateResult,
   type RelateTask,
+  type ResolveLinkResult,
+  type ResolveLinkTask,
 } from "@/domain/ports/consolidation-provider";
 
 export const SYSTEM_PROMPT =
@@ -283,6 +286,70 @@ export function parseRelate(raw: string): RelateResult {
   return {
     relation,
     from: o.from === "b" ? "b" : "a",
+    reason: typeof o.reason === "string" ? o.reason : "",
+  };
+}
+
+export const RESOLVE_LINK_SYSTEM_PROMPT =
+  "A note in an AI agent's durable memory links another note as [[link]], but no note " +
+  "carries that name any more: the target was retitled, merged or never written. Given " +
+  "the link, the text around it and the CANDIDATE notes, pick the one candidate the link " +
+  "meant and return its id as target, or 'none' when no candidate is what the link names. " +
+  "Judge by what the link and its surrounding sentence refer to, not by shared vocabulary " +
+  "alone. confidence is 'high' only when the choice is clear from the texts — for a " +
+  "candidate, that it is the very note the link names; for 'none', that every candidate " +
+  "is about something else. Otherwise 'low'. " +
+  "Return JSON: target (a candidate id or 'none'), confidence ('high'|'low'), reason " +
+  "(one sentence).";
+
+const NO_TARGET = "none";
+
+export function resolveLinkSchema(task: ResolveLinkTask) {
+  return {
+    type: "object",
+    properties: {
+      target: { type: "string", enum: [...task.candidates.map((c) => c.id), NO_TARGET] },
+      confidence: { type: "string", enum: Object.values(LinkConfidence) },
+      reason: { type: "string" },
+    },
+    required: ["target", "confidence", "reason"],
+  } as const;
+}
+
+const LINK_CANDIDATE_CHARS = 800;
+
+export function resolveLinkPrompt(task: ResolveLinkTask): string {
+  const scope = task.project ? ` (project: ${task.project})` : "";
+  const candidates = task.candidates
+    .map((c) => `[${c.id}] ${c.type}: ${c.title}\n${clip(c.content, LINK_CANDIDATE_CHARS)}`)
+    .join("\n\n");
+
+  return (
+    `The note "${task.note.title}"${scope} links [[${task.link}]] here:\n` +
+    `${task.note.context}\n\n` +
+    `Candidates:\n\n${candidates}`
+  );
+}
+
+export function parseResolveLink(raw: string, task: ResolveLinkTask): ResolveLinkResult {
+  let obj: unknown;
+
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    throw new Error("resolve-link provider returned invalid JSON");
+  }
+
+  const o = obj as Record<string, unknown>;
+  const target = typeof o.target === "string" ? o.target : NO_TARGET;
+
+  if (target !== NO_TARGET && !task.candidates.some((c) => c.id === target)) {
+    throw new Error(`resolve-link provider named a target outside the candidates: ${target}`);
+  }
+
+  return {
+    target_id: target === NO_TARGET ? null : target,
+    confidence: o.confidence === LinkConfidence.HIGH ? LinkConfidence.HIGH : LinkConfidence.LOW,
     reason: typeof o.reason === "string" ? o.reason : "",
   };
 }

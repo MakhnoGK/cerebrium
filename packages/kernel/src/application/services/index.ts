@@ -44,6 +44,10 @@ export { SessionNotices } from "@/application/services/session-notices.service";
 export { SessionService } from "@/application/services/session.service";
 export { SubscriptionService } from "@/application/services/subscription.service";
 export {
+  type Dangler,
+  WikilinkDanglerService,
+} from "@/application/services/wikilink-dangler.service";
+export {
   type WikilinkIndex,
   type WikilinkOutcome,
   WikilinkResolverService,

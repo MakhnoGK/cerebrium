@@ -59,6 +59,7 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
   reattach: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_REATTACH"),
   retype: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_RETYPE"),
   supersede: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_SUPERSEDE"),
+  wikilinks: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_WIKILINKS"),
 }) {}
 
 // `mergeSim` is deliberately higher than the write-time dedup probe so merge stays
@@ -103,6 +104,7 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   reattach: int(20).positive().env("MEMORY_CONSOLIDATE_REATTACH_BATCH"),
   retype: int(20).positive().env("MEMORY_CONSOLIDATE_RETYPE_BATCH"),
   repoint: int(200).positive().env("MEMORY_CONSOLIDATE_REPOINT_BATCH"),
+  wikilinks: int(10).positive().env("MEMORY_CONSOLIDATE_WIKILINK_BATCH"),
   // Note->symbol citations acted on per sweep. This caps the writes, not the work: the scan
   // walks every authored body and every backticked name regardless, so the ceiling only
   // decides how many of the resolved pairs get an edge. Each one is an insert plus a queue

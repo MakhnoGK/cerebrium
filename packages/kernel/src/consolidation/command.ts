@@ -10,6 +10,8 @@ import {
   type ReconcileTask,
   type RelateResult,
   type RelateTask,
+  type ResolveLinkResult,
+  type ResolveLinkTask,
 } from "@/domain/ports/consolidation-provider";
 import {
   ANNOTATE_SYSTEM_PROMPT,
@@ -17,11 +19,14 @@ import {
   parseAnnotate,
   parseReconcile,
   parseRelate,
+  parseResolveLink,
   parseResult,
   RECONCILE_SYSTEM_PROMPT,
   reconcilePrompt,
   RELATE_SYSTEM_PROMPT,
   relatePrompt,
+  RESOLVE_LINK_SYSTEM_PROMPT,
+  resolveLinkPrompt,
   SYSTEM_PROMPT,
   taskPrompt,
 } from "@/consolidation/provider";
@@ -119,6 +124,19 @@ export class CommandConsolidator implements ConsolidationProvider {
       b: task.b,
     });
     return parseRelate(await this.runners[GenerationRole.GENERATE](input));
+  }
+
+  async resolveLink(task: ResolveLinkTask): Promise<ResolveLinkResult> {
+    const input = JSON.stringify({
+      task: "resolve_link",
+      system: RESOLVE_LINK_SYSTEM_PROMPT,
+      model: this.roles[GenerationRole.GENERATE].model,
+      project: task.project,
+      prompt: resolveLinkPrompt(task),
+      link: task.link,
+      candidates: task.candidates.map((c) => c.id),
+    });
+    return parseResolveLink(await this.runners[GenerationRole.GENERATE](input), task);
   }
 }
 

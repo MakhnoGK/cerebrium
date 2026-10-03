@@ -82,6 +82,9 @@ export interface IntegrityCounters {
   links_to_review: number;
   superseded?: number;
   edges_repointed: number;
+  wikilinks_fixed?: number;
+  wikilinks_unlinked?: number;
+  wikilinks_to_review?: number;
 }
 
 export interface ConsolidationRunSummary {

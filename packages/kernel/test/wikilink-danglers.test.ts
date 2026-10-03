@@ -75,6 +75,7 @@ describe("Listing dangling wikilinks", () => {
         reason: "unknown",
         editable: true,
         suggestions: [{ id: target, title: "Episode purchase flow" }],
+        verdict: null,
       },
     ]);
   });
