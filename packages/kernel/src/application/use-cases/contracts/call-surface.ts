@@ -16,6 +16,7 @@ import { READ_SURFACE, type ReadName } from "@/application/use-cases/contracts/r
 import { RESOLVE_REVIEW } from "@/application/use-cases/contracts/reviews";
 import { SESSION_HINTS, START_SESSION } from "@/application/use-cases/contracts/session";
 import { SUBSCRIBE_EVENTS } from "@/application/use-cases/contracts/subscriptions";
+import { FIX_WIKILINK } from "@/application/use-cases/contracts/wikilinks";
 
 // Everything a client outside this process may call, by name. Extends the read surface with
 // the writes, so there is exactly one list to consult rather than one per delivery layer.
@@ -97,6 +98,13 @@ export const CALL_SURFACE = {
     audit: false,
     capability: Capability.READ,
   },
+  list_danglers: {
+    token: READ_SURFACE.list_danglers,
+    kind: "read",
+    action: EventAction.STATS,
+    audit: false,
+    capability: Capability.READ,
+  },
 
   // Writes — NEVER retried. None of these is idempotent: a retried `write_memory` after a
   // timeout creates a second node, and a retried `apply_candidate` resolves twice.
@@ -133,6 +141,12 @@ export const CALL_SURFACE = {
   },
   update_memory: {
     token: UPDATE_MEMORY,
+    kind: "write",
+    action: EventAction.UPDATE,
+    capability: Capability.WRITE,
+  },
+  fix_wikilink: {
+    token: FIX_WIKILINK,
     kind: "write",
     action: EventAction.UPDATE,
     capability: Capability.WRITE,

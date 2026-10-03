@@ -16,12 +16,15 @@ import type {
   ReviewNode,
 } from "@cerebrium/contracts/dashboard";
 import type { ConsolidationCandidate, ConsolidationProposal } from "@cerebrium/contracts/types";
+import type { WikilinkDangler, WikilinkFix } from "@cerebrium/contracts/wikilinks";
 import {
   decideCandidate,
   decideReview,
   errorMessage,
   fetchCandidates,
+  fetchDanglers,
   fetchReviews,
+  fixWikilink,
   retryCandidate,
   type CandidateKind,
 } from "../api";
@@ -31,6 +34,7 @@ import { Badge, Card, Empty, ErrorText, Mono, Notice, RelTime, useNow } from "./
 
 export const CANDIDATES_KEY = ["review", "candidates"] as const;
 export const REVIEWS_KEY = ["review", "runner"] as const;
+export const DANGLERS_KEY = ["review", "danglers"] as const;
 
 const KINDS: CandidateKind[] = ["distill", "merge", "supersede", "link", "prune", "documents"];
 
@@ -143,6 +147,7 @@ export function Review({ onCount }: { onCount: (count: number) => void }) {
     <div className="stack">
       <CandidatesSection state={candidates} />
       <RunnerSection state={runner} />
+      <DanglersSection />
     </div>
   );
 }
@@ -959,5 +964,152 @@ function ReviewWhat({ item }: { item: ReviewItemView }) {
     <>
       <NodeName node={item.node} /> <Badge tone="neutral">{item.node.type}</Badge>
     </>
+  );
+}
+
+function danglerKey(dangler: WikilinkDangler): string {
+  return `${dangler.node_id}|${dangler.link}`;
+}
+
+const FIX_LABEL: Record<WikilinkFix["action"], string> = {
+  rewrite: "Rewrote",
+  unlink: "Unlinked",
+  ignore: "Ignored",
+};
+
+function DanglersSection() {
+  const queryClient = useQueryClient();
+  const hidden = useIdSet();
+  const [errors, setError] = useErrors();
+  const [outcomes, pushOutcome] = useOutcomes();
+
+  const query = useQuery({
+    queryKey: DANGLERS_KEY,
+    queryFn: ({ signal }) => fetchDanglers(signal),
+    refetchInterval: 300_000,
+  });
+
+  const fix = useMutation({
+    mutationFn: ({ body }: { dangler: WikilinkDangler; body: WikilinkFix }) => fixWikilink(body),
+    onMutate: ({ dangler }) => {
+      setError(danglerKey(dangler), null);
+      hidden.add(danglerKey(dangler));
+    },
+    onSuccess: (_result, { dangler, body }) =>
+      pushOutcome("ok", `${FIX_LABEL[body.action]} [[${truncate(dangler.link, 60)}]]`),
+    onError: (error, { dangler }) => {
+      hidden.remove(danglerKey(dangler));
+      setError(danglerKey(dangler), errorMessage(error));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: DANGLERS_KEY }),
+  });
+
+  const danglers = query.data ?? [];
+  const visible = danglers.filter((d) => !hidden.ids.has(danglerKey(d)));
+  const error = query.isError ? errorMessage(query.error) : null;
+  const send = (dangler: WikilinkDangler, action: WikilinkFix["action"], target_id?: string) =>
+    fix.mutate({
+      dangler,
+      body: { node_id: dangler.node_id, link: dangler.link, action, target_id },
+    });
+
+  return (
+    <Card
+      title="Dangling wikilinks"
+      tone={visible.length > 0 ? "warn" : undefined}
+      aside={
+        query.data && (
+          <span className="sub muted">
+            <span className="num">{visible.length}</span> links point at no note
+          </span>
+        )
+      }
+    >
+      <Outcomes outcomes={outcomes} />
+      {error && (
+        <Notice tone={query.data ? "warn" : "err"}>Cannot load dangling links: {error}.</Notice>
+      )}
+      {!query.data ? (
+        query.isPending && <p className="loading">Loading dangling links…</p>
+      ) : visible.length === 0 ? (
+        <Empty>Every wikilink resolves to a note.</Empty>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Note</th>
+                <th>Link</th>
+                <th>Fix</th>
+              </tr>
+            </thead>
+            <tbody>
+              {danglers.map((dangler) => (
+                <DanglerRow
+                  key={danglerKey(dangler)}
+                  dangler={dangler}
+                  hidden={hidden.ids.has(danglerKey(dangler))}
+                  error={errors[danglerKey(dangler)] ?? null}
+                  onFix={(action, target) => send(dangler, action, target)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DanglerRow({
+  dangler,
+  hidden,
+  error,
+  onFix,
+}: {
+  dangler: WikilinkDangler;
+  hidden: boolean;
+  error: string | null;
+  onFix: (action: WikilinkFix["action"], target?: string) => void;
+}) {
+  return (
+    <tr hidden={hidden} className={error ? "row-err" : undefined}>
+      <td className="what">
+        <span title={dangler.node_id}>{dangler.node_title}</span>{" "}
+        {dangler.project && <Badge tone="neutral">{dangler.project}</Badge>}
+      </td>
+      <td className="what">
+        <code className="mono">[[{truncate(dangler.link, 60)}]]</code>{" "}
+        <Badge tone={dangler.reason === "ambiguous" ? "warn" : "neutral"}>
+          {dangler.reason === "ambiguous" ? "ambiguous" : "no match"}
+        </Badge>
+      </td>
+      <td>
+        <div className="actions">
+          {dangler.editable &&
+            dangler.suggestions.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className="btn"
+                title={`Rewrite to [[${s.id}]]`}
+                onClick={() => onFix("rewrite", s.id)}
+              >
+                → {truncate(s.title, 40)}
+              </button>
+            ))}
+          {dangler.editable && (
+            <button type="button" className="btn" onClick={() => onFix("unlink")}>
+              Unlink
+            </button>
+          )}
+          <button type="button" className="btn" onClick={() => onFix("ignore")}>
+            Ignore
+          </button>
+        </div>
+        {!dangler.editable && <span className="sub muted">episodic note: write-once</span>}
+        {error && <ErrorText text={error} max={160} />}
+      </td>
+    </tr>
   );
 }

@@ -12,6 +12,11 @@ import type {
   SweptNotice,
 } from "@cerebrium/contracts/dashboard";
 import type { GraphQuery, GraphSnapshot } from "@cerebrium/contracts/graph";
+import type {
+  WikilinkDangler,
+  WikilinkFix,
+  WikilinkFixResult,
+} from "@cerebrium/contracts/wikilinks";
 
 export const ACTIVITY_PAGE_SIZE = 100;
 
@@ -111,6 +116,14 @@ export function fetchReviews(signal?: AbortSignal): Promise<ReviewPage> {
 
 export function decideReview(body: ReviewDecisionBody): Promise<ReviewDecisionResult> {
   return postJson<ReviewDecisionResult>("/api/reviews/decision", body);
+}
+
+export function fetchDanglers(signal?: AbortSignal): Promise<WikilinkDangler[]> {
+  return getJson<WikilinkDangler[]>("/api/wikilinks/danglers", signal);
+}
+
+export function fixWikilink(body: WikilinkFix): Promise<WikilinkFixResult> {
+  return postJson<WikilinkFixResult>("/api/wikilinks/fix", body);
 }
 
 export function fetchGraph(query: GraphQuery, signal?: AbortSignal): Promise<GraphSnapshot> {

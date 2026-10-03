@@ -130,10 +130,14 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   duplicatePairFor(a: string, b: string, score: number): Promise<DuplicatePair | null>;
   citableSymbols(): Promise<{ name: string; node_id: string; repo: string }[]>;
   authoredBodies(): Promise<
-    { id: string; title: string; project: string | null; content: string }[]
+    { id: string; kind: MemoryKind; title: string; project: string | null; content: string }[]
   >;
   revisionCount(): Promise<number>;
   retiredAuthoredTitles(): Promise<{ id: string; title: string }[]>;
+  // Titles a live authored node carried before its current one.
+  formerTitles(): Promise<{ id: string; title: string }[]>;
+  ignoredWikilinks(): Promise<{ node_id: string; link: string }[]>;
+  ignoreWikilink(nodeId: string, link: string, ts: string): Promise<void>;
   codeIndexWatermark(): Promise<string | null>;
   deadMirrorNodes(limit: number, unreachable?: readonly string[]): Promise<string[]>;
   unannotatedSemantic(

@@ -765,7 +765,7 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
   // Every live authored node with its current body, which is both the text the citations
   // are read from and the titles the wikilinks resolve against.
   async authoredBodies(): Promise<
-    { id: string; title: string; project: string | null; content: string }[]
+    { id: string; kind: MemoryKind; title: string; project: string | null; content: string }[]
   > {
     return this.db
       .prepare(
@@ -774,14 +774,21 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
                   ROW_NUMBER() OVER (PARTITION BY r.node_id ORDER BY r.rev DESC) AS seq
            FROM revisions r
          )
-         SELECT n.id AS id, n.title AS title, n.project AS project, c.content AS content
+         SELECT n.id AS id, n.memory_kind AS kind, n.title AS title, n.project AS project,
+                c.content AS content
          FROM current c
          JOIN nodes n ON n.id = c.node_id
          WHERE c.seq = 1
            AND n.invalidated_at IS NULL
            AND n.memory_kind IN ('semantic', 'episodic')`,
       )
-      .all() as { id: string; title: string; project: string | null; content: string }[];
+      .all() as {
+      id: string;
+      kind: MemoryKind;
+      title: string;
+      project: string | null;
+      content: string;
+    }[];
   }
 
   // Revisions are append-only, so this changes if and only if a body or a title arrived
@@ -799,6 +806,41 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
          WHERE invalidated_at IS NOT NULL AND memory_kind IN ('semantic', 'episodic')`,
       )
       .all() as { id: string; title: string }[];
+  }
+
+  async formerTitles(): Promise<{ id: string; title: string }[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT t.node_id AS id, t.title AS title FROM node_titles t
+           JOIN nodes n ON n.id = t.node_id
+           WHERE n.invalidated_at IS NULL AND n.memory_kind IN ('semantic', 'episodic')
+             AND t.title != n.title
+           ORDER BY t.node_id, t.title`,
+        )
+        .all() as { id: string; title: string }[],
+    );
+  }
+
+  async ignoredWikilinks(): Promise<{ node_id: string; link: string }[]> {
+    return Promise.resolve(
+      this.db
+        .prepare("SELECT node_id, link FROM wikilink_ignores ORDER BY node_id, link")
+        .all() as {
+        node_id: string;
+        link: string;
+      }[],
+    );
+  }
+
+  async ignoreWikilink(nodeId: string, link: string, ts: string): Promise<void> {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO wikilink_ignores (node_id, link, ignored_at) VALUES (?, ?, ?)",
+      )
+      .run(nodeId, link, ts);
+
+    return Promise.resolve();
   }
 
   // ---- detection: Tier-1 mirror prune ---------------------------------------

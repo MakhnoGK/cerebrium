@@ -18,4 +18,5 @@ import "@/application/use-cases/local/search-memory";
 import "@/application/use-cases/local/session";
 import "@/application/use-cases/local/subscriptions";
 import "@/application/use-cases/local/update-memory";
+import "@/application/use-cases/local/wikilinks";
 import "@/application/use-cases/local/write-memory";

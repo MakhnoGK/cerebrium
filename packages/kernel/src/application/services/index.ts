@@ -43,3 +43,8 @@ export {
 export { SessionNotices } from "@/application/services/session-notices.service";
 export { SessionService } from "@/application/services/session.service";
 export { SubscriptionService } from "@/application/services/subscription.service";
+export {
+  type WikilinkIndex,
+  type WikilinkOutcome,
+  WikilinkResolverService,
+} from "@/application/services/wikilink-resolver.service";

@@ -644,10 +644,11 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
   }
 
   async authoredBodies(): Promise<
-    { id: string; title: string; project: string | null; content: string }[]
+    { id: string; kind: MemoryKind; title: string; project: string | null; content: string }[]
   > {
     return this.all(
-      `SELECT n.id AS id, n.title AS title, n.project AS project, lr.content AS content
+      `SELECT n.id AS id, n.memory_kind AS kind, n.title AS title, n.project AS project,
+              lr.content AS content
        FROM nodes n
        ${LATEST_REVISION}
        WHERE n.invalidated_at IS NULL AND n.memory_kind IN ('semantic', 'episodic')
@@ -664,6 +665,28 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
       `SELECT id, title FROM nodes
        WHERE invalidated_at IS NOT NULL AND memory_kind IN ('semantic', 'episodic')
        ORDER BY id`,
+    );
+  }
+
+  async formerTitles(): Promise<{ id: string; title: string }[]> {
+    return this.all(
+      `SELECT t.node_id AS id, t.title AS title FROM node_titles t
+       JOIN nodes n ON n.id = t.node_id
+       WHERE n.invalidated_at IS NULL AND n.memory_kind IN ('semantic', 'episodic')
+         AND t.title <> n.title
+       ORDER BY t.node_id, t.title`,
+    );
+  }
+
+  async ignoredWikilinks(): Promise<{ node_id: string; link: string }[]> {
+    return this.all("SELECT node_id, link FROM wikilink_ignores ORDER BY node_id, link");
+  }
+
+  async ignoreWikilink(nodeId: string, link: string, ts: string): Promise<void> {
+    await this.run(
+      `INSERT INTO wikilink_ignores (node_id, link, ignored_at) VALUES (@nodeId, @link, @ts)
+       ON CONFLICT DO NOTHING`,
+      { nodeId, link, ts },
     );
   }
 

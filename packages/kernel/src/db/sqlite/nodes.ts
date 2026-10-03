@@ -13,6 +13,7 @@ import {
   insertRevision,
   invalidateEdge,
   invalidateSystemSimilaritiesOf,
+  recordTitle,
   syncChunks,
 } from "@/db/sqlite/internal";
 import { newId } from "@/core/ids";
@@ -115,6 +116,7 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
           eventTo: input.event_to ?? null,
         });
       insertRevision(this.db, id, 1, input.content, input.session_id, null, input.ts);
+      recordTitle(this.db, id, input.title, input.ts);
       ftsPut(this.db, id, input.title, input.content);
       syncChunks(this.db, id, 1, input.content, input.ts);
       for (const link of input.links ?? []) {
@@ -152,6 +154,7 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
           session: input.session_id,
         });
       insertRevision(this.db, id, 1, input.content, input.session_id, null, input.ts);
+      recordTitle(this.db, id, input.title, input.ts);
       ftsPut(this.db, id, input.title, input.content);
       syncChunks(this.db, id, 1, input.content, input.ts);
       const mark = this.db.prepare(
@@ -313,6 +316,7 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
       const title = fields.title ?? cur.title;
       if (fields.title !== undefined) {
         this.db.prepare("UPDATE nodes SET title = ? WHERE id = ?").run(title, id);
+        recordTitle(this.db, id, title, fields.ts);
       }
       insertRevision(this.db, id, nextRev, content, fields.session_id, fields.reason, fields.ts);
       ftsPut(this.db, id, title, content);

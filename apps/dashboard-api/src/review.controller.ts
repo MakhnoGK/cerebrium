@@ -17,6 +17,12 @@ import type {
   ReviewDecisionResult,
   ReviewPage,
 } from "@cerebrium/contracts/dashboard";
+import {
+  WIKILINK_FIX_ACTIONS,
+  type WikilinkDangler,
+  type WikilinkFix,
+  type WikilinkFixResult,
+} from "@cerebrium/contracts/wikilinks";
 import { ReviewService } from "./review.service";
 
 const KINDS = ["distill", "merge", "link", "prune", "documents", "supersede"];
@@ -67,6 +73,29 @@ export class ReviewController {
   @HttpCode(200)
   retry(@Param("id") id: string): Promise<{ status: string }> {
     return relayed(this.review.retry(id));
+  }
+
+  @Get("wikilinks/danglers")
+  danglers(): Promise<WikilinkDangler[]> {
+    return relayed(this.review.danglers());
+  }
+
+  @Post("wikilinks/fix")
+  @HttpCode(200)
+  fixLink(@Body() body: WikilinkFix): Promise<WikilinkFixResult> {
+    if (!oneOf(body.action, [...WIKILINK_FIX_ACTIONS])) {
+      throw new BadRequestException(`action is one of ${WIKILINK_FIX_ACTIONS.join(", ")}`);
+    }
+
+    if (typeof body.node_id !== "string" || typeof body.link !== "string") {
+      throw new BadRequestException("node_id and link are required");
+    }
+
+    if (body.action === "rewrite" && typeof body.target_id !== "string") {
+      throw new BadRequestException("rewrite needs target_id");
+    }
+
+    return relayed(this.review.fixLink(body));
   }
 
   @Get("reviews")

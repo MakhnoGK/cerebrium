@@ -72,4 +72,45 @@ describe("Dashboard review", () => {
       { session_id: "01M3W00000000000000000SESS", id: "c1", decision: "apply", collapse: true },
     ]);
   });
+
+  it("should list dangling wikilinks and send a fix as the dashboard's session", async () => {
+    // Given
+    const dangler = {
+      node_id: "n1",
+      node_title: "Shop notes",
+      project: "toonspace",
+      link: "How buying works",
+      reason: "unknown",
+      editable: true,
+      suggestions: [{ id: "n2", title: "Episode purchase flow" }],
+    };
+    const { client, calls } = kernel({
+      list_danglers: [dangler],
+      fix_wikilink: { node_id: "n1", action: "rewrite", rewritten: 1 },
+    });
+    const review = new ReviewService(client);
+
+    // When
+    const listed = await review.danglers();
+    const fixed = await review.fixLink({
+      node_id: "n1",
+      link: "How buying works",
+      action: "rewrite",
+      target_id: "n2",
+    });
+
+    // Then
+    expect(listed).toEqual([dangler]);
+    expect(fixed.rewritten).toBe(1);
+    expect(calls[1]).toEqual({
+      name: "fix_wikilink",
+      args: {
+        session_id: "01M3W00000000000000000SESS",
+        node_id: "n1",
+        link: "How buying works",
+        action: "rewrite",
+        target_id: "n2",
+      },
+    });
+  });
 });
