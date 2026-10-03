@@ -1,0 +1,9 @@
+{
+  "name": "cerebrium-code-nav",
+  "version": "0.1.0",
+  "description": "Answers code searches in Cerebrium-indexed repos with code_lookup instead of Grep and shell search",
+  "author": {
+    "name": "Hryhorii Khyzhniakov"
+  },
+  "license": "MIT"
+}

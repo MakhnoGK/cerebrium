@@ -25,6 +25,7 @@ Every host needs the same four things, and all four expose all four:
 | Skill | `~/.claude/skills/cerebrium/` | **symlink** to this repo's `apps/plugin/skill/cerebrium` |
 | Rules | `~/.claude/CLAUDE.md` | managed block from [always-on.md](./always-on.md) |
 | Hook | `~/.claude/settings.json` | `SessionStart` command hook |
+| Mod | `~/.claude/settings.json` | `env.CLAUDE_CODE_PLUGIN_DIRS` lists this repo's `apps/plugin/install/claude-mod` |
 
 ## Codex CLI
 

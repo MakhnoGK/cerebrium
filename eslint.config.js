@@ -79,7 +79,18 @@ const restrict = (...patterns) => ({
 const KERNEL = "packages/kernel/src";
 
 export default tseslint.config(
-  { ignores: ["**/dist", "**/node_modules", ".tmp", "coverage", "**/test/fixtures"] },
+  {
+    ignores: [
+      "**/dist",
+      "**/node_modules",
+      ".tmp",
+      "coverage",
+      "**/test/fixtures",
+      // The `claude-code` module types exist only inside a Claude Code session.
+      "apps/plugin/install/claude-mod/hooks/register.ts",
+      "apps/plugin/install/claude-mod/tests",
+    ],
+  },
   js.configs.recommended,
   {
     files: ["**/*.ts", "**/*.mts"],

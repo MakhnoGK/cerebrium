@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyHost, type ApplyOptions } from "@plugin/scripts/agent-apply";
 import {
   ANTIGRAVITY_PERMISSION_GRANTS,
+  claudeModDir,
   defaultEnv,
   hookCommand,
   pending,
@@ -355,6 +356,40 @@ describe("Skill link", () => {
 
     // Then
     expect(JSON.parse(read(path)).entries).toEqual([other, { path: skillRoot(REPO) }]);
+  });
+});
+
+describe("Claude mod", () => {
+  it("should add this working tree's mod to the plugin dirs and keep the others", () => {
+    // Given
+    const path = join(home, ".claude", "settings.json");
+    mkdirSync(dirname(path), { recursive: true });
+    const stale = claudeModDir("/elsewhere/cerebrium");
+    writeFileSync(
+      path,
+      JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: `/opt/other-mod:${stale}`, OTHER: "1" } }),
+    );
+
+    // When
+    applyHost("claude", input(), options());
+
+    // Then
+    const env = JSON.parse(read(path)).env;
+    expect(env.CLAUDE_CODE_PLUGIN_DIRS).toBe(`/opt/other-mod:${claudeModDir(REPO)}`);
+    expect(env.OTHER).toBe("1");
+    expect(outstanding("claude")).not.toContain("mod");
+  });
+
+  it("should not list the mod twice across runs", () => {
+    // Given
+    applyHost("claude", input(), options());
+
+    // When
+    applyHost("claude", input(), options());
+
+    // Then
+    const path = join(home, ".claude", "settings.json");
+    expect(JSON.parse(read(path)).env.CLAUDE_CODE_PLUGIN_DIRS).toBe(claudeModDir(REPO));
   });
 });
 

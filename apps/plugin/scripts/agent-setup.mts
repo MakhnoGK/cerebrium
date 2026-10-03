@@ -60,7 +60,9 @@ Against a Cerebrium host:
   background, and post-commit/checkout/merge/rewrite hooks in that repo re-index it. An
   existing hook is kept beside ours as <name>.cerebrium-prev and still runs first.
 
-Core surfaces per host: mcp, skill, rules, hook. Antigravity also has an explicit
+Core surfaces per host: mcp, skill, rules, hook. Claude Code also has a mod surface: the
+code-nav mod in apps/plugin/install/claude-mod, listed in CLAUDE_CODE_PLUGIN_DIRS of
+~/.claude/settings.json. Antigravity also has an explicit
 permissions surface for the IDE and CLI configs; pi has an extension surface instead,
 because it ships no MCP client and one extension delivers all four. See apps/plugin/install/hosts.md
 for locations.

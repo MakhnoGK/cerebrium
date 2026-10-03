@@ -86,7 +86,12 @@ ln -s /ABSOLUTE/PATH/TO/cerebrium/apps/plugin/skill/cerebrium ~/.claude/skills/c
 Then paste `apps/plugin/install/always-on.md` into `~/.claude/CLAUDE.md`, markers included, and add a
 `SessionStart` hook to `~/.claude/settings.json` that echoes the reminder line.
 
-Verify: `claude mcp list` shows `cerebrium`; `/mcp` in a session lists its tools.
+Optionally load the code-nav mod, which answers identifier searches in indexed checkouts from
+`code_lookup`: add `apps/plugin/install/claude-mod` to `CLAUDE_CODE_PLUGIN_DIRS` under `env` in
+`~/.claude/settings.json` (absolute paths, `:`-separated; Claude Code 2.1.287 or later).
+
+Verify: `claude mcp list` shows `cerebrium`; `/mcp` in a session lists its tools; `/plugin`
+shows `cerebrium-code-nav` among the active mods.
 
 ## 2 — Codex CLI
 

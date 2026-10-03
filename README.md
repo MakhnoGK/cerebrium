@@ -1220,6 +1220,18 @@ deliberately left to you and named in the report: Codex's `hooks = true` under `
 (appending a second `[features]` table would corrupt the TOML) and its hook trust prompt,
 which is a security gate and not ours to pre-approve.
 
+Claude Code adds one host-specific surface: the **code-nav mod** in
+`apps/plugin/install/claude-mod`, loaded through `CLAUDE_CODE_PLUGIN_DIRS` in the `env` of
+`~/.claude/settings.json` (Claude Code 2.1.287 or later). In a checkout listed in
+`~/.cerebrium/plugin-index.json`, an `rg`, `grep -r` or `git grep` for a code identifier does
+not run: the mod answers it from `code_lookup` with each symbol's path, lines, id and callers.
+Repeating the identical command runs it, for every raw text match. Text searches, other
+languages, docs, piped input and unindexed directories run as before, and so does everything
+when Cerebrium is unreachable. It also loads `code_lookup`, `search`, `get` and
+`session_start` up front instead of behind tool search. The hook wiring in `hooks/register.ts`
+is checked by `claude plugin validate` and `claude plugin test apps/plugin/install/claude-mod`,
+which need a Claude Code install; the parsing in `hooks/code-nav.ts` is covered by vitest.
+
 Antigravity adds one host-specific surface: explicit Cerebrium permissions in the IDE and CLI
 settings. Setup merges the current tool grants into both active configs, preserves unrelated
 entries, and refuses malformed JSON or permission shapes instead of overwriting them.

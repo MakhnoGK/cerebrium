@@ -11,7 +11,15 @@ import { ToolName } from "@cerebrium/kernel/presentation/mcp/tools/contracts/too
 export const HOSTS = ["claude", "codex", "antigravity", "pi"] as const;
 export type HostId = (typeof HOSTS)[number];
 
-export const SURFACES = ["mcp", "skill", "rules", "hook", "permissions", "extension"] as const;
+export const SURFACES = [
+  "mcp",
+  "skill",
+  "rules",
+  "hook",
+  "mod",
+  "permissions",
+  "extension",
+] as const;
 export type Surface = (typeof SURFACES)[number];
 
 /** `ok` needs nothing; `manual` cannot be automated and is explained in `detail`. */
@@ -184,6 +192,18 @@ export const HOOK_SCRIPT_SUFFIX = join("install", "hooks", "session-start.mjs");
 
 export function hookScript(repoRoot: string): string {
   return join(pluginRoot(repoRoot), HOOK_SCRIPT_SUFFIX);
+}
+
+export const MOD_DIR_SUFFIX = join("install", "claude-mod");
+export const PLUGIN_DIRS_ENV = "CLAUDE_CODE_PLUGIN_DIRS";
+
+export function claudeModDir(repoRoot: string): string {
+  return join(pluginRoot(repoRoot), MOD_DIR_SUFFIX);
+}
+
+export function pluginDirs(settings: Record<string, unknown>): string[] {
+  const value = record(settings.env)[PLUGIN_DIRS_ENV];
+  return typeof value === "string" ? value.split(":").filter((dir) => dir !== "") : [];
 }
 
 /** pi has no MCP layer, no managed rules file and no session hook: one extension is all four. */
@@ -423,6 +443,23 @@ function hookState(path: string, present: boolean | null, detail: string): Surfa
     : state("hook", "missing", path, detail);
 }
 
+function modState(settings: JsonFile, path: string, repoRoot: string): SurfaceState {
+  if (settings.state === "missing") return state("mod", "missing", path, "file does not exist yet");
+  const dirs = pluginDirs(settings.value);
+  if (dirs.includes(claudeModDir(repoRoot))) {
+    return state("mod", "ok", path, "code-nav mod loaded from this working tree");
+  }
+  const other = dirs.find((dir) => dir.endsWith(MOD_DIR_SUFFIX));
+  return other
+    ? state("mod", "stale", path, `code-nav mod loaded from elsewhere (${other})`)
+    : state(
+        "mod",
+        "missing",
+        path,
+        `${PLUGIN_DIRS_ENV} does not list apps/plugin/${MOD_DIR_SUFFIX}`,
+      );
+}
+
 function jsonConflict(surface: Surface, path: string): SurfaceState {
   return state(surface, "conflict", path, "file is not a valid JSON object");
 }
@@ -527,6 +564,9 @@ function planClaude(input: PlanInput): HostPlan {
             hookPresent,
             "no SessionStart hook pointing at apps/plugin/install/hooks",
           ),
+      hooks.state === "conflict"
+        ? jsonConflict("mod", settings)
+        : modState(hooks, settings, repoRoot),
     ],
     notes: [],
   };

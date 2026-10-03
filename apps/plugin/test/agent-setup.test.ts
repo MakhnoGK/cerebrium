@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   alwaysOnBlock,
   ANTIGRAVITY_PERMISSION_GRANTS,
+  claudeModDir,
   codexEnv,
   defaultEnv,
   discoverEnv,
@@ -73,6 +74,7 @@ describe("planHost", () => {
     // Then
     expect(plan.detected).toBe(false);
     expect(plan.surfaces.map((s) => s.status)).toEqual([
+      "missing",
       "missing",
       "missing",
       "missing",
@@ -352,6 +354,36 @@ describe("Hook surface", () => {
 
     // When / Then
     expect(status("claude", "hook")).toBe("missing");
+  });
+});
+
+describe("Mod surface", () => {
+  it("should be ok when the plugin dirs list this working tree's mod", () => {
+    // Given
+    writeJson(join(home, ".claude", "settings.json"), {
+      env: { CLAUDE_CODE_PLUGIN_DIRS: `/opt/other-mod:${claudeModDir(REPO)}` },
+    });
+
+    // When / Then
+    expect(status("claude", "mod")).toBe("ok");
+  });
+
+  it("should be stale when the plugin dirs list another checkout's mod", () => {
+    // Given
+    writeJson(join(home, ".claude", "settings.json"), {
+      env: { CLAUDE_CODE_PLUGIN_DIRS: claudeModDir("/elsewhere/cerebrium") },
+    });
+
+    // When / Then
+    expect(status("claude", "mod")).toBe("stale");
+  });
+
+  it("should be missing when no plugin dir is set", () => {
+    // Given
+    writeJson(join(home, ".claude", "settings.json"), { env: { OTHER: "1" } });
+
+    // When / Then
+    expect(status("claude", "mod")).toBe("missing");
   });
 });
 

@@ -41,6 +41,8 @@
     "**/dist",
     ".tmp",
     "**/test/fixtures",
-    "apps/dashboard-web"
+    "apps/dashboard-web",
+    "apps/plugin/install/claude-mod/hooks/register.ts",
+    "apps/plugin/install/claude-mod/tests"
   ]
 }
