@@ -4,6 +4,8 @@ import { ConsolidationKind, EdgeType, MemoryKind } from "@cerebrium/contracts/vo
 import {
   ConsolidationRecommendation,
   type ConsolidationProvider,
+  type ConsolidationResult,
+  type ConsolidationTask,
 } from "@/domain/ports/consolidation-provider";
 import { ConsolidationWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
@@ -54,6 +56,7 @@ const stubProvider: ConsolidationProvider = {
       title: "Merged payments",
       summary: "S",
       body: "merged body",
+      missing: [],
     }),
   reconcile: () => Promise.reject(new Error("not used")),
   annotate: () => Promise.reject(new Error("not used")),
@@ -291,5 +294,78 @@ describe("Semantic dedup / merge", () => {
     expect(
       await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
     ).toHaveLength(0);
+  });
+});
+
+function draftingProvider(drafts: Pick<ConsolidationResult, "body" | "missing">[]) {
+  const tasks: ConsolidationTask[] = [];
+  const provider: ConsolidationProvider = {
+    ...stubProvider,
+    generate: (task) => {
+      tasks.push(task);
+      const draft = drafts[Math.min(tasks.length - 1, drafts.length - 1)]!;
+
+      return Promise.resolve({
+        recommendation: ConsolidationRecommendation.APPLY,
+        reason: "same fact",
+        title: "Payments",
+        summary: "S",
+        ...draft,
+      });
+    },
+  };
+
+  return { provider, tasks };
+}
+
+describe("Merge drafts that lose anchors", () => {
+  it("should ask once more with the lost anchors and keep the draft that loses fewer", async () => {
+    // Given
+    const { provider, tasks } = draftingProvider([
+      { body: "first", missing: ["01ABC", "deploy.sh"] },
+      { body: "second", missing: ["deploy.sh"] },
+    ]);
+    const env = setup({ consolidator: provider });
+    await seedDupes(env);
+
+    // When
+    await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
+    expect(tasks.map((t) => t.missing)).toEqual([undefined, ["01ABC", "deploy.sh"]]);
+    expect(tasks[0]!.canonical_id).toBe(cand!.canonical_id);
+    expect(cand!.proposal).toMatchObject({ body: "second", missing: ["deploy.sh"] });
+  });
+
+  it("should keep the first draft when the second loses as much", async () => {
+    // Given
+    const { provider, tasks } = draftingProvider([
+      { body: "first", missing: ["01ABC"] },
+      { body: "second", missing: ["01ABC"] },
+    ]);
+    const env = setup({ consolidator: provider });
+    await seedDupes(env);
+
+    // When
+    await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    const [cand] = await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE });
+    expect(tasks).toHaveLength(2);
+    expect(cand!.proposal).toMatchObject({ body: "first", missing: ["01ABC"] });
+  });
+
+  it("should not ask again when the draft loses nothing", async () => {
+    // Given
+    const { provider, tasks } = draftingProvider([{ body: "whole", missing: [] }]);
+    const env = setup({ consolidator: provider });
+    await seedDupes(env);
+
+    // When
+    await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(tasks).toHaveLength(1);
   });
 });

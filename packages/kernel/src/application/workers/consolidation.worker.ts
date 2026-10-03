@@ -421,16 +421,32 @@ export class ConsolidationWorker {
   ): Promise<ConsolidationResult | null> {
     const outcome = await this.runGeneration(task);
 
-    if (outcome.generated) {
-      return outcome.result;
+    if (!outcome.generated) {
+      if (outcome.error !== null) {
+        result.generation_failures++;
+        result.last_error = outcome.error;
+      }
+
+      return null;
     }
 
-    if (outcome.error !== null) {
-      result.generation_failures++;
-      result.last_error = outcome.error;
+    const first = outcome.result;
+
+    if (
+      task.kind !== ConsolidationKind.MERGE ||
+      first.recommendation !== ConsolidationRecommendation.APPLY ||
+      !first.missing.length
+    ) {
+      return first;
     }
 
-    return null;
+    const retry = await this.runGeneration({ ...task, missing: first.missing });
+
+    return retry.generated &&
+      retry.result.recommendation === ConsolidationRecommendation.APPLY &&
+      retry.result.missing.length < first.missing.length
+      ? retry.result
+      : first;
   }
 
   // similar_to link discovery. Deterministic kNN over stored vectors; no
@@ -889,6 +905,7 @@ export class ConsolidationWorker {
           kind: ConsolidationKind.MERGE,
           project: pair.project,
           inputs: await this.consolidationRepo.candidateInputs(pair.member_ids),
+          canonical_id: pair.canonical_id,
         },
         result,
       );
@@ -1547,7 +1564,7 @@ export class ConsolidationWorker {
       }
 
       const gen = await this.tryGenerate(
-        { kind: cand.kind, project: cand.project, inputs },
+        { kind: cand.kind, project: cand.project, inputs, canonical_id: cand.canonical_id },
         result,
       );
 

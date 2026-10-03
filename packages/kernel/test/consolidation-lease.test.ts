@@ -47,6 +47,7 @@ function slowProvider(holder: Holder, onGenerate?: () => void): ConsolidationPro
         title: "Drafted",
         summary: "S",
         body: "drafted body",
+        missing: [],
       });
     },
     reconcile: () => Promise.reject(new Error("not used")),

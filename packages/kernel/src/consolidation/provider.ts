@@ -10,6 +10,7 @@ import {
   type AnnotateTask,
   type ConsolidationResult,
   type ConsolidationTask,
+  type ConsolidationTaskInput,
   type ReconcileResult,
   type ReconcileTask,
   type RelateRecord,
@@ -18,35 +19,88 @@ import {
   type ResolveLinkResult,
   type ResolveLinkTask,
 } from "@/domain/ports/consolidation-provider";
+import {
+  composeDistill,
+  composeMerge,
+  missingAnchors,
+  sectionsOf,
+  summaryOf,
+  type MergeAddition,
+} from "@/consolidation/compose";
 
-export const SYSTEM_PROMPT =
-  "You judge and consolidate a cluster of an AI agent's memory records. FIRST decide " +
-  "whether they truly describe the SAME thing and should be consolidated into one note, " +
-  "or are merely similar-looking but DISTINCT (e.g. two different services, features, or " +
-  "entities that share vocabulary) and should be kept separate. Set recommendation to " +
-  "'apply' only when they are genuinely the same and consolidating loses nothing; " +
-  "otherwise 'reject'. Give a one-sentence reason. THEN draft the consolidated note " +
-  "(used only if applied): summarize ONLY what the records state, invent nothing, add no " +
-  "facts/dates/names/numbers absent from the inputs, and note (don't resolve) conflicts. " +
-  "Return JSON: recommendation ('apply'|'reject'), reason (one sentence), title (short " +
-  "noun phrase), summary (one sentence), body (2-4 sentences grounded in the records).";
+export const MERGE_SYSTEM_PROMPT =
+  "You fold a near-duplicate record into the record an AI agent's memory keeps. Record " +
+  "[KEEP] stays exactly as written; record [DUPLICATE] is retired. FIRST decide whether " +
+  "they truly describe the SAME thing: set recommendation to 'apply' only when they do, " +
+  "otherwise 'reject' (similar-looking but distinct services, features or entities that " +
+  "share vocabulary). Give a one-sentence reason. THEN list additions: every fact, detail, " +
+  "decision, reason, identifier, number, date, path, URL, `code` span and [[link]] that " +
+  "[DUPLICATE] states and [KEEP] does not. Each addition is one self-contained markdown " +
+  "line taken from [DUPLICATE], with identifiers copied verbatim; set its section to the " +
+  "[KEEP] heading it belongs under, or '' to append it at the end. Leave out what [KEEP] " +
+  "already says, however differently worded, and return no additions when [DUPLICATE] adds " +
+  "nothing. List conflicts, where the two records disagree, one line each, without " +
+  "resolving them. Invent nothing. Return JSON: recommendation ('apply'|'reject'), reason " +
+  "(one sentence), additions ([{section, text}]), conflicts (string[]).";
 
-// The JSON schema a structured-output backend (e.g., Ollama `format`) enforces so the
-// response parses without fragility.
-export const RESULT_SCHEMA = {
+export const DISTILL_SYSTEM_PROMPT =
+  "You distill a cluster of an AI agent's episodic memory records (what happened) into ONE " +
+  "durable semantic note (what is now known). FIRST decide whether the records share one " +
+  "subject worth a durable note: 'apply' if so, otherwise 'reject'. Give a one-sentence " +
+  "reason. THEN write: title (short noun phrase naming the subject), summary (one sentence " +
+  "that stands alone) and facts: every durable fact, decision with its reason, gotcha, " +
+  "how-to step, result and open question the records state, one self-contained line each, " +
+  "with identifiers, numbers, dates, paths, URLs, `code` spans and [[links]] copied " +
+  "verbatim. Write a fact the records repeat once; when records disagree, keep both sides " +
+  "and say so. Leave out only narration of the work itself (what was opened, read or " +
+  "tried in passing). Invent nothing. Return JSON: recommendation ('apply'|'reject'), " +
+  "reason (one sentence), title, summary, facts (string[]).";
+
+export function mergeSchema(task: ConsolidationTask) {
+  return {
+    type: "object",
+    properties: {
+      recommendation: { type: "string", enum: ["apply", "reject"] },
+      reason: { type: "string" },
+      additions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            section: { type: "string", enum: [...sectionsOf(keptOf(task).content), ""] },
+            text: { type: "string" },
+          },
+          required: ["section", "text"],
+        },
+      },
+      conflicts: { type: "array", items: { type: "string" } },
+    },
+    required: ["recommendation", "reason", "additions", "conflicts"],
+  } as const;
+}
+
+export const DISTILL_SCHEMA = {
   type: "object",
   properties: {
     recommendation: { type: "string", enum: ["apply", "reject"] },
     reason: { type: "string" },
     title: { type: "string" },
     summary: { type: "string" },
-    body: { type: "string" },
+    facts: { type: "array", items: { type: "string" } },
   },
-  required: ["recommendation", "reason", "title", "summary", "body"],
+  required: ["recommendation", "reason", "title", "summary", "facts"],
 } as const;
 
+export function systemPrompt(task: ConsolidationTask): string {
+  return task.kind === ConsolidationKind.MERGE ? MERGE_SYSTEM_PROMPT : DISTILL_SYSTEM_PROMPT;
+}
+
+export function resultSchema(task: ConsolidationTask): object {
+  return task.kind === ConsolidationKind.MERGE ? mergeSchema(task) : DISTILL_SCHEMA;
+}
+
 // Total characters of record content one cluster prompt may carry.
-export const CLUSTER_CHARS = 12_000;
+export const CLUSTER_CHARS = 40_000;
 
 const TRUNCATED = "\n…[truncated]";
 
@@ -70,28 +124,110 @@ function clip(content: string, budget: number): string {
   return content.length <= budget ? content : content.slice(0, budget).trimEnd() + TRUNCATED;
 }
 
+function keptOf(task: ConsolidationTask): ConsolidationTaskInput {
+  return task.inputs.find((r) => r.id === task.canonical_id) ?? task.inputs[0]!;
+}
+
+function duplicatesOf(task: ConsolidationTask): ConsolidationTaskInput[] {
+  const kept = keptOf(task);
+
+  return task.inputs.filter((r) => r !== kept);
+}
+
+function retryNote(task: ConsolidationTask): string {
+  if (!task.missing?.length) return "";
+
+  const ask =
+    task.kind === ConsolidationKind.MERGE
+      ? "Add each one [DUPLICATE] states and [KEEP] does not."
+      : "Include each one that is durable knowledge.";
+
+  return `\n\nA previous answer left these out: ${task.missing.join(", ")}. ${ask}`;
+}
+
 // The user message for a task: the cluster's records, labeled, ordered, and clipped to
 // the cluster budget.
 export function taskPrompt(task: ConsolidationTask): string {
-  const verb =
-    task.kind === ConsolidationKind.MERGE
-      ? "Merge these near-duplicate records"
-      : "Consolidate these records";
   const scope = task.project ? ` (project: ${task.project})` : "";
   const budgets = shares(
     task.inputs.map((r) => r.content.length),
     CLUSTER_CHARS,
   );
+  const clipped = new Map(task.inputs.map((r, i) => [r, clip(r.content, budgets[i]!)]));
+
+  if (task.kind === ConsolidationKind.MERGE) {
+    const kept = keptOf(task);
+    const records = [
+      `[KEEP] ${kept.title}\n${clipped.get(kept)!}`,
+      ...duplicatesOf(task).map((r) => `[DUPLICATE] ${r.title}\n${clipped.get(r)!}`),
+    ].join("\n\n");
+
+    return `Fold the duplicate into the kept record${scope}:\n\n${records}${retryNote(task)}`;
+  }
+
   const records = task.inputs
-    .map((r, i) => `[${i + 1}] ${r.title}\n${clip(r.content, budgets[i]!)}`)
+    .map((r, i) => `[${i + 1}] ${r.title}\n${clipped.get(r)!}`)
     .join("\n\n");
 
-  return `${verb}${scope}:\n\n${records}`;
+  return `Distill these records${scope}:\n\n${records}${retryNote(task)}`;
 }
 
-// Parse + validate a backend's JSON reply into a ConsolidationResult. Throws an
-// actionable error on anything malformed, so the caller degrades to suggest/skip.
-export function parseResult(raw: string): ConsolidationResult {
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+function additionsOf(v: unknown): MergeAddition[] {
+  if (!Array.isArray(v)) return [];
+
+  return v.flatMap((a) => {
+    const o = a as Record<string, unknown>;
+
+    return typeof o.text === "string"
+      ? [{ section: typeof o.section === "string" ? o.section : "", text: o.text }]
+      : [];
+  });
+}
+
+function draftOf(task: ConsolidationTask, o: Record<string, unknown>) {
+  if (task.kind === ConsolidationKind.MERGE && Array.isArray(o.additions)) {
+    const kept = keptOf(task);
+    const duplicates = duplicatesOf(task);
+    const body = composeMerge(
+      kept,
+      duplicates[0] ?? kept,
+      additionsOf(o.additions),
+      strings(o.conflicts),
+    );
+
+    return { title: kept.title, summary: summaryOf(body), body, sources: duplicates };
+  }
+
+  if (
+    task.kind === ConsolidationKind.DISTILL &&
+    Array.isArray(o.facts) &&
+    typeof o.title === "string"
+  ) {
+    const summary = typeof o.summary === "string" ? o.summary : "";
+
+    return {
+      title: o.title,
+      summary,
+      body: composeDistill(summary, strings(o.facts)),
+      sources: task.inputs,
+    };
+  }
+
+  if (typeof o.title !== "string" || typeof o.summary !== "string" || typeof o.body !== "string") {
+    throw new Error("consolidation provider response missing title/summary/body strings");
+  }
+
+  return { title: o.title, summary: o.summary, body: o.body, sources: task.inputs };
+}
+
+// Parse + validate a backend's JSON reply into a ConsolidationResult. A merge reply carries
+// additions and a distill reply facts; a plain {title, summary, body} is taken as written.
+// Throws an actionable error on anything malformed, so the caller degrades to suggest/skip.
+export function parseResult(raw: string, task: ConsolidationTask): ConsolidationResult {
   let obj: unknown;
 
   try {
@@ -101,18 +237,24 @@ export function parseResult(raw: string): ConsolidationResult {
   }
 
   const o = obj as Record<string, unknown>;
-
-  if (typeof o.title !== "string" || typeof o.summary !== "string" || typeof o.body !== "string") {
-    throw new Error("consolidation provider response missing title/summary/body strings");
-  }
-
+  const { title, summary, body, sources } = draftOf(task, o);
   const recommendation =
     o.recommendation === ConsolidationRecommendation.REJECT
       ? ConsolidationRecommendation.REJECT
       : ConsolidationRecommendation.APPLY;
   const reason = typeof o.reason === "string" ? o.reason : "";
 
-  return { recommendation, reason, title: o.title, summary: o.summary, body: o.body };
+  return {
+    recommendation,
+    reason,
+    title,
+    summary,
+    body,
+    missing: missingAnchors(
+      sources.map((r) => r.content),
+      body,
+    ),
+  };
 }
 
 // The reconciled judge's contract. Faithfulness again: the provider decides an ACTION,

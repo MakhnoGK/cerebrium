@@ -460,6 +460,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
             survivor={survivor}
             duplicate={duplicate}
             body={merging.draft.body}
+            missing={merging.edited ? undefined : proposal?.missing}
             onConfirm={confirmMerge}
             onCancel={() => setMerging(null)}
           />
@@ -609,11 +610,19 @@ interface MergeConfirmProps {
   survivor: NodePreview | undefined;
   duplicate: NodePreview | undefined;
   body: string;
+  missing: string[] | undefined;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function MergeConfirm({ survivor, duplicate, body, onConfirm, onCancel }: MergeConfirmProps) {
+function MergeConfirm({
+  survivor,
+  duplicate,
+  body,
+  missing,
+  onConfirm,
+  onCancel,
+}: MergeConfirmProps) {
   const kept = survivor?.content?.length ?? 0;
   const longest = Math.max(kept, duplicate?.content?.length ?? 0);
   const lossy = longest > 0 && body.length < longest * LOSSY_RATIO;
@@ -634,6 +643,7 @@ function MergeConfirm({ survivor, duplicate, body, onConfirm, onCancel }: MergeC
           lost. Edit it first, or keep both and mark duplicate.
         </Notice>
       )}
+      <Missing anchors={missing} />
       <div className="actions">
         <button type="button" className="btn btn-danger" onClick={onConfirm}>
           Merge
@@ -644,6 +654,11 @@ function MergeConfirm({ survivor, duplicate, body, onConfirm, onCancel }: MergeC
       </div>
     </div>
   );
+}
+
+function Missing({ anchors }: { anchors: string[] | undefined }) {
+  if (!anchors?.length) return null;
+  return <Notice tone="warn">Not carried over from the sources: {anchors.join(", ")}</Notice>;
 }
 
 const SUPERSEDE_CONFIRM =
@@ -668,6 +683,7 @@ function ProposalBlock({ proposal }: { proposal: ConsolidationProposal }) {
       <h3 className="proposal-title">{proposal.title}</h3>
       {proposal.summary && <p className="proposal-summary">{proposal.summary}</p>}
       <Clamp text={proposal.body} lines={12} />
+      <Missing anchors={proposal.missing} />
     </div>
   );
 }

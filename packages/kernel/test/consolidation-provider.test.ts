@@ -14,6 +14,7 @@ import {
   parseReconcile,
   parseResult,
   reconcilePrompt,
+  resultSchema,
   taskPrompt,
 } from "@/consolidation/provider";
 import { resolveRoles } from "@/consolidation/roles";
@@ -186,12 +187,94 @@ describe("Reconcile prompt building (reconcilePrompt)", () => {
   });
 });
 
+const MERGE_TASK: ConsolidationTask = {
+  kind: ConsolidationKind.MERGE,
+  project: "cerebrium",
+  canonical_id: "keep",
+  inputs: [
+    {
+      id: "dup",
+      title: "Deploy notes (copy)",
+      content: "Deploys run `deploy.sh` on host 01M3V0833AGBMG5DXCX06PECN2.",
+    },
+    {
+      id: "keep",
+      title: "Deploy notes",
+      content: "Deploys go through CI.\n\n## Steps\n- build\n- push",
+    },
+  ],
+};
+
 describe("Consolidation result parsing (parseResult)", () => {
-  it("should parse the result when it is well-formed", () => {
+  it("should keep the kept record whole and add the duplicate's facts when parsing a merge", () => {
+    // When
+    const out = parseResult(
+      JSON.stringify({
+        recommendation: "apply",
+        reason: "same notes",
+        additions: [
+          { section: "Steps", text: "run `deploy.sh` on host 01M3V0833AGBMG5DXCX06PECN2" },
+        ],
+        conflicts: [],
+      }),
+      MERGE_TASK,
+    );
+
+    // Then
+    expect(out).toEqual({
+      recommendation: "apply",
+      reason: "same notes",
+      title: "Deploy notes",
+      summary: "Deploys go through CI.",
+      body:
+        "Deploys go through CI.\n\n## Steps\n- build\n- push\n" +
+        "- run `deploy.sh` on host 01M3V0833AGBMG5DXCX06PECN2",
+      missing: [],
+    });
+  });
+
+  it("should list what the duplicate carries and the merged body lost when parsing a merge", () => {
+    // When
+    const out = parseResult(
+      JSON.stringify({ recommendation: "apply", reason: "r", additions: [], conflicts: [] }),
+      MERGE_TASK,
+    );
+
+    // Then
+    expect(out.body).toBe("Deploys go through CI.\n\n## Steps\n- build\n- push");
+    expect(out.missing).toEqual(["01M3V0833AGBMG5DXCX06PECN2", "deploy.sh"]);
+  });
+
+  it("should render the facts as a list under the summary when parsing a distill", () => {
+    // When
+    const out = parseResult(
+      JSON.stringify({
+        recommendation: "apply",
+        reason: "one subject",
+        title: "Pipeline speed",
+        summary: "Splitting the pipeline made it fast.",
+        facts: ["the pipeline was slow", "- splitting it made it fast", "the pipeline was slow"],
+      }),
+      TASK,
+    );
+
+    // Then
+    expect(out).toEqual({
+      recommendation: "apply",
+      reason: "one subject",
+      title: "Pipeline speed",
+      summary: "Splitting the pipeline made it fast.",
+      body: "Splitting the pipeline made it fast.\n\n- the pipeline was slow\n- splitting it made it fast",
+      missing: [],
+    });
+  });
+
+  it("should take a plain title/summary/body reply as written", () => {
     // When / Then
     expect(
       parseResult(
         '{"recommendation":"reject","reason":"distinct","title":"T","summary":"S","body":"B"}',
+        TASK,
       ),
     ).toEqual({
       recommendation: "reject",
@@ -199,20 +282,35 @@ describe("Consolidation result parsing (parseResult)", () => {
       title: "T",
       summary: "S",
       body: "B",
+      missing: [],
     });
   });
+
   it("should default the recommendation to apply when the field is absent", () => {
     // When / Then
-    expect(parseResult('{"title":"T","summary":"S","body":"B"}')).toMatchObject({
+    expect(parseResult('{"title":"T","summary":"S","body":"B"}', TASK)).toMatchObject({
       recommendation: "apply",
       title: "T",
     });
   });
+
   it("should throw when the result is invalid JSON or missing required fields", () => {
     // When / Then
-    expect(() => parseResult("not json")).toThrow(/invalid JSON/);
+    expect(() => parseResult("not json", TASK)).toThrow(/invalid JSON/);
     // When / Then
-    expect(() => parseResult('{"title":"T"}')).toThrow(/missing/);
+    expect(() => parseResult('{"title":"T"}', TASK)).toThrow(/missing/);
+  });
+});
+
+describe("Result schema (resultSchema)", () => {
+  it("should restrict a merge addition's section to the kept record's headings", () => {
+    // When
+    const schema = resultSchema(MERGE_TASK) as {
+      properties: { additions: { items: { properties: { section: { enum: string[] } } } } };
+    };
+
+    // Then
+    expect(schema.properties.additions.items.properties.section.enum).toEqual(["Steps", ""]);
   });
 });
 
@@ -226,6 +324,17 @@ describe("Task prompt building (taskPrompt)", () => {
     expect(p).toContain("[1] First");
     expect(p).toContain("[2] Second");
     expect(p).toContain("splitting it made it fast");
+  });
+
+  it("should label the kept record and the duplicate when building a merge prompt", () => {
+    // When
+    const p = taskPrompt({ ...MERGE_TASK, missing: ["deploy.sh"] });
+
+    // Then
+    expect(p.indexOf("[KEEP] Deploy notes\n")).toBeLessThan(
+      p.indexOf("[DUPLICATE] Deploy notes (copy)"),
+    );
+    expect(p).toContain("left these out: deploy.sh");
   });
 
   it("should keep every record whole when the cluster fits the budget", () => {
@@ -253,7 +362,7 @@ describe("Task prompt building (taskPrompt)", () => {
       inputs: Array.from({ length: 9 }, (_, i) => ({
         id: String(i),
         title: `Note ${i}`,
-        content: "z".repeat(4_000),
+        content: "z".repeat(CLUSTER_CHARS / 4),
       })),
     };
 

@@ -48,6 +48,7 @@ const stubProvider: ConsolidationProvider = {
       title: "Rollback procedure",
       summary: "S",
       body: "B body",
+      missing: [],
     }),
   reconcile: () => Promise.reject(new Error("not used")),
   annotate: () => Promise.reject(new Error("not used")),

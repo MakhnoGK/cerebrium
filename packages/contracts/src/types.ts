@@ -87,6 +87,7 @@ export interface ConsolidationProposal {
   body: string;
   recommendation?: "apply" | "reject";
   reason?: string;
+  missing?: string[];
 }
 
 // A queued consolidation candidate. `member_ids` is the cluster the sweep
