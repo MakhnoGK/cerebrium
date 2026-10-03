@@ -27,7 +27,8 @@ import {
   relatePrompt,
   RESOLVE_LINK_SYSTEM_PROMPT,
   resolveLinkPrompt,
-  SYSTEM_PROMPT,
+  resultSchema,
+  systemPrompt,
   taskPrompt,
 } from "@/consolidation/provider";
 import { resolveRoles, type ResolvedRoles } from "@/consolidation/roles";
@@ -77,14 +78,16 @@ export class CommandConsolidator implements ConsolidationProvider {
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
     const input = JSON.stringify({
       task: "consolidate",
-      system: SYSTEM_PROMPT,
+      system: systemPrompt(task),
       kind: task.kind,
       model: this.roles[GenerationRole.GENERATE].model,
       project: task.project,
       prompt: taskPrompt(task),
+      schema: resultSchema(task),
       inputs: task.inputs,
+      canonical_id: task.canonical_id ?? null,
     });
-    return parseResult(await this.runners[GenerationRole.GENERATE](input));
+    return parseResult(await this.runners[GenerationRole.GENERATE](input), task);
   }
 
   async reconcile(task: ReconcileTask): Promise<ReconcileResult> {

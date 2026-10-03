@@ -28,10 +28,14 @@ export interface ConsolidationProvider {
 // A generation task handed to a ConsolidationProvider: a cluster of records to fold
 // into ONE durable semantic fact (distill) or a merged canonical note (merge). The
 // provider only produces text — the daemon (the single writer) performs the DB write.
+// `canonical_id` names the merge survivor; `missing` carries anchors a previous draft lost,
+// for a second attempt.
 export interface ConsolidationTask {
   kind: GenerationTaskKind;
   project: string | null;
   inputs: ConsolidationTaskInput[];
+  canonical_id?: string | null;
+  missing?: string[];
 }
 
 export interface ConsolidationTaskInput {
@@ -44,13 +48,15 @@ export interface ConsolidationTaskInput {
 // the provider's verdict on whether these records should actually be consolidated —
 // detection only measures similarity, which yields false positives (two different
 // services' "dependencies" docs look alike). `reject` = keep them separate; `reason`
-// explains either way. title/summary/body are the consolidation to write when applied.
+// explains either way. title/summary/body are the consolidation to write when applied;
+// `missing` lists the inputs' ids, links, numbers and code spans the body does not carry.
 export interface ConsolidationResult {
   recommendation: ConsolidationRecommendation;
   reason: string;
   title: string;
   summary: string;
   body: string;
+  missing: string[];
 }
 
 export interface ReconcileResult {

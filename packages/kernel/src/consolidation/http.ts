@@ -30,8 +30,8 @@ import {
   RESOLVE_LINK_SYSTEM_PROMPT,
   resolveLinkPrompt,
   resolveLinkSchema,
-  RESULT_SCHEMA,
-  SYSTEM_PROMPT,
+  resultSchema,
+  systemPrompt,
   taskPrompt,
 } from "@/consolidation/provider";
 import { resolveRoles, type ResolvedRoles, type RoleBackend } from "@/consolidation/roles";
@@ -91,11 +91,12 @@ export class HttpConsolidator implements ConsolidationProvider {
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
     return parseResult(
       await this.chat(
-        SYSTEM_PROMPT,
+        systemPrompt(task),
         taskPrompt(task),
-        RESULT_SCHEMA,
+        resultSchema(task),
         this.roles[GenerationRole.GENERATE],
       ),
+      task,
     );
   }
 
