@@ -1,3 +1,4 @@
+import { Agent, fetch as undiciFetch } from "undici";
 import { GenerationRole } from "@cerebrium/contracts/vocab";
 import {
   type AnnotateResult,
@@ -37,6 +38,16 @@ import {
 import { resolveRoles, type ResolvedRoles, type RoleBackend } from "@/consolidation/roles";
 
 export type FetchFn = typeof fetch;
+
+// ⚠️ Ollama sends no headers until a non-streamed generation ends, so undici's default
+// 300 s headers timeout cuts any longer call as "fetch failed".
+const UNBOUNDED = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+
+const fetchUnbounded: FetchFn = (url, init) =>
+  undiciFetch(url as string, {
+    ...init,
+    dispatcher: UNBOUNDED,
+  });
 
 interface ChatResponse {
   message?: { content?: string };
@@ -85,7 +96,7 @@ export class HttpConsolidator implements ConsolidationProvider {
         timeoutMs: opts?.timeoutMs ?? DEFAULTS.timeoutMs,
         reconcileTimeoutMs: opts?.reconcileTimeoutMs ?? DEFAULTS.reconcileTimeoutMs,
       });
-    this.fetchFn = opts?.fetchFn ?? fetch;
+    this.fetchFn = opts?.fetchFn ?? fetchUnbounded;
   }
 
   async generate(task: ConsolidationTask): Promise<ConsolidationResult> {
