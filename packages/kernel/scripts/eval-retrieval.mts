@@ -12,7 +12,14 @@ import {
   type EvalQuery,
   type GoldEntry,
 } from "@scripts/gold";
-import { ndcgAtK, precisionAt1, recallAtK, reciprocalRank, sample } from "@scripts/metrics";
+import {
+  ndcgAtK,
+  pairedBootstrap,
+  precisionAt1,
+  recallAtK,
+  reciprocalRank,
+  sample,
+} from "@scripts/metrics";
 import type Database from "better-sqlite3";
 import { container, type DependencyContainer } from "tsyringe";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -22,6 +29,7 @@ import {
 } from "@/domain/ports/embedding-provider";
 import { HintsService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
+import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 import { DB_TOKEN } from "@/db/sqlite/base";
 import { matchesSection, sectionName } from "@/core/chunk";
 import { LinkTool } from "@/presentation/mcp/tools/link";
@@ -98,9 +106,11 @@ eval-retrieval — labelled relevance eval across configuration arms.
              labels are mined from the retrieval-outcome log: within a session, a node a
              \`get\` fetched after a \`search\` returned it counts as relevant to that query.
              Prints the volume it found and refuses to score below ${MIN_GOLD_QUERIES} labelled queries.
+  --pg URL   The same against a Postgres store. An arm may point at another one with
+             MEMORY_PG_URL; labels are then kept only for nodes live in every arm's store.
   --gold P   JSONL gold file (see scripts/gold.ts) merged with the mined labels: the same
              question from two sources becomes one query with the union of its labels.
-             Labels pointing at nodes no longer live are dropped and counted. Needs --db.
+             Labels pointing at nodes no longer live are dropped and counted. Needs --db or --pg.
   --origin O Comma-separated subset of generated,adjudicated,mined — score only labels of
              those origins, e.g. to check whether synthetic questions and real ones agree.
   --sample N Score a stable subset of N queries, chosen by hashing the query text — the
@@ -120,10 +130,13 @@ Examples
   npm run eval:retrieval -- --db ~/.cerebrium/memory.db --gold ~/.cerebrium/gold.jsonl
   npm run eval:retrieval -- --db snap.db --kinds semantic,episodic --arm sqlite \
     --arm pg:MEMORY_STORE_BACKEND=postgres,MEMORY_PG_URL=postgres://u:p@localhost/snap
+  npm run eval:retrieval -- --pg postgres://u:p@localhost/after \
+    --arm before:MEMORY_PG_URL=postgres://u:p@localhost/before --arm after
 
 Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, Facet@${FACET_K} (the 
 share of distinct gold facets covered by the returned set), and SecAcc@${K} (the share of 
-returned gold nodes whose returned chunk fell into a gold section).
+returned gold nodes whose returned chunk fell into a gold section). Deltas against the first
+arm carry a 95% band for MRR and nDCG from resampling the queries.
 `;
 
 function parseArms(argv: string[]): Arm[] {
@@ -272,18 +285,16 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
 // spending tokens on; it is not adjudicated ground truth and carries that bias. A narrowed
 // fetch also names the sections read, which is a label at chunk granularity; an `outline`
 // fetch is a decision aid rather than a read and is not counted as evidence at all.
-function goldFromEvents(db: Database.Database): {
+async function goldFromEvents(rows: Rows): Promise<{
   entries: GoldEntry[];
   searches: number;
   sectionLabels: number;
-} {
-  const rows = db
-    .prepare(
-      `SELECT session_id, action, detail FROM events
-       WHERE action IN ('search','get') AND detail LIKE '%"ids"%'
-       ORDER BY session_id, ts, id`,
-    )
-    .all() as { session_id: string; action: string; detail: string }[];
+}> {
+  const events = await rows<{ session_id: string; action: string; detail: string }>(
+    `SELECT session_id, action, detail FROM events
+     WHERE action IN ('search','get') AND detail LIKE '%"ids"%'
+     ORDER BY session_id, ts, id`,
+  );
 
   const entries: GoldEntry[] = [];
   let open: {
@@ -308,7 +319,7 @@ function goldFromEvents(db: Database.Database): {
     open = null;
   };
 
-  for (const row of rows) {
+  for (const row of events) {
     if (row.session_id !== session) {
       close();
       session = row.session_id;
@@ -374,36 +385,60 @@ function goldFromEvents(db: Database.Database): {
 // A label is only worth scoring while the node it points at is still live: an invalidated
 // or merged-away node cannot be returned, so keeping it would score a correct ranking as
 // a miss.
-function liveNodes(db: Database.Database): Set<string> {
-  const rows = db.prepare("SELECT id FROM nodes WHERE invalidated_at IS NULL").all() as {
-    id: string;
-  }[];
-
-  return new Set(rows.map((r) => r.id));
+async function liveNodes(rows: Rows): Promise<Set<string>> {
+  return new Set(
+    (await rows<{ id: string }>("SELECT id FROM nodes WHERE invalidated_at IS NULL")).map(
+      (r) => r.id,
+    ),
+  );
 }
 
-async function runArm(
-  arm: Arm,
-  queries: EvalQuery[],
-  shared: {
-    db: Database.Database;
-    provider: EmbeddingProvider;
-    readonly: boolean;
-    mode?: "hybrid" | "text" | "vector";
-    kinds?: MemoryKind[];
-  },
-  facetOf: Map<string, string>,
-): Promise<Scores> {
-  // A fresh container per arm so every config section is rebuilt from the arm's overlay,
-  // sharing the seeded DB and embeddings so only the knob differs.
+function redacted(url: string): string {
+  const parsed = new URL(url);
+
+  if (parsed.password) parsed.password = "***";
+
+  return parsed.toString();
+}
+
+type Rows = <T>(sql: string) => Promise<T[]>;
+
+function rowsOf(scope: DependencyContainer): Rows {
+  if (scope.isRegistered(PG_TOKEN, true)) {
+    const pg = scope.resolve<PgDatabase>(PG_TOKEN);
+
+    return async <T,>(sql: string) => (await pg.query(sql)).rows as T[];
+  }
+
+  const db = scope.resolve<Database.Database>(DB_TOKEN);
+
+  return <T,>(sql: string) => Promise.resolve(db.prepare(sql).all() as T[]);
+}
+
+interface Shared {
+  db: Database.Database | null;
+  base: Record<string, string>;
+  provider: EmbeddingProvider;
+  readonly: boolean;
+  mode?: "hybrid" | "text" | "vector";
+  kinds?: MemoryKind[];
+}
+
+// A fresh container per arm so every config section is rebuilt from the arm's overlay,
+// sharing the embeddings — and, on SQLite, the DB — so only the knob differs.
+function armScope(arm: Arm, shared: Shared): DependencyContainer {
   const scope = container.createChildContainer();
 
   buildContainer({
     role: shared.readonly ? "cli" : "server",
-    source: new LayeredConfigSource(new StaticConfigSource(arm.env), new EnvConfigSource()),
+    source: new LayeredConfigSource(
+      new StaticConfigSource(arm.env),
+      new StaticConfigSource(shared.base),
+      new EnvConfigSource(),
+    ),
     into: scope,
   });
-  scope.register(DB_TOKEN, { useValue: shared.db });
+  if (shared.db !== null) scope.register(DB_TOKEN, { useValue: shared.db });
   scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: shared.provider });
 
   // `search` normally touches the session table through HintsService. Against a real store
@@ -415,6 +450,15 @@ async function runArm(
     });
   }
 
+  return scope;
+}
+
+async function runArm(
+  scope: DependencyContainer,
+  queries: EvalQuery[],
+  shared: Shared,
+  facetOf: Map<string, string>,
+): Promise<Scores> {
   const tool = scope.resolve(SearchTool);
   const sid = shared.readonly
     ? "eval-readonly"
@@ -455,8 +499,12 @@ async function main() {
 
   const here = dirname(fileURLToPath(import.meta.url));
   const arms = parseArms(argv);
-  const store = argv[argv.indexOf("--db") + 1];
-  const readonly = argv.includes("--db") && !!store;
+  const store = argv.includes("--db") ? argv[argv.indexOf("--db") + 1] : undefined;
+  const pgUrl = argv.includes("--pg") ? argv[argv.indexOf("--pg") + 1] : undefined;
+  const readonly = !!store || !!pgUrl;
+  const base: Record<string, string> = pgUrl
+    ? { MEMORY_STORE_BACKEND: "postgres", MEMORY_PG_URL: pgUrl }
+    : { MEMORY_DB_PATH: store ?? ":memory:" };
   const mode = argv.includes("--mode")
     ? (argv[argv.indexOf("--mode") + 1] as "hybrid" | "text" | "vector")
     : undefined;
@@ -470,28 +518,33 @@ async function main() {
   // Against a real store the DB is opened through the `cli` role, which is read-only.
   const root = buildContainer({
     role: readonly ? "cli" : "server",
-    source: new LayeredConfigSource(
-      new StaticConfigSource({ MEMORY_DB_PATH: readonly ? store : ":memory:" }),
-      new EnvConfigSource(),
-    ),
+    source: new LayeredConfigSource(new StaticConfigSource(base), new EnvConfigSource()),
     into: container.createChildContainer(),
   });
 
-  const db = root.resolve<Database.Database>(DB_TOKEN);
+  const db = pgUrl ? null : root.resolve<Database.Database>(DB_TOKEN);
   const provider = root.resolve<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN);
+  const shared: Shared = { db, base, provider, readonly, mode, kinds };
+  const scopes = arms.map((arm) => armScope(arm, shared));
   let queries: EvalQuery[];
   let facetOf = new Map<string, string>();
 
   console.log(`embeddings: ${provider.name}`);
 
   if (readonly) {
-    const { entries: mined, searches, sectionLabels } = goldFromEvents(db);
+    const { entries: mined, searches, sectionLabels } = await goldFromEvents(rowsOf(root));
     const goldPath = argv.includes("--gold") ? argv[argv.indexOf("--gold") + 1] : undefined;
     const fromFile = goldPath ? readGoldFile(goldPath) : { entries: [], malformed: 0 };
     const origins = parseOrigins(
       argv.includes("--origin") ? argv[argv.indexOf("--origin") + 1] : undefined,
     );
-    const live = liveNodes(db);
+    const live = await liveNodes(rowsOf(root));
+
+    for (const scope of scopes) {
+      const armLive = await liveNodes(rowsOf(scope));
+
+      for (const id of live) if (!armLive.has(id)) live.delete(id);
+    }
     const { kept, droppedLabels, droppedQueries } = pruneStale(
       filterByOrigin([...fromFile.entries, ...mined], origins),
       (id) => live.has(id),
@@ -502,7 +555,7 @@ async function main() {
     const pairs = queries.reduce((n, q) => n + q.gold.size, 0);
     const counts = countByOrigin(kept);
 
-    console.log(`store: ${store} (read-only)`);
+    console.log(`store: ${pgUrl ? redacted(pgUrl) : store} (read-only)`);
 
     if (goldPath) {
       console.log(
@@ -569,8 +622,8 @@ async function main() {
 
   const table: { arm: Arm; scores: Scores }[] = [];
 
-  for (const arm of arms) {
-    const scores = await runArm(arm, queries, { db, provider, readonly, mode, kinds }, facetOf);
+  for (const [i, arm] of arms.entries()) {
+    const scores = await runArm(scopes[i]!, queries, shared, facetOf);
 
     table.push({ arm, scores });
     console.log(
@@ -581,19 +634,20 @@ async function main() {
   if (table.length > 1) {
     const first = table[0]!;
 
-    console.log(`\ndeltas vs '${first.arm.name}' (percentage points):`);
+    console.log(`\ndeltas vs '${first.arm.name}' (percentage points, 95% band):`);
+
+    const signed = (x: number) =>
+      Number.isNaN(x) ? "-" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}`;
+    const d = (a: number[], b: number[]) => signed(mean(b) - mean(a));
+    const band = (a: number[], b: number[]) => {
+      const { delta, low, high } = pairedBootstrap(a, b);
+
+      return `${signed(delta)} [${signed(low)}, ${signed(high)}]`;
+    };
 
     for (const row of table.slice(1)) {
-      const d = (a: number[], b: number[]) => {
-        const delta = (mean(b) - mean(a)) * 100;
-
-        if (Number.isNaN(delta)) return "-";
-
-        return `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`;
-      };
-
       console.log(
-        `  ${row.arm.name.padEnd(12)} nDCG ${d(first.scores.ndcg, row.scores.ndcg).padStart(6)}   Rec ${d(first.scores.recall, row.scores.recall).padStart(6)}   Facet ${d(first.scores.facets, row.scores.facets).padStart(6)}   SecAcc ${d(first.scores.secAcc, row.scores.secAcc).padStart(6)}`,
+        `  ${row.arm.name.padEnd(12)} nDCG ${band(first.scores.ndcg, row.scores.ndcg)}   MRR ${band(first.scores.rr, row.scores.rr)}   Rec ${d(first.scores.recall, row.scores.recall)}   Facet ${d(first.scores.facets, row.scores.facets)}   SecAcc ${d(first.scores.secAcc, row.scores.secAcc)}`,
       );
     }
   }
