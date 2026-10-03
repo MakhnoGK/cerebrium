@@ -5,7 +5,12 @@ import type {
   ConsolidationProposal,
   NewCandidate,
 } from "@cerebrium/contracts/types";
-import { ConsolidationKind, ConsolidationStatus, MemoryKind } from "@cerebrium/contracts/vocab";
+import {
+  ConsolidationKind,
+  ConsolidationStatus,
+  MemoryKind,
+  type EdgeType,
+} from "@cerebrium/contracts/vocab";
 import type { ConsolidationTickResult } from "@/domain/ports/consolidation-reporter";
 import {
   candidateHash,
@@ -542,6 +547,40 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
         )
         .all(limit) as StrandedEdge[],
     );
+  }
+
+  async revisedLinks(limit: number): Promise<StrandedEdge[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT e.src AS src, e.dst AS dst, e.type AS type, e.weight AS weight FROM edges e
+           JOIN nodes s ON s.id = e.src
+           JOIN nodes d ON d.id = e.dst
+           LEFT JOIN edge_checks c ON c.src = e.src AND c.dst = e.dst AND c.type = e.type
+           WHERE e.invalidated_at IS NULL AND e.provenance = 'system'
+             AND e.type IN ('relates_to', 'references')
+             AND s.memory_kind IN ('semantic', 'episodic') AND s.invalidated_at IS NULL
+             AND d.memory_kind IN ('semantic', 'episodic') AND d.invalidated_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM revisions r
+               WHERE r.node_id IN (e.src, e.dst) AND r.rev > 1
+                 AND r.ts > COALESCE(c.checked_at, e.valid_from)
+             )
+           ORDER BY e.src, e.dst, e.type LIMIT ?`,
+        )
+        .all(limit) as StrandedEdge[],
+    );
+  }
+
+  async markLinkChecked(src: string, dst: string, type: EdgeType, ts: string): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO edge_checks (src, dst, type, checked_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (src, dst, type) DO UPDATE SET checked_at = excluded.checked_at`,
+      )
+      .run(src, dst, type, ts);
+
+    return Promise.resolve();
   }
 
   async crossProjectSystemLinks(limit: number): Promise<StrandedEdge[]> {

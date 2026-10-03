@@ -47,6 +47,7 @@ const MIGRATION_IDS = [
   "033_process_host.sql",
   "034_integrity_counters.cjs",
   "035_wikilink_titles.sql",
+  "036_edge_checks.sql",
 ];
 
 const dirs: string[] = [];

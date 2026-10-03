@@ -357,3 +357,11 @@ CREATE TABLE IF NOT EXISTS wikilink_ignores (
   ignored_at TEXT NOT NULL,
   PRIMARY KEY (node_id, link)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS edge_checks (
+  src TEXT NOT NULL,
+  dst TEXT NOT NULL,
+  type TEXT NOT NULL,
+  checked_at TEXT NOT NULL,
+  PRIMARY KEY (src, dst, type)
+) STRICT;

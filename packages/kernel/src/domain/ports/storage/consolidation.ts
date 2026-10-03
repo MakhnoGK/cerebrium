@@ -116,6 +116,10 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   relationInputs(ids: string[]): Promise<RelationInput[]>;
   // Live system edges from a live authored node into a retired one that has a superseder.
   strandedSystemEdges(limit: number): Promise<StrandedEdge[]>;
+  // Live system relates_to/references edges between live authored nodes where either end got
+  // a revision after the edge was made or last confirmed.
+  revisedLinks(limit: number): Promise<StrandedEdge[]>;
+  markLinkChecked(src: string, dst: string, type: EdgeType, ts: string): Promise<void>;
   // Live system similar_to/relates_to edges between authored nodes of different project
   // families.
   crossProjectSystemLinks(limit: number): Promise<StrandedEdge[]>;
