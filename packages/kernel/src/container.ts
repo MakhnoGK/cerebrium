@@ -4,7 +4,7 @@ import { CODE_PARSER_TOKEN } from "@/domain/ports/code-parser";
 import { CONFIG_FILE_TOKEN, CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
-import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
+import { EMBEDDING_PROVIDER_TOKEN, VECTOR_DIM } from "@/domain/ports/embedding-provider";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
@@ -133,11 +133,15 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
 
       const config = c.resolve(EmbeddingConfig);
 
-      return createProvider(config.provider, config.model, config.cacheDir, {
-        url: config.url,
-        timeoutMs: config.timeoutMs,
-        batchSize: config.batchSize,
-      });
+      const sqlite = c.resolve(StorageConfig).backend === STORE_BACKENDS.SQLITE;
+
+      return createProvider(
+        config.provider,
+        config.model,
+        config.cacheDir,
+        { url: config.url, timeoutMs: config.timeoutMs, batchSize: config.batchSize },
+        sqlite ? VECTOR_DIM : undefined,
+      );
     }),
   });
 

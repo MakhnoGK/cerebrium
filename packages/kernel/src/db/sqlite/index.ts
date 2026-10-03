@@ -17,6 +17,7 @@ import {
   SESSIONS_REPO_TOKEN,
   STATS_REPO_TOKEN,
   STORE_TOKEN,
+  VECTOR_SPACES_REPO_TOKEN,
 } from "@/domain/ports/storage";
 import { SqliteBranchCodeRepo } from "@/db/sqlite/branch-code";
 import { SqliteChunksRepo } from "@/db/sqlite/chunks";
@@ -35,6 +36,7 @@ import { SqliteSearchRepo } from "@/db/sqlite/search";
 import { SqliteSessionsRepo } from "@/db/sqlite/sessions";
 import { SqliteStatsRepo } from "@/db/sqlite/stats";
 import { SqliteStore } from "@/db/sqlite/store";
+import { SqliteVectorSpacesRepo } from "@/db/sqlite/vector-spaces";
 
 export { BaseRepo, DB_TOKEN } from "@/db/sqlite/base";
 export {
@@ -73,4 +75,5 @@ export function registerSqliteRepositories(c: DependencyContainer): void {
   c.register(SESSIONS_REPO_TOKEN, { useClass: SqliteSessionsRepo });
   c.register(STATS_REPO_TOKEN, { useClass: SqliteStatsRepo });
   c.register(STORE_TOKEN, { useClass: SqliteStore });
+  c.register(VECTOR_SPACES_REPO_TOKEN, { useClass: SqliteVectorSpacesRepo });
 }

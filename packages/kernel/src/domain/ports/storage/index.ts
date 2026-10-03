@@ -85,3 +85,8 @@ export {
   type StoreCapabilities,
 } from "@/domain/ports/storage/store";
 export { STORAGE_TOKENS } from "@/domain/ports/storage/tokens";
+export {
+  VECTOR_SPACES_REPO_TOKEN,
+  type VectorSpace,
+  type VectorSpacesRepo,
+} from "@/domain/ports/storage/vector-spaces";
