@@ -60,6 +60,20 @@ export function rewriteWikilink(
   return { content: rewritten, count };
 }
 
+const CONTEXT_CHARS = 600;
+
+// The text on either side of the first `[[link…]]` in `content`.
+export function wikilinkContext(content: string, link: string): string {
+  const at = content.indexOf(`[[${link}`);
+
+  if (at < 0) return "";
+
+  const start = Math.max(0, at - CONTEXT_CHARS);
+  const end = Math.min(content.length, at + link.length + CONTEXT_CHARS);
+
+  return `${start > 0 ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`;
+}
+
 const NODE_ID = /^[0-7][0-9a-hjkmnp-tv-z]{25}$/;
 
 // A wikilink written as a node id, `[[01M3…]]`, slugified to lower case; null for a title.

@@ -17,6 +17,7 @@ export {
 export { CHUNKS_REPO_TOKEN, type ChunksRepo } from "@/domain/ports/storage/chunks";
 export { CODE_REPO_TOKEN, type CodeRepo } from "@/domain/ports/storage/code";
 export {
+  type AuthoredBody,
   candidateHash,
   CONSOLIDATION_REPO_TOKEN,
   type ConsolidationRepo,
@@ -28,6 +29,7 @@ export {
   type StrandedEdge,
   type SweepSeed,
   type UntypedLink,
+  type WikilinkVerdictRow,
 } from "@/domain/ports/storage/consolidation";
 export { EDGES_REPO_TOKEN, type EdgesRepo, type SubgraphEdge } from "@/domain/ports/storage/edges";
 export { GRAPH_REPO_TOKEN, type GraphRepo } from "@/domain/ports/storage/graph";

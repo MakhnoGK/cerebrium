@@ -12,11 +12,14 @@ import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
   CONSOLIDATION_PROVIDER_TOKEN,
   ConsolidationRecommendation,
+  LinkConfidence,
   LinkRelation,
   type ConsolidationProvider,
   type ConsolidationResult,
   type ConsolidationTask,
+  type LinkCandidate,
   type RelateResult,
+  type ResolveLinkResult,
 } from "@/domain/ports/consolidation-provider";
 import {
   CONSOLIDATION_REPORTER_TOKEN,
@@ -50,6 +53,10 @@ import type { CodeRefTarget } from "@/application/services/code-ref.service";
 import { NodeProtectionService } from "@/application/services/node-protection.service";
 import { NodeReferenceService } from "@/application/services/node-reference.service";
 import { SessionService } from "@/application/services/session.service";
+import {
+  WikilinkDanglerService,
+  type Dangler,
+} from "@/application/services/wikilink-dangler.service";
 import { WikilinkResolverService } from "@/application/services/wikilink-resolver.service";
 import { annotationFtsText } from "@/consolidation/provider";
 import type { Writer } from "@/runtime/client-identity";
@@ -58,6 +65,7 @@ import {
   citedSymbolNames,
   idTarget,
   repoBelongsToProject,
+  wikilinkContext,
   wikilinkTargets,
 } from "@/core/wikilinks";
 import {
@@ -114,6 +122,8 @@ interface NeighbourPair {
 
 const MAX_ERROR_CHARS = 500;
 const REATTACH_CANDIDATES = 3;
+const LINK_NEIGHBOURS = 3;
+const LINK_CANDIDATES = 6;
 
 interface Judgement {
   a: RelationInput;
@@ -160,6 +170,7 @@ export class ConsolidationWorker {
     danglingById: number;
   } | null = null;
   private readonly unrelated = new Set<string>();
+  private wikilinkBacklog = 0;
   private principal: string | null = null;
 
   constructor(
@@ -180,6 +191,7 @@ export class ConsolidationWorker {
     private readonly sessionService: SessionService,
     private readonly nodeReferences: NodeReferenceService,
     private readonly wikilinks: WikilinkResolverService,
+    private readonly danglers: WikilinkDanglerService,
     private readonly protection: NodeProtectionService,
     private readonly feed: ActivityFeed,
 
@@ -261,6 +273,9 @@ export class ConsolidationWorker {
         links_to_review: 0,
         superseded: 0,
         edges_repointed: 0,
+        wikilinks_fixed: 0,
+        wikilinks_unlinked: 0,
+        wikilinks_to_review: 0,
       },
     };
 
@@ -333,6 +348,11 @@ export class ConsolidationWorker {
       await this.settleSupersedes(now, result);
       await this.retypeLinks(now, result);
       await this.recheckLinks(now, result);
+
+      if (yielded(opts, result)) return await this.finish(runId, result);
+
+      await this.report(runId, "wikilinks", result);
+      await this.resolveWikilinks(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -1132,6 +1152,150 @@ export class ConsolidationWorker {
     }
   }
 
+  // The model picks what a dangling title link meant. Under `auto` a confident pick is acted
+  // on; anything else waits on the Review tab with the pick.
+  private async resolveWikilinks(now: string, result: ConsolidationTickResult): Promise<void> {
+    if (this.posture.wikilinks === Posture.OFF || !this.consolidator.enabled) return;
+
+    const judged = new Map(
+      (await this.consolidationRepo.wikilinkVerdicts()).map((v) => [
+        `${v.node_id}\0${v.link}`,
+        v.rev,
+      ]),
+    );
+    const pending = (await this.danglers.scan()).danglers.filter(
+      (d) => judged.get(`${d.body.id}\0${d.link.slug}`) !== d.body.rev,
+    );
+
+    this.wikilinkBacklog = pending.length;
+
+    for (const dangler of pending.slice(0, this.batch.wikilinks)) {
+      if (!(await this.holdLease())) return;
+
+      const candidates = await this.linkCandidates(dangler);
+      let verdict: ResolveLinkResult;
+
+      if (!candidates.length) {
+        verdict = { target_id: null, confidence: LinkConfidence.LOW, reason: "no candidate notes" };
+      } else {
+        try {
+          verdict = await this.consolidator.resolveLink({
+            project: dangler.body.project,
+            link: dangler.link.raw,
+            note: {
+              title: dangler.body.title,
+              context: wikilinkContext(dangler.body.content, dangler.link.raw),
+            },
+            candidates,
+          });
+        } catch (err) {
+          result.generation_failures++;
+          result.last_error = errorText(err);
+          continue;
+        }
+      }
+
+      this.wikilinkBacklog--;
+
+      const action = await this.applyLinkVerdict(dangler, verdict, now, result);
+      const target = candidates.find((c) => c.id === verdict.target_id);
+
+      await this.consolidationRepo.saveWikilinkVerdict({
+        node_id: dangler.body.id,
+        link: dangler.link.slug,
+        rev: dangler.body.rev,
+        target_id: verdict.target_id,
+        confidence: verdict.confidence,
+        reason: verdict.reason,
+        judged_at: now,
+      });
+      await this.logIntegrity(now, dangler.body.id, {
+        op: "wikilink",
+        relation: action,
+        link: dangler.link.raw,
+        to: verdict.target_id,
+        titles: [dangler.body.title.slice(0, 80), ...(target ? [target.title.slice(0, 80)] : [])],
+        confidence: verdict.confidence,
+        reason: verdict.reason,
+      });
+    }
+  }
+
+  private async applyLinkVerdict(
+    dangler: Dangler,
+    verdict: ResolveLinkResult,
+    now: string,
+    result: ConsolidationTickResult,
+  ): Promise<"rewrite" | "unlink" | "link" | "ignore" | "review"> {
+    const integrity = result.integrity!;
+
+    if (verdict.confidence !== LinkConfidence.HIGH || this.posture.wikilinks !== Posture.AUTO) {
+      integrity.wikilinks_to_review!++;
+      return "review";
+    }
+
+    const { body, link } = dangler;
+
+    try {
+      if (body.kind === MemoryKind.SEMANTIC) {
+        await this.danglers.rewrite({
+          node_id: body.id,
+          link: link.raw,
+          target: verdict.target_id,
+          session_id: this.ownerId,
+          via: "sweep",
+          ts: now,
+        });
+        body.rev++;
+      } else {
+        if (verdict.target_id !== null) {
+          await this.edgesRepo.insertSystemReferenceIfUnconnected(
+            body.id,
+            verdict.target_id,
+            this.ownerId,
+            now,
+          );
+        }
+
+        await this.consolidationRepo.ignoreWikilink(body.id, link.slug, now);
+      }
+    } catch (err) {
+      result.last_error = errorText(err);
+      integrity.wikilinks_to_review!++;
+      return "review";
+    }
+
+    if (verdict.target_id === null) {
+      integrity.wikilinks_unlinked!++;
+      return body.kind === MemoryKind.SEMANTIC ? "unlink" : "ignore";
+    }
+
+    integrity.wikilinks_fixed!++;
+    return body.kind === MemoryKind.SEMANTIC ? "rewrite" : "link";
+  }
+
+  // What the link may have meant: the ambiguous matches, notes whose text matches the link,
+  // and the note's own nearest neighbours.
+  private async linkCandidates(dangler: Dangler): Promise<LinkCandidate[]> {
+    const ids = new Set(dangler.candidates);
+
+    for (const match of await this.danglers.textMatches(dangler)) ids.add(match.id);
+
+    for (const nb of await this.consolidationRepo.neighboursOf(dangler.body.id, {
+      minScore: 0,
+      k: 20,
+      capPerNode: LINK_NEIGHBOURS,
+    })) {
+      ids.add(nb.id);
+    }
+
+    ids.delete(dangler.body.id);
+
+    return (await this.consolidationRepo.relationInputs([...ids].slice(0, LINK_CANDIDATES))).map(
+      (input) => ({ id: input.id, title: input.title, type: input.type, content: input.content }),
+    );
+  }
+
   private async statedReferences(links: { src: string; type: EdgeType }[]): Promise<Set<string>> {
     const sources = new Set(links.filter((l) => l.type === EdgeType.REFERENCES).map((l) => l.src));
     const stated = new Set<string>();
@@ -1345,6 +1509,8 @@ export class ConsolidationWorker {
     if (!this.consolidator.enabled) return false;
 
     if ((await this.consolidationRepo.pendingNeedingProposal(1)).length > 0) return true;
+
+    if (this.posture.wikilinks !== Posture.OFF && this.wikilinkBacklog > 0) return true;
 
     if (
       this.posture.retype !== Posture.OFF &&

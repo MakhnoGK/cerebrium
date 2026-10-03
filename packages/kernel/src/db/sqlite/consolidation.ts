@@ -15,6 +15,7 @@ import type { ConsolidationTickResult } from "@/domain/ports/consolidation-repor
 import {
   candidateHash,
   pairKey,
+  type AuthoredBody,
   type ConsolidationRepo,
   type DuplicatePair,
   type EdgelessNode,
@@ -23,6 +24,7 @@ import {
   type StrandedEdge,
   type SweepSeed,
   type UntypedLink,
+  type WikilinkVerdictRow,
 } from "@/domain/ports/storage";
 import { RUN_SUMMARY_COLUMNS, runSummaryOf, type RunSummaryRow } from "@/db/activity-rows";
 import { BaseRepo } from "@/db/sqlite/base";
@@ -803,9 +805,7 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
 
   // Every live authored node with its current body, which is both the text the citations
   // are read from and the titles the wikilinks resolve against.
-  async authoredBodies(): Promise<
-    { id: string; kind: MemoryKind; title: string; project: string | null; content: string }[]
-  > {
+  async authoredBodies(): Promise<AuthoredBody[]> {
     return this.db
       .prepare(
         `WITH current AS (
@@ -814,20 +814,14 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
            FROM revisions r
          )
          SELECT n.id AS id, n.memory_kind AS kind, n.title AS title, n.project AS project,
-                c.content AS content
+                c.rev AS rev, c.content AS content
          FROM current c
          JOIN nodes n ON n.id = c.node_id
          WHERE c.seq = 1
            AND n.invalidated_at IS NULL
            AND n.memory_kind IN ('semantic', 'episodic')`,
       )
-      .all() as {
-      id: string;
-      kind: MemoryKind;
-      title: string;
-      project: string | null;
-      content: string;
-    }[];
+      .all() as AuthoredBody[];
   }
 
   // Revisions are append-only, so this changes if and only if a body or a title arrived
@@ -878,6 +872,54 @@ export class SqliteConsolidationRepo extends BaseRepo implements ConsolidationRe
         "INSERT OR IGNORE INTO wikilink_ignores (node_id, link, ignored_at) VALUES (?, ?, ?)",
       )
       .run(nodeId, link, ts);
+
+    return Promise.resolve();
+  }
+
+  async wikilinkVerdicts(): Promise<WikilinkVerdictRow[]> {
+    return Promise.resolve(
+      this.db
+        .prepare(
+          `SELECT node_id, link, rev, target_id, confidence, reason, judged_at
+           FROM wikilink_verdicts ORDER BY node_id, link`,
+        )
+        .all() as WikilinkVerdictRow[],
+    );
+  }
+
+  async saveWikilinkVerdict(row: WikilinkVerdictRow): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO wikilink_verdicts
+           (node_id, link, rev, target_id, confidence, reason, judged_at)
+         VALUES (@node_id, @link, @rev, @target_id, @confidence, @reason, @judged_at)
+         ON CONFLICT (node_id, link) DO UPDATE SET
+           rev = excluded.rev, target_id = excluded.target_id,
+           confidence = excluded.confidence, reason = excluded.reason,
+           judged_at = excluded.judged_at`,
+      )
+      .run(row);
+
+    return Promise.resolve();
+  }
+
+  async confirmSettledLinks(nodeId: string, ts: string): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO edge_checks (src, dst, type, checked_at)
+         SELECT e.src, e.dst, e.type, @ts FROM edges e
+         LEFT JOIN edge_checks c ON c.src = e.src AND c.dst = e.dst AND c.type = e.type
+         WHERE (e.src = @nodeId OR e.dst = @nodeId)
+           AND e.invalidated_at IS NULL AND e.provenance = 'system'
+           AND e.type IN ('relates_to', 'references')
+           AND NOT EXISTS (
+             SELECT 1 FROM revisions r
+             WHERE r.node_id IN (e.src, e.dst) AND r.rev > 1
+               AND r.ts > COALESCE(c.checked_at, e.valid_from)
+           )
+         ON CONFLICT (src, dst, type) DO UPDATE SET checked_at = excluded.checked_at`,
+      )
+      .run({ nodeId, ts });
 
     return Promise.resolve();
   }

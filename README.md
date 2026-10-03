@@ -554,9 +554,11 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_REATTACH` | `auto` | Graph integrity: attach edgeless notes (an episodic record to its session's or project's last checkpoint, otherwise to a nearest note the model relates it to) and move system edges off superseded nodes. `off` skips it. |
 | `MEMORY_CONSOLIDATE_RETYPE` | `auto` | Link typing: the model replaces each `similar_to` with `relates_to`, `references` or nothing; `duplicate_of` goes to review as a merge candidate; `supersedes` follows `MEMORY_CONSOLIDATE_SUPERSEDE`. `off` skips it. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_SUPERSEDE` | `auto` | What a typed `supersedes` does: `auto` retires the older note at once (logged in Activity as `graph_integrity`, undo with `restore`) unless it is hand-maintained, in which case both stay related; `suggest` queues a supersede candidate for review; `off` keeps only the `relates_to`. |
+| `MEMORY_CONSOLIDATE_WIKILINKS` | `auto` | Dangling wikilinks: the model picks which note a `[[link]]` that resolves to nothing meant, from text matches and the note's nearest neighbours. A confident pick rewrites the link to `[[<id>]]`, a confident "none" unlinks it to plain text (both are revisions with reason `(sweep)`, logged in Activity as `graph_integrity`); in an episodic note it adds a `references` edge and ignores the link instead. An unsure pick waits on the Review tab with the model's choice. `suggest` leaves every pick there; `off` skips it. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_REATTACH_BATCH` | `20` | Max edgeless notes reattached per sweep. |
 | `MEMORY_CONSOLIDATE_RETYPE_BATCH` | `20` | Max `similar_to` edges typed per sweep. |
 | `MEMORY_CONSOLIDATE_REPOINT_BATCH` | `200` | Max system edges moved off superseded nodes per sweep. |
+| `MEMORY_CONSOLIDATE_WIKILINK_BATCH` | `10` | Max dangling wikilinks judged per sweep. |
 | `MEMORY_CONSOLIDATE_PROTECT_REVISIONS` | `5` | A note with this many revisions cannot be collapsed by a merge or retired by a supersede. |
 | `MEMORY_CONSOLIDATE_PROTECT_INBOUND` | `10` | Same, for a note with this many live inbound links. |
 

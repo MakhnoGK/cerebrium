@@ -40,6 +40,10 @@ class FakeAnnotator implements ConsolidationProvider {
   relate(): Promise<RelateResult> {
     return Promise.reject(new Error("not used"));
   }
+
+  resolveLink(): Promise<never> {
+    return Promise.reject(new Error("not used"));
+  }
 }
 
 // A node about failover; the enrichment keyword "resilience" is deliberately ABSENT from
@@ -188,6 +192,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
       reconcile: () => Promise.reject(new Error("no")),
       annotate: () => Promise.reject(new Error("model down")),
       relate: () => Promise.reject(new Error("not used")),
+      resolveLink: () => Promise.reject(new Error("not used")),
     };
     const env = setup({ consolidator: boom });
     const id = await writeFact(await session());

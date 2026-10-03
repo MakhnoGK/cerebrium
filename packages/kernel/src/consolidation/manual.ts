@@ -4,6 +4,7 @@ import {
   type ConsolidationResult,
   type ReconcileResult,
   type RelateResult,
+  type ResolveLinkResult,
 } from "@/domain/ports/consolidation-provider";
 
 // The default, offline, test-safe provider: no autonomous generation. `enabled` is
@@ -37,6 +38,12 @@ export class ManualConsolidator implements ConsolidationProvider {
   relate(): Promise<RelateResult> {
     return Promise.reject(
       new Error("manual consolidation provider does not judge links — no generation backend"),
+    );
+  }
+
+  resolveLink(): Promise<ResolveLinkResult> {
+    return Promise.reject(
+      new Error("manual consolidation provider does not resolve links — no generation backend"),
     );
   }
 }

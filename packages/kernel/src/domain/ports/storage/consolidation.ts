@@ -60,6 +60,25 @@ export interface StrandedEdge {
   weight: number;
 }
 
+export interface AuthoredBody {
+  id: string;
+  kind: MemoryKind;
+  title: string;
+  project: string | null;
+  rev: number;
+  content: string;
+}
+
+export interface WikilinkVerdictRow {
+  node_id: string;
+  link: string;
+  rev: number;
+  target_id: string | null;
+  confidence: string;
+  reason: string;
+  judged_at: string;
+}
+
 export type ResolvedStatus = Exclude<ConsolidationStatus, ConsolidationStatus.PENDING>;
 
 // Idempotency key: a cluster is the same regardless of member order, so hash the
@@ -133,15 +152,18 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   }): Promise<{ project: string | null; member_ids: string[]; score: number }[]>;
   duplicatePairFor(a: string, b: string, score: number): Promise<DuplicatePair | null>;
   citableSymbols(): Promise<{ name: string; node_id: string; repo: string }[]>;
-  authoredBodies(): Promise<
-    { id: string; kind: MemoryKind; title: string; project: string | null; content: string }[]
-  >;
+  authoredBodies(): Promise<AuthoredBody[]>;
   revisionCount(): Promise<number>;
   retiredAuthoredTitles(): Promise<{ id: string; title: string }[]>;
   // Titles a live authored node carried before its current one.
   formerTitles(): Promise<{ id: string; title: string }[]>;
   ignoredWikilinks(): Promise<{ node_id: string; link: string }[]>;
   ignoreWikilink(nodeId: string, link: string, ts: string): Promise<void>;
+  wikilinkVerdicts(): Promise<WikilinkVerdictRow[]>;
+  saveWikilinkVerdict(row: WikilinkVerdictRow): Promise<void>;
+  // Marks the node's live system relates_to/references edges that have nothing left to
+  // re-check as checked at `ts`, so a revision at `ts` does not queue them again.
+  confirmSettledLinks(nodeId: string, ts: string): Promise<void>;
   codeIndexWatermark(): Promise<string | null>;
   deadMirrorNodes(limit: number, unreachable?: readonly string[]): Promise<string[]>;
   unannotatedSemantic(

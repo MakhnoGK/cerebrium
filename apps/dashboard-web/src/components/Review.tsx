@@ -977,6 +977,21 @@ const FIX_LABEL: Record<WikilinkFix["action"], string> = {
   ignore: "Ignored",
 };
 
+// The fix that carries out the model's pick; an episodic note can only ignore its link.
+function verdictFix(dangler: WikilinkDangler): WikilinkFix | null {
+  const verdict = dangler.verdict;
+
+  if (!verdict) return null;
+
+  const base = { node_id: dangler.node_id, link: dangler.link };
+
+  if (!dangler.editable) return { ...base, action: "ignore" };
+
+  return verdict.target
+    ? { ...base, action: "rewrite", target_id: verdict.target.id }
+    : { ...base, action: "unlink" };
+}
+
 function DanglersSection() {
   const queryClient = useQueryClient();
   const hidden = useIdSet();
@@ -1004,8 +1019,36 @@ function DanglersSection() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: DANGLERS_KEY }),
   });
 
+  const acceptAll = useMutation({
+    mutationFn: async (picks: { dangler: WikilinkDangler; body: WikilinkFix }[]) => {
+      let accepted = 0;
+
+      for (const { dangler, body } of picks) {
+        setError(danglerKey(dangler), null);
+        hidden.add(danglerKey(dangler));
+
+        try {
+          await fixWikilink(body);
+          accepted++;
+        } catch (error) {
+          hidden.remove(danglerKey(dangler));
+          setError(danglerKey(dangler), errorMessage(error));
+        }
+      }
+
+      return accepted;
+    },
+    onSuccess: (accepted) => pushOutcome("ok", `Accepted ${String(accepted)} model picks`),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: DANGLERS_KEY }),
+  });
+
   const danglers = query.data ?? [];
   const visible = danglers.filter((d) => !hidden.ids.has(danglerKey(d)));
+  const picks = visible.flatMap((dangler) => {
+    const body = verdictFix(dangler);
+
+    return body ? [{ dangler, body }] : [];
+  });
   const error = query.isError ? errorMessage(query.error) : null;
   const send = (dangler: WikilinkDangler, action: WikilinkFix["action"], target_id?: string) =>
     fix.mutate({
@@ -1021,6 +1064,19 @@ function DanglersSection() {
         query.data && (
           <span className="sub muted">
             <span className="num">{visible.length}</span> links point at no note
+            {picks.length > 0 && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={acceptAll.isPending}
+                  onClick={() => acceptAll.mutate(picks)}
+                >
+                  Accept all {picks.length} model picks
+                </button>
+              </>
+            )}
           </span>
         )
       }
@@ -1051,6 +1107,11 @@ function DanglersSection() {
                   hidden={hidden.ids.has(danglerKey(dangler))}
                   error={errors[danglerKey(dangler)] ?? null}
                   onFix={(action, target) => send(dangler, action, target)}
+                  onAccept={() => {
+                    const body = verdictFix(dangler);
+
+                    if (body) fix.mutate({ dangler, body });
+                  }}
                 />
               ))}
             </tbody>
@@ -1066,12 +1127,16 @@ function DanglerRow({
   hidden,
   error,
   onFix,
+  onAccept,
 }: {
   dangler: WikilinkDangler;
   hidden: boolean;
   error: string | null;
   onFix: (action: WikilinkFix["action"], target?: string) => void;
+  onAccept: () => void;
 }) {
+  const verdict = dangler.verdict;
+
   return (
     <tr hidden={hidden} className={error ? "row-err" : undefined}>
       <td className="what">
@@ -1085,6 +1150,17 @@ function DanglerRow({
         </Badge>
       </td>
       <td>
+        {verdict && (
+          <div className="actions" title={verdict.reason}>
+            <button type="button" className="btn btn-primary" onClick={onAccept}>
+              Accept: {verdict.target ? `→ ${truncate(verdict.target.title, 40)}` : "unlink"}
+            </button>
+            <Badge tone={verdict.confidence === "high" ? "ok" : "warn"}>
+              model, {verdict.confidence}
+            </Badge>
+            <span className="sub muted">{truncate(verdict.reason, 120)}</span>
+          </div>
+        )}
         <div className="actions">
           {dangler.editable &&
             dangler.suggestions.map((s) => (

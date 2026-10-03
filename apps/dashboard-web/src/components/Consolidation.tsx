@@ -110,6 +110,9 @@ function RunsTable({ runs }: { runs: ConsolidationRunSummary[] }) {
             >
               Integrity
             </th>
+            <th className="num" title="wikilinks fixed / unlinked / sent to review">
+              Wikilinks
+            </th>
             <th className="num" title="generation failures">
               Gen fail
             </th>
@@ -156,6 +159,13 @@ function RunsTable({ runs }: { runs: ConsolidationRunSummary[] }) {
                       `${String(run.integrity.links_to_review)} / ` +
                       String(run.integrity.edges_repointed)
                     : "—"}
+                </td>
+                <td className="num nowrap">
+                  {run.integrity?.wikilinks_fixed === undefined
+                    ? "—"
+                    : `${String(run.integrity.wikilinks_fixed)} / ` +
+                      `${String(run.integrity.wikilinks_unlinked ?? 0)} / ` +
+                      String(run.integrity.wikilinks_to_review ?? 0)}
                 </td>
                 <td className="num">
                   {run.generation_failures > 0 ? (

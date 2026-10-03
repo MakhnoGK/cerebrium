@@ -22,6 +22,7 @@ export interface ConsolidationProvider {
   reconcile(task: ReconcileTask): Promise<ReconcileResult>;
   annotate(task: AnnotateTask): Promise<AnnotateResult>;
   relate(task: RelateTask): Promise<RelateResult>;
+  resolveLink(task: ResolveLinkTask): Promise<ResolveLinkResult>;
 }
 
 // A generation task handed to a ConsolidationProvider: a cluster of records to fold
@@ -115,6 +116,35 @@ export interface RelateResult {
   relation: LinkRelation;
   from: "a" | "b";
   reason: string;
+}
+
+export interface LinkCandidate {
+  id: string;
+  title: string;
+  type: string;
+  content: string;
+}
+
+// A `[[link]]` that resolves to no live note, the text around it, and the notes it may
+// have meant.
+export interface ResolveLinkTask {
+  project: string | null;
+  link: string;
+  note: { title: string; context: string };
+  candidates: LinkCandidate[];
+}
+
+// `target_id` is one of the candidates' ids, or null when none of them is what the link
+// meant.
+export interface ResolveLinkResult {
+  target_id: string | null;
+  confidence: LinkConfidence;
+  reason: string;
+}
+
+export enum LinkConfidence {
+  HIGH = "high",
+  LOW = "low",
 }
 
 export enum LinkRelation {
