@@ -7,7 +7,9 @@ import {
   type IndexCodeArgs,
   type IndexCodeResult,
 } from "@cerebrium/kernel/application/use-cases";
+import { cerebriumHome } from "@cerebrium/kernel/runtime/paths";
 import { indexCheckout, type CodeCalls } from "@plugin/src/code/client-indexer";
+import { optInCheckout } from "@plugin/src/code/index-opt-in";
 
 export function codeCalls(container: DependencyContainer): CodeCalls {
   return {
@@ -23,6 +25,8 @@ export class ClientIndexCode implements IndexCode {
   constructor(
     private readonly container: DependencyContainer,
     private readonly cwd: () => string = () => process.cwd(),
+    private readonly optIn: (root: string) => string | null = (root) =>
+      optInCheckout(cerebriumHome(), root, process.execPath),
   ) {}
 
   async invoke(args: IndexCodeArgs): Promise<IndexCodeResult> {
@@ -60,6 +64,14 @@ export class ClientIndexCode implements IndexCode {
       notes.push(`retired branches: ${r.branches_retired.join(", ")}.`);
 
     if (args.force) notes.push("`force` has no effect here: contents are addressed by hash.");
+
+    try {
+      const opted = this.optIn(done.checkout.root);
+
+      if (opted) notes.push(opted);
+    } catch (err) {
+      notes.push(`indexed, but not opted in for re-indexing: ${(err as Error).message}`);
+    }
 
     return {
       results: [

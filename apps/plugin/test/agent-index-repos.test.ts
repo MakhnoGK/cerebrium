@@ -1,16 +1,25 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyIndexRepos, INDEX_HOOKS } from "@plugin/scripts/agent-index-repos";
+import { applyIndexRepos } from "@plugin/scripts/agent-index-repos";
 import { readIndexConfig } from "@plugin/src/code/index-config";
+import { INDEX_HOOKS, optInCheckout } from "@plugin/src/code/index-opt-in";
 
 let dir: string;
 let repo: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "cb-index-repos-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "cb-index-repos-")));
   repo = join(dir, "widgets");
   mkdirSync(repo);
   execFileSync("git", ["-C", repo, "init", "-q"]);
@@ -75,5 +84,46 @@ describe("Opting a checkout into the host's code index", () => {
     expect(again?.ok).toBe(true);
     expect(readIndexConfig(join(dir, "home", ".cerebrium"))?.repos).toHaveLength(1);
     expect(() => readFileSync(join(repo, ".git", "hooks", "post-commit.cerebrium-prev"))).toThrow();
+  });
+});
+
+describe("Opting a checkout in from code_index", () => {
+  const home = () => join(dir, "home", ".cerebrium");
+  const other = () => join(dir, "other");
+
+  beforeEach(() => {
+    mkdirSync(other());
+    execFileSync("git", ["-C", other(), "init", "-q"]);
+    applyIndexRepos({ ...input(), repos: [other()] });
+  });
+
+  it("should list an unlisted checkout and install its hooks", () => {
+    // Given / When
+    const detail = optInCheckout(home(), repo, process.execPath);
+
+    // Then
+    expect(detail).toContain(repo);
+    expect(readIndexConfig(home())?.repos).toEqual([other(), repo].sort());
+    for (const name of INDEX_HOOKS) {
+      expect(readFileSync(join(repo, ".git", "hooks", name), "utf8")).toContain("--detach --quiet");
+    }
+  });
+
+  it("should change nothing for a checkout that is already listed", () => {
+    // Given / When
+    const detail = optInCheckout(home(), other(), process.execPath);
+
+    // Then
+    expect(detail).toBeNull();
+    expect(readIndexConfig(home())?.repos).toEqual([other()]);
+  });
+
+  it("should change nothing on a machine never set up for the host index", () => {
+    // Given / When
+    const detail = optInCheckout(join(dir, "elsewhere"), repo, process.execPath);
+
+    // Then
+    expect(detail).toBeNull();
+    expect(() => readFileSync(join(repo, ".git", "hooks", "post-commit"))).toThrow();
   });
 });

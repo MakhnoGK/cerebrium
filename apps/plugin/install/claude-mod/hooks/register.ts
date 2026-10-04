@@ -12,12 +12,11 @@ import {
 const SERVER = "cerebrium";
 const PREFERRED_TOOLS = /^mcp__cerebrium__(code_lookup|search|get|session_start)$/;
 
-let config: Promise<string[]> | undefined;
 const sessions = new Map<string, Promise<string>>();
 const answered = new Set<string>();
 
 function indexedRepos($: Api): Promise<string[]> {
-  return (config ??= readRepos($).catch(() => []));
+  return readRepos($).catch(() => []);
 }
 
 async function readRepos($: Api): Promise<string[]> {
@@ -69,7 +68,6 @@ async function answerFromIndex(
 }
 
 export const register: Register = (on) => {
-  config = undefined;
   sessions.clear();
   answered.clear();
 

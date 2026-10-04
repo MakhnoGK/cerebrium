@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -23,6 +23,7 @@ import {
   RpcServer,
   surfaceMethods,
 } from "@cerebrium/kernel/presentation/rpc";
+import { readIndexConfig, writeIndexConfig } from "@plugin/src/code/index-config";
 import { freshStore } from "@test/helpers";
 import { TEST_BACKEND } from "@test/pg";
 import { pluginBundle, runToExit } from "./plugin-bundle";
@@ -202,6 +203,33 @@ describe.skipIf(TEST_BACKEND !== "postgres")("Code indexing through the plugin b
       { remote_key: "github.com/acme/widgets", default_branch: "main" },
     ]);
     expect(await sql("SELECT COUNT(*)::int AS c FROM code_blobs")).toEqual([{ c: 3 }]);
+  });
+
+  it("should record the default branch and opt the checkout in when it was pushed, not cloned", async () => {
+    // Given
+    git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+    writeIndexConfig(join(dir, "home"), {
+      kernel: url,
+      token_file: token,
+      bundle: join(dir, "index.js"),
+      repos: [],
+    });
+    const client = await plugin();
+    const { session_id } = payload<{ session_id: string }>(
+      await client.callTool({ name: "session_start", arguments: { project: "widgets" } }),
+    );
+
+    // When
+    payload(await client.callTool({ name: "code_index", arguments: { session_id } }));
+
+    // Then
+    expect(await sql("SELECT default_branch FROM code_repos")).toEqual([
+      { default_branch: "main" },
+    ]);
+    expect(readIndexConfig(join(dir, "home"))?.repos).toEqual([realpathSync(repo)]);
+    expect(readFileSync(join(repo, ".git", "hooks", "post-commit"), "utf8")).toContain(
+      "cerebrium:index",
+    );
   });
 
   it("should follow a note's link into the code of the branch the session is on", async () => {

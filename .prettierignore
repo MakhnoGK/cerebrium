@@ -6,3 +6,4 @@ package-lock.json
 *.md
 *.sql
 **/test/fixtures
+apps/plugin/install/claude-mod/.claude-plugin/types
