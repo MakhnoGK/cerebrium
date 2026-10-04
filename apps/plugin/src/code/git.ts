@@ -84,6 +84,22 @@ async function remoteUrl(root: string): Promise<string | null> {
   return first ? ((await git(root, ["remote", "get-url", first]))?.trim() ?? null) : null;
 }
 
+// A repo made with `git init` and pushed, rather than cloned, has no origin/HEAD.
+async function defaultBranchOf(root: string): Promise<string | null> {
+  const head = (
+    await git(root, ["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"])
+  )?.trim();
+
+  if (head) return head.replace(/^[^/]+\//, "");
+
+  for (const name of ["main", "master"]) {
+    if ((await git(root, ["rev-parse", "-q", "--verify", `refs/remotes/origin/${name}`])) !== null)
+      return name;
+  }
+
+  return null;
+}
+
 // The repo identity and branch of a working directory, or why there is none.
 export async function readCheckout(dir: string, withStatus = true): Promise<Checkout> {
   const root = await repoRoot(dir);
@@ -107,9 +123,6 @@ export async function readCheckout(dir: string, withStatus = true): Promise<Chec
 
   const commit = (await git(root, ["rev-parse", "HEAD"]))?.trim() || null;
   const status = withStatus ? await git(root, ["status", "--porcelain"]) : "";
-  const head = (
-    await git(root, ["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"])
-  )?.trim();
 
   return {
     root,
@@ -118,7 +131,7 @@ export async function readCheckout(dir: string, withStatus = true): Promise<Chec
     branch,
     commit,
     dirty: (status ?? "").trim().length > 0,
-    default_branch: head ? head.replace(/^[^/]+\//, "") : null,
+    default_branch: await defaultBranchOf(root),
   };
 }
 

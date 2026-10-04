@@ -89,6 +89,7 @@ export default tseslint.config(
       // The `claude-code` module types exist only inside a Claude Code session.
       "apps/plugin/install/claude-mod/hooks/register.ts",
       "apps/plugin/install/claude-mod/tests",
+      "apps/plugin/install/claude-mod/.claude-plugin/types",
     ],
   },
   js.configs.recommended,

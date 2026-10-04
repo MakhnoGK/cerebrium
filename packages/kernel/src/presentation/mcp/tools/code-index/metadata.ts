@@ -13,7 +13,9 @@ export const metadata = {
     "compact per-repo summary (files scanned/indexed/skipped, symbols added/updated/invalidated, edges, timing). To read " +
     "the code afterwards use `search` (by meaning) or `code_lookup` (by structure), then `get` for a symbol's source. " +
     "Against a Cerebrium host, it indexes the git checkout at `path` (default: your working directory) on its current " +
-    "branch: only files the host lacks are uploaded, and the host parses them.",
+    "branch: only files the host lacks are uploaded, and the host parses them. The first index of a checkout on a " +
+    "machine set up with `agent:setup --index-repo` also opts it in: git hooks re-index it after every commit, " +
+    "checkout, merge and rewrite, so later calls are only needed for uncommitted work.",
 
   schema: {
     session_id: sessionIdSchema,

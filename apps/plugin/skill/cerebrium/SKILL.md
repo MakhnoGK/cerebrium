@@ -158,7 +158,8 @@ maintained by re-indexing.
   expansion (`via:{edge:'documents'}`). This is the payoff — design notes that point
   straight at the code they describe.
 - **Against a Cerebrium host, code is per branch.** `code_index` uploads the checkout
-  you are in (only files the host lacks) on its current branch; `code_lookup`, symbol
+  you are in (only files the host lacks) on its current branch, and the first call opts
+  the checkout into git hooks that re-index it on every commit; `code_lookup`, symbol
   `search` and `get` read the branch your working directory is on, or the repo's default
   branch when that one is not indexed yet (said so in `notes`). A symbol id names one
   version of one file, so after the file changes, look it up again; a `documents` link
