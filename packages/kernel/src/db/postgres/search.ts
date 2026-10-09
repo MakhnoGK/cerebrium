@@ -13,6 +13,7 @@ import {
   parseVector,
   toVectorLiteral,
 } from "@/db/postgres/internal";
+import { ACTIVE_EPISODIC } from "@/db/sql-fragments";
 import type { TextQuery } from "@/core/fts";
 
 // The same exact-KNN budget as the SQLite authored pool.
@@ -103,11 +104,11 @@ export class PgSearchRepo extends PgBaseRepo implements SearchRepo {
 
   async rowsFor(
     ids: string[],
-    opts: { asOf?: string; validAt?: string } = {},
+    opts: { asOf?: string; validAt?: string; activeSince?: string } = {},
   ): Promise<EnrichedRow[]> {
     if (!ids.length) return [];
 
-    if (opts.asOf === undefined && opts.validAt === undefined) {
+    if (opts.asOf === undefined && opts.validAt === undefined && opts.activeSince === undefined) {
       return (await enrichedByIds(this.db, ids)).filter((r) => r.invalidated_at == null);
     }
 
@@ -128,6 +129,11 @@ export class PgSearchRepo extends PgBaseRepo implements SearchRepo {
         "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
       );
       params.validAt = opts.validAt;
+    }
+
+    if (opts.activeSince !== undefined) {
+      where.push(ACTIVE_EPISODIC);
+      params.activeSince = opts.activeSince;
     }
 
     return this.all<EnrichedRow>(`${ENRICHED} WHERE ${where.join(" AND ")}`, params);
@@ -262,6 +268,11 @@ export class PgSearchRepo extends PgBaseRepo implements SearchRepo {
         "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
       );
       params.validAt = opts.validAt;
+    }
+
+    if (opts.activeSince !== undefined) {
+      where.push(ACTIVE_EPISODIC);
+      params.activeSince = opts.activeSince;
     }
 
     return where;

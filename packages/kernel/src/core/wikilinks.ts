@@ -11,15 +11,55 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+const CODE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
+
+// [start, end) of every fenced block and inline code span: a link written there is shown
+// as syntax, not followed.
+function codeRanges(content: string): [number, number][] {
+  return [...content.matchAll(CODE)].map((m) => [m.index, m.index + m[0].length]);
+}
+
+function inCode(ranges: [number, number][], at: number): boolean {
+  return ranges.some(([start, end]) => at >= start && at < end);
+}
+
+const PLACEHOLDERS = new Set([
+  "id",
+  "ids",
+  "ulid",
+  "node",
+  "node-id",
+  "name",
+  "title",
+  "slug",
+  "link",
+  "links",
+  "wikilink",
+  "wikilinks",
+  "target",
+  "x",
+  "y",
+  "foo",
+  "bar",
+]);
+
+// Syntax written about links rather than a link: `[[id]]`, `[[<id>]]`, `[[01M3…]]`, `[[...]]`.
+function isPlaceholder(raw: string, slug: string): boolean {
+  return PLACEHOLDERS.has(slug) || slug.length < 2 || /[<>…]|\.\.\./.test(raw);
+}
+
 // Deduplicated by slug, in the order they first appear; `raw` is the text as written.
 export function wikilinks(content: string): { raw: string; slug: string }[] {
   const out = new Map<string, string>();
+  const code = codeRanges(content);
 
   for (const match of content.matchAll(WIKILINK)) {
+    if (inCode(code, match.index)) continue;
+
     const raw = (match[1] ?? "").trim();
     const slug = slugify(raw);
 
-    if (slug.length && !out.has(slug)) out.set(slug, raw);
+    if (slug.length && !isPlaceholder(raw, slug) && !out.has(slug)) out.set(slug, raw);
   }
 
   return [...out].map(([slug, raw]) => ({ raw, slug }));
@@ -39,9 +79,12 @@ export function rewriteWikilink(
   target: string | null,
 ): { content: string; count: number } {
   const slug = slugify(link);
+  const code = codeRanges(content);
   let count = 0;
 
-  const rewritten = content.replace(WIKILINK_TOKEN, (token, inner: string) => {
+  const rewritten = content.replace(WIKILINK_TOKEN, (token, inner: string, at: number) => {
+    if (inCode(code, at)) return token;
+
     const pipe = inner.indexOf("|");
     const ref = pipe < 0 ? inner : inner.slice(0, pipe);
     const label = pipe < 0 ? null : inner.slice(pipe + 1);
@@ -104,7 +147,8 @@ export type Resolution =
 const AMBIGUOUS_CANDIDATES = 5;
 
 // Exact title match first, then a unique prefix — a truncated slug is the common case and
-// an ambiguous one is deliberately left unlinked rather than guessed.
+// an ambiguous one is deliberately left unlinked rather than guessed. A one-word link
+// matches only a whole title: as a prefix it names whatever title happens to start with it.
 export function resolveTarget(index: SlugIndex, target: string): Resolution {
   const exact = index.get(target);
 
@@ -114,10 +158,14 @@ export function resolveTarget(index: SlugIndex, target: string): Resolution {
       : { kind: "ambiguous", ids: exact.slice(0, AMBIGUOUS_CANDIDATES) };
   }
 
+  if (!target.includes("-")) return { kind: "unknown" };
+
   const found: string[] = [];
 
   for (const [slug, ids] of index) {
-    if (slug.startsWith(target)) found.push(...ids);
+    if (slug.startsWith(target) && (slug.length === target.length || slug[target.length] === "-")) {
+      found.push(...ids);
+    }
   }
 
   if (found.length === 1) return { kind: "prefix", id: found[0]! };

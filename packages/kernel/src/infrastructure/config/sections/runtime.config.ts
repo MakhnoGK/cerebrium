@@ -78,6 +78,8 @@ export class EmbeddingConfig extends SectionOf("embedding", {
 // `foldSim` sits on a different similarity scale from every other gate here — first-chunk
 // cosine, what MMR compares — so it is not comparable to `dedupThreshold` or `mergeSim`.
 // At 1.0 folding is off (a plain gate would still fire there — identical vectors score 1).
+// `episodicTtlDays` is how long an undistilled checkpoint or event note stays in a plain
+// search; `history` still finds it. 0 keeps them at any age.
 @configSection()
 export class RetrievalConfig extends SectionOf("retrieval", {
   symbolWeight: num(0.5).positive().env("MEMORY_SYMBOL_WEIGHT"),
@@ -91,6 +93,7 @@ export class RetrievalConfig extends SectionOf("retrieval", {
   lexicalDedupThreshold: num(0.2).range(0, 1).env("MEMORY_DEDUP_LEXICAL_THRESHOLD"),
   workingSetTokens: int(1500).positive().env("MEMORY_WORKING_SET_TOKENS"),
   longBodyChars: int(4000).nonNegative().env("MEMORY_LONG_BODY_CHARS"),
+  episodicTtlDays: int(7).nonNegative().env("MEMORY_EPISODIC_TTL_DAYS"),
 }) {}
 
 // `idleIntervalMs` is the poll cadence once the queue is empty; `idleExitMs` is how long

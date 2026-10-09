@@ -179,9 +179,9 @@ describe("Usage in ranking", () => {
     await env.worker.tick();
 
     // When
-    env.clock.advanceDays(25);
+    env.clock.advanceDays(4);
     await get([used.id]); // decay clock restarts here for `used` only
-    env.clock.advanceDays(5);
+    env.clock.advanceDays(2);
 
     // Then
     const ranked = await rank("deployment rollback procedure");

@@ -376,6 +376,31 @@ describe("Reattach", () => {
     expect(await liveEdge(record, checkpoint, EdgeType.RELATES_TO)).toBe(true);
   });
 
+  it("should not anchor a record to another session's checkpoint", async () => {
+    // Given
+    const checkpoint = await write(
+      "Block closed",
+      "the deploy block closed cleanly",
+      MemoryKind.EPISODIC,
+      "checkpoint",
+      "cerebrium",
+    );
+    session = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const record = await write(
+      "agent.selftest run completed",
+      "zebra quartz violin",
+      MemoryKind.EPISODIC,
+      "event_note",
+      "cerebrium",
+    );
+
+    // When
+    await sweep();
+
+    // Then
+    expect(await env.edges.pairIsConnected(record, checkpoint)).toBe(false);
+  });
+
   it("should attach an edgeless note to the nearest note the model relates it to", async () => {
     // Given
     const lonely = await write("OpenRouter retention", "openrouter keeps prompts for thirty days");
@@ -498,6 +523,49 @@ describe("Project families", () => {
 
     // Then
     expect(await env.edges.pairIsConnected(record, checkpoint)).toBe(false);
+  });
+
+  it("should drop a system references edge across families", async () => {
+    // Given
+    const a = await write("Retry budget", TWIN, MemoryKind.SEMANTIC, "fact", "cerebrium");
+    const b = await write(
+      "Prompt advisor",
+      "users rate prompts by result",
+      MemoryKind.SEMANTIC,
+      "fact",
+      "toonspace-advers",
+    );
+    await env.edges.insertSystemReferenceIfUnconnected(a, b, session, env.clock.t);
+
+    // When
+    await sweep();
+
+    // Then
+    expect(await liveEdge(a, b, EdgeType.REFERENCES)).toBe(false);
+  });
+
+  it("should not turn a wikilink into an edge to a note of another family", async () => {
+    // Given
+    const target = await write(
+      "Kafka topics",
+      "ingestion consumes kafka topics by tenant",
+      MemoryKind.SEMANTIC,
+      "fact",
+      "toonspace",
+    );
+    const source = await write(
+      "Plan",
+      "builds on [[Kafka topics]]",
+      MemoryKind.SEMANTIC,
+      "fact",
+      "cerebrium",
+    );
+
+    // When
+    await sweep();
+
+    // Then
+    expect(await liveEdge(source, target, EdgeType.REFERENCES)).toBe(false);
   });
 });
 
@@ -653,5 +721,50 @@ describe("Collapse guard", () => {
     await expect(collapse).rejects.toThrow(/hand-maintained.*mark it duplicate/);
     expect((await env.nodes.envelope(a))?.invalidated).toBe(false);
     expect((await env.consolidation.getCandidate(id!))?.status).toBe("pending");
+  });
+
+  it("should not count merge folds or system links as hand maintenance", async () => {
+    // Given
+    const [a, b] = await twins();
+    for (let fold = 0; fold < 4; fold++) {
+      env.clock.advanceMs(1_000);
+      await env.nodes.addRevision(b, {
+        content: `${TWIN} (fold ${String(fold)})`,
+        session_id: session,
+        reason: "merge",
+        ts: env.clock.t,
+      });
+    }
+    for (let n = 0; n < 10; n++) {
+      const other = await write(`Referrer ${String(n)}`, `points at the retry note ${String(n)}`);
+      await env.edges.insertSystemEdgeIfUnconnected(
+        EdgeType.RELATES_TO,
+        other,
+        b,
+        session,
+        env.clock.t,
+        0.8,
+      );
+    }
+    const id = await env.consolidation.insertCandidate({
+      kind: ConsolidationKind.MERGE,
+      member_ids: [a, b],
+      canonical_id: b,
+      score: 1,
+      detected_at: env.clock.t,
+    });
+
+    // When
+    const applied = await container.resolve(ConsolidateApplyTool).invoke({
+      session_id: session,
+      id: id!,
+      decision: ConsolidationRecommendation.APPLY,
+      collapse: true,
+      override: { title: "Retries", summary: "Retries.", body: "Retries." },
+    });
+
+    // Then
+    expect(applied).toMatchObject({ status: "applied" });
+    expect((await env.nodes.envelope(a))?.invalidated).toBe(true);
   });
 });

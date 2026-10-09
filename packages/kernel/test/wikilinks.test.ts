@@ -47,6 +47,22 @@ describe("wikilinkTargets", () => {
     // Given / When / Then
     expect(wikilinkTargets("empty [[ ]] and [[]] and [[---]]")).toEqual([]);
   });
+
+  it("should skip a link shown inside inline code or a fenced block", () => {
+    // Given
+    const content = "write `[[retry-budget]]`, then\n```\n[[kafka-topics]]\n```\nsee [[real-node]]";
+
+    // When / Then
+    expect(wikilinkTargets(content)).toEqual(["real-node"]);
+  });
+
+  it("should skip placeholder syntax written about links", () => {
+    // Given
+    const content = "rewritten to [[id]], [[ULID]], [[<id>]], [[x]], [[01M3…]] or [[...]]";
+
+    // When / Then
+    expect(wikilinkTargets(content)).toEqual([]);
+  });
 });
 
 describe("resolveTarget", () => {
@@ -89,6 +105,25 @@ describe("resolveTarget", () => {
     // Given / When / Then
     expect(resolveTarget(index([["alpha-node", ["A"]]]), "gamma")).toEqual({ kind: "unknown" });
   });
+
+  it("should take a one-word link only as a whole title", () => {
+    // Given
+    const titles = index([
+      ["idea-sync-call-prompt-advisor", ["A"]],
+      ["roadmap", ["B"]],
+    ]);
+
+    // When / Then
+    expect(resolveTarget(titles, "idea")).toEqual({ kind: "unknown" });
+    expect(resolveTarget(titles, "roadmap")).toEqual({ kind: "exact", id: "B" });
+  });
+
+  it("should take a prefix only where a word of the title ends", () => {
+    // Given / When / Then
+    expect(resolveTarget(index([["alpha-nodes-list", ["A"]]]), "alpha-node")).toEqual({
+      kind: "unknown",
+    });
+  });
 });
 
 describe("wikilinks", () => {
@@ -130,6 +165,17 @@ describe("rewriteWikilink", () => {
     expect(rewriteWikilink(body, "Retry Budget", null)).toEqual({
       content: "Retry Budget and the budget",
       count: 2,
+    });
+  });
+
+  it("should leave a link shown as code untouched", () => {
+    // Given
+    const body = "`[[Retry Budget]]` is the syntax; [[Retry Budget]] is the link";
+
+    // When / Then
+    expect(rewriteWikilink(body, "Retry Budget", null)).toEqual({
+      content: "`[[Retry Budget]]` is the syntax; Retry Budget is the link",
+      count: 1,
     });
   });
 

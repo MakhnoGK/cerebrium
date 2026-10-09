@@ -163,7 +163,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
             );
           }
 
-          await this.nodes.applyDistillation({
+          const distilled = await this.nodes.applyDistillation({
             title: result.title,
             content: result.body,
             project: candidate.project,
@@ -171,7 +171,7 @@ export class LocalApplyCandidate implements ApplyCandidate {
             session_id: args.session_id,
             ts: now,
           });
-          return ConsolidationStatus.APPLIED;
+          return distilled ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
         }
 
         if (candidate.kind === ConsolidationKind.MERGE) {

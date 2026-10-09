@@ -94,7 +94,7 @@ describe("Memory-model factors hold in hybrid mode", () => {
     container.register(RetrievalConfig, { useValue: foldOff() });
     const content = "deploy the release pipeline";
     const old = await w(s, MemoryKind.EPISODIC, "event_note", "Deploy", content);
-    env.clock.advanceDays(59);
+    env.clock.advanceDays(5);
     const fresh = await w(s, MemoryKind.EPISODIC, "event_note", "Deploy", content);
     env.clock.advanceDays(1);
     const fact = await w(s, MemoryKind.SEMANTIC, "fact", "Deploy", content);

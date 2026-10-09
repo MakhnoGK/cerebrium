@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { inject, injectable } from "tsyringe";
+import { projectFamily } from "@cerebrium/contracts/graph";
 import type { ConsolidationProposal } from "@cerebrium/contracts/types";
 import {
   ConsolidationKind,
@@ -119,6 +120,14 @@ interface NeighbourPair {
   dst: string;
   score: number;
   seed: SweepSeed;
+}
+
+// A project-less note belongs to every family, as in the storage-side family filters.
+function sameFamily(a: string | null, b: string | null): boolean {
+  const fa = projectFamily(a);
+  const fb = projectFamily(b);
+
+  return fa === null || fb === null || fa === fb;
 }
 
 const MAX_ERROR_CHARS = 500;
@@ -576,6 +585,7 @@ export class ConsolidationWorker {
     const bodies = await this.consolidationRepo.authoredBodies();
     const links = await this.wikilinks.index(bodies);
     const symbols = await this.citableSymbolIndex();
+    const projectOf = new Map(bodies.map((b) => [b.id, b.project]));
     const breath = breather(this.batch.msPerBreath);
 
     for (const row of bodies) {
@@ -592,7 +602,7 @@ export class ConsolidationWorker {
           continue;
         }
 
-        if (dst === row.id) continue;
+        if (dst === row.id || !sameFamily(row.project, projectOf.get(dst) ?? null)) continue;
 
         if (
           await this.edgesRepo.insertSystemReferenceIfUnconnected(row.id, dst, this.ownerId, now)
@@ -828,20 +838,24 @@ export class ConsolidationWorker {
       }
 
       if (posture === Posture.AUTO && gen) {
-        await this.consolidationRepo.resolveCandidateAtomically(id, this.ownerId, now, async () => {
-          await this.nodesRepo.applyDistillation({
-            title: gen.title,
-            content: gen.body,
-            project: cluster.project,
-            sourceIds: cluster.member_ids,
-            session_id: this.ownerId,
-            ts: now,
-          });
+        const resolved = await this.consolidationRepo.resolveCandidateAtomically(
+          id,
+          this.ownerId,
+          now,
+          async () =>
+            (await this.nodesRepo.applyDistillation({
+              title: gen.title,
+              content: gen.body,
+              project: cluster.project,
+              sourceIds: cluster.member_ids,
+              session_id: this.ownerId,
+              ts: now,
+            }))
+              ? ConsolidationStatus.APPLIED
+              : ConsolidationStatus.DISMISSED,
+        );
 
-          return ConsolidationStatus.APPLIED;
-        });
-
-        result.distilled++;
+        if (resolved?.status === ConsolidationStatus.APPLIED) result.distilled++;
 
         continue;
       }
@@ -1045,24 +1059,24 @@ export class ConsolidationWorker {
         if (proposal?.recommendation !== ConsolidationRecommendation.APPLY) continue;
 
         if (kind === ConsolidationKind.DISTILL) {
-          await this.consolidationRepo.resolveCandidateAtomically(
+          const resolved = await this.consolidationRepo.resolveCandidateAtomically(
             cand.id,
             this.ownerId,
             now,
-            async () => {
-              await this.nodesRepo.applyDistillation({
+            async () =>
+              (await this.nodesRepo.applyDistillation({
                 title: proposal.title,
                 content: proposal.body,
                 project: cand.project,
                 sourceIds: cand.member_ids,
                 session_id: this.ownerId,
                 ts: now,
-              });
-
-              return ConsolidationStatus.APPLIED;
-            },
+              }))
+                ? ConsolidationStatus.APPLIED
+                : ConsolidationStatus.DISMISSED,
           );
-          result.distilled++;
+
+          if (resolved?.status === ConsolidationStatus.APPLIED) result.distilled++;
           continue;
         }
 
@@ -1416,9 +1430,15 @@ export class ConsolidationWorker {
 
     ids.delete(dangler.body.id);
 
-    return (await this.consolidationRepo.relationInputs([...ids].slice(0, LINK_CANDIDATES))).map(
-      (input) => ({ id: input.id, title: input.title, type: input.type, content: input.content }),
-    );
+    return (await this.consolidationRepo.relationInputs([...ids]))
+      .filter((input) => sameFamily(dangler.body.project, input.project))
+      .slice(0, LINK_CANDIDATES)
+      .map((input) => ({
+        id: input.id,
+        title: input.title,
+        type: input.type,
+        content: input.content,
+      }));
   }
 
   private async statedReferences(links: { src: string; type: EdgeType }[]): Promise<Set<string>> {

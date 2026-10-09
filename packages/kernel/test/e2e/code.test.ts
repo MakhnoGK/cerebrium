@@ -189,8 +189,8 @@ describe("Code indexing end-to-end", () => {
     expect(scoped.results.length).toBeGreaterThan(0);
     expect(scoped.results.every((r) => r.type === "symbol" && r.kind === "mirror")).toBe(true);
 
-    // When / Then — age 60 days: the symbol (no decay) outranks the decayed episodic note.
-    env.clock.advanceDays(60);
+    // When / Then — age 6 days: the symbol (no decay) outranks the decayed episodic note.
+    env.clock.advanceDays(6);
     const aged = (await t.search.invoke({
       session_id: s,
       query: "validate",

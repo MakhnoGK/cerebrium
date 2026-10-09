@@ -127,8 +127,7 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   candidateInputs(ids: string[]): Promise<{ id: string; title: string; content: string }[]>;
   // Live authored nodes with no live edge to another live authored node.
   edgelessNodes(limit: number): Promise<EdgelessNode[]>;
-  // The checkpoint of the node's own session within its project family, else the newest
-  // earlier one of its project.
+  // The newest checkpoint of the node's own session within its project family.
   anchorCheckpoint(id: string): Promise<string | null>;
   // Live similar_to edges between live authored nodes, strongest first.
   untypedLinks(limit: number): Promise<UntypedLink[]>;
@@ -139,8 +138,8 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   // a revision after the edge was made or last confirmed.
   revisedLinks(limit: number): Promise<StrandedEdge[]>;
   markLinkChecked(src: string, dst: string, type: EdgeType, ts: string): Promise<void>;
-  // Live system similar_to/relates_to edges between authored nodes of different project
-  // families.
+  // Live system similar_to/relates_to/references edges between authored nodes of different
+  // project families.
   crossProjectSystemLinks(limit: number): Promise<StrandedEdge[]>;
   staleEpisodicClusters(opts: {
     minScore: number;
@@ -183,7 +182,8 @@ export interface ConsolidationRepo extends ConsolidationReporter {
     ts: string,
   ): Promise<boolean>;
   // Dismisses every pending candidate one of whose members has been retired since it was
-  // detected. Returns how many.
+  // detected, and every pending distill one of whose sources another distill has taken.
+  // Returns how many.
   dismissRetiredCandidates(resolvedBy: string, ts: string): Promise<number>;
   // Runs `operation` and the candidate's resolution in one transaction, so the writes it
   // performs through other repositories commit or roll back together with it.

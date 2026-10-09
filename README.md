@@ -499,6 +499,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_PG_POOL_MAX` | `10` | Connections per process. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
 | `MEMORY_LONG_BODY_CHARS` | `4000` | Body size at which `write`/`update` add an advisory `context_notes` line. Never blocks; `0` disables. |
+| `MEMORY_EPISODIC_TTL_DAYS` | `7` | How long an undistilled checkpoint or event note stays in a plain `search`. A distilled one leaves at once; its distill carries it. `history:true`, `as_of` and an episodic-only `kinds` still find both. `0` keeps undistilled ones at any age. |
 | `MEMORY_EMBED_PROVIDER` | `local` | `local` (transformers.js, downloads a model), `http` (a model served over HTTP, so the daemon holds none), or `local-null` (deterministic, offline, for tests). |
 | `MEMORY_EMBED_MODEL` | `Xenova/multilingual-e5-small` | Model id for the `local` provider (dim 384). Under `http` this is the serving backend's own tag, and it must name the model the store was already embedded with — see **Serving the embedding model** below. |
 | `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached. |
@@ -540,7 +541,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
 | `MEMORY_PRINCIPALS` | `{}` | Per-principal policy as JSON, keyed by client name: `capabilities`, `quota`, `weight`. See [Principals](#principals). |
 | `MEMORY_PRINCIPAL_DEFAULT` | `{}` | The profile applied to any principal the map does not name. |
-| `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `4` | Minimum episodic age before it is eligible to distill. |
+| `MEMORY_CONSOLIDATE_MIN_AGE_DAYS` | `1` | Minimum episodic age before it is eligible to distill. |
 | `MEMORY_CONSOLIDATE_MIN_CLUSTER` | `3` | Minimum episodic cluster size to distill. |
 | `MEMORY_CONSOLIDATE_MERGE_BURST_MS` | `3600000` | Burst window for merge detection: a near-duplicate pair one session wrote within it is treated as a series and left to age, not proposed. `0` disables the rule. |
 | `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
@@ -1381,7 +1382,7 @@ secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
   a drift-guard test. Nothing is ever hard-deleted — invalidation is soft, and superseded
   data stays queryable with `history:true`.
 - **Hybrid retrieval with a memory model.** FTS5 bm25 and vector KNN are fused with RRF,
-  multiplied by a memory factor (semantic steady, episodic `exp(-age/14d)`), then expanded
+  multiplied by a memory factor (semantic steady, episodic `exp(-age/3d)`), then expanded
   one hop over typed edges.
 - **Async embeddings, single-writer safe.** A node is findable via FTS the instant it is
   written; a 384-dim vector per content-addressed chunk is computed asynchronously, so
