@@ -344,7 +344,7 @@ export default function GraphView({
       allowInvalidContainer: true,
       defaultEdgeType: "line",
       minEdgeThickness: 0.1,
-      zoomToSizeRatioFunction: (ratio) => ratio ** 0.3,
+      zoomToSizeRatioFunction: (ratio) => (ratio > 1 ? ratio : ratio ** 0.3),
       itemSizesReference: "screen",
       labelRenderedSizeThreshold: Number.POSITIVE_INFINITY,
       labelDensity: 0.6,
