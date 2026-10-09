@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { inject, injectable } from "tsyringe";
+import type { ConsolidationProposal } from "@cerebrium/contracts/types";
 import {
   ConsolidationKind,
   ConsolidationStatus,
@@ -341,6 +342,7 @@ export class ConsolidationWorker {
 
       await this.report(runId, "backfill", result);
       await this.backfillProposals(now, result);
+      await this.drainPending(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -904,18 +906,20 @@ export class ConsolidationWorker {
         continue;
       }
 
-      const loser = pair.member_ids.find((id) => id !== pair.canonical_id);
+      const order = await this.orderPair(pair);
 
-      if (!loser) {
+      if (!order) {
         continue;
       }
+
+      const { survivor, loser } = order;
 
       const gen = await this.tryGenerate(
         {
           kind: ConsolidationKind.MERGE,
           project: pair.project,
           inputs: await this.consolidationRepo.candidateInputs(pair.member_ids),
-          canonical_id: pair.canonical_id,
+          canonical_id: survivor,
         },
         result,
       );
@@ -926,7 +930,7 @@ export class ConsolidationWorker {
           kind: ConsolidationKind.MERGE,
           project: pair.project,
           member_ids: pair.member_ids,
-          canonical_id: pair.canonical_id,
+          canonical_id: survivor,
           score: pair.score,
           proposal: gen,
           detected_at: now,
@@ -949,7 +953,7 @@ export class ConsolidationWorker {
         kind: ConsolidationKind.MERGE,
         project: pair.project,
         member_ids: pair.member_ids,
-        canonical_id: pair.canonical_id,
+        canonical_id: survivor,
         score: pair.score,
         proposal: gen,
         detected_at: now,
@@ -959,26 +963,8 @@ export class ConsolidationWorker {
         continue;
       }
 
-      if (posture === Posture.AUTO && gen && !(await this.anyHandMaintained(pair.member_ids))) {
-        const survivor = pair.canonical_id;
-        const resolved = await this.consolidationRepo.resolveCandidateAtomically(
-          id,
-          this.ownerId,
-          now,
-          async () => {
-            const merged = await this.nodesRepo.applyMerge({
-              survivorId: survivor,
-              loserId: loser,
-              session_id: this.ownerId,
-              ts: now,
-              merged: { title: gen.title, body: gen.body },
-            });
-
-            return merged ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
-          },
-        );
-
-        if (resolved?.status === ConsolidationStatus.APPLIED) {
+      if (posture === Posture.AUTO && gen) {
+        if (await this.autoMerge(id, pair.score, survivor, loser, gen, now)) {
           result.merged++;
         }
 
@@ -989,12 +975,107 @@ export class ConsolidationWorker {
     }
   }
 
-  private async anyHandMaintained(ids: string[]): Promise<boolean> {
-    for (const id of ids) {
-      if (await this.protection.handMaintained(id)) return true;
+  private async orderPair(
+    pair: DuplicatePair,
+  ): Promise<{ survivor: string; loser: string } | null> {
+    const loser = pair.member_ids.find((id) => id !== pair.canonical_id);
+
+    if (!loser) return null;
+
+    if (
+      (await this.protection.handMaintained(loser)) &&
+      !(await this.protection.handMaintained(pair.canonical_id))
+    ) {
+      return { survivor: loser, loser: pair.canonical_id };
     }
 
-    return false;
+    return { survivor: pair.canonical_id, loser };
+  }
+
+  // A hand-maintained loser, or a body missing anchors of the duplicate, is recorded as
+  // `duplicate_of` instead of collapsed.
+  private async autoMerge(
+    candidateId: string,
+    score: number,
+    survivor: string,
+    loser: string,
+    proposal: ConsolidationProposal,
+    now: string,
+  ): Promise<boolean> {
+    const keepBoth =
+      (proposal.missing?.length ?? 0) > 0 || (await this.protection.handMaintained(loser)) !== null;
+
+    const resolved = await this.consolidationRepo.resolveCandidateAtomically(
+      candidateId,
+      this.ownerId,
+      now,
+      async () => {
+        const done = keepBoth
+          ? await this.edgesRepo.insertDuplicateOfIfLive(loser, survivor, this.ownerId, now, score)
+          : await this.nodesRepo.applyMerge({
+              survivorId: survivor,
+              loserId: loser,
+              session_id: this.ownerId,
+              ts: now,
+              merged: { title: proposal.title, body: proposal.body },
+            });
+
+        return done ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+      },
+    );
+
+    return resolved?.status === ConsolidationStatus.APPLIED;
+  }
+
+  // Under `auto`, applies pending distill/merge candidates whose proposal says `apply`.
+  private async drainPending(now: string, result: ConsolidationTickResult): Promise<void> {
+    for (const kind of [ConsolidationKind.DISTILL, ConsolidationKind.MERGE]) {
+      const posture =
+        kind === ConsolidationKind.DISTILL ? this.posture.distill : this.posture.merge;
+
+      if (posture !== Posture.AUTO) continue;
+
+      const limit = kind === ConsolidationKind.DISTILL ? this.batch.distill : this.batch.merge;
+
+      for (const cand of await this.consolidationRepo.pendingCandidates({ kind, limit })) {
+        if (!(await this.holdLease())) return;
+
+        const proposal = cand.proposal;
+
+        if (proposal?.recommendation !== ConsolidationRecommendation.APPLY) continue;
+
+        if (kind === ConsolidationKind.DISTILL) {
+          await this.consolidationRepo.resolveCandidateAtomically(
+            cand.id,
+            this.ownerId,
+            now,
+            async () => {
+              await this.nodesRepo.applyDistillation({
+                title: proposal.title,
+                content: proposal.body,
+                project: cand.project,
+                sourceIds: cand.member_ids,
+                session_id: this.ownerId,
+                ts: now,
+              });
+
+              return ConsolidationStatus.APPLIED;
+            },
+          );
+          result.distilled++;
+          continue;
+        }
+
+        const survivor = cand.canonical_id;
+        const loser = cand.member_ids.find((id) => id !== survivor);
+
+        if (!survivor || !loser) continue;
+
+        if (await this.autoMerge(cand.id, cand.score, survivor, loser, proposal, now)) {
+          result.merged++;
+        }
+      }
+    }
   }
 
   private async repointStranded(now: string, result: ConsolidationTickResult): Promise<void> {
