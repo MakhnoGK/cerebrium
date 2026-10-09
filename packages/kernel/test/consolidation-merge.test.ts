@@ -67,6 +67,7 @@ const stubProvider: ConsolidationProvider = {
 afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_MERGE;
   delete process.env.MEMORY_CONSOLIDATE_LINKS;
+  delete process.env.MEMORY_CONSOLIDATE_PROTECT_INBOUND;
 });
 
 describe("Semantic dedup / merge", () => {
@@ -155,7 +156,7 @@ describe("Semantic dedup / merge", () => {
     ).toBe(true);
   });
 
-  it("should record duplicate_of without destroying either node when auto", async () => {
+  it("should collapse the pair into the survivor and record an applied candidate when auto", async () => {
     // Given
     process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
     const env = setup({ consolidator: stubProvider });
@@ -169,13 +170,34 @@ describe("Semantic dedup / merge", () => {
     expect(
       await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
     ).toHaveLength(0);
+    expect(await env.consolidation.candidateExists(ConsolidationKind.MERGE, [a, b])).toBe(true);
+    const envelopes = [(await env.nodes.envelope(a))!, (await env.nodes.envelope(b))!];
+    const survivors = envelopes.filter((e) => !e.invalidated);
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0]!.title).toBe("Merged payments");
+  });
+
+  it("should leave a hand-maintained pair queued when auto", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
+    process.env.MEMORY_CONSOLIDATE_PROTECT_INBOUND = "1";
+    const env = setup({ consolidator: stubProvider });
+    const { s, a, b } = await seedDupes(env);
+    const citing = await mk(s, "Ledger", "the ledger records settled transactions by day");
+    for (const dst of [a, b]) {
+      await container
+        .resolve(LinkTool)
+        .invoke({ session_id: s, src: citing, dst, type: EdgeType.REFERENCES });
+    }
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merged).toBe(0);
+    expect(r.merge_suggested).toBe(1);
     expect((await env.nodes.envelope(a))!.invalidated).toBe(false);
     expect((await env.nodes.envelope(b))!.invalidated).toBe(false);
-    const recorded = [];
-    for (const id of [a, b]) {
-      if ((await env.edges.edgesOf(id)).some((e) => e.edge === "duplicate_of")) recorded.push(id);
-    }
-    expect(recorded).toHaveLength(2);
   });
 
   it("should dismiss an overlapping collapse after its shared loser was already retired", async () => {

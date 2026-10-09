@@ -812,21 +812,6 @@ export class ConsolidationWorker {
         continue;
       }
 
-      if (posture === Posture.AUTO && gen) {
-        await this.nodesRepo.applyDistillation({
-          title: gen.title,
-          content: gen.body,
-          project: cluster.project,
-          sourceIds: cluster.member_ids,
-          session_id: this.ownerId,
-          ts: now,
-        });
-
-        result.distilled++;
-
-        continue;
-      }
-
       const id = await this.consolidationRepo.insertCandidate({
         kind: ConsolidationKind.DISTILL,
         project: cluster.project,
@@ -836,15 +821,36 @@ export class ConsolidationWorker {
         detected_at: now,
       });
 
-      if (id) {
-        result.distill_suggested++;
+      if (!id) {
+        continue;
       }
+
+      if (posture === Posture.AUTO && gen) {
+        await this.consolidationRepo.resolveCandidateAtomically(id, this.ownerId, now, async () => {
+          await this.nodesRepo.applyDistillation({
+            title: gen.title,
+            content: gen.body,
+            project: cluster.project,
+            sourceIds: cluster.member_ids,
+            session_id: this.ownerId,
+            ts: now,
+          });
+
+          return ConsolidationStatus.APPLIED;
+        });
+
+        result.distilled++;
+
+        continue;
+      }
+
+      result.distill_suggested++;
     }
   }
 
-  // Semantic dedup/merge. auto merges only with a generating provider (to author
-  // the merged body safely); under manual, or on generation failure, it degrades to a
-  // suggestion. Never auto-merges authored knowledge without a mind or a model.
+  // Semantic dedup/merge. auto collapses the pair into the survivor only with a generated
+  // body; on generation failure, or when either node is hand-maintained, it degrades to a
+  // suggestion.
   private inBurst(pair: DuplicatePair, now: string): boolean {
     const window = this.thresholds.mergeBurstMs;
 
@@ -939,25 +945,6 @@ export class ConsolidationWorker {
         continue;
       }
 
-      // AUTO no longer rewrites and invalidates: it records the relationship and leaves
-      // both nodes live, so an 88.3%-precision judge costs a ranking nudge, not a node.
-      // Collapsing two nodes into one is `consolidate_apply` with `collapse`, by hand.
-      if (posture === Posture.AUTO) {
-        const recorded = await this.edgesRepo.insertDuplicateOfIfLive(
-          loser,
-          pair.canonical_id,
-          this.ownerId,
-          now,
-          pair.score,
-        );
-
-        if (recorded) {
-          result.merged++;
-        }
-
-        continue;
-      }
-
       const id = await this.consolidationRepo.insertCandidate({
         kind: ConsolidationKind.MERGE,
         project: pair.project,
@@ -968,10 +955,46 @@ export class ConsolidationWorker {
         detected_at: now,
       });
 
-      if (id) {
-        result.merge_suggested++;
+      if (!id) {
+        continue;
       }
+
+      if (posture === Posture.AUTO && gen && !(await this.anyHandMaintained(pair.member_ids))) {
+        const survivor = pair.canonical_id;
+        const resolved = await this.consolidationRepo.resolveCandidateAtomically(
+          id,
+          this.ownerId,
+          now,
+          async () => {
+            const merged = await this.nodesRepo.applyMerge({
+              survivorId: survivor,
+              loserId: loser,
+              session_id: this.ownerId,
+              ts: now,
+              merged: { title: gen.title, body: gen.body },
+            });
+
+            return merged ? ConsolidationStatus.APPLIED : ConsolidationStatus.DISMISSED;
+          },
+        );
+
+        if (resolved?.status === ConsolidationStatus.APPLIED) {
+          result.merged++;
+        }
+
+        continue;
+      }
+
+      result.merge_suggested++;
     }
+  }
+
+  private async anyHandMaintained(ids: string[]): Promise<boolean> {
+    for (const id of ids) {
+      if (await this.protection.handMaintained(id)) return true;
+    }
+
+    return false;
   }
 
   private async repointStranded(now: string, result: ConsolidationTickResult): Promise<void> {
