@@ -153,7 +153,7 @@ function nodeReducer(view: View, graph: MemoryGraph) {
       if (integrity.edgeless.has(node)) res.color = palette.edgeless;
       else if (integrity.detached.has(node)) res.color = palette.detached;
       else if (view.danglingTargets.has(node)) res.color = palette.dangling;
-      else res.color = fade(data.color, palette.dimAlpha);
+      else res.color = fade(data.color, palette.dimAlpha, palette.canvas);
     }
 
     if (view.focus !== null && graph.hasNode(view.focus)) {
@@ -161,7 +161,7 @@ function nodeReducer(view: View, graph: MemoryGraph) {
         res.forceLabel = node === view.focus || data.hub || view.focusLabels.has(node);
         res.zIndex = 1;
       } else {
-        res.color = fade(data.color, palette.dimAlpha);
+        res.color = fade(data.color, palette.dimAlpha, palette.canvas);
         res.forceLabel = false;
         res.label = null;
       }
