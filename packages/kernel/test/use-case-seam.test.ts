@@ -62,7 +62,7 @@ describe("The use-case seam", () => {
       .invoke({ session_id: ID, id: "01KKKKKKKKKKKKKKKKKKKKKKKK" });
 
     // Then
-    expect(calls).toEqual([{ id: "01KKKKKKKKKKKKKKKKKKKKKKKK" }]);
+    expect(calls).toEqual([{ session_id: ID, id: "01KKKKKKKKKKKKKKKKKKKKKKKK" }]);
     expect(result).toEqual({ status: "reopened", id: ID });
   });
 
