@@ -40,6 +40,10 @@ services:
       MEMORY_CONSOLIDATE_LEASE_TTL_MS: "2100000"
       MEMORY_CONSOLIDATE_ANNOTATE_BATCH: "10"
       MEMORY_CONSOLIDATE_BACKFILL_BATCH: "10"
+      MEMORY_CONSOLIDATE_CLUSTER_CHARS: "120000"
+      MEMORY_CONSOLIDATE_NUM_CTX: "131072"
+      MEMORY_CONSOLIDATE_DISTILL: auto
+      MEMORY_CONSOLIDATE_MERGE: auto
       MEMORY_PRINCIPALS: >-
         {"cerebrium-runner": {"capabilities": {"read": "auto", "write": "suggest",
         "consolidate": "off", "admin": "off"}, "quota": {"windowMs": 3600000, "writes": 60},

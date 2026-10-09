@@ -51,6 +51,8 @@ export interface BackendOptions {
   cmd?: string;
   timeoutMs?: number;
   reconcileTimeoutMs?: number;
+  clusterChars?: number;
+  numCtx?: number;
 }
 
 // The backends, by the name `consolidation.provider` selects. Default `manual` keeps the

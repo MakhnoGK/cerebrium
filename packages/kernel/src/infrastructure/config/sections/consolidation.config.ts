@@ -32,6 +32,11 @@ export class ConsolidationConfig extends SectionOf("consolidation", {
   reconcileTimeoutMs: int(25_000).positive().env("MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS"),
   leaseTtlMs: int(600_000).positive().env("MEMORY_CONSOLIDATE_LEASE_TTL_MS"),
   intervalMs: int(300_000).nonNegative().env("MEMORY_CONSOLIDATE_INTERVAL_MS"),
+  // Record characters one distill/merge prompt may carry, and the context window asked of
+  // an Ollama backend (0 leaves it to the server). The prompt must fit the window, or
+  // Ollama silently drops its head.
+  clusterChars: int(40_000).positive().env("MEMORY_CONSOLIDATE_CLUSTER_CHARS"),
+  numCtx: int(0).nonNegative().env("MEMORY_CONSOLIDATE_NUM_CTX"),
   // Per-role overrides of the three settings above, keyed by GenerationRole. A role names a
   // model, a host and a deadline; anything it leaves out it inherits, so a config that names
   // no role runs exactly as one model with the two deadlines. Measured 2026-08-24 on the

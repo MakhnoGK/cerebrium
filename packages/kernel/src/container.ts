@@ -152,6 +152,8 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
       return createConsolidator(config.provider, {
         roles: resolveRoles(config, config.roles),
         cmd: config.command ?? undefined,
+        clusterChars: config.clusterChars,
+        numCtx: config.numCtx,
       });
     }),
   });

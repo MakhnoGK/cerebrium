@@ -49,14 +49,17 @@ export class CommandConsolidator implements ConsolidationProvider {
   // the payload so a user process can route on it too.
   private readonly runners: Record<GenerationRole, CommandRunner>;
   private readonly roles: ResolvedRoles;
+  private readonly clusterChars: number | undefined;
 
   constructor(opts?: {
     roles?: ResolvedRoles;
     cmd?: string;
     timeoutMs?: number;
     reconcileTimeoutMs?: number;
+    clusterChars?: number;
     runner?: CommandRunner;
   }) {
+    this.clusterChars = opts?.clusterChars;
     this.roles =
       opts?.roles ??
       resolveRoles({
@@ -82,7 +85,7 @@ export class CommandConsolidator implements ConsolidationProvider {
       kind: task.kind,
       model: this.roles[GenerationRole.GENERATE].model,
       project: task.project,
-      prompt: taskPrompt(task),
+      prompt: taskPrompt(task, this.clusterChars),
       schema: resultSchema(task),
       inputs: task.inputs,
       canonical_id: task.canonical_id ?? null,

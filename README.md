@@ -529,8 +529,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_RECONCILE_TIMEOUT_MS` | `25000` | Budget for the one generation call that happens on an interactive path: the write-time reconcile a `write_memory` waits for before it answers. Deliberately far under `MEMORY_CONSOLIDATE_TIMEOUT_MS`, which is sized for a background sweep — and under the 45 s RPC deadline for a write, so a busy model costs the write its advice rather than making a landed write look like a failure. |
 | `MEMORY_CONSOLIDATE_LEASE_TTL_MS` | `600000` | TTL of the `consolidation` worker lease, renewed between clusters. Must exceed one generation call, or the lease reads as expired mid-sweep. |
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
-| `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. |
-| `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. Applying records `duplicate_of` and destroys nothing, so `auto` here costs a ranking nudge rather than a node — it still ships as `suggest`, and flipping it is a decision to take on its own. |
+| `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. `auto` writes the generated fact and records the candidate as `applied`. The host runs `auto`. |
+| `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. `auto` collapses the pair into the survivor with the generated body (the loser is superseded, `restore` brings it back) and records the candidate as `applied`; a pair with a hand-maintained node, or with no generation, stays queued. A by-hand apply without `collapse` records `duplicate_of` instead. The host runs `auto`. |
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
 | `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
@@ -545,6 +545,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_BURST_MS` | `3600000` | Burst window for merge detection: a near-duplicate pair one session wrote within it is treated as a series and left to age, not proposed. `0` disables the rule. |
 | `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
+| `MEMORY_CONSOLIDATE_CLUSTER_CHARS` | `40000` | Characters of record content one distill/merge prompt carries; longer clusters are clipped, shortest records kept whole first. Must fit the model's context window (~3.8 chars per token for Gemma). The host runs `120000` against a 128k window. |
+| `MEMORY_CONSOLIDATE_NUM_CTX` | `0` | Context window (`num_ctx`) asked of an Ollama backend on every call; `0` leaves it to the server. Ollama silently drops the head of a prompt that overflows it. The host runs `131072`. |
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
 | `MEMORY_CONSOLIDATE_DISTILL_BATCH` | `200` | Max episodic clusters considered for distillation per sweep. |
 | `MEMORY_CONSOLIDATE_MERGE_BATCH` | `200` | Max duplicate semantic pairs considered per sweep. |

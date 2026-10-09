@@ -77,6 +77,8 @@ export class HttpConsolidator implements ConsolidationProvider {
   readonly enabled = true;
   private readonly roles: ResolvedRoles;
   private readonly fetchFn: FetchFn;
+  private readonly clusterChars: number | undefined;
+  private readonly numCtx: number | undefined;
   // Flipped for the process once a backend rejects the field; see `chat`.
   private thinkSupported = true;
 
@@ -86,8 +88,12 @@ export class HttpConsolidator implements ConsolidationProvider {
     model?: string;
     timeoutMs?: number;
     reconcileTimeoutMs?: number;
+    clusterChars?: number;
+    numCtx?: number;
     fetchFn?: FetchFn;
   }) {
+    this.clusterChars = opts?.clusterChars;
+    this.numCtx = opts?.numCtx;
     this.roles =
       opts?.roles ??
       resolveRoles({
@@ -103,7 +109,7 @@ export class HttpConsolidator implements ConsolidationProvider {
     return parseResult(
       await this.chat(
         systemPrompt(task),
-        taskPrompt(task),
+        taskPrompt(task, this.clusterChars),
         resultSchema(task),
         this.roles[GenerationRole.GENERATE],
       ),
@@ -233,7 +239,7 @@ export class HttpConsolidator implements ConsolidationProvider {
         stream: false,
         format,
         ...(this.thinkSupported ? { think: false } : {}),
-        options: { temperature: 0.2 },
+        options: { temperature: 0.2, ...(this.numCtx ? { num_ctx: this.numCtx } : {}) },
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },

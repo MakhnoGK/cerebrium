@@ -168,6 +168,9 @@ describe("Episodic -> semantic distillation", () => {
     expect(
       await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL }),
     ).toHaveLength(0);
+    expect(
+      env.db.prepare("SELECT status FROM consolidation_candidates WHERE kind = 'distill'").all(),
+    ).toEqual([{ status: "applied" }]);
 
     const fact = env.db
       .prepare("SELECT id FROM nodes WHERE memory_kind = 'semantic' AND title = ?")
