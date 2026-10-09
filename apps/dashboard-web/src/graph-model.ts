@@ -12,49 +12,60 @@ export interface Palette {
   retired: string;
   edge: string;
   edgeFaint: string;
-  dim: string;
+  edgeFocus: string;
+  dimAlpha: number;
   pulse: string;
   dangling: string;
   detached: string;
   edgeless: string;
   label: string;
+  labelShadow: string;
   surface: string;
 }
 
 const LIGHT: Palette = {
-  slots: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"],
-  other: "#898781",
-  symbol: "#b5b3ac",
-  retired: "#d4d2cb",
-  edge: "#b6b7b9",
-  edgeFaint: "#ededee",
-  dim: "#e6e7ea",
-  pulse: "#3b5bdb",
-  dangling: "#d03b3b",
-  detached: "#ec835a",
-  edgeless: "#fab219",
-  label: "#1a1e24",
+  slots: ["#3a6fc8", "#c4553d", "#15867c", "#a6730f", "#b4467e", "#5c8730", "#7a5bc6"],
+  other: "#86837b",
+  symbol: "#918e86",
+  retired: "#bdbab2",
+  edge: "rgba(132, 141, 158, 0.3)",
+  edgeFaint: "rgba(132, 141, 158, 0.13)",
+  edgeFocus: "rgba(71, 84, 103, 0.85)",
+  dimAlpha: 0.16,
+  pulse: "#2f55d4",
+  dangling: "#c8372f",
+  detached: "#c9611f",
+  edgeless: "#a77e00",
+  label: "#1c1f24",
+  labelShadow: "rgba(16, 24, 40, 0.16)",
   surface: "#ffffff",
 };
 
 const DARK: Palette = {
-  slots: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9"],
-  other: "#898781",
-  symbol: "#5c5f66",
-  retired: "#3a3d44",
-  edge: "#4c4f54",
-  edgeFaint: "#212429",
-  dim: "#262a31",
-  pulse: "#8098ff",
-  dangling: "#d03b3b",
-  detached: "#ec835a",
-  edgeless: "#fab219",
-  label: "#e2e5ea",
-  surface: "#171a1f",
+  slots: ["#6b9bea", "#e57f63", "#3dbcae", "#d9a43a", "#e27aae", "#8cbb5a", "#a68ef0"],
+  other: "#9a978f",
+  symbol: "#6f7279",
+  retired: "#4a4d54",
+  edge: "rgba(150, 160, 178, 0.22)",
+  edgeFaint: "rgba(150, 160, 178, 0.08)",
+  edgeFocus: "rgba(180, 188, 200, 0.85)",
+  dimAlpha: 0.2,
+  pulse: "#8aa2ff",
+  dangling: "#ef5d53",
+  detached: "#ef8a4a",
+  edgeless: "#e3b23c",
+  label: "#e6e8ec",
+  labelShadow: "rgba(0, 0, 0, 0.45)",
+  surface: "#23272e",
 };
 
 export function paletteFor(dark: boolean): Palette {
   return dark ? DARK : LIGHT;
+}
+
+export function fade(hex: string, alpha: number): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
 
 const TYPE_ORDER = ["fact", "decision", "entity", "howto", "task", "checkpoint", "event_note"];
@@ -74,6 +85,7 @@ export interface NodeAttrs {
   label: string;
   kind: GraphNode["kind"];
   invalidated: boolean;
+  hub: boolean;
 }
 
 export interface EdgeAttrs {
@@ -169,10 +181,30 @@ function seeded(id: string): [number, number] {
   return [r * Math.cos(2 * Math.PI * b), r * Math.sin(2 * Math.PI * b)];
 }
 
-function sizeOf(degree: number, kind: GraphNode["kind"]): number {
-  const base = kind === "symbol" ? 1 : 1.6;
+const LEAF_DEGREE = 2;
+const MIN_SIZE = 1.5;
+const LEAF_SIZE = 2.5;
+const MAX_SIZE = 20;
+const SIZE_GAMMA = 1.5;
+const DEGREE_FLOOR = 40;
+const SYMBOL_SCALE = 0.8;
+const HUB_LABELS = 8;
+const HUB_MIN_DEGREE = 4;
 
-  return Math.min(7, base + 0.55 * Math.sqrt(degree));
+export function sizeOf(degree: number, kind: GraphNode["kind"], maxDegree: number): number {
+  const reach = Math.log1p(Math.max(maxDegree, DEGREE_FLOOR) - LEAF_DEGREE);
+  const size =
+    degree <= LEAF_DEGREE
+      ? MIN_SIZE + ((LEAF_SIZE - MIN_SIZE) * degree) / LEAF_DEGREE
+      : LEAF_SIZE +
+        (MAX_SIZE - LEAF_SIZE) * (Math.log1p(degree - LEAF_DEGREE) / reach) ** SIZE_GAMMA;
+
+  return kind === "symbol" ? size * SYMBOL_SCALE : size;
+}
+
+// Sigma's line program draws an edge 2 x size px wide.
+export function edgeSizeOf(weight: number): number {
+  return 0.12 + 0.14 * Math.max(0, Math.min(1, weight));
 }
 
 export function layoutSettings(order: number): ForceAtlas2Settings {
@@ -281,6 +313,16 @@ export function syncGraph(
     degree.set(edge.dst, (degree.get(edge.dst) ?? 0) + 1);
   }
 
+  let maxDegree = 0;
+  for (const d of degree.values()) maxDegree = Math.max(maxDegree, d);
+  const hubs = new Set(
+    snapshot.nodes
+      .filter((n) => n.kind !== "symbol" && (degree.get(n.id) ?? 0) >= HUB_MIN_DEGREE)
+      .sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id))
+      .slice(0, HUB_LABELS)
+      .map((n) => n.id),
+  );
+
   graph.clearEdges();
   graph.forEachNode((id) => {
     if (!wanted.has(id)) graph.dropNode(id);
@@ -290,11 +332,12 @@ export function syncGraph(
 
   for (const node of snapshot.nodes) {
     const attrs = {
-      size: sizeOf(degree.get(node.id) ?? 0, node.kind),
+      size: sizeOf(degree.get(node.id) ?? 0, node.kind, maxDegree),
       color: colorOf(node, colorBy, palette, slots),
       label: truncate(node.title, 48),
       kind: node.kind,
       invalidated: node.invalidated,
+      hub: hubs.has(node.id),
     };
 
     if (graph.hasNode(node.id)) graph.mergeNodeAttributes(node.id, attrs);
@@ -310,7 +353,7 @@ export function syncGraph(
   snapshot.edges.forEach((edge, index) => {
     const onSpine = spine.has(index);
     graph.addDirectedEdgeWithKey(String(index), edge.src, edge.dst, {
-      size: 0.3 + 0.4 * Math.max(0, Math.min(1, edge.weight)),
+      size: edgeSizeOf(edge.weight),
       color: onSpine ? palette.edge : palette.edgeFaint,
       relation: edge.type,
       index,
