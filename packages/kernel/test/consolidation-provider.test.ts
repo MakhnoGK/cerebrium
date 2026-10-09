@@ -467,6 +467,34 @@ describe("HttpConsolidator (injected fetch)", () => {
     expect(body.format).toBeDefined();
     expect(body.think).toBe(false);
     expect((body.messages as { role: string }[])[0]!.role).toBe("system");
+    expect(body.options).toEqual({ temperature: 0.2 });
+  });
+
+  it("should ask for the configured context window and clip the cluster to its budget", async () => {
+    // Given
+    let body: { options: Record<string, unknown>; messages: { content: string }[] } | null = null;
+    const fetchFn: FetchFn = (_url, init) => {
+      body = JSON.parse(init?.body as string) as typeof body;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ message: { content: '{"title":"T","summary":"S","body":"B"}' } }),
+          { status: 200 },
+        ),
+      );
+    };
+    const p = new HttpConsolidator({ fetchFn, numCtx: 131072, clusterChars: 100_000 });
+    const task: ConsolidationTask = {
+      ...TASK,
+      inputs: [{ id: "a", title: "Long", content: "q".repeat(80_000) }],
+    };
+
+    // When
+    await p.generate(task);
+
+    // Then
+    expect(body!.options).toEqual({ temperature: 0.2, num_ctx: 131072 });
+    expect(body!.messages[1]!.content).toContain("q".repeat(80_000));
+    expect(body!.messages[1]!.content).not.toContain("truncated");
   });
 
   it("should retry without the reasoning flag when the backend rejects it, then stop sending it", async () => {

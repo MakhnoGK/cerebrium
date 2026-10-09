@@ -99,7 +99,7 @@ export function resultSchema(task: ConsolidationTask): object {
   return task.kind === ConsolidationKind.MERGE ? mergeSchema(task) : DISTILL_SCHEMA;
 }
 
-// Total characters of record content one cluster prompt may carry.
+// Default total characters of record content one cluster prompt may carry.
 export const CLUSTER_CHARS = 40_000;
 
 const TRUNCATED = "\n…[truncated]";
@@ -147,11 +147,11 @@ function retryNote(task: ConsolidationTask): string {
 
 // The user message for a task: the cluster's records, labeled, ordered, and clipped to
 // the cluster budget.
-export function taskPrompt(task: ConsolidationTask): string {
+export function taskPrompt(task: ConsolidationTask, budget = CLUSTER_CHARS): string {
   const scope = task.project ? ` (project: ${task.project})` : "";
   const budgets = shares(
     task.inputs.map((r) => r.content.length),
-    CLUSTER_CHARS,
+    budget,
   );
   const clipped = new Map(task.inputs.map((r, i) => [r, clip(r.content, budgets[i]!)]));
 

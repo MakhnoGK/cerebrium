@@ -545,6 +545,8 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_MERGE_BURST_MS` | `3600000` | Burst window for merge detection: a near-duplicate pair one session wrote within it is treated as a series and left to age, not proposed. `0` disables the rule. |
 | `MEMORY_CONSOLIDATE_MAX_LINK_DEGREE` | `5` | Max `similar_to` edges kept per node. Discovery stops at it; the prune stage retires edges outside the top-N by weight of *both* endpoints. |
 | `MEMORY_CONSOLIDATE_INTERVAL_MS` | `300000` | Minimum gap between consolidation sweeps. |
+| `MEMORY_CONSOLIDATE_CLUSTER_CHARS` | `40000` | Characters of record content one distill/merge prompt carries; longer clusters are clipped, shortest records kept whole first. Must fit the model's context window (~3.8 chars per token for Gemma). The host runs `120000` against a 128k window. |
+| `MEMORY_CONSOLIDATE_NUM_CTX` | `0` | Context window (`num_ctx`) asked of an Ollama backend on every call; `0` leaves it to the server. Ollama silently drops the head of a prompt that overflows it. The host runs `131072`. |
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
 | `MEMORY_CONSOLIDATE_DISTILL_BATCH` | `200` | Max episodic clusters considered for distillation per sweep. |
 | `MEMORY_CONSOLIDATE_MERGE_BATCH` | `200` | Max duplicate semantic pairs considered per sweep. |

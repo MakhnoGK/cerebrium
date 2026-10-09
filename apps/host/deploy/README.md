@@ -155,6 +155,11 @@ asks for:
 ollama pull gemma4:12b-it-qat
 ```
 
+The daemon asks for a 128k window (`MEMORY_CONSOLIDATE_NUM_CTX`). Run Ollama with
+`OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_CONTEXT_LENGTH=131072`, and leave the KV cache at
+f16: without flash attention a 128k window runs the Metal GPU out of memory on a 32 GB
+M1 Pro, and a `q8_0` cache cut decode by ~40%.
+
 ## The runner's subscription token
 
 The runner draws on the owner's Claude subscription, never on API billing. Turn off extra
