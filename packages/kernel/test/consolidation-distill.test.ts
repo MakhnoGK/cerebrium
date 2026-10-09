@@ -186,4 +186,38 @@ describe("Episodic -> semantic distillation", () => {
     // When / Then — second sweep: sources are consolidated, so nothing re-distills.
     expect((await cw.tick()).distilled).toBe(0);
   });
+
+  it("should apply a pending distill that already carries an apply proposal when auto", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_DISTILL = "auto";
+    const env = setup({ consolidator: stubProvider });
+    const { ids } = await seedEpisodics(env);
+    await env.consolidation.insertCandidate({
+      kind: ConsolidationKind.DISTILL,
+      project: "cerebrium",
+      member_ids: ids,
+      score: 0.95,
+      proposal: {
+        recommendation: ConsolidationRecommendation.APPLY,
+        reason: "one subject",
+        title: "Queued rollback fact",
+        summary: "S",
+        body: "drain connections, then flip the flag",
+        missing: [],
+      },
+      detected_at: env.clock.t,
+    });
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.distilled).toBe(1);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL }),
+    ).toHaveLength(0);
+    expect(
+      env.db.prepare("SELECT id FROM nodes WHERE title = ?").get("Queued rollback fact"),
+    ).toBeDefined();
+  });
 });

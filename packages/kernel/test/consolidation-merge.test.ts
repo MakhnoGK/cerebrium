@@ -68,6 +68,7 @@ afterEach(() => {
   delete process.env.MEMORY_CONSOLIDATE_MERGE;
   delete process.env.MEMORY_CONSOLIDATE_LINKS;
   delete process.env.MEMORY_CONSOLIDATE_PROTECT_INBOUND;
+  delete process.env.MEMORY_CONSOLIDATE_PROTECT_REVISIONS;
 });
 
 describe("Semantic dedup / merge", () => {
@@ -177,7 +178,7 @@ describe("Semantic dedup / merge", () => {
     expect(survivors[0]!.title).toBe("Merged payments");
   });
 
-  it("should leave a hand-maintained pair queued when auto", async () => {
+  it("should record duplicate_of and keep both when both nodes are hand-maintained under auto", async () => {
     // Given
     process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
     process.env.MEMORY_CONSOLIDATE_PROTECT_INBOUND = "1";
@@ -194,10 +195,106 @@ describe("Semantic dedup / merge", () => {
     const r = await container.resolve(ConsolidationWorker).tick();
 
     // Then
-    expect(r.merged).toBe(0);
-    expect(r.merge_suggested).toBe(1);
+    expect(r.merged).toBe(1);
+    expect(r.merge_suggested).toBe(0);
     expect((await env.nodes.envelope(a))!.invalidated).toBe(false);
     expect((await env.nodes.envelope(b))!.invalidated).toBe(false);
+    const recorded = [];
+    for (const id of [a, b]) {
+      if ((await env.edges.edgesOf(id)).some((e) => e.edge === "duplicate_of")) recorded.push(id);
+    }
+    expect(recorded).toHaveLength(2);
+  });
+
+  it("should keep the hand-maintained node as the survivor and collapse the other under auto", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
+    process.env.MEMORY_CONSOLIDATE_PROTECT_REVISIONS = "2";
+    const env = setup({ consolidator: stubProvider });
+    const { s, a, b } = await seedDupes(env);
+    const third = await mk(s, "Ledger", "the ledger records settled transactions by day");
+    await container
+      .resolve(LinkTool)
+      .invoke({ session_id: s, src: a, dst: third, type: EdgeType.REFERENCES });
+    await env.nodes.addRevision(b, {
+      title: "Payments B (curated)",
+      session_id: s,
+      reason: null,
+      ts: env.clock.t,
+    });
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merged).toBe(1);
+    expect((await env.nodes.envelope(b))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(a))!.invalidated).toBe(true);
+  });
+
+  it("should record duplicate_of instead of collapsing when the draft lost anchors under auto", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
+    const lossy: ConsolidationProvider = {
+      ...stubProvider,
+      generate: () =>
+        Promise.resolve({
+          recommendation: ConsolidationRecommendation.APPLY,
+          reason: "same fact",
+          title: "Merged payments",
+          summary: "S",
+          body: "merged body",
+          missing: ["`ledger-v2`"],
+        }),
+    };
+    const env = setup({ consolidator: lossy });
+    const { a, b } = await seedDupes(env);
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merged).toBe(1);
+    expect((await env.nodes.envelope(a))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(b))!.invalidated).toBe(false);
+    expect((await env.edges.edgesOf(a)).some((e) => e.id === b && e.edge === "duplicate_of")).toBe(
+      true,
+    );
+  });
+
+  it("should apply a pending merge that already carries an apply proposal under auto", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
+    const env = setup({ consolidator: stubProvider });
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const keep = await mk(s, "Ledger keep", "the ledger records settled transactions by day");
+    const dup = await mk(s, "Payroll", "payroll runs on the last business day of the month");
+    await env.consolidation.insertCandidate({
+      kind: ConsolidationKind.MERGE,
+      member_ids: [keep, dup].sort(),
+      canonical_id: keep,
+      score: 0.95,
+      proposal: {
+        recommendation: ConsolidationRecommendation.APPLY,
+        reason: "same",
+        title: "Ledger keep",
+        summary: "S",
+        body: "the ledger records settled transactions by day",
+        missing: [],
+      },
+      detected_at: env.clock.t,
+    });
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merged).toBe(1);
+    expect(
+      await env.consolidation.pendingCandidates({ kind: ConsolidationKind.MERGE }),
+    ).toHaveLength(0);
+    expect((await env.nodes.envelope(keep))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(dup))!.invalidated).toBe(true);
   });
 
   it("should dismiss an overlapping collapse after its shared loser was already retired", async () => {
