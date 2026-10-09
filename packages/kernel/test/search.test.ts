@@ -1,6 +1,7 @@
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
+import { NODES_REPO_TOKEN, type NodesRepo } from "@/domain/ports/storage";
 import type { Envelope } from "@/db/repo";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
@@ -20,7 +21,7 @@ function ids(res: { results: { id: string }[] }): string[] {
 }
 
 describe("Ranking blends text relevance with the memory model", () => {
-  it("should rank a semantic fact above a fresh episodic above a 60-day-old one", async () => {
+  it("should rank a semantic fact above a fresh episodic above a 6-day-old one", async () => {
     // Given
     const env = setup();
     const t = tools();
@@ -35,7 +36,7 @@ describe("Ranking blends text relevance with the memory model", () => {
       title: "Deploy",
       content,
     })) as Envelope;
-    env.clock.advanceDays(59);
+    env.clock.advanceDays(5);
     const fresh = (await t.write.invoke({
       session_id: s,
       parent_node_id: null,
@@ -59,6 +60,49 @@ describe("Ranking blends text relevance with the memory model", () => {
 
     // Then
     expect(ids(res)).toEqual([fact.id, fresh.id, old.id]);
+  });
+
+  it("should leave an episodic note past its TTL, or one a distill absorbed, to history", async () => {
+    // Given
+    const env = setup();
+    const t = tools();
+    const s = (await t.sessionStart.invoke({})).session_id;
+    const note = (title: string) =>
+      t.write.invoke({
+        session_id: s,
+        parent_node_id: null,
+        memory_kind: MemoryKind.EPISODIC,
+        type: "checkpoint",
+        title,
+        content: "rolled the gateway back after the canary failed",
+      }) as Promise<Envelope>;
+    const stale = await note("Rollback one");
+    env.clock.advanceDays(8);
+    const live = await note("Rollback two");
+    const absorbed = await note("Rollback three");
+    await container.resolve<NodesRepo>(NODES_REPO_TOKEN).applyDistillation({
+      title: "Gateway canary policy",
+      content: "A failed canary means a rollback.",
+      project: null,
+      sourceIds: [absorbed.id],
+      session_id: s,
+      ts: env.clock.now(),
+    });
+
+    // When
+    const plain = await t.search.invoke({ session_id: s, query: "gateway rollback", limit: 10 });
+    const past = await t.search.invoke({
+      session_id: s,
+      query: "gateway rollback",
+      limit: 10,
+      history: true,
+    });
+
+    // Then
+    expect(ids(plain)).toContain(live.id);
+    expect(ids(plain)).not.toContain(stale.id);
+    expect(ids(plain)).not.toContain(absorbed.id);
+    expect(ids(past)).toEqual(expect.arrayContaining([stale.id, live.id, absorbed.id]));
   });
 
   it("should let a stronger-but-older text match win under history:true (decay dropped)", async () => {

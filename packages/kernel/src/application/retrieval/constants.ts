@@ -2,7 +2,7 @@
 // final top-N is contained in the top bm25 candidates. A fixed 100-cap
 // scan; raise or paginate if a project ever holds enough matching nodes to notice.
 export const CANDIDATE_CAP = 100;
-export const DECAY_DAYS = 14;
+export const DECAY_DAYS = 3;
 export const USE_SATURATION = 20; // fetches at which the importance prior reaches its ceiling
 
 // Hybrid retrieval constants.

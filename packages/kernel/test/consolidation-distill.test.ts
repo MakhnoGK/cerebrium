@@ -220,4 +220,45 @@ describe("Episodic -> semantic distillation", () => {
       env.db.prepare("SELECT id FROM nodes WHERE title = ?").get("Queued rollback fact"),
     ).toBeDefined();
   });
+
+  it("should write one fact for two pending distills that share sources and dismiss the other", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_DISTILL = "auto";
+    const env = setup({ consolidator: stubProvider });
+    const { ids } = await seedEpisodics(env, 4);
+    const queue = (members: string[], title: string, score: number) =>
+      env.consolidation.insertCandidate({
+        kind: ConsolidationKind.DISTILL,
+        project: "cerebrium",
+        member_ids: members,
+        score,
+        proposal: {
+          recommendation: ConsolidationRecommendation.APPLY,
+          reason: "one subject",
+          title,
+          summary: "S",
+          body: "drain connections, then flip the flag",
+          missing: [],
+        },
+        detected_at: env.clock.t,
+      });
+    await queue(ids.slice(0, 3), "Rollback, first three", 0.96);
+    await queue(ids, "Rollback, all four", 0.95);
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.distilled).toBe(1);
+    expect(
+      env.db.prepare("SELECT title FROM nodes WHERE memory_kind = 'semantic' ORDER BY title").all(),
+    ).toEqual([{ title: "Rollback, first three" }]);
+    expect(
+      env.db
+        .prepare(
+          "SELECT status FROM consolidation_candidates WHERE kind = 'distill' ORDER BY score",
+        )
+        .all(),
+    ).toEqual([{ status: "dismissed" }, { status: "applied" }]);
+  });
 });

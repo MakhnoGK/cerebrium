@@ -88,7 +88,7 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
 export class ConsolidationThresholdsConfig extends SectionOf("consolidation.thresholds", {
   sim: num(0.9).range(0, 1).env("MEMORY_CONSOLIDATE_SIM"),
   mergeSim: num(0.925).range(0, 1).env("MEMORY_CONSOLIDATE_MERGE_SIM"),
-  minAgeDays: int(4).nonNegative().env("MEMORY_CONSOLIDATE_MIN_AGE_DAYS"),
+  minAgeDays: int(1).nonNegative().env("MEMORY_CONSOLIDATE_MIN_AGE_DAYS"),
   minCluster: int(3).min(2).env("MEMORY_CONSOLIDATE_MIN_CLUSTER"),
   mergeBurstMs: int(3_600_000).nonNegative().env("MEMORY_CONSOLIDATE_MERGE_BURST_MS"),
   maxLinkDegree: int(5).positive().env("MEMORY_CONSOLIDATE_MAX_LINK_DEGREE"),

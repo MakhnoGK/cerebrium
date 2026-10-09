@@ -399,12 +399,10 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
           `SELECT c.id AS id FROM nodes n
            JOIN nodes c ON c.memory_kind = 'episodic' AND c.type = 'checkpoint'
              AND c.invalidated_at IS NULL AND c.id <> n.id
-             AND ((c.created_by_session = n.created_by_session
-                   AND ${sameProjectFamily("c.project", "n.project")})
-                  OR (c.project IS NOT DISTINCT FROM n.project AND c.created_at <= n.created_at))
+             AND c.created_by_session = n.created_by_session
+             AND ${sameProjectFamily("c.project", "n.project")}
            WHERE n.id = @id
-           ORDER BY CASE WHEN c.created_by_session = n.created_by_session THEN 0 ELSE 1 END,
-                    c.created_at DESC, c.id DESC
+           ORDER BY c.created_at DESC, c.id DESC
            LIMIT 1`,
           { id },
         )
@@ -497,7 +495,7 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
        JOIN nodes s ON s.id = e.src
        JOIN nodes d ON d.id = e.dst
        WHERE e.invalidated_at IS NULL AND e.provenance = 'system'
-         AND e.type IN ('similar_to', 'relates_to')
+         AND e.type IN ('similar_to', 'relates_to', 'references')
          AND s.memory_kind IN ('semantic', 'episodic') AND s.invalidated_at IS NULL
          AND d.memory_kind IN ('semantic', 'episodic') AND d.invalidated_at IS NULL
          AND NOT ${sameProjectFamily("s.project", "d.project")}
@@ -824,7 +822,8 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
          AND EXISTS (
            SELECT 1 FROM nodes n
            WHERE n.id IN (SELECT jsonb_array_elements_text(c.member_ids::jsonb))
-             AND n.invalidated_at IS NOT NULL)`,
+             AND (n.invalidated_at IS NOT NULL
+                  OR (c.kind = 'distill' AND n.consolidated_at IS NOT NULL)))`,
       { ts, resolvedBy },
     );
   }

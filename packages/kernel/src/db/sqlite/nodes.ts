@@ -4,6 +4,7 @@ import { toEnvelope } from "@cerebrium/contracts/types";
 import { EdgeType } from "@cerebrium/contracts/vocab";
 import type { NodesRepo } from "@/domain/ports/storage";
 import type { UseRecorder } from "@/domain/ports/use-recorder";
+import { AUTHORED_REVISION } from "@/db/sql-fragments";
 import { BaseRepo } from "@/db/sqlite/base";
 import {
   edgesOf,
@@ -44,10 +45,11 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
       this.db
         .prepare(
           `SELECT n.type AS type,
-                  (SELECT COUNT(*) FROM revisions r WHERE r.node_id = n.id) AS revisions,
+                  (SELECT COUNT(*) FROM revisions r WHERE r.node_id = n.id
+                    AND ${AUTHORED_REVISION}) AS revisions,
                   (SELECT COUNT(*) FROM edges e JOIN nodes s ON s.id = e.src
                     WHERE e.dst = n.id AND e.invalidated_at IS NULL AND s.invalidated_at IS NULL
-                      AND s.memory_kind != 'mirror') AS inbound
+                      AND e.provenance = 'agent' AND s.memory_kind != 'mirror') AS inbound
            FROM nodes n WHERE n.id = ?`,
         )
         .get(id) as { type: string; revisions: number; inbound: number } | undefined,
@@ -138,9 +140,19 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
     sourceIds: string[];
     session_id: string;
     ts: string;
-  }): Promise<Envelope> {
+  }): Promise<Envelope | undefined> {
     const id = newId();
-    this.tx(() => {
+    const applied = this.tx(() => {
+      const fresh = this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM nodes
+           WHERE id IN (SELECT value FROM json_each(?)) AND memory_kind = 'episodic'
+             AND invalidated_at IS NULL AND consolidated_at IS NULL`,
+        )
+        .get(JSON.stringify(input.sourceIds)) as { n: number };
+
+      if (fresh.n !== new Set(input.sourceIds).size) return false;
+
       this.db
         .prepare(
           `INSERT INTO nodes (id, memory_kind, type, title, project, valid_from, created_by_session, created_at)
@@ -165,8 +177,9 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
         insertEdge(this.db, id, src, EdgeType.DERIVED_FROM, "system", input.session_id, input.ts);
         mark.run({ ts: input.ts, src });
       }
+      return true;
     });
-    return this.envelopeNow(id)!;
+    return applied ? this.envelopeNow(id)! : undefined;
   }
 
   // Merge apply: fold `loserId` into `survivorId`, atomically. Optionally revise

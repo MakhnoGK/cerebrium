@@ -3,6 +3,7 @@ import type { EnrichedRow, Envelope, SearchRow, VectorRow } from "@cerebrium/con
 import { toEnvelope } from "@cerebrium/contracts/types";
 import { MemoryKind, SYMBOL_TYPE } from "@cerebrium/contracts/vocab";
 import type { SearchRepo } from "@/domain/ports/storage";
+import { ACTIVE_EPISODIC } from "@/db/sql-fragments";
 import { BaseRepo } from "@/db/sqlite/base";
 import {
   AUTHORED_VEC,
@@ -38,6 +39,7 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
       cap: number;
       asOf?: string;
       validAt?: string;
+      activeSince?: string;
     },
   ): Promise<VectorRow[]> {
     const where: string[] = ["c.stale = 0"];
@@ -76,6 +78,11 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
         "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
       );
       params.validAt = opts.validAt;
+    }
+
+    if (opts.activeSince !== undefined) {
+      where.push(ACTIVE_EPISODIC);
+      params.activeSince = opts.activeSince;
     }
 
     const knn = this.poolsFor(opts)
@@ -140,6 +147,7 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
     cap: number;
     asOf?: string;
     validAt?: string;
+    activeSince?: string;
   }): Promise<{ rows: SearchRow[]; total: number }> {
     const where: string[] = ["node_fts MATCH @match"];
     const params: Record<string, unknown> = { match: toFtsMatch(opts.text) };
@@ -174,6 +182,10 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
       );
       params.validAt = opts.validAt;
     }
+    if (opts.activeSince !== undefined) {
+      where.push(ACTIVE_EPISODIC);
+      params.activeSince = opts.activeSince;
+    }
     const clause = where.join(" AND ");
 
     const rows = this.db
@@ -207,11 +219,11 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
   // graph hits go through the identical scoring and envelope path.
   async rowsFor(
     ids: string[],
-    opts: { asOf?: string; validAt?: string } = {},
+    opts: { asOf?: string; validAt?: string; activeSince?: string } = {},
   ): Promise<EnrichedRow[]> {
     if (!ids.length) return [];
 
-    if (opts.asOf === undefined && opts.validAt === undefined) {
+    if (opts.asOf === undefined && opts.validAt === undefined && opts.activeSince === undefined) {
       return enrichedByIds(this.db, ids).filter((r) => r.invalidated_at == null);
     }
 
@@ -232,6 +244,11 @@ export class SqliteSearchRepo extends BaseRepo implements SearchRepo {
         "(n.event_from IS NULL OR n.event_from <= @validAt) AND (n.event_to IS NULL OR n.event_to > @validAt)",
       );
       params.validAt = opts.validAt;
+    }
+
+    if (opts.activeSince !== undefined) {
+      where.push(ACTIVE_EPISODIC);
+      params.activeSince = opts.activeSince;
     }
 
     return this.db.prepare(`${ENRICHED} WHERE ${where.join(" AND ")}`).all(params) as EnrichedRow[];

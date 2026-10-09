@@ -15,6 +15,7 @@ import {
   syncChunks,
   textPut,
 } from "@/db/postgres/internal";
+import { AUTHORED_REVISION } from "@/db/sql-fragments";
 import { newId } from "@/core/ids";
 
 @injectable()
@@ -39,10 +40,11 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
   ): Promise<{ type: string; revisions: number; inbound: number } | undefined> {
     return this.one(
       `SELECT n.type AS type,
-              (SELECT COUNT(*) FROM revisions r WHERE r.node_id = n.id) AS revisions,
+              (SELECT COUNT(*) FROM revisions r WHERE r.node_id = n.id
+                AND ${AUTHORED_REVISION}) AS revisions,
               (SELECT COUNT(*) FROM edges e JOIN nodes s ON s.id = e.src
                 WHERE e.dst = n.id AND e.invalidated_at IS NULL AND s.invalidated_at IS NULL
-                  AND s.memory_kind <> 'mirror') AS inbound
+                  AND e.provenance = 'agent' AND s.memory_kind <> 'mirror') AS inbound
        FROM nodes n WHERE n.id = @id`,
       { id },
     );
@@ -125,10 +127,19 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
     sourceIds: string[];
     session_id: string;
     ts: string;
-  }): Promise<Envelope> {
+  }): Promise<Envelope | undefined> {
     const id = newId();
 
-    await this.tx(async () => {
+    const applied = await this.tx(async () => {
+      const fresh = await this.db.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM nodes
+         WHERE id = ANY(@ids) AND memory_kind = 'episodic'
+           AND invalidated_at IS NULL AND consolidated_at IS NULL`,
+        { ids: input.sourceIds },
+      );
+
+      if ((fresh.rows[0]?.n ?? 0) !== new Set(input.sourceIds).size) return false;
+
       await this.db.query(
         `INSERT INTO nodes (id, memory_kind, type, title, project, valid_from, created_by_session, created_at)
          VALUES (@id, 'semantic', 'fact', @title, @project, @ts, @session, @ts)`,
@@ -161,9 +172,11 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
           { ts: input.ts, src },
         );
       }
+
+      return true;
     });
 
-    return (await this.envelope(id))!;
+    return applied ? (await this.envelope(id))! : undefined;
   }
 
   async applyMerge(input: {

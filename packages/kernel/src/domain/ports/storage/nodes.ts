@@ -17,6 +17,8 @@ export interface NodesRepo extends UseRecorder {
   listRevisions(id: string): Promise<RevisionMeta[]>;
   revisionContent(id: string, rev: number): Promise<string | undefined>;
   createNode(input: NewNode): Promise<Envelope>;
+  // Undefined, with nothing written, when a source is no longer a live, unconsolidated
+  // episodic node.
   applyDistillation(input: {
     title: string;
     content: string;
@@ -24,7 +26,7 @@ export interface NodesRepo extends UseRecorder {
     sourceIds: string[];
     session_id: string;
     ts: string;
-  }): Promise<Envelope>;
+  }): Promise<Envelope | undefined>;
   applyMerge(input: {
     survivorId: string;
     loserId: string;

@@ -66,6 +66,7 @@ export class LocalSearchMemory implements SearchMemory {
 
   async invoke(args: SearchQuery): Promise<SearchOutcome> {
     const history = args.history ?? false;
+    const activeSince = this.activeSince(args, history);
     const mode = args.mode ?? "hybrid";
     const penalty = this.wantsSymbols(args) ? 1 : this.retrieval.symbolWeight;
     const text = parseTextQuery(args.query);
@@ -107,7 +108,7 @@ export class LocalSearchMemory implements SearchMemory {
     await this.applyTrust(entries);
 
     if ((args.expand_graph ?? true) && entries.size) {
-      const expanded = await this.expandByRank(entries, args.as_of, args.valid_at);
+      const expanded = await this.expandByRank(entries, args.as_of, args.valid_at, activeSince);
 
       for (const entry of [...expanded, ...(await this.expandIntoCode(entries, code))]) {
         entries.set(entry.row.id, entry);
@@ -228,6 +229,19 @@ export class LocalSearchMemory implements SearchMemory {
     return [...best.values()];
   }
 
+  // A plain search reads live memory; `history`, `as_of` and a search scoped to episodic
+  // notes see every one of them.
+  private activeSince(args: SearchQuery, history: boolean): string | undefined {
+    if (history || args.as_of !== undefined) return undefined;
+    if (args.kinds?.length && args.kinds.every((k) => k === MemoryKind.EPISODIC)) {
+      return undefined;
+    }
+
+    const ttl = this.retrieval.episodicTtlDays;
+
+    return ttl > 0 ? new Date(Date.parse(this.clock.now()) - ttl * 86_400_000).toISOString() : "";
+  }
+
   private wantsSymbols(args: SearchQuery): boolean {
     if (args.types?.includes("symbol")) {
       return true;
@@ -260,6 +274,7 @@ export class LocalSearchMemory implements SearchMemory {
       cap: CANDIDATE_CAP,
       asOf: args.as_of,
       validAt: args.valid_at,
+      activeSince: this.activeSince(args, history),
     });
     const codeRows = await this.codeTextRows(code, text);
     const ftsRows = byTextRank([...rows, ...codeRows]).slice(0, FUSE_CAP);
@@ -293,6 +308,7 @@ export class LocalSearchMemory implements SearchMemory {
         cap: FUSE_CAP,
         asOf: args.as_of,
         validAt: args.valid_at,
+        activeSince: this.activeSince(args, history),
       });
 
       if (!code?.direct || !code.scopes.length) return rows;
@@ -326,6 +342,7 @@ export class LocalSearchMemory implements SearchMemory {
       cap: CANDIDATE_CAP,
       asOf: args.as_of,
       validAt: args.valid_at,
+      activeSince: this.activeSince(args, history),
     });
     const codeRows = await this.codeTextRows(code, text);
     const rows = byTextRank([...found.rows, ...codeRows]);
@@ -429,6 +446,7 @@ export class LocalSearchMemory implements SearchMemory {
     entries: Map<string, Entry>,
     asOf?: string,
     validAt?: string,
+    activeSince?: string,
   ): Promise<Entry[]> {
     const seeds = [...entries.values()];
     const topScore = Math.max(...seeds.map((s) => s.score));
@@ -467,7 +485,7 @@ export class LocalSearchMemory implements SearchMemory {
       (
         await this.searchRepo.rowsFor(
           surfaced.map(([id]) => id),
-          { asOf, validAt },
+          { asOf, validAt, activeSince },
         )
       ).map((r) => [r.id, r]),
     );
