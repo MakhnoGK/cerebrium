@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import FA2Layout from "graphology-layout-forceatlas2/worker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Sigma from "sigma";
-import type { NodeHoverDrawingFunction } from "sigma/rendering";
+import type { NodeHoverDrawingFunction, NodeLabelDrawingFunction } from "sigma/rendering";
 import type { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 import type { ActivityEntry } from "@cerebrium/contracts/dashboard";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@cerebrium/contracts/graph";
 import { errorMessage, fetchGraph, type ActivityBus } from "../api";
 import {
+  fade,
   follow,
   layoutSettings,
   legendOf,
@@ -41,6 +42,13 @@ const SETTLED = 0.003;
 const SETTLED_SAMPLES = 3;
 const REFETCH_DEBOUNCE_MS = 2_000;
 const FORCED_LABELS = 12;
+const LEAF_LABEL_DEGREE = 2;
+const FOCUS_EDGE_SIZE = 0.5;
+const DANGLING_EDGE_SIZE = 0.6;
+const LABEL_PAD_X = 6;
+const LABEL_PAD_Y = 3;
+const LABEL_GAP = 4;
+const HALO = 2.5;
 const WRITES = new Set([
   "write",
   "update",
@@ -64,6 +72,7 @@ interface View {
   danglingTargets: Set<string>;
   focus: string | null;
   focusNeighbors: Set<string>;
+  focusLabels: Set<string>;
   selected: string | null;
   pulses: Map<string, Pulse>;
 }
@@ -80,28 +89,55 @@ function usePrefersDark(): boolean {
   return dark;
 }
 
+function shadow(ctx: CanvasRenderingContext2D, color: string | null): void {
+  ctx.shadowColor = color ?? "transparent";
+  ctx.shadowBlur = color ? 6 : 0;
+  ctx.shadowOffsetY = color ? 1 : 0;
+}
+
+function pill(
+  ctx: CanvasRenderingContext2D,
+  palette: Palette,
+  x: number,
+  y: number,
+  label: string,
+  size: number,
+): void {
+  const w = ctx.measureText(label).width + 2 * LABEL_PAD_X;
+  const h = size + 2 * LABEL_PAD_Y;
+
+  ctx.fillStyle = palette.surface;
+  shadow(ctx, palette.labelShadow);
+  ctx.beginPath();
+  ctx.roundRect(x, y - h / 2, w, h, h / 2);
+  ctx.fill();
+  shadow(ctx, null);
+
+  ctx.fillStyle = palette.label;
+  ctx.fillText(label, x + LABEL_PAD_X, y + size / 3);
+}
+
+function labelDrawer(palette: Palette): NodeLabelDrawingFunction<NodeAttrs, EdgeAttrs> {
+  return (ctx, data, settings) => {
+    if (!data.label) return;
+    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
+    pill(ctx, palette, data.x + data.size + LABEL_GAP, data.y, data.label, settings.labelSize);
+  };
+}
+
 function hoverDrawer(palette: Palette): NodeHoverDrawingFunction<NodeAttrs, EdgeAttrs> {
   return (ctx, data, settings) => {
-    const size = settings.labelSize;
-    ctx.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
-    const label = data.label ?? "";
-    const pad = 4;
-    const w = label ? ctx.measureText(label).width + 2 * pad : 0;
-    const h = size + 2 * pad;
-    const r = data.size + 3;
+    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
 
     ctx.fillStyle = palette.surface;
-    ctx.shadowColor = "rgb(0 0 0 / 25%)";
-    ctx.shadowBlur = 8;
+    shadow(ctx, palette.labelShadow);
     ctx.beginPath();
-    ctx.arc(data.x, data.y, r, 0, Math.PI * 2);
-    if (label) ctx.rect(data.x, data.y - h / 2, r + w, h);
+    ctx.arc(data.x, data.y, data.size + HALO, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0;
+    shadow(ctx, null);
 
-    if (label) {
-      ctx.fillStyle = palette.label;
-      ctx.fillText(label, data.x + r + pad, data.y + size / 3);
+    if (data.label) {
+      pill(ctx, palette, data.x + data.size + LABEL_GAP, data.y, data.label, settings.labelSize);
     }
   };
 }
@@ -111,19 +147,22 @@ function nodeReducer(view: View, graph: MemoryGraph) {
     const res: Partial<NodeDisplayData> = { ...data };
     const { palette, integrity } = view;
 
+    if (data.hub) res.forceLabel = true;
+
     if (view.integrityOn && integrity) {
       if (integrity.edgeless.has(node)) res.color = palette.edgeless;
       else if (integrity.detached.has(node)) res.color = palette.detached;
       else if (view.danglingTargets.has(node)) res.color = palette.dangling;
-      else res.color = palette.dim;
+      else res.color = fade(data.color, palette.dimAlpha);
     }
 
     if (view.focus !== null && graph.hasNode(view.focus)) {
       if (node === view.focus || view.focusNeighbors.has(node)) {
-        res.forceLabel = node === view.focus || view.focusNeighbors.size <= FORCED_LABELS;
+        res.forceLabel = node === view.focus || data.hub || view.focusLabels.has(node);
         res.zIndex = 1;
       } else {
-        res.color = palette.dim;
+        res.color = fade(data.color, palette.dimAlpha);
+        res.forceLabel = false;
         res.label = null;
       }
     }
@@ -153,7 +192,7 @@ function edgeReducer(view: View, graph: MemoryGraph) {
     if (view.integrityOn && integrity) {
       if (integrity.dangling.has(data.index)) {
         res.color = palette.dangling;
-        res.size = 1.5;
+        res.size = DANGLING_EDGE_SIZE;
         res.zIndex = 1;
       } else res.color = palette.edgeFaint;
     }
@@ -162,8 +201,9 @@ function edgeReducer(view: View, graph: MemoryGraph) {
       const [src, dst] = graph.extremities(edge);
       if (src !== view.focus && dst !== view.focus) res.hidden = true;
       else {
-        res.size = Math.max(data.size, 1);
-        if (!view.integrityOn) res.color = palette.edge;
+        res.size = Math.max(data.size, FOCUS_EDGE_SIZE);
+        res.zIndex = 1;
+        if (!view.integrityOn) res.color = palette.edgeFocus;
       }
     }
 
@@ -225,6 +265,7 @@ export default function GraphView({
     danglingTargets: new Set(),
     focus: null,
     focusNeighbors: new Set(),
+    focusLabels: new Set(),
     selected: null,
     pulses: new Map(),
   });
@@ -271,8 +312,15 @@ export default function GraphView({
   function setFocus(id: string | null) {
     const graph = graphRef.current;
     viewRef.current.focus = id;
-    viewRef.current.focusNeighbors = new Set(
-      id !== null && graph.hasNode(id) ? graph.neighbors(id) : [],
+    const neighbors = id !== null && graph.hasNode(id) ? graph.neighbors(id) : [];
+    viewRef.current.focusNeighbors = new Set(neighbors);
+    viewRef.current.focusLabels = new Set(
+      neighbors.length <= FORCED_LABELS
+        ? neighbors
+        : neighbors
+            .filter((n) => graph.degree(n) > LEAF_LABEL_DEGREE)
+            .sort((a, b) => graph.getNodeAttribute(b, "size") - graph.getNodeAttribute(a, "size"))
+            .slice(0, FORCED_LABELS),
     );
     refresh();
   }
@@ -295,11 +343,16 @@ export default function GraphView({
     const sigma = new Sigma<NodeAttrs, EdgeAttrs>(graph, containerRef.current, {
       allowInvalidContainer: true,
       defaultEdgeType: "line",
-      labelRenderedSizeThreshold: 12,
+      minEdgeThickness: 0.1,
+      zoomToSizeRatioFunction: (ratio) => ratio ** 0.3,
+      itemSizesReference: "screen",
+      labelRenderedSizeThreshold: Number.POSITIVE_INFINITY,
       labelDensity: 0.6,
       labelFont: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-      labelSize: 12,
+      labelSize: 11,
+      labelWeight: "500",
       labelColor: { color: view.palette.label },
+      defaultDrawNodeLabel: labelDrawer(view.palette),
       defaultDrawNodeHover: hoverDrawer(view.palette),
       zIndex: true,
       nodeReducer: nodeReducer(view, graph),
@@ -339,6 +392,7 @@ export default function GraphView({
     const sigma = sigmaRef.current;
     if (!sigma) return;
     sigma.setSetting("labelColor", { color: palette.label });
+    sigma.setSetting("defaultDrawNodeLabel", labelDrawer(palette));
     sigma.setSetting("defaultDrawNodeHover", hoverDrawer(palette));
   }, [palette]);
 

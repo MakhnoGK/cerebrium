@@ -7,6 +7,7 @@
   --bg: #f5f6f8;
   --surface: #ffffff;
   --surface-2: #f0f2f5;
+  --graph-bg: #fafaf8;
   --border: #e1e4e9;
   --text: #1a1e24;
   --muted: #5f6875;
@@ -31,6 +32,7 @@
     --bg: #0f1114;
     --surface: #171a1f;
     --surface-2: #1f232a;
+    --graph-bg: #171a1f;
     --border: #2b3038;
     --text: #e2e5ea;
     --muted: #8d96a3;
@@ -1005,7 +1007,7 @@ td.what {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--graph-bg);
 }
 
 .graph-overlay {
