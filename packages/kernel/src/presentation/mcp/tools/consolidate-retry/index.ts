@@ -12,6 +12,6 @@ export class ConsolidateRetryTool implements McpTool<(typeof metadata)["schema"]
   constructor(@inject(RETRY_CANDIDATE) private readonly retry: RetryCandidate) {}
 
   invoke(args: ToolArgs<(typeof metadata)["schema"]>): Promise<unknown> {
-    return this.retry.invoke({ id: args.id });
+    return this.retry.invoke({ session_id: args.session_id, id: args.id });
   }
 }

@@ -5,6 +5,7 @@ import type { ConsolidationRecommendation } from "@/domain/ports/consolidation-p
 import { useCaseToken, type UseCase } from "@/application/use-cases/contracts/use-case";
 
 export interface RetryCandidateArgs {
+  session_id: string;
   id: string;
 }
 
