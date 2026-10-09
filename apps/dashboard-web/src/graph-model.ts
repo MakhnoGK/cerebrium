@@ -21,6 +21,7 @@ export interface Palette {
   label: string;
   labelShadow: string;
   surface: string;
+  canvas: string;
 }
 
 const LIGHT: Palette = {
@@ -28,9 +29,9 @@ const LIGHT: Palette = {
   other: "#86837b",
   symbol: "#918e86",
   retired: "#bdbab2",
-  edge: "rgba(132, 141, 158, 0.3)",
-  edgeFaint: "rgba(132, 141, 158, 0.13)",
-  edgeFocus: "rgba(71, 84, 103, 0.85)",
+  edge: "#c5c9cf",
+  edgeFaint: "#e2e4e6",
+  edgeFocus: "#626d7d",
   dimAlpha: 0.16,
   pulse: "#2f55d4",
   dangling: "#c8372f",
@@ -39,6 +40,7 @@ const LIGHT: Palette = {
   label: "#1c1f24",
   labelShadow: "rgba(16, 24, 40, 0.16)",
   surface: "#ffffff",
+  canvas: "#fafaf8",
 };
 
 const DARK: Palette = {
@@ -46,9 +48,9 @@ const DARK: Palette = {
   other: "#9a978f",
   symbol: "#6f7279",
   retired: "#4a4d54",
-  edge: "rgba(150, 160, 178, 0.22)",
-  edgeFaint: "rgba(150, 160, 178, 0.08)",
-  edgeFocus: "rgba(180, 188, 200, 0.85)",
+  edge: "#40454e",
+  edgeFaint: "#262a31",
+  edgeFocus: "#9ca4af",
   dimAlpha: 0.2,
   pulse: "#8aa2ff",
   dangling: "#ef5d53",
@@ -57,15 +59,19 @@ const DARK: Palette = {
   label: "#e6e8ec",
   labelShadow: "rgba(0, 0, 0, 0.45)",
   surface: "#23272e",
+  canvas: "#171a1f",
 };
 
 export function paletteFor(dark: boolean): Palette {
   return dark ? DARK : LIGHT;
 }
 
-export function fade(hex: string, alpha: number): string {
-  const n = Number.parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+// Sigma's WebGL programs draw translucent colours lighter than the canvas, so blend up front.
+export function fade(hex: string, alpha: number, over: string): string {
+  const [a, b] = [Number.parseInt(hex.slice(1), 16), Number.parseInt(over.slice(1), 16)];
+  const mix = (shift: number) =>
+    Math.round(((a >> shift) & 255) * alpha + ((b >> shift) & 255) * (1 - alpha));
+  return `rgb(${mix(16)}, ${mix(8)}, ${mix(0)})`;
 }
 
 const TYPE_ORDER = ["fact", "decision", "entity", "howto", "task", "checkpoint", "event_note"];
@@ -181,30 +187,24 @@ function seeded(id: string): [number, number] {
   return [r * Math.cos(2 * Math.PI * b), r * Math.sin(2 * Math.PI * b)];
 }
 
-const LEAF_DEGREE = 2;
 const MIN_SIZE = 1.5;
-const LEAF_SIZE = 2.5;
 const MAX_SIZE = 20;
-const SIZE_GAMMA = 1.5;
+const SIZE_GAMMA = 1.2;
 const DEGREE_FLOOR = 40;
 const SYMBOL_SCALE = 0.8;
 const HUB_LABELS = 8;
 const HUB_MIN_DEGREE = 4;
 
 export function sizeOf(degree: number, kind: GraphNode["kind"], maxDegree: number): number {
-  const reach = Math.log1p(Math.max(maxDegree, DEGREE_FLOOR) - LEAF_DEGREE);
-  const size =
-    degree <= LEAF_DEGREE
-      ? MIN_SIZE + ((LEAF_SIZE - MIN_SIZE) * degree) / LEAF_DEGREE
-      : LEAF_SIZE +
-        (MAX_SIZE - LEAF_SIZE) * (Math.log1p(degree - LEAF_DEGREE) / reach) ** SIZE_GAMMA;
+  const share = Math.min(1, degree / Math.max(maxDegree, DEGREE_FLOOR));
+  const size = MIN_SIZE + (MAX_SIZE - MIN_SIZE) * share ** SIZE_GAMMA;
 
   return kind === "symbol" ? size * SYMBOL_SCALE : size;
 }
 
 // Sigma's line program draws an edge 2 x size px wide.
 export function edgeSizeOf(weight: number): number {
-  return 0.12 + 0.14 * Math.max(0, Math.min(1, weight));
+  return 0.25 + 0.15 * Math.max(0, Math.min(1, weight));
 }
 
 export function layoutSettings(order: number): ForceAtlas2Settings {

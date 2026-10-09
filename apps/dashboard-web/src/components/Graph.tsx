@@ -153,7 +153,7 @@ function nodeReducer(view: View, graph: MemoryGraph) {
       if (integrity.edgeless.has(node)) res.color = palette.edgeless;
       else if (integrity.detached.has(node)) res.color = palette.detached;
       else if (view.danglingTargets.has(node)) res.color = palette.dangling;
-      else res.color = fade(data.color, palette.dimAlpha);
+      else res.color = fade(data.color, palette.dimAlpha, palette.canvas);
     }
 
     if (view.focus !== null && graph.hasNode(view.focus)) {
@@ -161,7 +161,7 @@ function nodeReducer(view: View, graph: MemoryGraph) {
         res.forceLabel = node === view.focus || data.hub || view.focusLabels.has(node);
         res.zIndex = 1;
       } else {
-        res.color = fade(data.color, palette.dimAlpha);
+        res.color = fade(data.color, palette.dimAlpha, palette.canvas);
         res.forceLabel = false;
         res.label = null;
       }
@@ -344,7 +344,7 @@ export default function GraphView({
       allowInvalidContainer: true,
       defaultEdgeType: "line",
       minEdgeThickness: 0.1,
-      zoomToSizeRatioFunction: (ratio) => ratio ** 0.3,
+      zoomToSizeRatioFunction: (ratio) => (ratio > 1 ? ratio : ratio ** 0.3),
       itemSizesReference: "screen",
       labelRenderedSizeThreshold: Number.POSITIVE_INFINITY,
       labelDensity: 0.6,
