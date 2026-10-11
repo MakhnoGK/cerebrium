@@ -50,19 +50,15 @@ npm install
 npm run build
 ```
 
-Node ≥ 22. Run `nvm use` first; `.nvmrc` is the runtime source of truth. One store per machine,
-not per repo: every host points at the same
-`MEMORY_DB_PATH`. If a host is already registered, copy its environment rather than inventing
-a second one — two stores means two memories, which is the failure this system exists to
-prevent.
-
-The reference registration, with the paths this repo's author uses:
+Node ≥ 22. Run `nvm use` first; `.nvmrc` is the runtime source of truth. The memory lives on a
+Cerebrium host, never on this machine: every entry runs `apps/plugin/dist/server.js` against
+that host. If a host is already registered, copy its environment rather than inventing a
+second one.
 
 | Variable | Value |
 |---|---|
-| `MEMORY_DB_PATH` | `$HOME/.cerebrium/memory.db` |
-| `MEMORY_EMBED_PROVIDER` | `local` |
-| `MEMORY_CODE_ROOTS` | `cerebrium=/ABSOLUTE/PATH/TO/cerebrium` |
+| `MEMORY_KERNEL_URL` | `tcp://HOST:7433` |
+| `MEMORY_KERNEL_TOKEN_FILE` | `/ABSOLUTE/PATH/TO/token` (mode 600) |
 
 Settings can also live in `$CEREBRIUM_HOME/config.json` (default `~/.cerebrium/config.json`)
 instead of a host's env block, which is the better place for anything shared by every host —
@@ -77,9 +73,10 @@ working directory, not yours.
 
 ```bash
 claude mcp add cerebrium -s user \
-  --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
+  --env MEMORY_KERNEL_URL=tcp://HOST:7433 \
+  --env MEMORY_KERNEL_TOKEN_FILE=/ABSOLUTE/PATH/TO/token \
   -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
-  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  /ABSOLUTE/PATH/TO/cerebrium/apps/plugin/dist/server.js
 ln -s /ABSOLUTE/PATH/TO/cerebrium/apps/plugin/skill/cerebrium ~/.claude/skills/cerebrium
 ```
 
@@ -97,9 +94,10 @@ shows `cerebrium-code-nav` among the active mods.
 
 ```bash
 codex mcp add cerebrium \
-  --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
+  --env MEMORY_KERNEL_URL=tcp://HOST:7433 \
+  --env MEMORY_KERNEL_TOKEN_FILE=/ABSOLUTE/PATH/TO/token \
   -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node \
-  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
+  /ABSOLUTE/PATH/TO/cerebrium/apps/plugin/dist/server.js
 ln -s /ABSOLUTE/PATH/TO/cerebrium/apps/plugin/skill/cerebrium ~/.codex/skills/cerebrium
 ```
 
@@ -119,8 +117,11 @@ Add to `~/.gemini/config/mcp_config.json`:
   "mcpServers": {
     "cerebrium": {
       "command": "/ABSOLUTE/PATH/TO/.nvm/versions/node/v22.x/bin/node",
-      "args": ["/ABSOLUTE/PATH/TO/cerebrium/dist/server.js"],
-      "env": { "MEMORY_DB_PATH": "/ABSOLUTE/PATH/TO/HOME/.cerebrium/memory.db" }
+      "args": ["/ABSOLUTE/PATH/TO/cerebrium/apps/plugin/dist/server.js"],
+      "env": {
+        "MEMORY_KERNEL_URL": "tcp://HOST:7433",
+        "MEMORY_KERNEL_TOKEN_FILE": "/ABSOLUTE/PATH/TO/token"
+      }
     }
   }
 }
@@ -144,11 +145,9 @@ it to "use the cerebrium skill" loads `SKILL.md` from the working tree.
 After changing rules, permissions, or the MCP bundle, restart Antigravity and start a fresh
 conversation so the host rediscovers the tool catalog and runs the first-invocation hook.
 
-The Node command must be the canonical absolute executable selected by `.nvmrc`, because
-`better-sqlite3` is a native addon and a GUI may resolve bare `node` to another ABI. The setup
-command validates `.nvmrc`, opens an in-memory SQLite database before writing config, and pins
-that executable automatically. After an NVM upgrade/removal, rerun `nvm use && npm install`
-and then rerun setup.
+The Node command must be an absolute executable, because a GUI may resolve bare `node` to
+another runtime. The setup command validates `.nvmrc` and pins that executable automatically.
+After an NVM upgrade/removal, rerun `nvm use && npm install` and then rerun setup.
 
 ## 4 — pi
 
@@ -164,8 +163,11 @@ surfaces. Setup writes two files:
 // ~/.pi/agent/cerebrium.json — the launch entry an mcpServers block holds elsewhere
 {
   "command": "/ABSOLUTE/PATH/TO/.nvm/versions/node/v26.x/bin/node",
-  "args": ["/ABSOLUTE/PATH/TO/cerebrium/dist/server.js"],
-  "env": { "MEMORY_DB_PATH": "/ABSOLUTE/PATH/TO/HOME/.cerebrium/memory.db" }
+  "args": ["/ABSOLUTE/PATH/TO/cerebrium/apps/plugin/dist/server.js"],
+  "env": {
+    "MEMORY_KERNEL_URL": "tcp://HOST:7433",
+    "MEMORY_KERNEL_TOKEN_FILE": "/ABSOLUTE/PATH/TO/token"
+  }
 }
 ```
 
@@ -197,17 +199,9 @@ write/link, and checkpoint scenarios manually in separate fresh conversations af
 
 ## Running more than one host
 
-Each host spawns its own server process, so two hosts open at once means two writers against
-one SQLite file. That is allowed, and it was measured rather than assumed: two servers doing
-120 interleaved writes and searches against one store finished in 246 ms with zero errors
-(p95 7 ms), and every node landed and was searchable. WAL, a 15 s busy timeout and the retry
-helper serialize them; the `worker_lease` still elects a single owner for the background
-roles. Invariant #1 in [CLAUDE.md](../CLAUDE.md) states the amendment and its limits.
-
-One thing that measurement did find: two processes opening a **brand new, unmigrated** store
-at the same instant used to race, and the loser died on the migration ledger's primary key.
-Fixed — the ledger is now read inside the write transaction — but it is why the store should
-be created once, by whichever host you set up first, before you open a second.
+Each host spawns its own plugin process, and every plugin talks to the one daemon on the
+Cerebrium host, which is the only process that writes the store. Two hosts open at once are
+two clients, not two writers.
 
 ## Against a Cerebrium host
 

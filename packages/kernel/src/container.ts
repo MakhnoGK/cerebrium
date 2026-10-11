@@ -4,24 +4,15 @@ import { CODE_PARSER_TOKEN } from "@/domain/ports/code-parser";
 import { CONFIG_FILE_TOKEN, CONFIG_SOURCE_TOKEN, type ConfigSource } from "@/domain/ports/config";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { CONSOLIDATION_REPORTER_TOKEN } from "@/domain/ports/consolidation-reporter";
-import { EMBEDDING_PROVIDER_TOKEN, VECTOR_DIM } from "@/domain/ports/embedding-provider";
+import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
 import { CONSOLIDATION_REPO_TOKEN, NODES_REPO_TOKEN, STORAGE_TOKENS } from "@/domain/ports/storage";
 import { WORKER_OPTIONS_TOKEN } from "@/application/workers";
+import { NoUseRecorder } from "@/db/no-use-recorder";
 import { registerPostgresRepositories } from "@/db/postgres";
-import { registerSqliteRepositories } from "@/db/sqlite";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase, openDatabaseReadonly } from "@/db/sqlite/database";
-import { NoUseRecorder } from "@/db/sqlite/nodes";
-import {
-  ConsolidationConfig,
-  DatabaseConfig,
-  EmbeddingConfig,
-  StorageConfig,
-  STORE_BACKENDS,
-} from "@/infrastructure/config";
+import { ConsolidationConfig, EmbeddingConfig } from "@/infrastructure/config";
 import "@/infrastructure/config/sections";
 import { InProcessCodeParser } from "@/code/unit-parser";
 import { resolveRoles } from "@/consolidation/roles";
@@ -38,9 +29,9 @@ import { buildRemoteContainer, registerConfigSource } from "@/remote-container";
 // host and be present in another.
 export type HostRole = "server" | "daemon" | "cli" | "reader" | "runner";
 
-// Which kernel backs the tokens. `local` resolves everything in-process against SQLite;
-// `remote` resolves the same tokens against the daemon's socket and registers no database
-// at all, so a host in that mode cannot reach the file even by accident.
+// Which kernel backs the tokens. `local` resolves everything in-process against Postgres;
+// `remote` resolves the same tokens against a daemon and registers no database at all, so
+// a host in that mode cannot reach the store even by accident.
 export type KernelMode = "local" | "remote";
 
 export interface ContainerOptions {
@@ -87,9 +78,8 @@ export function buildContainer({
   return target;
 }
 
-// The local kernel: everything resolves in-process against the configured store — one
-// SQLite file, or a Postgres database. A remote kernel registers these same tokens against
-// a transport client instead.
+// The local kernel: everything resolves in-process against the Postgres store. A remote
+// kernel registers these same tokens against a transport client instead.
 //
 // Registrations are lazy (`instanceCachingFactory`): a role that never resolves the
 // embedding provider never constructs it, which is what makes registering the full set
@@ -99,18 +89,7 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
   // than racing the one writer.
   const readOnly = role === "cli" || role === "reader";
 
-  if (target.resolve(StorageConfig).backend === STORE_BACKENDS.POSTGRES) {
-    registerPostgresRepositories(target, { readOnly });
-  } else {
-    target.register(DB_TOKEN, {
-      useFactory: instanceCachingFactory((c) => {
-        const { path } = c.resolve(DatabaseConfig);
-
-        return readOnly ? openDatabaseReadonly(path) : openDatabase(path);
-      }),
-    });
-    registerSqliteRepositories(target);
-  }
+  registerPostgresRepositories(target, { readOnly });
 
   target.registerSingleton(CLOCK_TOKEN, SystemClock);
   target.register(CODE_PARSER_TOKEN, { useValue: new InProcessCodeParser() });
@@ -133,15 +112,11 @@ function registerLocalKernel(role: HostRole, target: DependencyContainer): void 
 
       const config = c.resolve(EmbeddingConfig);
 
-      const sqlite = c.resolve(StorageConfig).backend === STORE_BACKENDS.SQLITE;
-
-      return createProvider(
-        config.provider,
-        config.model,
-        config.cacheDir,
-        { url: config.url, timeoutMs: config.timeoutMs, batchSize: config.batchSize },
-        sqlite ? VECTOR_DIM : undefined,
-      );
+      return createProvider(config.provider, config.model, config.cacheDir, {
+        url: config.url,
+        timeoutMs: config.timeoutMs,
+        batchSize: config.batchSize,
+      });
     }),
   });
 

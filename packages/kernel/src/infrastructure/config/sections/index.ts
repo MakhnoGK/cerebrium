@@ -23,7 +23,6 @@ export {
   IdentityConfig,
   KernelConfig,
   RetrievalConfig,
-  STORE_BACKENDS,
   StorageConfig,
 } from "@/infrastructure/config/sections/runtime.config";
 export {

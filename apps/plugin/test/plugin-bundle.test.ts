@@ -8,8 +8,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pluginBundle, runToExit } from "./plugin-bundle";
 
 const FORBIDDEN_PACKAGES = [
-  "better-sqlite3",
-  "sqlite-vec",
   "pg",
   "pg-pool",
   "@huggingface/transformers",

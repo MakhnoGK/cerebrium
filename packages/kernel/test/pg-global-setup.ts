@@ -13,17 +13,8 @@ async function dropTestDatabases(admin: pg.Pool, includeTemplate: boolean): Prom
   }
 }
 
-// Builds the migrated template every test database is copied from. Without a test server
-// configured there is nothing to do: the Postgres half of the suite skips.
+// Builds the migrated template every test database is copied from.
 export async function setup(): Promise<void> {
-  if (TEST_PG_URL === null) {
-    if (process.env.CEREBRIUM_REQUIRE_PG === "1") {
-      throw new Error("CEREBRIUM_REQUIRE_PG=1 but CEREBRIUM_TEST_PG_URL is not set");
-    }
-
-    return;
-  }
-
   const admin = new pg.Pool({ connectionString: TEST_PG_URL, max: 1 });
 
   try {
@@ -47,8 +38,6 @@ export async function setup(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-  if (TEST_PG_URL === null) return;
-
   const admin = new pg.Pool({ connectionString: TEST_PG_URL, max: 1 });
 
   try {

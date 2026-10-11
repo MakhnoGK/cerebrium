@@ -56,9 +56,8 @@ and the IDE.
 | Permissions | IDE: `~/.gemini/config/config.json`; CLI: `~/.gemini/antigravity-cli/settings.json` | explicit allow entry for each current Cerebrium tool; unrelated grants are preserved |
 
 Every MCP registration — including pi's launch entry — uses the canonical absolute Node executable selected by this repo's
-`.nvmrc`, never bare `node`. `better-sqlite3` is ABI-bound: setup checks the current Node against
-`.nvmrc` and opens `:memory:` with the addon before it mutates any host config. Rerun setup after
-changing/removing the NVM version or rebuilding native dependencies.
+`.nvmrc`, never bare `node`. Setup checks the current Node against `.nvmrc` before it mutates
+any host config. Rerun setup after changing/removing the NVM version.
 
 Antigravity discovers skills from `skills/<name>/SKILL.md` under a customization root **or**
 from any path declared in `skills.json`. The declared path is what setup uses: it points at the
@@ -79,7 +78,7 @@ tree — so all four surfaces are one artifact, [`apps/plugin/install/pi/`](./pi
 
 | Surface | Location | Mechanism |
 |---|---|---|
-| MCP | the extension itself | spawns `dist/server.js` over stdio and registers each tool as a pi tool, prefixed `cerebrium_` |
+| MCP | the extension itself | spawns `apps/plugin/dist/server.js` over stdio and registers each tool as a pi tool, prefixed `cerebrium_` |
 | Skill | the extension itself | `resources_discover` returns this repo's `apps/plugin/skill/` — no symlink, no copy |
 | Rules | the extension itself | `before_agent_start` chains `apps/plugin/install/always-on.md` onto pi's system prompt |
 | Hook | the extension itself | calls `session_start` and posts the working set, so the model is handed a real `session_id` |

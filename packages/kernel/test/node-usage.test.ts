@@ -1,26 +1,14 @@
-// sqlite-only: reads or swaps the SQLite handle directly
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { strengthFactor } from "@/application/retrieval";
 import type { EnrichedRow, Envelope } from "@/db/repo";
-import { newId } from "@/core/ids";
 import { GetTool } from "@/presentation/mcp/tools/get";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { RetrievalConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup, type TestEnv } from "@test/helpers";
-
-const requireCjs = createRequire(import.meta.url);
-const migration = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "../src/db/sqlite/migrations/010_node_usage.cjs",
-);
 
 let env: TestEnv;
 let session: string;
@@ -48,15 +36,15 @@ function get(ids: string[]) {
   return container.resolve(GetTool).invoke({ session_id: session, ids });
 }
 
-function usage(id: string): { use_count: number; last_used_at: string | null } {
-  return env.db.prepare("SELECT use_count, last_used_at FROM nodes WHERE id = ?").get(id) as {
-    use_count: number;
-    last_used_at: string | null;
-  };
+async function usage(id: string): Promise<{ use_count: number; last_used_at: string | null }> {
+  return (await env.sql.one<{ use_count: number; last_used_at: string | null }>(
+    "SELECT use_count, last_used_at FROM nodes WHERE id = @id",
+    { id },
+  ))!;
 }
 
-function setUseCount(id: string, count: number): void {
-  env.db.prepare("UPDATE nodes SET use_count = ? WHERE id = ?").run(count, id);
+async function setUseCount(id: string, count: number): Promise<void> {
+  await env.sql.run("UPDATE nodes SET use_count = @count WHERE id = @id", { count, id });
 }
 
 async function rank(query: string): Promise<string[]> {
@@ -79,38 +67,6 @@ afterEach(() => {
   });
 });
 
-describe("Migration 010 node usage", () => {
-  it("should backfill counts and the last timestamp from get events that carry ids", async () => {
-    // Given
-    const node = await write("Retry budget", "the http client retries with backoff");
-    const insert = env.db.prepare(
-      "INSERT INTO events (id, session_id, action, node_id, detail, ts) VALUES (?, ?, 'get', ?, ?, ?)",
-    );
-    insert.run(
-      newId(),
-      session,
-      node.id,
-      JSON.stringify({ ids: [node.id] }),
-      "2026-01-02T00:00:00.000Z",
-    );
-    insert.run(
-      newId(),
-      session,
-      node.id,
-      JSON.stringify({ ids: [node.id] }),
-      "2026-01-05T00:00:00.000Z",
-    );
-    // A pre-A1 row: it logged only a count, so it carries no usable ids.
-    insert.run(newId(), session, node.id, JSON.stringify({ count: 1 }), "2026-01-09T00:00:00.000Z");
-
-    // When
-    (requireCjs(migration) as { up: (db: BetterSqlite3.Database) => void }).up(env.db);
-
-    // Then
-    expect(usage(node.id)).toEqual({ use_count: 2, last_used_at: "2026-01-05T00:00:00.000Z" });
-  });
-});
-
 describe("Recording node use", () => {
   it("should bump the count and stamp the timestamp for the ids a get resolved", async () => {
     // Given
@@ -120,7 +76,7 @@ describe("Recording node use", () => {
     await get([node.id]);
 
     // Then
-    expect(usage(node.id)).toEqual({ use_count: 1, last_used_at: env.clock.t });
+    expect(await usage(node.id)).toEqual({ use_count: 1, last_used_at: env.clock.t });
   });
 
   it("should leave an unresolvable id untouched when a get half-misses", async () => {
@@ -132,24 +88,21 @@ describe("Recording node use", () => {
 
     // Then
     expect(res.not_found).toHaveLength(1);
-    expect(usage(node.id).use_count).toBe(1);
+    expect((await usage(node.id)).use_count).toBe(1);
   });
 
   it("should not look like an edit when a node is fetched", async () => {
     // Given
     const node = await write("Retry budget", "the http client retries with backoff");
-    const before = env.db
-      .prepare("SELECT MAX(rev) AS rev, MAX(ts) AS ts FROM revisions WHERE node_id = ?")
-      .get(node.id);
+    const latest = "SELECT MAX(rev) AS rev, MAX(ts) AS ts FROM revisions WHERE node_id = @id";
+    const before = await env.sql.one(latest, { id: node.id });
 
     // When
     env.clock.advanceDays(3);
     await get([node.id]);
 
     // Then
-    const after = env.db
-      .prepare("SELECT MAX(rev) AS rev, MAX(ts) AS ts FROM revisions WHERE node_id = ?")
-      .get(node.id);
+    const after = await env.sql.one(latest, { id: node.id });
     expect(after).toEqual(before);
   });
 
@@ -194,7 +147,7 @@ describe("Usage in ranking", () => {
     const unused = await write("Retry budget", topic);
     const used = await write("Client retries", topic);
     await env.worker.tick();
-    setUseCount(used.id, 10);
+    await setUseCount(used.id, 10);
 
     // When
     const ranked = await rank("http client retries");
@@ -213,11 +166,11 @@ describe("Usage in ranking", () => {
     await env.worker.tick();
 
     // When — the count moves from one node to the other.
-    setUseCount(first.id, 20);
+    await setUseCount(first.id, 20);
     const firstBoosted = await rank(query);
 
-    setUseCount(first.id, 0);
-    setUseCount(second.id, 20);
+    await setUseCount(first.id, 0);
+    await setUseCount(second.id, 20);
     const secondBoosted = await rank(query);
 
     // Then — whichever node holds it leads. Never assert a winner by id: ULIDs minted in
@@ -237,7 +190,7 @@ describe("Usage in ranking", () => {
 
     // When
     const before = await rank("http client retries");
-    setUseCount(hot.id, 1000);
+    await setUseCount(hot.id, 1000);
     const after = await rank("http client retries");
 
     // Then

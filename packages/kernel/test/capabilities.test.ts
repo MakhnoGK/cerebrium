@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -66,10 +65,14 @@ function write(session_id: string): Record<string, unknown> {
 
 // The test clock is frozen, so every row shares a timestamp and "the last event" is a
 // ULID tie-break rather than an ordering. Ask whether the row is there instead.
-function logged(fragment: string): boolean {
-  return (env.db.prepare("SELECT detail FROM events").all() as { detail: string | null }[]).some(
+async function logged(fragment: string): Promise<boolean> {
+  return (await env.sql.all<{ detail: string | null }>("SELECT detail FROM events")).some(
     (row) => row.detail?.includes(fragment) === true,
   );
+}
+
+async function nodeCount(): Promise<number> {
+  return (await env.sql.one<{ n: number }>("SELECT COUNT(*)::int AS n FROM nodes"))!.n;
 }
 
 beforeEach(() => {
@@ -147,7 +150,7 @@ describe("Capability enforcement", () => {
       "codex-mcp-client": profile({ [Capability.WRITE]: Posture.OFF }),
     });
     const id = await session(pipeline, "codex-mcp-client");
-    const before = env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get() as { n: number };
+    const before = await nodeCount();
 
     // When
     await expect(
@@ -158,8 +161,8 @@ describe("Capability enforcement", () => {
     ).rejects.toThrow(/not permitted to write/);
 
     // Then — nothing written, and the refusal is on the record.
-    expect(env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get()).toEqual(before);
-    expect(logged("not permitted to write")).toBe(true);
+    expect(await nodeCount()).toBe(before);
+    expect(await logged("not permitted to write")).toBe(true);
   });
 
   it("should let a suggested capability through and mark it for review", async () => {
@@ -177,7 +180,7 @@ describe("Capability enforcement", () => {
 
     // Then
     expect(written).toBeDefined();
-    expect(logged('"review":true')).toBe(true);
+    expect(await logged('"review":true')).toBe(true);
   });
 
   it("should fall back to the default profile for a principal it does not name", async () => {

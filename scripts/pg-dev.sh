@@ -1,5 +1,5 @@
 #!/bin/sh
-# A throwaway Postgres for `npm run test:pg`: ParadeDB (pg_search + pgvector) on port 55432,
+# A throwaway Postgres for `npm test`: ParadeDB (pg_search + pgvector) on port 55432,
 # byte-order collation as the store requires. Data lives on tmpfs and nothing is durable, so
 # WAL is kept small: every test creates and drops a database.
 set -eu

@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConsolidationKind, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -15,6 +14,19 @@ import { setup, TestEnv } from "@test/helpers";
 const BASE = "the deployment rollback procedure drains connections and flips the feature flag";
 
 // Three near-identical episodics (one distinct token each) -> tight cluster, distinct nodes.
+function semanticByTitle(env: TestEnv, title: string): Promise<{ id: string } | undefined> {
+  return env.sql.one("SELECT id FROM nodes WHERE memory_kind = 'semantic' AND title = @title", {
+    title,
+  });
+}
+
+async function consolidatedAt(env: TestEnv, id: string): Promise<string | null> {
+  return (await env.sql.one<{ consolidated_at: string | null }>(
+    "SELECT consolidated_at FROM nodes WHERE id = @id",
+    { id },
+  ))!.consolidated_at;
+}
+
 async function seedEpisodics(env: TestEnv, n = 3): Promise<{ s: string; ids: string[] }> {
   const write = container.resolve(WriteTool);
   const sessionStart = container.resolve(SessionStartTool);
@@ -100,9 +112,7 @@ describe("Episodic -> semantic distillation", () => {
     expect(applied).toMatchObject({ status: "applied", kind: ConsolidationKind.DISTILL });
 
     // a new semantic fact exists, derived_from each source
-    const fact = env.db
-      .prepare("SELECT id FROM nodes WHERE memory_kind = 'semantic' AND title = ?")
-      .get("Rollback runbook") as { id: string } | undefined;
+    const fact = await semanticByTitle(env, "Rollback runbook");
     expect(fact).toBeDefined();
     const derived = (await env.edges.edgesOf(fact!.id))
       .filter((e) => e.edge === "derived_from")
@@ -112,10 +122,7 @@ describe("Episodic -> semantic distillation", () => {
 
     // every source is stamped consolidated_at and the candidate is applied
     for (const id of ids) {
-      const row = env.db.prepare("SELECT consolidated_at FROM nodes WHERE id = ?").get(id) as {
-        consolidated_at: string | null;
-      };
-      expect(row.consolidated_at).not.toBeNull();
+      expect(await consolidatedAt(env, id)).not.toBeNull();
     }
     expect((await env.consolidation.getCandidate(cand!.id))!.status).toBe("applied");
   });
@@ -169,18 +176,13 @@ describe("Episodic -> semantic distillation", () => {
       await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL }),
     ).toHaveLength(0);
     expect(
-      env.db.prepare("SELECT status FROM consolidation_candidates WHERE kind = 'distill'").all(),
+      await env.sql.all("SELECT status FROM consolidation_candidates WHERE kind = 'distill'"),
     ).toEqual([{ status: "applied" }]);
 
-    const fact = env.db
-      .prepare("SELECT id FROM nodes WHERE memory_kind = 'semantic' AND title = ?")
-      .get("Rollback procedure") as { id: string } | undefined;
+    const fact = await semanticByTitle(env, "Rollback procedure");
     expect(fact).toBeDefined();
     for (const id of ids) {
-      const row = env.db.prepare("SELECT consolidated_at FROM nodes WHERE id = ?").get(id) as {
-        consolidated_at: string | null;
-      };
-      expect(row.consolidated_at).not.toBeNull();
+      expect(await consolidatedAt(env, id)).not.toBeNull();
     }
 
     // When / Then — second sweep: sources are consolidated, so nothing re-distills.
@@ -217,7 +219,9 @@ describe("Episodic -> semantic distillation", () => {
       await env.consolidation.pendingCandidates({ kind: ConsolidationKind.DISTILL }),
     ).toHaveLength(0);
     expect(
-      env.db.prepare("SELECT id FROM nodes WHERE title = ?").get("Queued rollback fact"),
+      await env.sql.one("SELECT id FROM nodes WHERE title = @title", {
+        title: "Queued rollback fact",
+      }),
     ).toBeDefined();
   });
 
@@ -251,14 +255,12 @@ describe("Episodic -> semantic distillation", () => {
     // Then
     expect(r.distilled).toBe(1);
     expect(
-      env.db.prepare("SELECT title FROM nodes WHERE memory_kind = 'semantic' ORDER BY title").all(),
+      await env.sql.all("SELECT title FROM nodes WHERE memory_kind = 'semantic' ORDER BY title"),
     ).toEqual([{ title: "Rollback, first three" }]);
     expect(
-      env.db
-        .prepare(
-          "SELECT status FROM consolidation_candidates WHERE kind = 'distill' ORDER BY score",
-        )
-        .all(),
+      await env.sql.all(
+        "SELECT status FROM consolidation_candidates WHERE kind = 'distill' ORDER BY score",
+      ),
     ).toEqual([{ status: "dismissed" }, { status: "applied" }]);
   });
 });

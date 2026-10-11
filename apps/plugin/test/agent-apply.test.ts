@@ -18,13 +18,15 @@ import { applyHost, type ApplyOptions } from "@plugin/scripts/agent-apply";
 import {
   ANTIGRAVITY_PERMISSION_GRANTS,
   claudeModDir,
-  defaultEnv,
   hookCommand,
+  HOST_REQUIRED,
+  kernelEnv,
   pending,
   piBridgeConfig,
   piExtension,
   piSettings,
   planHost,
+  pluginServerPath,
   skillPath,
   skillRoot,
   type HostId,
@@ -32,6 +34,7 @@ import {
 } from "@plugin/scripts/agent-hosts";
 
 const REPO = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
+const HOST_ENV = kernelEnv("tcp://host:7433", "/tokens/cerebrium");
 
 let home: string;
 let ran: { cmd: string; args: string[] }[];
@@ -41,7 +44,7 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
     home,
     repoRoot: REPO,
     nodePath: process.execPath,
-    env: { MEMORY_DB_PATH: join(home, ".cerebrium", "memory.db") },
+    env: HOST_ENV,
     hasCommand: () => true,
     ...over,
   };
@@ -106,7 +109,7 @@ describe("applyHost", () => {
     expect(add.cmd).toBe("codex");
     expect(add.args).toContain("--env");
     expect(add.args[add.args.indexOf("--") + 1]).toBe(process.execPath);
-    expect(add.args.at(-1)).toBe(join(REPO, "dist", "server.js"));
+    expect(add.args.at(-1)).toBe(pluginServerPath(REPO));
   });
 
   it("should remove a stale registration before adding the new one", () => {
@@ -457,26 +460,37 @@ describe("Hooks", () => {
 });
 
 describe("Environment", () => {
-  it("should point Antigravity at the same store the caller resolved", () => {
+  it("should point Antigravity at the host the caller resolved", () => {
     // Given / When
     applyHost("antigravity", input(), options());
 
     // Then
     const config = JSON.parse(read(join(home, ".gemini", "config", "mcp_config.json")));
-    expect(config.mcpServers.cerebrium.env.MEMORY_DB_PATH).toBe(
-      join(home, ".cerebrium", "memory.db"),
-    );
-    expect(config.mcpServers.cerebrium.args).toEqual([join(REPO, "dist", "server.js")]);
+    expect(config.mcpServers.cerebrium.env).toEqual(HOST_ENV);
+    expect(config.mcpServers.cerebrium.args).toEqual([pluginServerPath(REPO)]);
     expect(config.mcpServers.cerebrium.command).toBe(process.execPath);
   });
 
-  it("should default the store under the inspected home when nothing is registered", () => {
+  it("should write no MCP entry and say why when no host is configured", () => {
     // Given / When
-    const env = defaultEnv(home, REPO);
+    const applied = applyHost("antigravity", input({ env: {} }), options());
 
     // Then
-    expect(env.MEMORY_DB_PATH).toBe(join(home, ".cerebrium", "memory.db"));
-    expect(env.MEMORY_CODE_ROOTS).toBe(`cerebrium=${REPO}`);
+    expect(applied.find((a) => a.surface === "mcp")).toEqual({
+      surface: "mcp",
+      outcome: "skipped",
+      detail: HOST_REQUIRED,
+    });
+    expect(existsSync(join(home, ".gemini", "config", "mcp_config.json"))).toBe(false);
+    expect(existsSync(join(home, ".gemini", "config", "skills.json"))).toBe(true);
+  });
+
+  it("should not register through a host CLI when no host is configured", () => {
+    // Given / When
+    applyHost("claude", input({ env: {} }), options());
+
+    // Then
+    expect(ran).toEqual([]);
   });
 });
 
@@ -509,8 +523,8 @@ describe("pi", () => {
     const bridge = JSON.parse(read(piBridgeConfig(home)));
     expect(settings.extensions).toEqual([piExtension(REPO)]);
     expect(bridge.command).toBe(process.execPath);
-    expect(bridge.args).toEqual([join(REPO, "dist", "server.js")]);
-    expect(bridge.env.MEMORY_DB_PATH).toBe(join(home, ".cerebrium", "memory.db"));
+    expect(bridge.args).toEqual([pluginServerPath(REPO)]);
+    expect(bridge.env).toEqual(HOST_ENV);
   });
 
   it("should keep the user's other pi settings and extensions", () => {

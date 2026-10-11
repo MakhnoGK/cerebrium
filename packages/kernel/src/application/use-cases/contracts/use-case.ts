@@ -16,7 +16,7 @@ export function useCaseToken<Args, Result>(name: string): UseCaseToken<Args, Res
 
 // Registers the implementation against the token the callers resolve. A factory rather
 // than `useToken`, for the same reason `@tool()` uses one: each container builds its own
-// instance against its own DB_TOKEN, which keeps test scopes isolated. A later
+// instance against its own store, which keeps test scopes isolated. A later
 // registration of the same token wins, which is how a remote implementation would
 // displace a local one.
 export function useCase<Args, Result>(token: UseCaseToken<Args, Result>): ClassDecorator {

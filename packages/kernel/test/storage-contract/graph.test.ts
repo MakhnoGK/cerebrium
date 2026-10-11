@@ -1,4 +1,3 @@
-import type Database from "better-sqlite3";
 import type { DependencyContainer } from "tsyringe";
 import { beforeEach, expect, it } from "vitest";
 import { graphIntegrity } from "@cerebrium/contracts/graph";
@@ -14,7 +13,6 @@ import {
   type StatsRepo,
 } from "@/domain/ports/storage";
 import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
-import { DB_TOKEN } from "@/db/sqlite/base";
 import { describeStorage } from "@test/storage-contract/backends";
 
 const T0 = "2026-01-01T00:00:00.000Z";
@@ -44,31 +42,13 @@ describeStorage("graph snapshot", (backend) => {
   const retire = (id: string) => nodes.invalidateNode(id, { ts: T0, session_id: "s" });
 
   async function cite(note: string): Promise<void> {
-    if (backend.name === "postgres") {
-      await scope.resolve<PgDatabase>(PG_TOKEN).query(
-        `INSERT INTO code_refs (src, type, repo, remote_key, path, qualified, symbol_kind,
-                                symbol_live, valid_from)
-         VALUES (@note, 'documents', 'cerebrium', 'github.com/o/cerebrium', 'src/a.ts',
-                 'src/a.ts:Alpha.run', 'method', 1, @ts)`,
-        { note, ts: T0 },
-      );
-      return;
-    }
-
-    const db = scope.resolve<Database.Database>(DB_TOKEN);
-
-    db.prepare(
-      `INSERT INTO nodes (id, memory_kind, type, title, project, origin, valid_from,
-                          created_by_session, created_at)
-       VALUES ('sym1', 'mirror', 'method', 'Alpha.run', 'cerebrium', 'code', ?, 's', ?)`,
-    ).run(T0, T0);
-    db.prepare(
-      `INSERT INTO symbols (node_id, repo, path, lang, symbol_kind, name, qualified,
-                            start_line, end_line, code_hash, source)
-       VALUES ('sym1', 'cerebrium', 'src/a.ts', 'ts', 'method', 'run', 'src/a.ts:Alpha.run',
-               1, 2, 'h', 'run() {}')`,
-    ).run();
-    await link(note, "sym1", EdgeType.DOCUMENTS);
+    await scope.resolve<PgDatabase>(PG_TOKEN).query(
+      `INSERT INTO code_refs (src, type, repo, remote_key, path, qualified, symbol_kind,
+                              symbol_live, valid_from)
+       VALUES (@note, 'documents', 'cerebrium', 'github.com/o/cerebrium', 'src/a.ts',
+               'src/a.ts:Alpha.run', 'method', 1, @ts)`,
+      { note, ts: T0 },
+    );
   }
 
   beforeEach(() => {

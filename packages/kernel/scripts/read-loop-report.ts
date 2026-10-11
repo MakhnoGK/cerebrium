@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import type Database from "better-sqlite3";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { buildContainer } from "@/container";
-import { DatabaseConfig } from "@/infrastructure/config";
+import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 
 // Read-loop report: `npm run report:readloop`. Answers "is a node that is never fetched
 // waste, or is it doing its job as a search envelope" — the question the store could not
 // ask about itself, because only the fetch half of retrieval was logged. Read-only: opens
-// the DB via the `cli` role, so it never migrates and never becomes a second writer.
+// the store via the `cli` role in a read-only session, so it never becomes a second writer.
 //
 // The join is `events`: a surfacing row lists the node ids put in front of the agent, a
 // later `get` in the same session lists the ids it actually spent tokens on. Everything
 // below is that join, cut three ways — by rank, by retrieval path, and per node.
 //
-// Flags: --json, --since <ISO instant>, --help.
+// Flags: --pg <URL> (required), --json, --since <ISO instant>, --help.
 
 const SURFACING_ACTIONS = ["search", "session_start", "code_lookup"] as const;
 const AUTHORED_KINDS = ["semantic", "episodic"] as const;
@@ -105,37 +104,58 @@ interface NodeCount {
   fetched: number;
 }
 
-function main(): void {
-  if (process.argv.includes("--help")) {
-    process.stdout.write("usage: npm run report:readloop -- [--json] [--since <ISO instant>]\n");
+const USAGE = "usage: npm run report:readloop -- --pg <URL> [--json] [--since <ISO instant>]\n";
+
+async function main(): Promise<void> {
+  const argv = process.argv;
+  const url = argv.includes("--pg") ? argv[argv.indexOf("--pg") + 1] : undefined;
+
+  if (argv.includes("--help")) {
+    process.stdout.write(USAGE);
     return;
   }
 
-  const container = buildContainer({ role: "cli" });
-  const db = container.resolve<Database.Database>(DB_TOKEN);
-  const dbPath = container.resolve(DatabaseConfig).path;
+  if (!url) {
+    process.stderr.write(USAGE);
+    process.exitCode = 1;
+    return;
+  }
 
-  const sinceFlag = process.argv[process.argv.indexOf("--since") + 1];
+  const container = buildContainer({
+    role: "cli",
+    source: new LayeredConfigSource(
+      new StaticConfigSource({ MEMORY_PG_URL: url }),
+      new EnvConfigSource(),
+    ),
+  });
+  const db = container.resolve<PgDatabase>(PG_TOKEN);
+
+  const sinceFlag = argv[argv.indexOf("--since") + 1];
   const since =
-    process.argv.includes("--since") && sinceFlag ? sinceFlag : (firstInstrumented(db) ?? "");
+    argv.includes("--since") && sinceFlag ? sinceFlag : ((await firstInstrumented(db)) ?? "");
 
-  report(db, dbPath, since, process.argv.includes("--json"));
+  await report(db, redactUrl(url), since, argv.includes("--json"));
 }
 
 // Surfaced ids only started being logged partway through this store's life, and each action
 // started on its own date. Anything before the first instrumented search reads as a zero
 // that means "not recorded", not "not surfaced" — so that is where the window opens.
-function firstInstrumented(db: Database.Database): string | null {
-  const row = db
-    .prepare(`SELECT MIN(ts) AS ts FROM events WHERE action = 'search' AND detail LIKE '%"ids"%'`)
-    .get() as { ts: string | null };
+async function firstInstrumented(db: PgDatabase): Promise<string | null> {
+  const { rows } = await db.query<{ ts: string | null }>(
+    `SELECT MIN(ts) AS ts FROM events WHERE action = 'search' AND detail LIKE '%"ids"%'`,
+  );
 
-  return row.ts;
+  return rows[0]?.ts ?? null;
 }
 
-function report(db: Database.Database, dbPath: string, since: string, asJson: boolean): void {
-  const { surfacings, fetches } = load(db, since);
-  const coverage = instrumentationCoverage(db, since);
+async function report(
+  db: PgDatabase,
+  store: string,
+  since: string,
+  asJson: boolean,
+): Promise<void> {
+  const { surfacings, fetches } = await load(db, since);
+  const coverage = await instrumentationCoverage(db, since);
 
   const searches = surfacings.filter((s) => s.action === "search");
   const fetchedAfter = fetchIndex(fetches);
@@ -149,24 +169,32 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
     surfacings.map((s) => ({ ids: [...s.ids, ...s.folded.map((f) => f.id)] })),
   );
   const fetchedCount = tally(fetches.filter((f) => !f.outline));
-  const splits = AUTHORED_KINDS.map((kind) =>
-    splitOf(`live ${kind}`, liveNodes(db, kind), surfacedCount, fetchedCount),
-  );
+  const splits: Split[] = [];
+
+  for (const kind of AUTHORED_KINDS) {
+    splits.push(splitOf(`live ${kind}`, await liveNodes(db, kind), surfacedCount, fetchedCount));
+  }
+
   splits.unshift(
-    splitOf("live authored (semantic+episodic)", liveNodes(db), surfacedCount, fetchedCount),
+    splitOf("live authored (semantic+episodic)", await liveNodes(db), surfacedCount, fetchedCount),
   );
 
-  const titles = titleIndex(db);
+  const titles = await titleIndex(db);
   const mostSurfaced = topBy(surfacedCount, fetchedCount, titles, () => true);
   const ignored = topBy(surfacedCount, fetchedCount, titles, (id) => !fetchedCount.get(id));
-  const writers = writerCurve(searches, fetchedAfter, writerIndex(db), writeCounts(db, since));
+  const writers = writerCurve(
+    searches,
+    fetchedAfter,
+    await writerIndex(db),
+    await writeCounts(db, since),
+  );
   const folds = foldOutcome(searches, fetchedAfter, fetchedCount);
 
   if (asJson) {
     process.stdout.write(
       JSON.stringify(
         {
-          db_path: dbPath,
+          store,
           window_from: since,
           instrumentation: coverage,
           follow_through: followThrough,
@@ -187,7 +215,7 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
 
   const L: string[] = [];
 
-  L.push(`cerebrium read-loop report   ${dbPath}`);
+  L.push(`cerebrium read-loop report   ${store}`);
   L.push(`window from ${since || "(nothing instrumented yet)"}`);
   L.push("");
 
@@ -300,17 +328,16 @@ function report(db: Database.Database, dbPath: string, since: string, asJson: bo
 
 // ---- loading ----------------------------------------------------------------
 
-function load(
-  db: Database.Database,
+async function load(
+  db: PgDatabase,
   since: string,
-): { surfacings: Surfacing[]; fetches: (Fetch & { outline: boolean })[] } {
-  const rows = db
-    .prepare(
-      `SELECT action, session_id, detail, ts FROM events
-       WHERE ts >= ? AND action IN ('search','get','session_start','code_lookup')
-       ORDER BY ts`,
-    )
-    .all(since) as EventRow[];
+): Promise<{ surfacings: Surfacing[]; fetches: (Fetch & { outline: boolean })[] }> {
+  const { rows } = await db.query<EventRow>(
+    `SELECT action, session_id, detail, ts FROM events
+     WHERE ts >= @since AND action IN ('search','get','session_start','code_lookup')
+     ORDER BY ts`,
+    { since },
+  );
 
   const surfacings: Surfacing[] = [];
   const fetches: (Fetch & { outline: boolean })[] = [];
@@ -346,69 +373,67 @@ function load(
   return { surfacings, fetches };
 }
 
-function instrumentationCoverage(db: Database.Database, since: string): Coverage[] {
-  return [...SURFACING_ACTIONS, "get"].map((action) => {
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS rows,
-                SUM(CASE WHEN detail LIKE '%"ids"%' THEN 1 ELSE 0 END) AS instrumented,
-                MIN(CASE WHEN detail LIKE '%"ids"%' THEN ts END) AS first
-         FROM events WHERE action = ? AND ts >= ?`,
-      )
-      .get(action, since) as { rows: number; instrumented: number | null; first: string | null };
+async function instrumentationCoverage(db: PgDatabase, since: string): Promise<Coverage[]> {
+  const out: Coverage[] = [];
 
-    return { action, rows: row.rows, instrumented: row.instrumented ?? 0, first: row.first };
-  });
+  for (const action of [...SURFACING_ACTIONS, "get"]) {
+    const { rows } = await db.query<{
+      rows: string;
+      instrumented: string | null;
+      first: string | null;
+    }>(
+      `SELECT COUNT(*) AS rows,
+              SUM(CASE WHEN detail LIKE '%"ids"%' THEN 1 ELSE 0 END) AS instrumented,
+              MIN(CASE WHEN detail LIKE '%"ids"%' THEN ts END) AS first
+       FROM events WHERE action = @action AND ts >= @since`,
+      { action, since },
+    );
+    const row = rows[0];
+
+    out.push({
+      action,
+      rows: Number(row?.rows ?? 0),
+      instrumented: Number(row?.instrumented ?? 0),
+      first: row?.first ?? null,
+    });
+  }
+
+  return out;
 }
 
-function liveNodes(db: Database.Database, kind?: string): string[] {
-  const sql = kind
-    ? `SELECT id FROM nodes WHERE invalidated_at IS NULL AND memory_kind = ?`
-    : `SELECT id FROM nodes WHERE invalidated_at IS NULL AND memory_kind IN ('semantic','episodic')`;
-
-  const rows = (kind ? db.prepare(sql).all(kind) : db.prepare(sql).all()) as { id: string }[];
+async function liveNodes(db: PgDatabase, kind?: string): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    kind
+      ? `SELECT id FROM nodes WHERE invalidated_at IS NULL AND memory_kind = @kind`
+      : `SELECT id FROM nodes WHERE invalidated_at IS NULL AND memory_kind IN ('semantic','episodic')`,
+    kind ? { kind } : undefined,
+  );
 
   return rows.map((r) => r.id);
 }
 
-// This report opens the store read-only and so cannot migrate it. A store whose server
-// has not restarted since migration 020 still has no `client`, and a crash there would
-// take the whole report with it — every writer simply reads as unnamed instead.
-function hasWriterColumn(db: Database.Database): boolean {
-  const columns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
-
-  return columns.some((c) => c.name === "client");
-}
-
-function writerIndex(db: Database.Database): Map<string, string> {
-  if (!hasWriterColumn(db)) {
-    return new Map();
-  }
-
-  const rows = db.prepare(`SELECT id, client FROM sessions`).all() as {
-    id: string;
-    client: string | null;
-  }[];
+async function writerIndex(db: PgDatabase): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; client: string | null }>(
+    `SELECT id, client FROM sessions`,
+  );
 
   return new Map(rows.map((r) => [r.id, r.client ?? UNNAMED_WRITER]));
 }
 
-function writeCounts(db: Database.Database, since: string): Map<string, number> {
-  const writer = hasWriterColumn(db) ? "COALESCE(s.client, ?)" : "?";
-  const rows = db
-    .prepare(
-      `SELECT ${writer} AS writer, COUNT(*) AS writes
-       FROM events e JOIN sessions s ON s.id = e.session_id
-       WHERE e.ts >= ? AND e.action IN ('write','update','invalidate','checkpoint','link')
-       GROUP BY writer`,
-    )
-    .all(UNNAMED_WRITER, since) as { writer: string; writes: number }[];
+async function writeCounts(db: PgDatabase, since: string): Promise<Map<string, number>> {
+  const { rows } = await db.query<{ writer: string; writes: string }>(
+    `SELECT COALESCE(s.client, @unnamed) AS writer, COUNT(*) AS writes
+     FROM events e JOIN sessions s ON s.id = e.session_id
+     WHERE e.ts >= @since AND e.action IN ('write','update','invalidate','checkpoint','link')
+     GROUP BY 1`,
+    { unnamed: UNNAMED_WRITER, since },
+  );
 
-  return new Map(rows.map((r) => [r.writer, r.writes]));
+  return new Map(rows.map((r) => [r.writer, Number(r.writes)]));
 }
 
-function titleIndex(db: Database.Database): Map<string, string> {
-  const rows = db.prepare(`SELECT id, title FROM nodes`).all() as { id: string; title: string }[];
+async function titleIndex(db: PgDatabase): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; title: string }>(`SELECT id, title FROM nodes`);
 
   return new Map(rows.map((r) => [r.id, r.title]));
 }
@@ -675,4 +700,12 @@ function pct(part: number, whole: number): string {
   return whole ? `${((100 * part) / whole).toFixed(1).padStart(5)}%` : "    —";
 }
 
-if (process.env.VITEST === undefined) main();
+if (process.env.VITEST === undefined) {
+  main().then(
+    () => process.exit(),
+    (e: unknown) => {
+      process.stderr.write(`read-loop report failed: ${String(e)}\n`);
+      process.exit(1);
+    },
+  );
+}

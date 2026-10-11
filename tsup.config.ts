@@ -19,17 +19,10 @@ const declared = WORKSPACES.flatMap((dir) => {
 }).filter((name) => !name.startsWith("@cerebrium/"));
 
 // Native/wasm packages must not be bundled — they resolve their own binaries and
-// wasm assets from node_modules at runtime (better-sqlite3 .node, sqlite-vec, the
-// onnxruntime behind @huggingface/transformers, and the tree-sitter wasm grammars).
+// wasm assets from node_modules at runtime (the onnxruntime behind
+// @huggingface/transformers, and the tree-sitter wasm grammars).
 const external = [
-  ...new Set([
-    ...declared,
-    "better-sqlite3",
-    "sqlite-vec",
-    "@huggingface/transformers",
-    "web-tree-sitter",
-    "tree-sitter-wasms",
-  ]),
+  ...new Set([...declared, "@huggingface/transformers", "web-tree-sitter", "tree-sitter-wasms"]),
 ];
 
 export default defineConfig({
@@ -43,7 +36,6 @@ export default defineConfig({
     "code-worker": "apps/host/src/code-worker.ts",
     "embed-worker": "apps/host/src/embed-worker.ts",
     healthcheck: "apps/host/src/healthcheck.ts",
-    "import-sqlite": "apps/host/src/import-sqlite.ts",
     dashboard: "apps/dashboard-api/src/main.ts",
   },
   format: ["esm"],

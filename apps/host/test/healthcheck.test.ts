@@ -72,7 +72,7 @@ describe("Health verdict (healthProblem)", () => {
       protocol: PROTOCOL_VERSION,
       pid: 7,
       model: { state: "ready", ms: 1 },
-      store: { backend: "sqlite", ready: true },
+      store: { backend: "postgres", ready: true },
     };
 
     // When / Then

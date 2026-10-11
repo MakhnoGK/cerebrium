@@ -13,15 +13,13 @@ import {
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
 import { NODES_REPO_TOKEN } from "@/domain/ports/storage";
 import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
+import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { Server } from "@/presentation/mcp/server";
 import { sessionIdDescription } from "@/presentation/mcp/tools/contracts";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
-import { freshStore } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
+import { freshStore, sqlOf } from "@test/helpers";
 
 // Every test gets its own MCP client backed by a fresh store, so ordering and cross-test
 // state never leak. A child DI container re-binds the store, and the Server
@@ -176,29 +174,28 @@ describe("session_start tool", () => {
     expect(res.hints.length).toBeGreaterThan(0);
   });
 
-  it.skipIf(TEST_BACKEND === "postgres")(
-    "should attribute the session to the client named in the initialize handshake",
-    async () => {
-      const scope = container.createChildContainer();
-      const db = openDatabase(":memory:");
-      scope.register(DB_TOKEN, { useValue: db });
-      scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
-      scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
+  it("should attribute the session to the client named in the initialize handshake", async () => {
+    const scope = container.createChildContainer();
+    freshStore(scope);
+    scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
+    scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
 
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      await scope.resolve(Server).connect(serverTransport);
-      const client = new Client({ name: "codex-cli", version: "4.5.6" });
-      await client.connect(clientTransport);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await scope.resolve(Server).connect(serverTransport);
+    const client = new Client({ name: "codex-cli", version: "4.5.6" });
+    await client.connect(clientTransport);
 
-      const { session_id } = payload<{ session_id: string }>(
-        await client.callTool({ name: "session_start", arguments: {} }),
-      );
+    const { session_id } = payload<{ session_id: string }>(
+      await client.callTool({ name: "session_start", arguments: {} }),
+    );
 
-      expect(
-        db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
-      ).toStrictEqual({ client: "codex-cli", client_version: "4.5.6" });
-    },
-  );
+    expect(
+      await sqlOf(scope.resolve<PgDatabase>(PG_TOKEN)).one(
+        "SELECT client, client_version FROM sessions WHERE id = @id",
+        { id: session_id },
+      ),
+    ).toStrictEqual({ client: "codex-cli", client_version: "4.5.6" });
+  });
 
   it("should scope the working set to the project when a project is given", async () => {
     const client = await connect();
@@ -780,7 +777,7 @@ describe("stats tool", () => {
   });
 });
 
-describe.runIf(TEST_BACKEND === "postgres")("code tools on the postgres backend", () => {
+describe("code tools", () => {
   it("should refuse code_index and point at the plugin, which uploads the checkout", async () => {
     const client = await connect();
     const sid = await startSession(client);
@@ -791,103 +788,6 @@ describe.runIf(TEST_BACKEND === "postgres")("code tools on the postgres backend"
 
     expect(res.isError).toBe(true);
     expect(res.text).toContain("Call code_index through cerebrium-plugin");
-  });
-});
-
-describe.skipIf(TEST_BACKEND === "postgres")("code_index tool", () => {
-  it("should return a compact summary when indexing an explicit path", async () => {
-    const client = await connect();
-    const sid = await startSession(client);
-
-    const res = payload<{ repo: string; files_indexed: number; symbols_added: number }>(
-      await client.callTool({ name: "code_index", arguments: { session_id: sid, path: FIXTURE } }),
-    );
-
-    expect(res.repo).toBe("demo-repo");
-    expect(res.files_indexed).toBe(2);
-    expect(res.symbols_added).toBeGreaterThan(4);
-    expect(res).not.toHaveProperty("symbols");
-  });
-
-  it("should error when the repo is unknown and no path is given", async () => {
-    const client = await connect();
-    const sid = await startSession(client);
-
-    const res = asError(
-      await client.callTool({ name: "code_index", arguments: { session_id: sid, repo: "nope" } }),
-    );
-
-    expect(res.isError).toBe(true);
-    expect(res.text).toMatch(/not configured/);
-  });
-});
-
-describe.skipIf(TEST_BACKEND === "postgres")("code_lookup tool", () => {
-  async function indexed(client: Client): Promise<string> {
-    const sid = await startSession(client);
-    await client.callTool({ name: "code_index", arguments: { session_id: sid, path: FIXTURE } });
-    return sid;
-  }
-
-  it("should resolve a symbol by name with neighbor stubs when indexed", async () => {
-    const client = await connect();
-    const sid = await indexed(client);
-    const res = payload<{
-      symbols: { symbol_kind: string; neighbors: { edge: string; title: string }[] }[];
-    }>(
-      await client.callTool({
-        name: "code_lookup",
-        arguments: { session_id: sid, name: "AuthService" },
-      }),
-    );
-    expect(res.symbols).toHaveLength(1);
-    expect(res.symbols[0]!.symbol_kind).toBe("class");
-    expect(
-      res.symbols[0]!.neighbors.some((n) => n.edge === "defines" && n.title.endsWith("validate")),
-    ).toBe(true);
-  });
-
-  it("should list a file's symbols when given a file path", async () => {
-    const client = await connect();
-    const sid = await indexed(client);
-    const res = payload<{ symbols: { symbol_kind: string }[] }>(
-      await client.callTool({
-        name: "code_lookup",
-        arguments: { session_id: sid, file: "util/crypto.ts" },
-      }),
-    );
-    const kinds = res.symbols.map((s) => s.symbol_kind);
-    expect(kinds).toContain("function");
-    expect(kinds).toContain("enum");
-  });
-
-  it("should error when neither name nor file is provided", async () => {
-    const client = await connect();
-    const sid = await indexed(client);
-    const res = asError(
-      await client.callTool({ name: "code_lookup", arguments: { session_id: sid } }),
-    );
-    expect(res.isError).toBe(true);
-    expect(res.text).toMatch(/provide/);
-  });
-
-  it("should return the raw source slice and facets when a symbol is fetched via get", async () => {
-    const client = await connect();
-    const sid = await indexed(client);
-    const looked = payload<{ symbols: { id: string }[] }>(
-      await client.callTool({
-        name: "code_lookup",
-        arguments: { session_id: sid, name: "AuthService" },
-      }),
-    );
-    const res = payload<{ nodes: { source: string; symbol: { symbol_kind: string } }[] }>(
-      await client.callTool({
-        name: "get",
-        arguments: { session_id: sid, ids: [looked.symbols[0]!.id] },
-      }),
-    );
-    expect(res.nodes[0]!.source).toContain("class AuthService");
-    expect(res.nodes[0]!.symbol.symbol_kind).toBe("class");
   });
 });
 

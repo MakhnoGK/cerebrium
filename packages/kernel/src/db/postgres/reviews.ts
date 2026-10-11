@@ -31,7 +31,7 @@ interface NodeRow {
 }
 
 // Pending is derived: the artifact is live, its author is in scope, and no decision row
-// names it. See db/sqlite/reviews.ts.
+// names it.
 @injectable()
 export class PgReviewsRepo extends PgBaseRepo implements ReviewsRepo {
   private scopeClause(scope: ReviewScope, column: string): { sql: string; principals: string[] } {

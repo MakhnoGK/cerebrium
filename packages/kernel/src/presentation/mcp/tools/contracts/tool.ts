@@ -9,7 +9,7 @@ export function tool(): ClassDecorator {
   return (target) => {
     injectable()(target as never);
     // Transient (not instance-cached): each container that resolves the tool set builds
-    // fresh instances against its own DB_TOKEN. The server resolves the set once at
+    // fresh instances against its own store. The server resolves the set once at
     // startup, so this costs nothing in production, and it keeps test scopes isolated.
     container.register(TOOL_TOKEN, {
       useFactory: (dependencyContainer) => dependencyContainer.resolve(target as never),

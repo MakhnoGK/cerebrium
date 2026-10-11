@@ -152,9 +152,7 @@ export function createDaemonMethods(
     // The operator payload, not the compact one the agent-facing `stats` tool returns:
     // this is the surface the CLI and the GUI render.
     //
-    // Answered off the main thread when a pool exists. This call is ~140ms of synchronous
-    // SQLite work, and running it here is what used to make every other client wait for
-    // its full remainder.
+    // Answered off the main thread when a pool exists.
     status: async () => {
       const snapshot =
         reads === undefined

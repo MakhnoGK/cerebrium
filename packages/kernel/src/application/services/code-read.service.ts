@@ -275,8 +275,7 @@ export class CodeReadService {
     return out;
   }
 
-  // The structural edges of one symbol on one branch, resolved the way the SQLite indexer
-  // resolved them at write time.
+  // The structural edges of one symbol on one branch.
   private async neighbors(scope: BranchScope, sym: CodeSymbolRow): Promise<NeighborStub[]> {
     const dir = await this.directory(scope);
     const stubs = new Map<string, NeighborStub>();

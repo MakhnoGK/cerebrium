@@ -10,7 +10,6 @@ import {
   percentile,
   terms,
 } from "@scripts/role-metrics";
-import type Database from "better-sqlite3";
 import { ConsolidationKind, GENERATION_ROLES, GenerationRole } from "@cerebrium/contracts/vocab";
 import type {
   AnnotateTask,
@@ -25,9 +24,14 @@ import {
 } from "@/domain/ports/consolidation-provider";
 import { HttpConsolidator } from "@/consolidation/http";
 import { resolveRoles } from "@/consolidation/roles";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { buildContainer } from "@/container";
-import { ConsolidationConfig, DatabaseConfig } from "@/infrastructure/config";
+import {
+  ConsolidationConfig,
+  EnvConfigSource,
+  LayeredConfigSource,
+  StaticConfigSource,
+} from "@/infrastructure/config";
 
 // The gate in front of pointing a generation role at a different model: `npm run eval:roles`.
 // The embedding gate exists because a model can produce a space that looks fine and is
@@ -57,23 +61,33 @@ interface Timed<T> {
 function main(): Promise<void> {
   if (process.argv.includes("--help")) {
     process.stdout.write(
-      "usage: npm run eval:roles -- --model TAG [--baseline TAG] [--role annotate,reconcile,generate]\n" +
-        "                            [--n 10] [--url URL] [--json]\n",
+      "usage: npm run eval:roles -- --pg URL --model TAG [--baseline TAG]\n" +
+        "                            [--role annotate,reconcile,generate] [--n 10] [--url URL] [--json]\n",
     );
 
     return Promise.resolve();
   }
 
-  const container = buildContainer({ role: "cli" });
-  const config = container.resolve(ConsolidationConfig);
+  const store = flag("--pg");
   const candidate = flag("--model");
 
-  if (candidate === undefined) {
-    process.stdout.write("pass --model TAG: the model being considered for a role\n");
+  if (store === undefined || candidate === undefined) {
+    process.stdout.write(
+      "pass --pg URL (the store to sample) and --model TAG (the model being considered)\n",
+    );
     process.exitCode = 1;
 
     return Promise.resolve();
   }
+
+  const container = buildContainer({
+    role: "cli",
+    source: new LayeredConfigSource(
+      new StaticConfigSource({ MEMORY_PG_URL: store }),
+      new EnvConfigSource(),
+    ),
+  });
+  const config = container.resolve(ConsolidationConfig);
 
   const roles = (flag("--role") ?? "annotate,reconcile")
     .split(",")
@@ -83,8 +97,8 @@ function main(): Promise<void> {
     );
 
   return report({
-    db: container.resolve<Database.Database>(DB_TOKEN),
-    dbPath: container.resolve(DatabaseConfig).path,
+    db: container.resolve<PgDatabase>(PG_TOKEN),
+    dbPath: redactUrl(store),
     baseline: flag("--baseline") ?? config.model,
     candidate,
     url: flag("--url") ?? config.url,
@@ -96,7 +110,7 @@ function main(): Promise<void> {
 }
 
 async function report(opts: {
-  db: Database.Database;
+  db: PgDatabase;
   dbPath: string;
   baseline: string;
   candidate: string;
@@ -107,9 +121,11 @@ async function report(opts: {
   asJson: boolean;
 }): Promise<void> {
   const labelled = opts.roles.some((role) => role !== GenerationRole.ANNOTATE)
-    ? loadLabelled(opts.db, opts.n)
+    ? await loadLabelled(opts.db, opts.n)
     : [];
-  const records = opts.roles.includes(GenerationRole.ANNOTATE) ? loadRecords(opts.db, opts.n) : [];
+  const records = opts.roles.includes(GenerationRole.ANNOTATE)
+    ? await loadRecords(opts.db, opts.n)
+    : [];
   const results: Record<string, unknown> = {};
   let passes = true;
 
@@ -351,23 +367,30 @@ async function timed_<T>(call: () => Promise<T>): Promise<Timed<T>> {
 // two runs compare the same clusters and a number that moved means the model moved — and it
 // is uncorrelated with age, unlike id order, whose head is old candidates whose members have
 // since been superseded. The whole labelled set is read; it is a few hundred rows.
-function loadLabelled(db: Database.Database, n: number): Labelled[] {
-  const rows = db
-    .prepare(
-      `SELECT id, kind, status, member_ids
-         FROM consolidation_candidates
-        WHERE status IN ('applied','dismissed') AND kind IN ('merge','distill')
-        ORDER BY member_hash`,
-    )
-    .all() as { id: string; kind: ConsolidationKind; status: string; member_ids: string }[];
-  const content = db.prepare(
-    `SELECT n.id AS id, n.title AS title, r.content AS content
-       FROM nodes n
-       JOIN revisions r ON r.node_id = n.id
-      WHERE n.id = ?
-      ORDER BY r.rev DESC
-      LIMIT 1`,
+async function loadLabelled(db: PgDatabase, n: number): Promise<Labelled[]> {
+  const { rows } = await db.query<{
+    id: string;
+    kind: ConsolidationKind;
+    status: string;
+    member_ids: string;
+  }>(
+    `SELECT id, kind, status, member_ids
+       FROM consolidation_candidates
+      WHERE status IN ('applied','dismissed') AND kind IN ('merge','distill')
+      ORDER BY member_hash`,
   );
+  const content = async (id: string) =>
+    (
+      await db.query<Labelled["members"][number]>(
+        `SELECT n.id AS id, n.title AS title, r.content AS content
+           FROM nodes n
+           JOIN revisions r ON r.node_id = n.id
+          WHERE n.id = @id
+          ORDER BY r.rev DESC
+          LIMIT 1`,
+        { id },
+      )
+    ).rows[0];
   const balanced: Labelled[] = [];
   const half = Math.max(1, Math.floor(n / 2));
   let applied = 0;
@@ -379,9 +402,9 @@ function loadLabelled(db: Database.Database, n: number): Labelled[] {
     if (expectMerge && applied >= half) continue;
     if (!expectMerge && dismissed >= n - half) continue;
 
-    const members = (JSON.parse(row.member_ids) as string[])
-      .map((id) => content.get(id) as Labelled["members"][number] | undefined)
-      .filter((member): member is Labelled["members"][number] => member !== undefined);
+    const members = (
+      await Promise.all((JSON.parse(row.member_ids) as string[]).map(content))
+    ).filter((member): member is Labelled["members"][number] => member !== undefined);
 
     // A cluster whose members have since been hard-superseded cannot be re-judged.
     if (members.length < 2) continue;
@@ -395,21 +418,22 @@ function loadLabelled(db: Database.Database, n: number): Labelled[] {
   return balanced;
 }
 
-function loadRecords(
-  db: Database.Database,
+async function loadRecords(
+  db: PgDatabase,
   n: number,
-): { title: string; content: string; project: string | null }[] {
-  return db
-    .prepare(
-      `SELECT n.title AS title, n.project AS project, r.content AS content
-         FROM nodes n
-         JOIN revisions r ON r.node_id = n.id
-                         AND r.rev = (SELECT MAX(rev) FROM revisions WHERE node_id = n.id)
-        WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL
-        ORDER BY n.id
-        LIMIT ?`,
-    )
-    .all(n) as { title: string; content: string; project: string | null }[];
+): Promise<{ title: string; content: string; project: string | null }[]> {
+  const { rows } = await db.query<{ title: string; content: string; project: string | null }>(
+    `SELECT n.title AS title, n.project AS project, r.content AS content
+       FROM nodes n
+       JOIN revisions r ON r.node_id = n.id
+                       AND r.rev = (SELECT MAX(rev) FROM revisions WHERE node_id = n.id)
+      WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL
+      ORDER BY n.id
+      LIMIT @n`,
+    { n },
+  );
+
+  return rows;
 }
 
 function render(
@@ -512,3 +536,4 @@ function ms(x: number): string {
 }
 
 await main();
+process.exit();

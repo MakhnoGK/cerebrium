@@ -1,10 +1,9 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { setup } from "@test/helpers";
+import { setup, type TestEnv } from "@test/helpers";
 
 async function session(): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({})).session_id;
@@ -22,12 +21,10 @@ async function writeFact(s: string, title: string): Promise<string> {
   return out.id;
 }
 
-function liveEdges(db: { prepare: (sql: string) => { all: () => unknown } }) {
-  return db
-    .prepare(
-      "SELECT src, dst, type FROM edges WHERE invalidated_at IS NULL ORDER BY src, dst, type",
-    )
-    .all() as { src: string; dst: string; type: string }[];
+function liveEdges(env: TestEnv) {
+  return env.sql.all<{ src: string; dst: string; type: string }>(
+    "SELECT src, dst, type FROM edges WHERE invalidated_at IS NULL ORDER BY src, dst, type",
+  );
 }
 
 describe("NodesRepo.invalidateNode edge re-pointing", () => {
@@ -48,7 +45,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     });
 
     // Then
-    const edges = liveEdges(env.db);
+    const edges = await liveEdges(env);
     expect(edges).toContainEqual({ src: referrer, dst: successor, type: EdgeType.REFERENCES });
     expect(edges).not.toContainEqual({ src: referrer, dst: doomed, type: EdgeType.REFERENCES });
     expect((await env.stats.techStats(env.clock.t)).graph.dangling_edges).toBe(0);
@@ -70,7 +67,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     });
 
     // Then
-    const edges = liveEdges(env.db);
+    const edges = await liveEdges(env);
     expect(edges).not.toContainEqual({ src: successor, dst: successor, type: EdgeType.REFERENCES });
     expect(edges).toEqual([{ src: successor, dst: doomed, type: EdgeType.SUPERSEDES }]);
   });
@@ -92,7 +89,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
       session_id: s,
     });
 
-    const edges = liveEdges(env.db);
+    const edges = await liveEdges(env);
     expect(edges).not.toContainEqual({ src: referrer, dst: doomed, type: EdgeType.SIMILAR_TO });
     expect(edges).not.toContainEqual({ src: doomed, dst: other, type: EdgeType.SIMILAR_TO });
     expect(edges).not.toContainEqual({ src: referrer, dst: successor, type: EdgeType.SIMILAR_TO });
@@ -111,7 +108,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     await env.nodes.invalidateNode(doomed, { ts: env.clock.t, session_id: s });
 
     // Then
-    expect(liveEdges(env.db)).toContainEqual({
+    expect(await liveEdges(env)).toContainEqual({
       src: referrer,
       dst: doomed,
       type: EdgeType.REFERENCES,
@@ -155,7 +152,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     });
 
     // Then
-    const edges = liveEdges(env.db);
+    const edges = await liveEdges(env);
     expect(edges).toEqual([
       { src: referrer, dst: survivor, type: EdgeType.REFERENCES },
       { src: survivor, dst: loser, type: EdgeType.SUPERSEDES },
@@ -185,7 +182,7 @@ describe("NodesRepo.invalidateNode edge re-pointing", () => {
     });
 
     // Then
-    const edges = liveEdges(env.db);
+    const edges = await liveEdges(env);
     expect(edges).toContainEqual({ src: referrer, dst: first, type: EdgeType.REFERENCES });
     expect(edges).not.toContainEqual({ src: referrer, dst: second, type: EdgeType.REFERENCES });
   });

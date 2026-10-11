@@ -1,8 +1,8 @@
 # Agent memory (Cerebrium)
 
 `Cerebrium` is my cross-session working memory and the single durable knowledge
-base — a stdio MCP server owning one SQLite file (FTS5 + vector search + a typed
-graph). It is where I record and recall everything across sessions: facts and
+base — a kernel on the host owning one Postgres store (BM25 + vector search + a
+typed graph), reached through the stdio MCP plugin. It is where I record and recall everything across sessions: facts and
 how-tos I've learned, decisions I made (with reasons), entities, and where I left
 off. I am the only writer. Source repo: `~/projects/ai/cerebrium`.
 

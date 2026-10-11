@@ -1,12 +1,11 @@
 import "reflect-metadata";
-import type Database from "better-sqlite3";
 import { container } from "tsyringe";
 import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
 import { HintsService, MemoryService } from "@/application/services";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { estimateTokens } from "@/core/tokens";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { buildContainer } from "@/container";
@@ -16,16 +15,16 @@ import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infr
 // responses, before changing a contract every consumer parses. Replays the queries from the
 // retrieval-outcome log through the real ranking pipeline and encodes each response three
 // ways. Read-only: the store is opened through the `cli` role and the session-hint write is
-// stubbed out, exactly as `eval-retrieval --db` does.
+// stubbed out, exactly as `eval-retrieval --pg` does.
 //
 // Not part of `npm test` (it may download an embedding model); run with `npm run eval:encoding`.
 
 const HELP = `
 eval-encoding — what a cheaper encoding is worth on real tool responses.
 
-  npm run eval:encoding -- --db PATH [--limit N] [--queries N]
+  npm run eval:encoding -- --pg URL [--limit N] [--queries N]
 
-  --db PATH    Store to replay against. Opened READ-ONLY; the run cannot modify it.
+  --pg URL     Postgres store to replay against, in a read-only session.
   --limit N    Results per search (default 10) — the same knob agents pass.
   --queries N  Cap how many logged queries to replay (default all).
   --show       Print one encoded sample of each form.
@@ -122,14 +121,12 @@ function encodings(name: string, rows: Row[]): Encoded[] {
 }
 
 // The queries the log actually carries, most recent first, deduplicated.
-function loggedQueries(db: Database.Database): string[] {
-  const rows = db
-    .prepare(
-      `SELECT detail FROM events
-       WHERE action = 'search' AND detail LIKE '%"query"%'
-       ORDER BY ts DESC, id DESC`,
-    )
-    .all() as { detail: string }[];
+async function loggedQueries(db: PgDatabase): Promise<string[]> {
+  const { rows } = await db.query<{ detail: string }>(
+    `SELECT detail FROM events
+     WHERE action = 'search' AND detail LIKE '%"query"%'
+     ORDER BY ts DESC, id DESC`,
+  );
 
   const seen = new Set<string>();
 
@@ -160,10 +157,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const store = flag(argv, "--db");
+  const store = flag(argv, "--pg");
 
   if (!store) {
-    console.log("eval-encoding needs a real store: --db PATH. See --help.");
+    console.log("eval-encoding needs a real store: --pg URL. See --help.");
     return;
   }
 
@@ -173,7 +170,7 @@ async function main(): Promise<void> {
   const root = buildContainer({
     role: "cli",
     source: new LayeredConfigSource(
-      new StaticConfigSource({ MEMORY_DB_PATH: store }),
+      new StaticConfigSource({ MEMORY_PG_URL: store }),
       new EnvConfigSource(),
     ),
     into: container.createChildContainer(),
@@ -184,11 +181,11 @@ async function main(): Promise<void> {
     useValue: { getSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
   });
 
-  const db = root.resolve<Database.Database>(DB_TOKEN);
+  const db = root.resolve<PgDatabase>(PG_TOKEN);
   const provider = root.resolve<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN);
-  const queries = loggedQueries(db).slice(0, cap);
+  const queries = (await loggedQueries(db)).slice(0, cap);
 
-  console.log(`store: ${store} (read-only)`);
+  console.log(`store: ${redactUrl(store)} (read-only)`);
   console.log(`embeddings: ${provider.name}`);
   console.log(`replaying ${queries.length} logged queries at limit ${limit}\n`);
 
@@ -273,3 +270,4 @@ async function main(): Promise<void> {
 }
 
 await main();
+process.exit();

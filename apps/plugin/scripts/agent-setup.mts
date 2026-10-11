@@ -5,9 +5,8 @@ import { fileURLToPath } from "node:url";
 import { stableNodePath } from "@cerebrium/kernel/runtime/launch-agent";
 import { applyHost, type Applied } from "@plugin/scripts/agent-apply";
 import {
-  DEFAULT_ENV_KEYS,
-  defaultEnv,
   discoverEnv,
+  HOST_REQUIRED,
   HOSTS,
   isHostEnv,
   KERNEL_ENV_KEYS,
@@ -22,7 +21,7 @@ import {
   type SurfaceStatus,
 } from "@plugin/scripts/agent-hosts";
 import { applyIndexRepos, planIndexRepos } from "@plugin/scripts/agent-index-repos";
-import { assertNativeRuntime, resolveNodeRuntime } from "@plugin/scripts/agent-runtime";
+import { resolveNodeRuntime } from "@plugin/scripts/agent-runtime";
 import { verify } from "@plugin/scripts/agent-verify";
 
 // Reports — and with --apply, installs — what each agent host needs to use Cerebrium as
@@ -31,29 +30,27 @@ import { verify } from "@plugin/scripts/agent-verify";
 const HELP = `
 agent-setup — report or install what each agent host needs to use Cerebrium as memory.
 
-  npm run agent:setup -- [options]
+  npm run agent:setup -- --kernel tcp://HOST:PORT --token-file PATH [options]
 
-  --host H     Host to act on: ${HOSTS.join(" | ")} | all (default all).
-  --apply      Write the missing surfaces. Without it, nothing is written.
-  --force      Move an existing skill *copy* aside (kept, never deleted) and link instead.
-  --repo PATH  Working tree the hosts should point at (default: this checkout).
-  --home PATH  Home directory to act on (default: $HOME). For testing a fake home.
-  --verify     Prove it works: boot the bundle, call session_start against a throwaway
-               store, and run the hook script. Never touches the real memory. Exits
-               non-zero if any of that fails.
-  --json       Emit the plan as JSON instead of a table.
-  --check      Exit non-zero if a detected host is missing a surface.
-  --help       This text.
-
-Against a Cerebrium host:
-
-  npm run agent:setup -- --kernel tcp://HOST:PORT --token-file PATH [--host H] [--apply] [--verify]
+  --kernel URL      The Cerebrium host every entry talks to. With --token-file.
+  --token-file PATH The principal token for that host (mode 600).
+  --host H          Host to act on: ${HOSTS.join(" | ")} | all (default all).
+  --apply           Write the missing surfaces. Without it, nothing is written.
+  --force           Move an existing skill *copy* aside (kept, never deleted) and link instead.
+  --repo PATH       Working tree the hosts should point at (default: this checkout).
+  --home PATH       Home directory to act on (default: $HOME). For testing a fake home.
+  --verify          Prove it works: boot the plugin bundle, open a session on the host when
+                    one is registered, and run the hook script. Exits non-zero if any of
+                    that fails.
+  --json            Emit the plan as JSON instead of a table.
+  --check           Exit non-zero if a detected host is missing a surface.
+  --help            This text.
 
   The cerebrium entry of every host runs apps/plugin/dist/server.js against that host. Its
   env holds the URL and the token file's path; the token itself is never read into config
-  or output. Once registered, a later run without the two flags keeps them. --apply also
-  removes the ${TRIAL_ENTRY} trial entry from Claude Code and Codex. --verify opens a real
-  session on the host through the plugin bundle.
+  or output. Once registered, a later run without the two flags keeps them. There is no
+  local store: without a host, no entry is written. --apply also removes the
+  ${TRIAL_ENTRY} trial entry from Claude Code and Codex.
 
   --index-repo PATH (repeatable) opts a checkout into the host's per-branch code index:
   it is listed in ~/.cerebrium/plugin-index.json, the session-start hook indexes it in the
@@ -122,7 +119,8 @@ function report(
 ): void {
   process.stdout.write(`\nNode runtime: ${nodePath}\n`);
   process.stdout.write(`\nEnvironment (${source}):\n`);
-  for (const key of isHostEnv(env) ? KERNEL_ENV_KEYS : DEFAULT_ENV_KEYS) {
+  if (!isHostEnv(env)) process.stdout.write(`  none — ${HOST_REQUIRED}\n`);
+  for (const key of KERNEL_ENV_KEYS) {
     if (env[key] !== undefined) process.stdout.write(`  ${key}=${env[key]}\n`);
   }
 
@@ -213,32 +211,16 @@ async function main(): Promise<void> {
 
   const base: PlanInput = { home, repoRoot, nodePath, env: {}, hasCommand };
   const discovered = kernelUrl === "" ? discoverEnv(base) : null;
-  const env =
-    kernelUrl !== ""
-      ? kernelEnv(kernelUrl, resolve(tokenFile))
-      : (discovered ?? defaultEnv(home, repoRoot));
-  const input: PlanInput = {
-    ...base,
-    env,
-    nodePath: isHostEnv(env) ? stableNodePath(nodePath) : nodePath,
-  };
+  const env = kernelUrl !== "" ? kernelEnv(kernelUrl, resolve(tokenFile)) : (discovered ?? {});
+  const input: PlanInput = { ...base, env, nodePath: stableNodePath(nodePath) };
   const source =
     kernelUrl !== ""
       ? "from --kernel and --token-file"
       : discovered !== null
         ? "reused from an existing registration"
-        : "defaults";
+        : "no registration found";
 
   if (flag("apply")) {
-    if (!isHostEnv(env)) {
-      try {
-        assertNativeRuntime(repoRoot, nodePath);
-      } catch (err) {
-        process.stderr.write(`Runtime preflight failed: ${String(err)}\n`);
-        process.exitCode = 1;
-        return;
-      }
-    }
     let unresolved = false;
     for (const host of hosts) {
       const applied = applyHost(host, input, { force: flag("force"), run });

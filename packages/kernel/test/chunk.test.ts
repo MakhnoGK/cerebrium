@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -82,9 +81,9 @@ describe("Embedding diff: only genuinely-new chunks re-embed", () => {
 
     // Then
     expect(first.embedded).toBe(3); // all three chunks embedded on first drain
-    expect((env.db.prepare("SELECT COUNT(*) c FROM embedding_meta").get() as { c: number }).c).toBe(
-      3,
-    );
+    expect(
+      (await env.sql.one<{ c: number }>("SELECT COUNT(*)::int AS c FROM chunk_vectors"))!.c,
+    ).toBe(3);
 
     // When — edit one section only.
     const edited = NOTE.replace(

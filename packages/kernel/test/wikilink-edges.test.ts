@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -31,12 +30,15 @@ async function write(title: string, content: string): Promise<string> {
   return id;
 }
 
-function edgeBetween(src: string, dst: string): { type: string; provenance: string } | undefined {
-  return env.db
-    .prepare(
-      "SELECT type, provenance FROM edges WHERE src = ? AND dst = ? AND invalidated_at IS NULL",
-    )
-    .get(src, dst) as { type: string; provenance: string } | undefined;
+function edgeBetween(
+  src: string,
+  dst: string,
+): Promise<{ type: string; provenance: string } | undefined> {
+  return env.sql.one(
+    `SELECT type, provenance FROM edges
+      WHERE src = @src AND dst = @dst AND invalidated_at IS NULL`,
+    { src, dst },
+  );
 }
 
 beforeEach(async () => {
@@ -58,7 +60,7 @@ describe("Wikilinks as edges", () => {
 
     // Then
     expect(result.wikilinks_linked).toBeGreaterThanOrEqual(1);
-    expect(edgeBetween(source, target)).toEqual({
+    expect(await edgeBetween(source, target)).toEqual({
       type: EdgeType.REFERENCES,
       provenance: "system",
     });
@@ -76,7 +78,7 @@ describe("Wikilinks as edges", () => {
     await container.resolve(ConsolidationWorker).tick();
 
     // Then
-    expect(edgeBetween(source, target)?.type).toBe(EdgeType.REFERENCES);
+    expect((await edgeBetween(source, target))?.type).toBe(EdgeType.REFERENCES);
   });
 
   it("should count a target that does not exist instead of inventing an edge", async () => {
@@ -108,7 +110,7 @@ describe("Wikilinks as edges", () => {
 
     // Then
     expect(result.wikilinks_linked).toBe(0);
-    expect(edgeBetween(source, target)).toEqual({
+    expect(await edgeBetween(source, target)).toEqual({
       type: EdgeType.RELATES_TO,
       provenance: "agent",
     });
@@ -130,7 +132,7 @@ describe("Wikilinks as edges", () => {
     const result = await container.resolve(ConsolidationWorker).tick();
 
     // Then
-    expect(edgeBetween(source, target)?.provenance).toBe("agent");
+    expect((await edgeBetween(source, target))?.provenance).toBe("agent");
     expect(result.wikilinks_linked).toBe(0);
   });
 
@@ -152,7 +154,7 @@ describe("Wikilinks as edges", () => {
 
     // Then
     expect(result.wikilinks_linked).toBeGreaterThanOrEqual(1);
-    expect(edgeBetween(source, fresh)?.type).toBe(EdgeType.REFERENCES);
+    expect((await edgeBetween(source, fresh))?.type).toBe(EdgeType.REFERENCES);
   });
 
   it("should not guess when a retired target has more than one live successor", async () => {
@@ -177,8 +179,8 @@ describe("Wikilinks as edges", () => {
     const result = await container.resolve(ConsolidationWorker).tick();
 
     // Then
-    expect(edgeBetween(source, first)).toBeUndefined();
-    expect(edgeBetween(source, second)).toBeUndefined();
+    expect(await edgeBetween(source, first)).toBeUndefined();
+    expect(await edgeBetween(source, second)).toBeUndefined();
     expect(result.wikilinks_dangling).toBeGreaterThanOrEqual(1);
   });
 
@@ -217,6 +219,6 @@ describe("Wikilinks as edges", () => {
 
     // Then
     await worker.tick();
-    expect(edgeBetween(source, target)?.type).toBe(EdgeType.REFERENCES);
+    expect((await edgeBetween(source, target))?.type).toBe(EdgeType.REFERENCES);
   });
 });

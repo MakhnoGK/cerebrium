@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import "reflect-metadata";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
@@ -8,7 +7,7 @@ import { InvalidateTool } from "@/presentation/mcp/tools/invalidate";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { setup } from "@test/helpers";
+import { setup, type TestEnv } from "@test/helpers";
 
 const P = "auth-service";
 const FACT =
@@ -21,6 +20,15 @@ type Result = Envelope & {
 };
 function results(res: unknown): Result[] {
   return (res as { results: Result[] }).results;
+}
+
+async function pendingEmbedding(env: TestEnv, id: string): Promise<number> {
+  return (await env.sql.one<{ p: number }>(
+    "SELECT pending_embedding AS p FROM nodes WHERE id = @id",
+    {
+      id,
+    },
+  ))!.p;
 }
 
 describe("Retrieval lifecycle end-to-end", () => {
@@ -43,13 +51,7 @@ describe("Retrieval lifecycle end-to-end", () => {
       content: FACT,
       project: P,
     })) as unknown as Envelope;
-    expect(
-      (
-        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as {
-          p: number;
-        }
-      ).p,
-    ).toBe(1);
+    expect(await pendingEmbedding(env, fact.id)).toBe(1);
     const textHit = results(
       await search.invoke({
         session_id: s,
@@ -75,13 +77,7 @@ describe("Retrieval lifecycle end-to-end", () => {
 
     // 2) worker drains -> vector search now finds it, with a best_chunk snippet
     await env.worker.tick();
-    expect(
-      (
-        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(fact.id) as {
-          p: number;
-        }
-      ).p,
-    ).toBe(0);
+    expect(await pendingEmbedding(env, fact.id)).toBe(0);
     const vecHit = results(
       await search.invoke({
         session_id: s,

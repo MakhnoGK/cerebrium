@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -7,7 +6,15 @@ import { EmbeddingWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { setup } from "@test/helpers";
+import { setup, type TestEnv } from "@test/helpers";
+
+async function pending(env: TestEnv, id: string): Promise<number | undefined> {
+  return (
+    await env.sql.one<{ p: number }>("SELECT pending_embedding AS p FROM nodes WHERE id = @id", {
+      id,
+    })
+  )?.p;
+}
 
 async function session(): Promise<string> {
   return (await container.resolve(SessionStartTool).invoke({})).session_id;
@@ -39,13 +46,7 @@ describe("Embedding queue drains", () => {
     const env = setup();
     const s = await session();
     const node = await writeFact(s, "TTL");
-    expect(
-      (
-        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as {
-          p: number;
-        }
-      ).p,
-    ).toBe(1);
+    expect(await pending(env, node.id)).toBe(1);
     expect((await env.queue.embeddingStats()).backlog).toBe(1);
 
     // When
@@ -53,15 +54,9 @@ describe("Embedding queue drains", () => {
 
     // Then
     expect(res.embedded).toBeGreaterThan(0);
-    expect(
-      (
-        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as {
-          p: number;
-        }
-      ).p,
-    ).toBe(0);
+    expect(await pending(env, node.id)).toBe(0);
     expect((await env.queue.embeddingStats()).backlog).toBe(0);
-    expect(env.db.prepare("SELECT COUNT(*) c FROM embedding_queue").get()).toEqual({ c: 0 });
+    expect(await env.sql.one("SELECT COUNT(*)::int AS c FROM embedding_queue")).toEqual({ c: 0 });
   });
 });
 
@@ -121,7 +116,7 @@ describe("Restart recovery", () => {
     const env = setup();
     const s = await session();
     const node = await writeFact(s, "Orphan");
-    env.db.prepare("DELETE FROM embedding_queue").run(); // simulate a lost queue row
+    await env.sql.run("DELETE FROM embedding_queue");
     expect((await env.queue.queueRows(10)).length).toBe(0);
 
     // When
@@ -131,12 +126,6 @@ describe("Restart recovery", () => {
     // Then
     expect((await env.queue.queueRows(10)).length).toBe(1); // pending node re-queued
     await restarted.tick();
-    expect(
-      (
-        env.db.prepare("SELECT pending_embedding p FROM nodes WHERE id=?").get(node.id) as {
-          p: number;
-        }
-      ).p,
-    ).toBe(0);
+    expect(await pending(env, node.id)).toBe(0);
   });
 });

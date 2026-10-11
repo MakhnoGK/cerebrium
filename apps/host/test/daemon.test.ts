@@ -16,7 +16,6 @@ import {
   readDaemonPid,
   writeDaemonPid,
 } from "@cerebrium/kernel/runtime/daemon-pid";
-import { ensureDaemon } from "@cerebrium/kernel/runtime/ensure-daemon";
 import {
   nextIdleState,
   ownedByAnother,
@@ -241,13 +240,6 @@ describe("runDaemon loop", () => {
 
     // Then
     await expect(p).resolves.toBeUndefined();
-  });
-});
-
-describe("ensureDaemon", () => {
-  it("should skip spawning under the local-null provider", () => {
-    // Given / When / Then — the decision comes from the resolved config, not process.env.
-    expect(ensureDaemon({ dbPath: DB, embedProvider: "local-null" })).toBe("skipped");
   });
 });
 

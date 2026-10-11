@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -44,20 +43,19 @@ describe("live node references", () => {
     await create("First", null);
     await create("Second", null);
 
-    const edges = (env.db.prepare("SELECT COUNT(*) AS c FROM edges").get() as { c: number }).c;
+    const edges = await env.sql.one("SELECT COUNT(*)::int AS c FROM edges");
 
-    expect(edges).toBe(0);
+    expect(edges).toEqual({ c: 0 });
   });
 
   it("should atomically relate a write to its explicit parent without duplicating the edge", async () => {
     const parent = await create("Parent", null);
     const child = await create("Child", parent.id, [{ dst: parent.id, type: EdgeType.RELATES_TO }]);
 
-    const rows = env.db
-      .prepare(
-        "SELECT src, dst, type FROM edges WHERE src = ? AND dst = ? AND invalidated_at IS NULL",
-      )
-      .all(child.id, parent.id);
+    const rows = await env.sql.all(
+      "SELECT src, dst, type FROM edges WHERE src = @src AND dst = @dst AND invalidated_at IS NULL",
+      { src: child.id, dst: parent.id },
+    );
 
     expect(rows).toStrictEqual([{ src: child.id, dst: parent.id, type: EdgeType.RELATES_TO }]);
   });
@@ -79,15 +77,14 @@ describe("live node references", () => {
       reason: "replaced again",
       superseded_by: terminal.id,
     });
-    const before = (env.db.prepare("SELECT COUNT(*) AS c FROM nodes").get() as { c: number }).c;
+    const count = "SELECT COUNT(*)::int AS c FROM nodes";
+    const before = await env.sql.one(count);
 
     await expect(create("Rejected", first.id)).rejects.toThrow(
       `parent node ${first.id} is invalidated. Use live successor ${terminal.id}.`,
     );
 
-    expect((env.db.prepare("SELECT COUNT(*) AS c FROM nodes").get() as { c: number }).c).toBe(
-      before,
-    );
+    expect(await env.sql.one(count)).toEqual(before);
   });
 
   it("should reject stale ids in explicit links and checkpoint references", async () => {

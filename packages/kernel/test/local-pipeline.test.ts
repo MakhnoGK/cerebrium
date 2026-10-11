@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Capability, MemoryKind, Posture } from "@cerebrium/contracts/vocab";
@@ -46,14 +45,15 @@ function writeArgs(session_id: string, title = "A fact") {
   };
 }
 
-function rows(action: string): number {
-  return (
-    env.db.prepare("SELECT COUNT(*) AS n FROM events WHERE action = ?").get(action) as { n: number }
-  ).n;
+async function rows(action: string): Promise<number> {
+  return (await env.sql.one<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM events WHERE action = @action",
+    { action },
+  ))!.n;
 }
 
-function nodeCount(): number {
-  return (env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get() as { n: number }).n;
+async function nodeCount(): Promise<number> {
+  return (await env.sql.one<{ n: number }>("SELECT COUNT(*)::int AS n FROM nodes"))!.n;
 }
 
 beforeEach(() => {
@@ -67,13 +67,13 @@ describe("Local mode delivery path", () => {
       "codex-mcp-client": profile({ [Capability.WRITE]: Posture.OFF }),
     });
     const { session_id } = await scope.resolve(SessionStartTool).invoke({});
-    const before = nodeCount();
+    const before = await nodeCount();
 
     // When / Then
     await expect(scope.resolve(WriteTool).invoke(writeArgs(session_id))).rejects.toBeInstanceOf(
       CapabilityDeniedError,
     );
-    expect(nodeCount()).toBe(before);
+    expect(await nodeCount()).toBe(before);
   });
 
   it("should leave the capabilities it did not revoke alone", async () => {
@@ -126,8 +126,8 @@ describe("Local mode delivery path", () => {
     await scope.resolve(WriteTool).invoke(writeArgs(session_id));
 
     // Then
-    expect(rows("write")).toBe(1);
-    expect(rows("session_start")).toBe(1);
+    expect(await rows("write")).toBe(1);
+    expect(await rows("session_start")).toBe(1);
   });
 
   it("should attribute the session to the host's identity, not to an argument", async () => {
@@ -138,9 +138,13 @@ describe("Local mode delivery path", () => {
     const { session_id } = await scope.resolve(SessionStartTool).invoke({});
 
     // Then
-    const row = env.db
-      .prepare("SELECT client, client_version, principal_id FROM sessions WHERE id = ?")
-      .get(session_id) as { client: string; client_version: string; principal_id: string };
+    const row = (await env.sql.one<{
+      client: string;
+      client_version: string;
+      principal_id: string;
+    }>("SELECT client, client_version, principal_id FROM sessions WHERE id = @id", {
+      id: session_id,
+    }))!;
 
     expect(row.client).toBe("claude-code");
     expect(row.client_version).toBe("1.0.0");

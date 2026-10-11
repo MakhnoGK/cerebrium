@@ -1,19 +1,20 @@
 # cerebrium
 
-**Persistent, cross-session memory for AI agents — one SQLite file behind a single stdio MCP server.**
+**Persistent, cross-session memory for AI agents — one Postgres store behind a stdio MCP plugin.**
 
 Cerebrium gives an LLM agent (such as Claude Code) a durable knowledge base it can
-search, write to, and reason over across sessions. One TypeScript process owns one
-SQLite database that combines **FTS5 full-text search**, **vector search
-(sqlite-vec)**, and a **typed knowledge graph** over append-only, revisioned nodes.
+search, write to, and reason over across sessions. One daemon owns one Postgres
+database that combines **BM25 full-text search (pg_search)**, **vector search
+(pgvector)**, and a **typed knowledge graph** over append-only, revisioned nodes;
+agents reach it through a thin stdio plugin.
 The agent is the only writer; nothing is ever hard-deleted; search returns compact
 *envelopes* and full content is fetched by id, so retrieval stays token-cheap.
 
 It distinguishes **episodic** memory (write-once records of *what happened*, relevance
 decaying with age) from **semantic** memory (durable facts, maintained through
-revisions). Search is hybrid — FTS5 bm25 and vector KNN fused with Reciprocal Rank
+revisions). Search is hybrid — BM25 and vector KNN fused with Reciprocal Rank
 Fusion, re-scored by a memory model, then expanded one hop over the graph — with an
-asynchronous embedding pipeline drained by a background daemon, in-process tree-sitter code indexing, and a consolidation sweep that distils episodic memory into semantic knowledge.
+asynchronous embedding pipeline drained by a background daemon, per-branch tree-sitter code indexing, and a consolidation sweep that distils episodic memory into semantic knowledge.
 
 A personal R&D project exploring long-term memory for agents, used daily with Claude Code.
 
@@ -50,28 +51,27 @@ packages/kernel/src/
                              code index, event log, model warm-up)
                    workers/  (embedding drain, consolidation sweep)
                    errors/   (typed errors a use case throws)
-  db/              sqlite/ (the SQLite adapter: migrations, repositories, schema snapshot)
-                   postgres/ (the Postgres adapter: its baseline, repositories, SQLite importer)
+  db/              postgres/ (the storage adapter: migrations, repositories)
   infrastructure/  config sections + the environment source and registry
   embeddings/      pluggable embedding providers
   code/            tree-sitter code analysis (walk, parse, extract, resolve edges)
   consolidation/   pluggable generation adapter (manual / command / http)
-  runtime/         process/IO glue (install layout, daemon spawn, pid file, clock,
+  runtime/         process/IO glue (install layout, bin paths, pid file, clock,
                    liveness, launchd agent, the socket client)
   presentation/    delivery — mcp/ (stdio server, audit + output adapters, one dir per
                    tool) and rpc/ (the daemon's local socket server and its methods)
   container.ts     the composition root every bin builds from
   remote-container.ts  the composition root of a host with no kernel of its own
 
-apps/plugin/src/server.ts      stdio MCP server            plugin-server.ts  remote-only, for a host
-apps/host/src/daemon.ts        embedding drain + socket    runner.ts   unattended agent jobs
+apps/plugin/src/server.ts      stdio MCP server (daemon)   plugin-server.ts  for agents' machines
+apps/host/src/daemon.ts        owns the store + socket     runner.ts   unattended agent jobs
 apps/host/src/read-worker.ts   one read pool worker (read-only connection, no model)
 apps/host/src/stats-cli.ts     operational snapshot        service-cli.ts  launchd agents
 ```
 
-Every bin is still bundled flat into the root `dist/`, which is what the local install and
-every agent host point at. The exception is the plugin's remote-only server, a single
-self-contained `apps/plugin/dist/server.js` (see [cerebrium-plugin](#cerebrium-plugin)).
+Every host-side bin is bundled flat into the root `dist/`, which is what the host image
+runs. Agents run the plugin's server instead, a single self-contained
+`apps/plugin/dist/server.js` (see [cerebrium-plugin](#cerebrium-plugin)).
 
 Dependencies point inward only: `contracts` imports nothing, `core` sees only `contracts`, `domain/ports` sees only those two,
 adapters implement the ports, and nothing may import `presentation`. The kernel may not import an app, and the host and the plugin never import each other. **That direction is
@@ -82,9 +82,8 @@ The two background workers are application services that happen to run on a time
 live in `application/workers/` rather than beside the adapters they drive.
 
 Storage is reached through async ports (`packages/kernel/src/domain/ports/storage/*`); all SQL lives in
-the adapters — SQLite under `packages/kernel/src/db/sqlite/*`, Postgres under
-`packages/kernel/src/db/postgres/*` — consumers inject the specific ports they need, and tools
-contain no SQL. Enum-like vocabularies are TypeScript string enums defined
+the Postgres adapter under `packages/kernel/src/db/postgres/*`, consumers inject the specific
+ports they need, and tools contain no SQL. Enum-like vocabularies are TypeScript string enums defined
 once in `packages/contracts/src/vocab.ts`. IDs are ULIDs; timestamps are UTC ISO-8601. The full design
 contract and invariants are in [`CLAUDE.md`](CLAUDE.md).
 
@@ -124,13 +123,12 @@ declared defaults  <-  $CEREBRIUM_HOME/config.json  <-  environment
 ```
 
 `CEREBRIUM_HOME` (default `~/.cerebrium`) is the **only** variable read directly, before
-any config exists: `config.json`, `memory.db`, `daemon.pid` and `models/` all derive from
+any config exists: `config.json`, `daemon.pid`, `daemon.sock` and `models/` all derive from
 it, so the install relocates as a unit. `config.json` is keyed by **config path**, which is
 what a human edits and what `status` prints back:
 
 ```json
 {
-  "database": { "path": "/Users/me/.cerebrium/memory.db" },
   "retrieval": { "mmrLambda": 0.85 },
   "consolidation": { "posture": { "merge": "suggest" } }
 }
@@ -254,24 +252,24 @@ search.
 - **Section** — the heading path a node's chunks are filed under
   (`H2: Ranking > H3: Decay`), and the unit `get` can deliver instead of a whole
   body. See below.
-- **Embedding** — a 384-dim vector per chunk, computed **asynchronously** by an
-  in-process worker. A node is fully findable via FTS the instant it's written;
+- **Embedding** — a 384-dim vector per chunk, computed **asynchronously** by the
+  daemon. A node is fully findable via BM25 the instant it's written;
   vector search catches up within seconds. `pending_embedding=1` until embedded.
 
 ## Hybrid search
 
-`search` fuses two candidate lists — FTS5 bm25 and vector KNN — with Reciprocal
+`search` fuses two candidate lists — pg_search BM25 and pgvector KNN — with Reciprocal
 Rank Fusion, then applies the memory model (semantic steady, episodic decays by
 disuse, often-fetched nodes carry a bounded importance boost, invalidated hidden
 unless `history:true`), then optionally expands the graph.
 
-- `mode`: `hybrid` (default), `text` (FTS only — cheapest), or
+- `mode`: `hybrid` (default), `text` (BM25 only — cheapest), or
   `vector` (semantic only).
 - **Two vector pools.** The KNN runs before any filter, so one shared table meant the
   code index — which outnumbers authored memory by ~100:1 — consumed the entire
-  over-fetch and an authored-only search saw a fraction of its own nodes. `chunk_vec`
-  holds authored memory (plus any legacy external mirror records), `code_vec` holds the code-symbol
-  index, and a query sweeps only the pools it can return from: `types:['symbol']` reads
+  over-fetch and an authored-only search saw a fraction of its own nodes. `chunk_vectors`
+  holds authored memory, `code_vectors` holds the per-branch code-symbol index, and a
+  query sweeps only the pools it can return from: `types:['symbol']` reads
   code alone, a `kinds` filter without `mirror` reads authored alone, anything else reads
   both and merges by distance. The budgets differ with the sizes — 1000 for the authored
   pool, which sweeps all of it in ~5 ms and makes every live authored node a candidate for
@@ -314,7 +312,7 @@ unless `history:true`), then optionally expands the graph.
   since was valid then and belongs in the answer. `get` takes the same argument and
   returns the revision current at that time. This is how a decision taken on information
   that has since changed gets audited.
-  **Limit worth knowing:** the FTS index and the vectors hold the *current* wording only,
+  **Limit worth knowing:** the text index and the vectors hold the *current* wording only,
   so `as_of` decides which nodes are considered — not how they were phrased then.
 - `valid_at` (ISO-8601): the **other** time axis. `as_of` asks *when did we know it*;
   `valid_at` asks *when was it true*. A node carries an optional event window
@@ -367,42 +365,33 @@ quietly accumulated several unrelated facts — but the agent writing it can.
 
 ## Quick start
 
-Requires Node ≥ 22 (developed on Node 25; run `nvm use` from this repo). `better-sqlite3`
-and `sqlite-vec` are native modules that build/download on install.
+Requires Node ≥ 22 (developed on Node 25; run `nvm use` from this repo). The store lives on
+a Cerebrium host (see [Host release](#host-release)); this machine runs only the plugin.
 
 **1 — Clone and build.**
 
 ```bash
 git clone <this-repo> cerebrium && cd cerebrium
 npm install
-npm run build        # tsup (esbuild) -> dist/, copies migrations
+npm run build        # tsup (esbuild) -> dist/ and apps/plugin/dist/server.js
 ```
 
-**2 — Register it in Claude Code.** Use `-s user` so the memory server is available in
-**every** project you open, not just one — a memory that only exists in one repo defeats
-the point. Point it at the built `dist/server.js` by absolute path:
+**2 — Get a token** for this machine from the host (`cerebrium-service token issue`, see
+`apps/host/deploy/README.md`) and save it, mode `600`, e.g. `~/.cerebrium/host-token`.
 
-```bash
-claude mcp add cerebrium -s user \
-  --env MEMORY_DB_PATH=$HOME/.cerebrium/memory.db \
-  -- /ABSOLUTE/PATH/TO/.nvm/versions/node/v25.x/bin/node \
-  /ABSOLUTE/PATH/TO/cerebrium/dist/server.js
-```
-
-**3 — Verify.** `claude mcp list` should show `cerebrium`, and inside a Claude Code
-session `/mcp` lists its tools (`session_start`, `search`, `write`, …). The SQLite file
-and its `~/.cerebrium/models` cache are created on first use — no manual DB setup.
-
-**4 — Install the discipline, not just the tools.** An agent handed 18 tools and no
+**3 — Register the plugin and install the discipline.** An agent handed 18 tools and no
 doctrine calls `write` without searching and fills the store with duplicates. One command
-installs the skill, the always-on retrieval rules and a session-start hook for every agent
-host it finds — Claude Code, Codex CLI, Antigravity and pi:
+registers the plugin (user scope, so it is available in every project) and installs the
+skill, the always-on retrieval rules and a session-start hook for every agent host it
+finds — Claude Code, Codex CLI, Antigravity and pi:
 
 ```bash
-npm run agent:setup            # what each host is missing; writes nothing
-npm run agent:setup -- --apply # install it
+npm run agent:setup -- --kernel tcp://HOST:7433 --token-file ~/.cerebrium/host-token          # plan; writes nothing
+npm run agent:setup -- --kernel tcp://HOST:7433 --token-file ~/.cerebrium/host-token --apply --verify
 ```
 
+`--verify` opens a real session on the host through the plugin. Without `--kernel` the
+installer reuses a host-backed registration it already finds; it never writes a local one.
 It links the skill into each host rather than copying it, so the doctrine can never fall
 behind this working tree. See [Agent hosts](#agent-hosts) for what it writes where.
 
@@ -411,11 +400,11 @@ That's it — open your agent in any project and it can call `session_start`, `s
 [Skill for consuming agents](#skill-for-consuming-agents) for the usage discipline.
 
 **One-time model download.** The default `local` embedding provider runs
-[transformers.js](https://github.com/huggingface/transformers.js) in-process and
+[transformers.js](https://github.com/huggingface/transformers.js) in the host's daemon and
 downloads `Xenova/multilingual-e5-small` (the ONNX build of
 `intfloat/multilingual-e5-small`, ~120MB, quantized) to `MEMORY_MODEL_CACHE`
-(default `~/.cerebrium/models`) on first embed. No API key, no daemon, no cost — a node
-is searchable via FTS instantly and vector search catches up once the model is warm.
+(default `~/.cerebrium/models`) on first embed. No API key, no cost — a node is searchable
+via BM25 instantly and vector search catches up once the model is warm.
 
 **Serving the embedding model instead of loading it.** `MEMORY_EMBED_PROVIDER=http` points
 the same port at a model served over HTTP (Ollama's `/api/embed` shape), which takes the
@@ -429,56 +418,50 @@ wrong endpoint or a wrong dimension fails at daemon startup instead of inside th
 write that needs a vector.
 
 **It must be the same model, and dimension is not proof of that.** Every response is checked
-against `FLOAT[384]` and a mismatch throws — but 384 dimensions from a *different* model is
+against the active vector space's dimension and a mismatch throws — but 384 dimensions from a *different* model is
 not an error any runtime check can see. It silently re-bases new vectors against every
 vector already stored, which does not fail, it just quietly stops finding things. So a
 switch on a populated store has a gate in front of it:
 
 ```sh
-npm run eval:embedding -- --model multilingual-e5-small   # cosine vs the STORED vectors
-npm run eval:retrieval                                    # and no P@1 regression
+npm run eval:embedding -- --pg $URL --model multilingual-e5-small   # cosine vs the STORED vectors
+npm run eval:retrieval -- --pg $URL --gold ~/.cerebrium/gold.jsonl  # and no P@1 regression
 ```
 
 `eval:embedding` re-embeds a deterministic sample of real chunks through the remote and
-compares each against the vector already in `chunk_vec`, reporting min/p10/p50/mean and
+compares each against the vector already in `chunk_vectors`, reporting min/p10/p50/mean and
 exiting non-zero if any chunk falls below 0.99. Both gates have to hold; if either does not,
-the switch means a full re-embed rather than a config change, and `embedding_meta.model`
-records which model wrote each chunk so a half-migrated store is detectable.
+the switch means a new vector space and a full re-embed rather than a config change
+(`space:build` / `space:report`), and `vector_spaces.model` records which model each space
+was built with.
 
 **The daemon loads the model before it starts draining.** Loading costs a few hundred
 milliseconds of blocked event loop, so the process whose job is to hold the model pays it
 at startup rather than inside the first batch that needs it. A load failure does not stop
 the daemon — every tick then fails and backs off the way the queue already handles — but
 it is recorded, so `cerebrium-stats` shows a running daemon that cannot embed as
-`model failed` with the reason instead of leaving it looking healthy. The MCP server's
-in-process fallback worker does not pre-warm: there the load would stall the client's own
-startup, and a background timer is already off the request path. Inference itself does
+`model failed` with the reason instead of leaving it looking healthy. Inference itself does
 *not* block the loop for its duration — `onnxruntime-node` runs the graph on its own
 threads — so only the load is worth moving.
 
 ### Development & checks
 
 ```bash
+npm run pg:up        # throwaway ParadeDB on :55432 — every test runs against it
 npm run check        # typecheck + lint + prettier + Vitest + build — the gate
 npm test             # full Vitest suite (offline, no keys — uses the local-null provider)
-npm run build        # tsup bundle of the three bins to dist/
-npm run inspect      # MCP inspector against a throwaway dev DB (verify tool schemas)
+npm run build        # tsup bundle of the bins to dist/
 ```
+
+Each test gets a database of its own, copied from a migrated template on the server
+`CEREBRIUM_TEST_PG_URL` names (default: the one `pg:up` starts; never a real store). CI runs
+the same suites against a Postgres service.
 
 One root `tsconfig.json` covers `src` + `test` + `scripts`, so `tsc`, Vitest and every
 editor resolve the `@/*` alias identically — and tests are genuinely type-checked rather
 than merely transpiled. `npm run build` is part of the gate because esbuild catches a
 class of import error `tsc` cannot: an interface imported as a value type-checks fine and
 breaks the bundle.
-
-To run against the TypeScript source without a build step (throwaway dev DB), register a
-second server pointed at `tsx`:
-
-```bash
-claude mcp add cerebrium-dev -s user \
-  --env MEMORY_DB_PATH=$HOME/.cerebrium/dev.db \
-  -- npx tsx /ABSOLUTE/PATH/TO/cerebrium/src/server.ts
-```
 
 ## Environment
 
@@ -491,10 +474,9 @@ declared range fails at startup rather than being quietly replaced.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `CEREBRIUM_HOME` | `~/.cerebrium` | Install root. `config.json`, `memory.db`, `daemon.pid` and `models/` all derive from it. Read before any config tier exists. |
-| `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | SQLite file. `:memory:` for ephemeral. Also keys the daemon's pidfile on either backend. |
-| `MEMORY_STORE_BACKEND` | `sqlite` | `sqlite` or `postgres`. See **Postgres backend**. |
-| `MEMORY_PG_URL` | — | Postgres connection URL. Secret: redacted from every config report. |
+| `CEREBRIUM_HOME` | `~/.cerebrium` | Install root. `config.json`, `daemon.pid`, `daemon.sock` and `models/` all derive from it. Read before any config tier exists. |
+| `MEMORY_DB_PATH` | `$CEREBRIUM_HOME/memory.db` | Not a store: only the key of the daemon's pidfile, which lives in its directory. |
+| `MEMORY_PG_URL` | — | The store: a Postgres connection URL. Secret: redacted from every config report. |
 | `MEMORY_PG_URL_FILE` | — | A file holding the URL (a container secret), read when `MEMORY_PG_URL` is unset. |
 | `MEMORY_PG_POOL_MAX` | `10` | Connections per process. |
 | `MEMORY_WORKING_SET_TOKENS` | `1500` | Token budget for the `session_start` working set. |
@@ -505,16 +487,15 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_MODEL_CACHE` | `$CEREBRIUM_HOME/models` | Where model weights are cached. |
 | `MEMORY_EMBED_URL` | `http://127.0.0.1:11434/api/embed` | `http` provider only: the batch embedding endpoint (`{model, input[]}` -> `{embeddings[][]}`). |
 | `MEMORY_EMBED_TIMEOUT_MS` | `30000` | `http` provider only: budget for one batch. A batch is `MEMORY_EMBED_BATCH` texts, so raise both together. |
-| `MEMORY_DAEMON_IDLE_MS` | `300000` | How long the background drain daemon stays up with an empty queue before exiting (respawned on the next session). |
+| `MEMORY_DAEMON_IDLE_MS` | `300000` | Outside resident mode, how long the daemon stays up with an empty queue before exiting; under resident mode it only paces the consolidation sweep. |
 | `MEMORY_EMBED_BATCH` | `64` | Chunks the daemon embeds and commits per tick (one transaction). Larger = higher throughput, longer write-lock holds. |
 | `MEMORY_DAEMON_ACTIVE_MS` | `0` | Pause between daemon ticks while a backlog exists. `0` = drain continuously (only an event-loop yield). |
-| `MEMORY_DAEMON_RESIDENT` | `false` | Skip idle-exit entirely and let a supervisor own the daemon's lifetime. Set by the launchd agent `cerebrium-service install` writes; off by default because resident mode with no supervisor strands a process nothing restarts. |
+| `MEMORY_DAEMON_RESIDENT` | `false` | Skip idle-exit entirely and let a supervisor own the daemon's lifetime. The host image sets it (compose restarts the container), as does the launchd agent `cerebrium-service install` writes. |
 | `MEMORY_DAEMON_READ_WORKERS` | `3` | Worker threads serving reads, each with its own read-only connection. One is reserved for `status` so it cannot queue behind a search; a pool of 1 shares its single worker rather than starving data reads. |
 | `MEMORY_DAEMON_SOCKET` | `$CEREBRIUM_HOME/daemon.sock` | Where the daemon listens. Rejected at startup if over the platform's 103-byte `sun_path` limit — set a shorter `CEREBRIUM_HOME` rather than working around it here. |
 | `MEMORY_DEDUP_THRESHOLD` | `0.92` | Cosine similarity above which a write reports `similar_existing`. Calibrated, not chosen — see below. |
 | `MEMORY_DEDUP_LEXICAL_THRESHOLD` | `0.2` | Jaccard overlap gate for the write probe's lexical fallback (used only while nothing is embedded yet). A separate variable because Jaccard and cosine are different scales. |
-| `MEMORY_CODE_ROOTS` | *(unset)* | Comma-separated `name=path` repos for `code_index` (e.g. `nebula-x=/Users/me/nebula-x,api=/Users/me/api`). Optional once a repo has been indexed by `path` — its root is remembered and re-indexable by name. |
-| `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code `symbol` mirrors as direct hits (down-weighted so authored knowledge ranks first; bypassed when the query asks for symbols). |
+| `MEMORY_SYMBOL_WEIGHT` | `0.5` | Knowledge-first ranking: search rank multiplier for code symbols as direct hits (down-weighted so authored knowledge ranks first; bypassed when the query asks for symbols). |
 | `MEMORY_MMR_LAMBDA` | `0.85` | Diversity of the final `search` cut: `1.0` is pure relevance (off), lower trades relevance for less redundancy between returned hits. Calibrated against the gold set — see *Calibrating the ranking constants*. |
 | `MEMORY_FOLD_SIM` | `0.93` | Raw first-chunk cosine at which a result folds under one already kept instead of taking its own slot; `1.0` is off. **Its own scale** — not comparable to `MEMORY_DEDUP_THRESHOLD` or `MEMORY_CONSOLIDATE_MERGE_SIM`, which score a seed chunk against the nearest one. Measured by the fold arm of `calibrate:report`. |
 | `MEMORY_USE_WEIGHT` | `0.25` | Ceiling of the usage/importance boost a frequently fetched node earns (log-scaled, saturating at 20 fetches). `0` disables the prior. |
@@ -535,7 +516,7 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
 | `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
-| `MEMORY_CONSOLIDATE_ANNOTATE` | `auto` | Attribute-enrichment posture: `auto` mines keywords/tags/context for each semantic node during the sweep and folds them into its FTS text for wider recall; `off` skips it. Needs a generating provider. |
+| `MEMORY_CONSOLIDATE_ANNOTATE` | `auto` | Attribute-enrichment posture: `auto` mines keywords/tags/context for each semantic node during the sweep and folds them into its indexed text for wider recall; `off` skips it. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE_BATCH` | `50` | Max un-annotated semantic nodes enriched per sweep. |
 | `MEMORY_CONSOLIDATE_SIM` | `0.9` | Cosine-similarity floor for clustering + link discovery. |
 | `MEMORY_CONSOLIDATE_MERGE_SIM` | `0.925` | Similarity floor for treating two semantic nodes as duplicates. |
@@ -565,42 +546,22 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_PROTECT_REVISIONS` | `5` | A note with this many revisions cannot be collapsed by a merge or retired by a supersede. |
 | `MEMORY_CONSOLIDATE_PROTECT_INBOUND` | `10` | Same, for a note with this many live inbound links. |
 
-The DB opens in WAL mode (`busy_timeout=15000`, foreign keys on) with the
-`sqlite-vec` extension loaded. In practice one stdio server process runs per
-Claude Code session, so several may open the same file: WAL serializes writers,
-every write is an `IMMEDIATE` transaction wrapped in a busy-retry, and the async
-embedding drain is single-elected via a `worker_lease` row, so nothing writes in
-lockstep. Only the main thread of each process touches the DB.
+Every write runs through `PgDatabase.tx`: one in-process write lane plus a store-wide
+advisory lock, with the transaction's client held in AsyncLocalStorage so nested repository
+calls join it. Background writer roles (embedding drain, consolidation) are single-elected
+via a `worker_lease` row, so nothing writes in lockstep.
 
-**Background drain daemon.** The embedding queue is drained by a standalone
-`cerebrium-daemon` process, not by the session that happens to be open. On
-startup the MCP server spawns one detached (guarded by a `daemon.pid` file next to
-the DB) if none is alive; the daemon holds the `embedding` lease, drains the queue,
-and — once the queue has been empty for `MEMORY_DAEMON_IDLE_MS` — releases the model
-and exits, to be respawned by the next session. This keeps the backlog moving even
-after every Claude session has closed. If a daemon can't be spawned, the server
-falls back to an in-process worker; the lease guarantees the two never double-write.
-
-**Always-on mode.** `cerebrium-service install` writes a launchd user agent that runs
-the daemon in resident mode (`MEMORY_DAEMON_RESIDENT=1`), so it starts at login, is
-restarted on crash, and holds the model instead of reloading it once per burst of work.
-The plist runs `$CEREBRIUM_HOME/bin/daemon.js`, a link to the built bundle, so the agent
-carries no working-tree path — re-point that link to move the agent to another build.
-`cerebrium-service status` flags a link whose target no longer resolves, since launchd
-will otherwise keep retrying a dangling path silently. A resident daemon that finds the
-database owned by another one waits for it to exit and then takes over, rather than
-exiting: with `KeepAlive` set, exiting would mean being respawned every few seconds
-forever.
-The two settings go together: `KeepAlive` plus idle-exit would respawn the daemon every
-five minutes forever. Without a supervisor the auto-spawn posture above is the right one,
-which is why resident mode defaults to off. It also closes a real gap — `ensureDaemon`
-runs once at server startup, so before this a daemon that died mid-session was never
-replaced and the backlog simply waited for the next session.
+**The daemon.** `cerebrium-daemon` owns the store: it serves the kernel over its socket and
+TCP listener, holds the `embedding` lease and drains the queue, and runs the consolidation
+sweep. On the host it runs resident (`MEMORY_DAEMON_RESIDENT=1`) and compose restarts it;
+a `daemon.pid` file beside `MEMORY_DB_PATH` keeps a second one on the same machine from
+starting. A resident daemon that finds the pidfile owned by a live one waits for it to exit
+and then takes over, rather than exiting into a supervisor's restart loop.
+`cerebrium-service install` writes the equivalent launchd user agent for a macOS host.
 
 **Read pool.** Reads are served by worker threads (`MEMORY_DAEMON_READ_WORKERS`, default
-3), each holding its own read-only connection to the same file — WAL allows any number of
-readers, and better-sqlite3 is synchronous only per connection, so separate connections buy
-real concurrency. One worker is held back for `status`, so asking the daemon how it is
+3), each holding its own read-only connection to the store, so reads run genuinely
+concurrently. One worker is held back for `status`, so asking the daemon how it is
 cannot queue behind a search. No embedding model lives in a worker: a query vector travels
 in the arguments instead, because embedding is ~3ms of a ~200ms search and a model per
 worker would cost ~150MB each. Running from source there is no worker bundle to spawn and
@@ -608,15 +569,13 @@ reads stay in-process. Measured on an 868MB store: a trivial call made while a h
 is in flight went from 639ms to 2ms, and three heavy reads run 2.4x faster across three
 workers than in sequence. A single call is no faster — the pool buys concurrency, not speed.
 
-**Proxy mode.** On startup the MCP server tries the daemon's socket with a short handshake
-(750 ms; a stdio host that is slow to start is as bad as one that fails). If the daemon
-answers, the server holds **no database at all** — the same use-case tokens resolve to
-socket calls — and it does **not** apply its own session guard or audit row, because the
-daemon's pipeline already did both and doing it twice would validate twice and log every
-call twice. If the daemon does not answer, or speaks a protocol this build does not, the
-server degrades to resolving everything in-process exactly as it did before a transport
-existed; the two reasons are reported differently, because an absent daemon is ordinary
-while a version mismatch means a resident daemon needs restarting.
+**No store in the MCP server.** The server agents launch holds **no database at all**: the
+use-case tokens resolve to calls on the kernel named by `MEMORY_KERNEL_URL`, or, on the host
+itself (the runner), to the daemon's socket found with a short handshake (750 ms; a stdio
+host that is slow to start is as bad as one that fails). It does **not** apply its own
+session guard or audit row, because the daemon's pipeline already did both. If no daemon
+answers, or one speaks a protocol this build does not, the server refuses to start and says
+which — there is no in-process fallback.
 
 A daemon that dies mid-session fails the in-flight call and reconnects on the next one —
 it does not silently degrade. The error says whether repeating the call is safe: a read may
@@ -658,18 +617,17 @@ handler reports whatever state warming has reached, so a daemon that is still lo
 whose load failed can still be asked what is wrong with it. `cerebrium-stats` asks the
 socket first and opens the database only when no daemon answers.
 
-**Dimension.** Both vector tables (`chunk_vec`, `code_vec`) are fixed at `FLOAT[384]`
-(the default model's dimension). If a configured provider reports a different `dim`, the
-server fails loudly at startup — changing the embedding dimension requires new vector
-tables (recreate the DB or add a migration), not a silent reindex.
+**Vector spaces.** Vectors belong to a *vector space* (`vector_spaces`: one model and one
+dimension; exactly one is active). The store refuses vectors from any other model, so
+changing the embedding model or dimension means building a new space and switching to it
+(`space:build`, `space:report`), not a silent reindex.
 
-**Stale vectors.** A chunk a later revision drops is marked `stale` and its vector is
-deleted with it, along with its `embedding_meta` row. That is the one place the
-no-hard-deletes invariant is relaxed, and only because the vector index records nothing:
-every row recomputes from `chunks.text`, and the `chunks` row itself is still only
-soft-deleted. Chunk ids are content-addressed, so an edit that restores old text revives
-the chunk — dropping the provenance row with the vector is what makes it re-embed instead
-of counting as already done.
+**Stale vectors.** A chunk a later revision drops is marked `stale` and its vectors are
+deleted with it, in every space. That is the one place the no-hard-deletes invariant is
+relaxed, and only because a vector records nothing: every row recomputes from
+`chunks.text`, and the `chunks` row itself is still only soft-deleted. Chunk ids are
+content-addressed, so an edit that restores old text revives the chunk and, having no
+vector, re-embeds.
 
 ## Tools
 
@@ -692,7 +650,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `code_lookup` | Exact structural code lookup: by `name` (simple/qualified) or `file`, returning symbol envelopes + `defines`/`calls`/`imports` neighbor stubs. Raw source via `get`. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. Paged: pass `page_size` and feed `next_cursor` back until it is absent (`limit` alone still returns one unpaged batch). |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
-| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (DB + WAL bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), generation (the backend, whether it generates at all, and the resolved model/host/deadline per role), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
+| `stats` | Operational snapshot (no content): embedding queue depth (backlog/parked/oldest/attempts histogram), content totals (nodes by kind, edges, chunks embedded vs pending, sessions, events), storage (database bytes), drain health (provider, daemon alive, lease holder), graph integrity (dangling edges, how many are repairable, stranded nodes — all three should read 0), generation (the backend, whether it generates at all, and the resolved model/host/deadline per role), the live process registry (role, pid, whether it is still alive, config state, and whether it has an embedding model loaded), and the names of any variables that were set but unusable. `session_id` optional. |
 
 Every tool call updates the session's `last_seen` and appends an `events` row — written at
 the boundary by `AuditedTool`, on failures as well as successes, so provenance cannot be
@@ -707,17 +665,17 @@ rides a `Symbol` key out of the tool, without a single token reaching the agent.
 
 ## Commands
 
-Installed as `bin` entries (available on `PATH` after `npm link` / global install),
-also runnable in-repo via `npm run <name>` against a throwaway dev DB.
+Installed as `bin` entries (available on `PATH` after `npm link` / global install). The
+scripts below read a real store with `--pg URL`, always in a read-only session.
 
 | Command | What it does |
 |---------|--------------|
-| `cerebrium` | The MCP server (stdio). Registered in each agent host — see *Agent hosts*. |
-| `cerebrium-daemon` | The background embedding drain. Normally auto-spawned by the server; run manually to force a drain or to keep one resident. |
+| `cerebrium` | The MCP server (stdio) for a machine that runs the daemon (the host's runner). Agent hosts on other machines run the plugin — see *Agent hosts*. |
+| `cerebrium-daemon` | Owns the store: serves the kernel, drains the embedding queue, runs the consolidation sweep. |
 | `cerebrium-stats [--json] [--local]` | Read-only operational snapshot: the DB counters (same data as the `stats` tool), the process registry (including each process's model state and what the load cost) and the resolved configuration with the tier each value came from. Asks the running daemon over its socket and falls back to reading the DB itself, printing which of the two it used; `--local` skips the socket. Safe to run anytime — it never writes — including when no server or daemon is up, or before any writer has migrated the store. |
 | `cerebrium-service <install\|uninstall\|status\|print>` | Manages the launchd user agent that keeps the daemon always-on. `print` renders the plist without touching the system. macOS only. |
 | `npm run calibrate:report` | Read-only threshold calibration report against a real store: where the similarity gates should sit, and why. `--json`, `--all-scorers`, `--cross-encoder`. See *Calibrating the similarity gates*. |
-| `npm run eval:retrieval` | Labelled relevance eval over a seeded 36-doc corpus. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. `--db PATH` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. See *Evaluating a ranking change*. |
+| `npm run eval:retrieval` | Labelled relevance eval. `--seed-into URL` writes a seeded 36-doc corpus into an empty Postgres database and measures it; `--pg URL` measures a real store instead, read-only, with `--gold PATH` for a labelled query set. `--arm NAME:KEY=VAL` (repeatable) measures one configuration against another on identical documents, embeddings and queries — e.g. `--arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7`. Reports MRR, nDCG@10, P@1, Recall@10 and Facet@3. See *Evaluating a ranking change*. |
 | `npm run report:readloop` | Read-only read-loop report against a real store: which nodes retrieval surfaced, which of those a later `get` actually read, and therefore what "never fetched" means. `--json`, `--since <ISO instant>`. See *Reading the read loop*. |
 | `npm run gold:generate` | Writes labelled queries for the eval by asking the local model what each section of the store answers. Read-only on the store, resumable, appends to a gold JSONL that lives outside the repo. See *The gold file*. |
 | `npm run agent:setup` | Reports what each agent host still needs to use Cerebrium as memory; `-- --apply` installs it, `-- --verify` proves it by booting the server and calling `session_start`. Read-only without `--apply`, and it never touches the store. See *Agent hosts*. |
@@ -725,10 +683,14 @@ also runnable in-repo via `npm run <name>` against a throwaway dev DB.
 
 ## Code indexing
 
-`code_index` walks configured repos (`MEMORY_CODE_ROOTS`) or an explicit `path`,
-parses each source file with tree-sitter **in-process** (WASM, no daemon), and
-mirrors its symbols into the graph. This runs kernel-side — reading files from disk
-does not violate the single-writer invariant (that is about who writes the *DB*).
+Code is indexed **per branch**. `code_index`, called through the plugin from inside a
+checkout (or with its `path`), lists the files git sees — tracked plus untracked ones git
+does not ignore — and uploads the contents the host lacks; the host parses them with
+tree-sitter (WASM) and stores the result against that repo and branch. Contents are
+addressed by hash, a parse by (hash, path), and a branch is a versioned set of path → parse
+rows, so re-indexing uploads and parses only what changed and nothing is deleted: a file
+that leaves a branch invalidates its row. Reads (`code_lookup`, symbol search) answer for
+the branch the caller is on.
 
 - **Supported languages:** TypeScript (`.ts`/`.mts`/`.cts`), TSX (`.tsx`),
   JavaScript (`.js`/`.jsx`/`.mjs`/`.cjs`), PHP (`.php` — classes, traits, interfaces,
@@ -754,32 +716,13 @@ does not violate the single-writer invariant (that is about who writes the *DB*)
 - **Headers are parsed with the C++ grammar.** `.h` is ambiguous across C, C++ and
   Objective-C; the C++ grammar accepts nearly all C, while the C grammar turns every
   `class` in a C++ header into an `ERROR` node. `.h` symbols are still labelled `c`.
-- **`symbol` mirror nodes** (`memory_kind='mirror'`, `type='symbol'`, `origin='repo'`)
-  are *derived from source, not authored*: `write`/`update` on them are rejected. Each
-  node's content is a compact **summary** (one-line signature + first doc-comment
-  line) — that is what gets FTS-indexed and embedded. The raw source slice lives in
-  the `symbols` table and is returned only by `get`. A symbol node's stable identity is
-  `sha256(repo, path, qualified-name, kind)`, so re-indexing revises the same node and
-  any `documents` edges you drew from a note survive.
-- **Roots are remembered.** The first time a repo is indexed by explicit `path`, its root
-  is stored in `code_repos`, so later runs can pass just `repo` (the name) even when
-  `MEMORY_CODE_ROOTS` doesn't define it. "Index all" (no `repo`/`path`) covers both the
-  configured roots and the remembered ones (env wins on a name clash).
-- **Branch-agnostic, with provenance.** Symbol identity does not include the git branch —
-  the index is a snapshot of whatever is on disk, so re-indexing after a branch switch makes
-  it reflect that branch ("last indexed branch wins"; symbols that differ are re-embedded,
-  files only on the other branch are soft-invalidated). For provenance, each index run records
-  the root's git `branch`/`commit`/`dirty` in `code_repos` and reports it in the `code_index`
-  and `stats` output. If you want isolated per-branch indexes, give each a distinct `repo`
-  name (e.g. via a git worktree) rather than bouncing one repo across branches.
-- **Incremental.** A per-file content hash (`code_files`) skips unchanged files
-  entirely. A changed file re-parses; only symbols whose own source changed get a new
-  revision, and a symbol re-embeds only when its summary actually changes. Symbols and
-  files removed from source are **soft-invalidated** (never deleted; reachable with
-  `history:true`).
-- **Edges** (all provenance `system`, agent-uncreatable): `defines` (class->method,
+- **Symbols are derived from source, not authored**, and live outside `nodes`
+  (`code_symbols`, with their own vector pool `code_vectors`): `write`/`update` cannot touch
+  them. What gets BM25-indexed and embedded is a compact **summary** (one-line signature +
+  first doc-comment line); the raw source slice is returned only by `get`.
+- **Structure** (derived, agent-uncreatable): `defines` (class->method,
   module->top-level), `imports` (resolved to repo-local files; third-party/aliased
-  specifiers are dropped, not stored as dangling edges), and best-effort `calls`.
+  specifiers are dropped, not stored as dangling), and best-effort `calls`.
 - **`calls` is best-effort and intra-repo only** — same-file names and imported symbols
   are resolved by name; dynamic dispatch and cross-module calls that need a type system
   are dropped. A precise call graph would require SCIP and is out of scope. `imports`
@@ -798,24 +741,19 @@ does not violate the single-writer invariant (that is about who writes the *DB*)
   only** — more precise than the repo-wide fallback, and it gets no repo-wide fallback
   of its own.
 - **The payoff:** write a semantic decision/gotcha about code and `link` it to a symbol
-  with a `documents` edge — a later `search` for that topic surfaces the symbol via
-  graph expansion (`via:{edge:'documents'}`), straight from note to code.
+  with a `documents` edge. The link is a `code_refs` row keyed by repo, path and qualified
+  name, resolved against whichever branch a later read is on, so a later `search` for that
+  topic surfaces the symbol (`via:{edge:'documents'}`), straight from note to code — the
+  same for an applied `documents` candidate or the sweep's auto-citation.
 
-**.gitignore support** is a pragmatic subset (comments, blank lines, `!` negation,
-anchored & directory-only patterns, `*`/`**`/`?` globs, nested `.gitignore` files);
-`node_modules`, `.git`, `dist`, `build`, and similar are always skipped, along with
-binaries and files > 1 MB. Auto-refresh on `git pull` is not wired up — re-run
-`code_index` after changes.
+Auto-refresh on `git pull` is not wired up — re-run `code_index` after changes.
 
 ## External mirrors (removed)
 
 Cerebrium used to mirror curated records from external tools (GitLab, Jira, Sentry, Grafana, …)
 through `source_register` / `mirror_upsert` / `mirror_status`, with a `mirror_sources` registry
-and `stale_sources` in `session_start`. All of that is gone. A store that used it keeps its
-rows — `mirror_sources`, `mirror_records` and the `mirror` nodes themselves (`origin` = the
-source kind) — because nothing is ever hard-deleted; they stay searchable and can be linked or
-invalidated, but nothing writes them any more. Knowledge worth keeping from an external tool
-goes into an ordinary `semantic` node with the deep link in its body.
+and `stale_sources` in `session_start`. All of that is gone. Knowledge worth keeping from an
+external tool goes into an ordinary `semantic` node with the deep link in its body.
 
 ## Consolidation
 
@@ -925,7 +863,7 @@ is made.
 switch does — a judge can answer fast and answer differently:
 
 ```sh
-npm run eval:roles -- --model gemma4:e4b-it-qat --role annotate,reconcile
+npm run eval:roles -- --pg $URL --model gemma4:e4b-it-qat --role annotate,reconcile
 ```
 
 `generate` and `reconcile` are scored against the verdicts this store actually recorded: a
@@ -942,14 +880,14 @@ to buy.
 ## Evaluating a ranking change
 
 `npm run eval:retrieval` answers one question: *does this knob help on labelled data?* It
-seeds a fixed 36-doc corpus (with edges, and with gold answers that cluster into facets)
-into an in-memory DB, embeds it once, then runs the same queries through two or more
-**arms** — named configuration overlays — sharing that one corpus and those embeddings, so
-the only difference between arms is the knob.
+`--seed-into URL` seeds a fixed 36-doc corpus (with edges, and with gold answers that
+cluster into facets) into an empty Postgres database, embeds it once, then runs the same
+queries through two or more **arms** — named configuration overlays — sharing that one
+corpus and those embeddings, so the only difference between arms is the knob.
 
 ```sh
-npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
-npm run eval:retrieval -- --arm shy:MEMORY_GRAPH_BASE=0.1 --arm bold:MEMORY_GRAPH_BASE=0.6
+npm run eval:retrieval -- --seed-into $SCRATCH_URL --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
+npm run eval:retrieval -- --seed-into $SCRATCH_URL --arm shy:MEMORY_GRAPH_BASE=0.1 --arm bold:MEMORY_GRAPH_BASE=0.6
 ```
 
 `Facet@3` is deliberately read at a tighter cut than the relevance metrics: a diversity
@@ -957,12 +895,13 @@ stage trades relevance for distinct information, and at a window wide enough to 
 gold answer that trade is invisible. Covering a facet with an *irrelevant* document does
 not count.
 
-**What this is not.** 36 docs in memory cannot reproduce the anisotropy or the candidate
+**What this is not.** 36 docs cannot reproduce the anisotropy or the candidate
 starvation of a real 125k-node store, and the corpus contains no usage history, so an arm
 that wins here has stopped being a guess — it has not become proven.
 
-For that, `--db PATH` runs the same arms against a real store. It is opened **read-only**
-and the session-hint write is stubbed out, so a run cannot modify the store it measures.
+For that, `--pg URL` runs the same arms against a real store. It is opened in a
+**read-only** session and the session-hint write is stubbed out, so a run cannot modify the
+store it measures.
 Gold labels are mined from the retrieval-outcome log: within one session, a node that `get`
 fetched after a `search` returned it counts as relevant to that query — implicit relevance,
 i.e. what the agent judged worth spending tokens on, not adjudicated truth. The run prints
@@ -987,14 +926,14 @@ Labels pointing at nodes that are no longer live are dropped and counted: an inv
 or merged-away node cannot be returned, so scoring it would count a correct ranking as a
 miss. A growing share of dropped labels is the signal to regenerate.
 
-`npm run gold:generate -- --db PATH` builds the `generated` half: for every section of
+`npm run gold:generate -- --pg URL` builds the `generated` half: for every section of
 every live authored node it asks the local model (the same Ollama sidecar the `http`
 consolidation provider uses) for questions that section answers, and the section becomes
 the label. It appends per section, so an interrupted run resumes; it drops any question
 that shares more than `--max-overlap` of its content words with its own source, because a
 question echoing its section hands BM25 the answer and never exercises the vector side.
 
-`npm run gold:adjudicate -- --db PATH` builds the `adjudicated` half from the queries an
+`npm run gold:adjudicate -- --pg URL` builds the `adjudicated` half from the queries an
 agent actually ran. For each one it pools candidates across the hybrid, text and vector
 modes and asks the judge which of them genuinely answer it, so a query ends up with every
 node that does — the multi-label form a generated question cannot have, and the reason a
@@ -1003,8 +942,8 @@ modes keeps today's ranker from writing its own labels; it does not remove that 
 entirely, since a node no mode retrieves can never be labelled.
 
 **The gold file is deliberately not in this repository.** It is derived from the contents
-of one private store and points at that store's ids, so it lives beside the DB
-(`~/.cerebrium/gold.jsonl`); only the machinery to build and read it is versioned here.
+of one private store and points at that store's ids, so it lives outside it
+(`~/.cerebrium/gold.jsonl` by default); only the machinery to build and read it is versioned here.
 
 A narrowed fetch labels more finely: it records *which sections* were read, so the run also
 reports query→node→section pairs. Nothing scores them yet — every metric above is
@@ -1055,7 +994,7 @@ use, not about relevance.
 
 ## Measuring a wire encoding before changing one
 
-`npm run eval:encoding -- --db PATH` answers what a cheaper encoding is actually worth on
+`npm run eval:encoding -- --pg URL` answers what a cheaper encoding is actually worth on
 *this* store's list-shaped responses, before a contract every consumer parses gets changed
 for a guess. It replays the queries from the retrieval-outcome log through the real ranking
 pipeline, opens the store read-only, and encodes each response four ways: `json` (what
@@ -1095,8 +1034,8 @@ model-specific: on a single-domain corpus every pair of authored notes can sit i
 a ~0.85–1.00 band, so a threshold that looks conservative in the abstract fires on
 everything, and a swap of the embedding model invalidates whatever was set before.
 
-`npm run calibrate:report` measures where they belong, read-only, against a real
-store. It has two arms, because only one gate has ground truth:
+`npm run calibrate:report -- --pg URL` measures where they belong, read-only, against a
+real store. It has two arms, because only one gate has ground truth:
 
 - **Labelled** — `consolidation_candidates` records every past merge verdict
   (`applied` / `dismissed`). That is a labelled set: the report scores those pairs,
@@ -1150,7 +1089,7 @@ retrieval noise built on a fetch count is unfalsifiable.
 
 Both halves are now in `events`. A surfacing row — `search`, `session_start`,
 `code_lookup` — lists the node ids put in front of the agent, in rank order; a `get`
-row lists the ids it spent tokens on. `npm run report:readloop` joins them, read-only,
+row lists the ids it spent tokens on. `npm run report:readloop -- --pg URL` joins them, read-only,
 and cuts the join three ways:
 
 - **Follow-through** — how many searches led to a fetch of something they surfaced,
@@ -1205,7 +1144,7 @@ reads, so switch back to the main line before relying on it.
 
 ## Agent hosts
 
-Cerebrium is a stdio MCP server, so any MCP-capable host can call its tools. What does not
+Cerebrium reaches an agent through a stdio MCP plugin, so any MCP-capable host can call its tools. What does not
 travel with the transport is the discipline that makes it useful, so setup installs four
 surfaces per host: the **MCP server**, the **skill**, the **always-on rules**, and a
 **session-start hook**.
@@ -1250,16 +1189,14 @@ cannot: it calls `session_start` before the first turn and hands the model the r
 Memory tools carry a `cerebrium_` prefix there, since pi already has built-in `write`, `read`
 and `get`. See `apps/plugin/install/pi/README.md`.
 
-Setup reads the numeric version in `.nvmrc`, verifies that it is running under that Node, opens
-an in-memory `better-sqlite3` database as a native-addon preflight, and registers the canonical
-absolute Node executable in every MCP host. This avoids GUI and terminal `PATH` differences
-silently selecting incompatible Node ABIs. After changing or removing the NVM version, run
-`nvm use && npm install`, then rerun agent setup to migrate the registrations.
+Setup registers the plugin bundle under the stable Node on `PATH` in every MCP host; the
+bundle loads no native addon, so a Node upgrade does not break the registration.
 
-`npm run agent:setup -- --verify` proves the result by exercising it: it boots the built
-server over stdio against a throwaway store, calls `session_start`, counts the tools and
-runs the hook script — or, for pi, loads the extension under `node --experimental-strip-types`
-and checks it exports a factory. `apps/plugin/install/README.md` has the per-host procedure by hand, and
+`npm run agent:setup -- --verify` proves the result by exercising it: it opens a real
+session on the host through the plugin bundle, boots the bundle against an unreachable
+host to check it lists the tools and reports the URL, and runs the hook script — or, for
+pi, loads the extension under `node --experimental-strip-types` and checks it exports a
+factory. `apps/plugin/install/README.md` has the per-host procedure by hand, and
 `apps/plugin/install/hosts.md` records what was verified on which host version.
 
 `npm run eval:agents` audits persisted Antigravity traces. It emits aggregate tool names and
@@ -1268,10 +1205,9 @@ partial lower bounds. Organic history gets no compliance verdict; compare fresh 
 scenarios after a restart. The command intentionally has no threshold/pass-fail mode; controlled
 scenario evaluation remains a separate manual step.
 
-**More than one host at once** means more than one server process on one SQLite file. That
-is allowed — see invariant #1 in `CODEX.md` — and measured: two servers doing 120
-interleaved writes and searches finished in 246 ms with zero errors (p95 7 ms), every node
-landed and searchable.
+**More than one host at once** means more than one plugin process talking to the same
+daemon, each as its own session; the daemon serializes their writes (invariant #1 in
+`CODEX.md`).
 
 ## cerebrium-plugin
 
@@ -1281,7 +1217,7 @@ server with none of the kernel: `apps/plugin/src/plugin-server.ts` is composed f
 falls back to a local daemon. It is built into one file, `apps/plugin/dist/server.js`
 (~960 KB, only node builtins imported), because a Claude Code plugin is copied into the
 plugin cache without `node_modules`. `apps/plugin/test/plugin-bundle.test.ts` fails the build
-if better-sqlite3, pg, onnx, tree-sitter or any other non-builtin import reaches it.
+if pg, onnx, tree-sitter or any other non-builtin import reaches it.
 
 It needs two settings and nothing else: `MEMORY_KERNEL_URL` (`tcp://host:port`) and
 `MEMORY_KERNEL_TOKEN_FILE`, a mode-600 file holding the token the host issued
@@ -1312,59 +1248,26 @@ native addon. The token file must not be readable by others; the token is never 
 config file or printed. `--verify` opens a real session on the host through the plugin
 bundle.
 
-## Postgres backend
+## The store
 
-`MEMORY_STORE_BACKEND=postgres` runs the same kernel on PostgreSQL 18 with two extensions:
-**pgvector** (exact cosine KNN over `chunk_vectors`, one generation of vectors per row of
-`vector_spaces`) and **pg_search** (ParadeDB BM25 for the text branch). The server image is
-`paradedb/paradedb`, which carries both; the database must be created with `--locale=C`.
+The kernel runs on PostgreSQL 18 with two extensions: **pgvector** (exact cosine KNN over
+`chunk_vectors`, one generation of vectors per row of `vector_spaces`) and **pg_search**
+(ParadeDB BM25 over a stemmed (english) title and body for the text branch). The server
+image is `paradedb/paradedb`, which carries both; the database must be created with
+`--locale=C`. `MEMORY_PG_URL` (or `MEMORY_PG_URL_FILE`) names it.
 
-What differs from SQLite:
-
-- **Code is indexed per branch, not mirrored into nodes.** The plugin uploads a checkout's
-  files and the host parses them; the daemon schedules no index of its own. A note's link
-  into code — from `link`, from an applied `documents` candidate or from the sweep's
-  auto-citation — is a `code_refs` row keyed by repo, path and qualified name, resolved
-  against whichever branch a later read is on.
-- **Text ranking is BM25 over a stemmed (english) title and body.** Measured on a snapshot
-  of the live store it scores above FTS5 on the text branch and level with it on hybrid.
 - **Vectors belong to a space.** A provider whose model is not the active space's is refused
   at commit, so a model swap cannot mix vectors; the queue records why.
+- On the host, Postgres runs in the compose stack beside the daemon and publishes no port.
 
-Moving a store: `npm run import:sqlite -- --from copy.db --to <url> --verify` copies authored
-memory from a `.backup` of the SQLite file (never the live one), idempotently, and `--verify`
-compares counts and content hashes per table (rows the target wrote itself, such as its
-daemon's own session, are reported as `target_only` and do not fail it). Before a Postgres
-store replaces a SQLite one, `npm run parity:pg -- --sqlite copy.db --pg <url> --gold …`
-runs both on the same queries and query vectors: the vector branch's top-40 must overlap
-at ≥ 0.98, text and hybrid nDCG@10 / Recall@10 may trail SQLite by at most one point, and
-no labelled merge pair may cross a similarity gate. On the host, Postgres runs in the
-compose stack beside the daemon, with a dump before every deploy
-([`apps/host/deploy/README.md`](apps/host/deploy/README.md)).
+**Backup.** `deploy.sh` dumps the running store (`pg_dump -Fc`) into `backups/` before every
+deploy and keeps the 14 newest; a failed or empty dump stops the deploy. Restoring, and
+rehearsing a restore into a scratch database, are in
+[`apps/host/deploy/README.md`](apps/host/deploy/README.md).
 
-Testing: `npm run pg:up` starts a throwaway ParadeDB in podman or docker and prints the
-`CEREBRIUM_TEST_PG_URL` to export; `npm run test:pg` then reruns the suites against it
-(files whose first line is `// sqlite-only:` are skipped), and the storage contract tests in
-`packages/kernel/test/storage-contract/` run on both backends. `npm run pg:down` removes it.
-
-## Backup (Litestream)
-
-Streaming replication is not built in; run [Litestream](https://litestream.io)
-alongside the server. Example `litestream.yml`:
-
-```yaml
-dbs:
-  - path: /home/you/.cerebrium/memory.db
-    replicas:
-      - type: s3
-        bucket: my-memory-backups
-        path: cerebrium
-        # or: type: file, path: /mnt/backup/cerebrium
-```
-
-`litestream replicate -config litestream.yml`. Restore with
-`litestream restore -o memory.db s3://my-memory-backups/cerebrium`.
-WAL mode (already on) is required for Litestream.
+**Tests.** `npm run pg:up` starts a throwaway ParadeDB in podman or docker on `:55432`, the
+default `CEREBRIUM_TEST_PG_URL`; `npm test` runs every suite against it, each test on a
+database of its own, and `npm run pg:down` removes it.
 
 ## Host release
 
@@ -1378,22 +1281,20 @@ secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
 ## Engineering highlights
 
 - **DB-as-source-of-truth, append-only.** A database is built purely by running numbered
-  migrations (`000_baseline.sql -> NNN`); `schema.sql` is a derived snapshot kept honest by
-  a drift-guard test. Nothing is ever hard-deleted — invalidation is soft, and superseded
-  data stays queryable with `history:true`.
-- **Hybrid retrieval with a memory model.** FTS5 bm25 and vector KNN are fused with RRF,
-  multiplied by a memory factor (semantic steady, episodic `exp(-age/3d)`), then expanded
-  one hop over typed edges.
-- **Async embeddings, single-writer safe.** A node is findable via FTS the instant it is
+  migrations (`000_baseline.sql -> NNN`). Nothing is ever hard-deleted — invalidation is
+  soft, and superseded data stays queryable with `history:true`.
+- **Hybrid retrieval with a memory model.** BM25 and vector KNN are fused with RRF,
+  multiplied by a memory factor (semantic steady, episodic decaying by disuse), then
+  expanded over typed edges by personalized PageRank.
+- **Async embeddings, single-writer safe.** A node is findable via BM25 the instant it is
   written; a 384-dim vector per content-addressed chunk is computed asynchronously, so
-  editing one section re-embeds only that chunk. A standalone daemon drains the queue across
-  sessions and either idle-exits or, under launchd, stays resident; a `worker_lease` elects exactly one drain writer, and every write
-  is an `IMMEDIATE` transaction wrapped in busy-retry — so several session processes can
-  share one SQLite file without lockstep writes.
-- **In-process code indexing.** tree-sitter (WASM, no external process) mirrors
-  TypeScript / JavaScript / PHP / Rust / C / C++ / Lua symbols into the graph, incrementally via a per-file
-  content-hash gate, with `defines` / `imports` / best-effort `calls` edges. Link a semantic
-  note to a symbol and a later search resurfaces the code by meaning via graph expansion.
+  editing one section re-embeds only that chunk. The daemon drains the queue; a
+  `worker_lease` elects exactly one drain writer, and every write goes through one write lane
+  plus a store-wide advisory lock.
+- **Per-branch code indexing.** tree-sitter (WASM) parses TypeScript / JavaScript / PHP /
+  Rust / C / C++ / Lua checkouts the plugin uploads, content-addressed so only what changed is
+  parsed, with `defines` / `imports` / best-effort `calls`. Link a semantic note to a symbol
+  and a later search resurfaces the code by meaning.
 - **Background consolidation.** Link discovery, episodic->semantic distillation, dedup/merge,
   and dead-mirror pruning run in the daemon, each with an independent `off`/`suggest`/`auto`
   posture. Generation is a pluggable adapter (`manual`/`command`/`http`), and the default
@@ -1411,6 +1312,13 @@ secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
 - **Performance-driven choices.** Batched commits took measured single-writer embedding
   throughput from ~30 to ~176 chunks/s; a benchmark showed CPU int8 inference beating
   CoreML/WebGPU for the 384-dim model, so there is no GPU dependency.
+
+## Changelog
+
+- **2026-10-11** — SQLite removed: the store is Postgres only, the plugin is remote-only
+  (no local kernel or store on an agent's machine), and every test suite runs against
+  Postgres. `import:sqlite`, `parity:pg`, `code:repo-map`, `test:pg` and
+  `MEMORY_STORE_BACKEND` are gone; scripts take `--pg URL` instead of `--db PATH`.
 
 ## License
 

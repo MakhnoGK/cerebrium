@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConsolidationKind, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -21,10 +20,10 @@ interface Holder {
   worker?: ConsolidationWorker;
 }
 
-function leaseExpiry(env: TestEnv): string | undefined {
-  const row = env.db
-    .prepare("SELECT expires_at FROM worker_lease WHERE role = 'consolidation'")
-    .get() as { expires_at: string } | undefined;
+async function leaseExpiry(env: TestEnv): Promise<string | undefined> {
+  const row = await env.sql.one<{ expires_at: string }>(
+    "SELECT expires_at FROM worker_lease WHERE role = 'consolidation'",
+  );
 
   return row?.expires_at;
 }
@@ -114,8 +113,8 @@ describe("Consolidation worker lease", () => {
     // Then — the last renewal is the one before the final candidate's generation call,
     // so the lease outlives what a single claim at tick entry would have covered.
     const lastRenewal = Date.parse(START) + (ids.length - 1) * GENERATION_MS;
-    expect(leaseExpiry(env)).toBe(new Date(lastRenewal + ttl).toISOString());
-    expect(Date.parse(leaseExpiry(env)!)).toBeGreaterThan(Date.parse(START) + ttl);
+    expect(await leaseExpiry(env)).toBe(new Date(lastRenewal + ttl).toISOString());
+    expect(Date.parse((await leaseExpiry(env))!)).toBeGreaterThan(Date.parse(START) + ttl);
   });
 
   it("should end the sweep where it stands and leave the lease released when stopped mid-tick", async () => {
@@ -140,6 +139,6 @@ describe("Consolidation worker lease", () => {
         ids.slice(1).map(async (id) => (await env.consolidation.getCandidate(id))!.proposal),
       ),
     ).toEqual([null, null]);
-    expect(leaseExpiry(env)).toBeUndefined();
+    expect(await leaseExpiry(env)).toBeUndefined();
   });
 });

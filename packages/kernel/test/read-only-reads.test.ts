@@ -1,22 +1,26 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type BetterSqlite3 from "better-sqlite3";
 import { container as globalContainer, type DependencyContainer } from "tsyringe";
+import { ulid } from "ulid";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
+import { STORE_TOKEN, type Store } from "@/domain/ports/storage";
 import {
   READ_SURFACE,
   type FetchNodes,
   type ReadName,
   type UseCase,
 } from "@/application/use-cases";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
+import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { buildContainer } from "@/container";
 import { StaticConfigSource } from "@/infrastructure/config";
+import {
+  createFromTemplate,
+  databaseUrl,
+  dropDatabase,
+  TEST_DB_PREFIX,
+  TEST_PG_URL,
+} from "@test/pg";
 
 // The read pool holds a read-only connection, and from source there is no worker bundle to
 // spawn — so every read runs on the writer's handle under `npm run check` and a use case
@@ -24,14 +28,14 @@ import { StaticConfigSource } from "@/infrastructure/config";
 // `get` against the built daemon while every test stayed green. This builds the reader
 // container the pool actually uses and runs the whole surface through it.
 
-const DIR = mkdtempSync(join(tmpdir(), "cerebrium-readonly-"));
-const DB_FILE = join(DIR, "store.db");
+const DB_NAME = `${TEST_DB_PREFIX}${ulid().toLowerCase()}`;
 const OFFLINE = {
-  MEMORY_DB_PATH: DB_FILE,
+  MEMORY_PG_URL: databaseUrl(TEST_PG_URL, DB_NAME),
   MEMORY_EMBED_PROVIDER: "local-null",
   MEMORY_CONSOLIDATE: "manual",
 };
 
+let writer: DependencyContainer;
 let reader: DependencyContainer;
 let seeded: string;
 
@@ -51,9 +55,9 @@ function argsFor(name: ReadName): unknown {
 }
 
 beforeAll(async () => {
-  openDatabase(DB_FILE).close();
+  await createFromTemplate(DB_NAME);
 
-  const writer = globalContainer.createChildContainer();
+  writer = globalContainer.createChildContainer();
   buildContainer({ role: "server", source: new StaticConfigSource(OFFLINE), into: writer });
 
   const { session_id } = await writer.resolve(SessionStartTool).invoke({});
@@ -67,14 +71,15 @@ beforeAll(async () => {
   });
 
   seeded = written.id;
-  writer.resolve<BetterSqlite3.Database>(DB_TOKEN).close();
 
   reader = globalContainer.createChildContainer();
   buildContainer({ role: "reader", source: new StaticConfigSource(OFFLINE), into: reader });
 });
 
-afterAll(() => {
-  rmSync(DIR, { recursive: true, force: true });
+afterAll(async () => {
+  await writer.resolve<Store>(STORE_TOKEN).close();
+  await reader.resolve<Store>(STORE_TOKEN).close();
+  await dropDatabase(DB_NAME);
 });
 
 describe("Read surface against a read-only handle", () => {
@@ -110,11 +115,10 @@ describe("Read surface against a read-only handle", () => {
     await fetch.invoke({ ids: [seeded] });
 
     // Then
-    const row = reader
-      .resolve<BetterSqlite3.Database>(DB_TOKEN)
-      .prepare("SELECT use_count FROM nodes WHERE id = ?")
-      .get(seeded) as { use_count: number };
+    const { rows } = await reader
+      .resolve<PgDatabase>(PG_TOKEN)
+      .query<{ use_count: number }>("SELECT use_count FROM nodes WHERE id = @id", { id: seeded });
 
-    expect(row.use_count).toBe(0);
+    expect(rows[0]?.use_count).toBe(0);
   });
 });

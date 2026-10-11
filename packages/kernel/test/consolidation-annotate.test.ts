@@ -1,5 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
-import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -17,7 +15,7 @@ import type { Envelope } from "@/db/repo";
 import { parseTextQuery } from "@/core/fts";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
-import { setup } from "@test/helpers";
+import { setup, type TestSql } from "@test/helpers";
 
 // An enabled provider that only annotates. `generate`/`reconcile` are unused here.
 class FakeAnnotator implements ConsolidationProvider {
@@ -76,10 +74,10 @@ async function ftsFinds(search: SearchRepo, term: string, id: string): Promise<b
   ).rows.some((r) => r.id === id);
 }
 
-function annotationRows(db: BetterSqlite3.Database, id: string): unknown[] {
-  return db
-    .prepare("SELECT node_id, rev, annotations FROM revision_annotations WHERE node_id = ?")
-    .all(id);
+function annotationRows(sql: TestSql, id: string): Promise<unknown[]> {
+  return sql.all("SELECT node_id, rev, annotations FROM revision_annotations WHERE node_id = @id", {
+    id,
+  });
 }
 
 async function session(project?: string): Promise<string> {
@@ -115,7 +113,7 @@ describe("Write-time attribute enrichment (annotate)", () => {
     const full = (await env.nodes.fullNode(id))!;
     expect(full.content).toBe(BODY);
     expect(full.envelope.rev).toBe(1);
-    expect(annotationRows(env.db, id)).toHaveLength(1);
+    expect(await annotationRows(env.sql, id)).toHaveLength(1);
   });
 
   it("should re-annotate nothing on a second sweep (idempotent)", async () => {

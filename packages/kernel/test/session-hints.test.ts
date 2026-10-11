@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ConsolidationKind, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -91,6 +90,6 @@ describe("Session hints", () => {
 
     // Then
     expect(await hints.getSessionHints(other)).toHaveLength(1);
-    expect(env.db.prepare("SELECT COUNT(*) AS n FROM sessions").get()).toEqual({ n: 2 });
+    expect(await env.sql.one("SELECT COUNT(*)::int AS n FROM sessions")).toEqual({ n: 2 });
   });
 });

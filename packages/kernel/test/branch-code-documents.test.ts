@@ -18,7 +18,6 @@ import { InProcessCodeParser } from "@/code/unit-parser";
 import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 import { ConsolidationPostureConfig, StaticConfigSource } from "@/infrastructure/config";
 import { setup } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 
 const REMOTE = "github.com/acme/widgets";
 
@@ -94,101 +93,98 @@ async function hashTokenQualified(): Promise<string> {
   )[0]!.qualified;
 }
 
-describe.skipIf(TEST_BACKEND !== "postgres")(
-  "Note-to-code citations on the per-branch index",
-  () => {
-    beforeEach(async () => {
-      setup();
-      container.register(CODE_PARSER_TOKEN, { useValue: new InProcessCodeParser() });
-      session = (
-        await container
-          .resolve(START_SESSION)
-          .invoke({ project: "widgets", client: { client: "t", version: "1" } })
-      ).session_id;
-      await index({ "src/util.ts": UTIL });
+describe("Note-to-code citations on the per-branch index", () => {
+  beforeEach(async () => {
+    setup();
+    container.register(CODE_PARSER_TOKEN, { useValue: new InProcessCodeParser() });
+    session = (
+      await container
+        .resolve(START_SESSION)
+        .invoke({ project: "widgets", client: { client: "t", version: "1" } })
+    ).session_id;
+    await index({ "src/util.ts": UTIL });
+  });
+
+  afterEach(() => {
+    container.register(ConsolidationPostureConfig, {
+      useValue: new ConsolidationPostureConfig(new StaticConfigSource({})),
+    });
+  });
+
+  it("should record the symbol a note cites as a code ref, once", async () => {
+    // Given
+    const id = await note("the token check goes through `hashToken` before anything else");
+
+    // When
+    const first = await container.resolve(ConsolidationWorker).tick();
+    await note("an unrelated change");
+    const second = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(first.documents_linked).toBe(1);
+    expect(second.documents_linked).toBe(0);
+    expect(await refs()).toEqual([
+      {
+        src: id,
+        type: EdgeType.DOCUMENTS,
+        remote_key: REMOTE,
+        path: "src/util.ts",
+        qualified: await hashTokenQualified(),
+      },
+    ]);
+  });
+
+  it("should propose the citation, and record it as a code ref when applied", async () => {
+    // Given
+    withDocumentsPosture(Posture.SUGGEST);
+    const id = await note("the token check goes through `hashToken`");
+    const result = await container.resolve(ConsolidationWorker).tick();
+    const [candidate] = await rows<{ id: string; kind: string }>(
+      "SELECT id, kind FROM consolidation_candidates WHERE status = 'pending'",
+    );
+
+    // When
+    const applied = await container.resolve(APPLY_CANDIDATE).invoke({
+      session_id: session,
+      id: candidate!.id,
+      decision: ConsolidationRecommendation.APPLY,
     });
 
-    afterEach(() => {
-      container.register(ConsolidationPostureConfig, {
-        useValue: new ConsolidationPostureConfig(new StaticConfigSource({})),
-      });
+    // Then
+    expect(result.documents_suggested).toBe(1);
+    expect(candidate!.kind).toBe(ConsolidationKind.DOCUMENTS);
+    expect(applied.status).toBe("applied");
+    expect(await refs()).toEqual([expect.objectContaining({ src: id, path: "src/util.ts" })]);
+  });
+
+  it("should not cross from one project's note into another project's code", async () => {
+    // Given
+    await note("the token check goes through `hashToken`", "some-other-project");
+
+    // When
+    const result = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(result.documents_linked).toBe(0);
+    expect(await refs()).toEqual([]);
+  });
+
+  it("should rescan once a branch is indexed, without a new revision", async () => {
+    // Given
+    const id = await note("the parser calls `reverseWords` on every token");
+    const worker = container.resolve(ConsolidationWorker);
+    const before = await worker.tick();
+
+    // When
+    await index({
+      "src/util.ts": UTIL,
+      "src/words.ts": "export function reverseWords(s: string): string {\n  return s;\n}\n",
     });
+    const after = await worker.tick();
 
-    it("should record the symbol a note cites as a code ref, once", async () => {
-      // Given
-      const id = await note("the token check goes through `hashToken` before anything else");
-
-      // When
-      const first = await container.resolve(ConsolidationWorker).tick();
-      await note("an unrelated change");
-      const second = await container.resolve(ConsolidationWorker).tick();
-
-      // Then
-      expect(first.documents_linked).toBe(1);
-      expect(second.documents_linked).toBe(0);
-      expect(await refs()).toEqual([
-        {
-          src: id,
-          type: EdgeType.DOCUMENTS,
-          remote_key: REMOTE,
-          path: "src/util.ts",
-          qualified: await hashTokenQualified(),
-        },
-      ]);
-    });
-
-    it("should propose the citation, and record it as a code ref when applied", async () => {
-      // Given
-      withDocumentsPosture(Posture.SUGGEST);
-      const id = await note("the token check goes through `hashToken`");
-      const result = await container.resolve(ConsolidationWorker).tick();
-      const [candidate] = await rows<{ id: string; kind: string }>(
-        "SELECT id, kind FROM consolidation_candidates WHERE status = 'pending'",
-      );
-
-      // When
-      const applied = await container.resolve(APPLY_CANDIDATE).invoke({
-        session_id: session,
-        id: candidate!.id,
-        decision: ConsolidationRecommendation.APPLY,
-      });
-
-      // Then
-      expect(result.documents_suggested).toBe(1);
-      expect(candidate!.kind).toBe(ConsolidationKind.DOCUMENTS);
-      expect(applied.status).toBe("applied");
-      expect(await refs()).toEqual([expect.objectContaining({ src: id, path: "src/util.ts" })]);
-    });
-
-    it("should not cross from one project's note into another project's code", async () => {
-      // Given
-      await note("the token check goes through `hashToken`", "some-other-project");
-
-      // When
-      const result = await container.resolve(ConsolidationWorker).tick();
-
-      // Then
-      expect(result.documents_linked).toBe(0);
-      expect(await refs()).toEqual([]);
-    });
-
-    it("should rescan once a branch is indexed, without a new revision", async () => {
-      // Given
-      const id = await note("the parser calls `reverseWords` on every token");
-      const worker = container.resolve(ConsolidationWorker);
-      const before = await worker.tick();
-
-      // When
-      await index({
-        "src/util.ts": UTIL,
-        "src/words.ts": "export function reverseWords(s: string): string {\n  return s;\n}\n",
-      });
-      const after = await worker.tick();
-
-      // Then
-      expect(before.documents_linked).toBe(0);
-      expect(after.documents_linked).toBe(1);
-      expect(await refs()).toEqual([expect.objectContaining({ src: id, path: "src/words.ts" })]);
-    });
-  },
-);
+    // Then
+    expect(before.documents_linked).toBe(0);
+    expect(after.documents_linked).toBe(1);
+    expect(await refs()).toEqual([expect.objectContaining({ src: id, path: "src/words.ts" })]);
+  });
+});

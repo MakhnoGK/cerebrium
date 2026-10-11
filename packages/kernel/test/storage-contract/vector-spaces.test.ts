@@ -38,14 +38,6 @@ describeStorage("vector spaces", (backend) => {
       })
     ).id;
 
-  if (backend.name === "sqlite") {
-    it("should refuse every call", async () => {
-      await expect(spaces.ensureSpace(MODEL, 1024, T0)).rejects.toThrow(/sqlite/);
-    });
-
-    return;
-  }
-
   it("should add an inactive space for a new model and return it again", async () => {
     // When
     const created = await spaces.ensureSpace(MODEL, 1024, T0);

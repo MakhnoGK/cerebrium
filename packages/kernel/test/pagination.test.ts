@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -23,16 +22,23 @@ let env: TestEnv;
 
 // Candidates are inserted directly: the detection path is not what these tests are about,
 // and it cannot produce a controlled score/timestamp ladder.
-function candidate(score: number, detectedAt: string, id = newId()): string {
-  env.db
-    .prepare(
-      `INSERT INTO consolidation_candidates
-         (id, kind, status, project, member_ids, member_hash, canonical_id, score, proposal, detected_at)
-       VALUES (?, 'merge', 'pending', NULL, ?, ?, NULL, ?, NULL, ?)`,
-    )
-    .run(id, JSON.stringify([newId()]), id, score, detectedAt);
+async function candidate(score: number, detectedAt: string, id = newId()): Promise<string> {
+  await env.sql.run(
+    `INSERT INTO consolidation_candidates
+       (id, kind, status, project, member_ids, member_hash, canonical_id, score, proposal, detected_at)
+     VALUES (@id, 'merge', 'pending', NULL, @members, @id, NULL, @score, NULL, @detectedAt)`,
+    { id, members: JSON.stringify([newId()]), score, detectedAt },
+  );
 
   return id;
+}
+
+async function candidates(count: number, make: (i: number) => Promise<string>): Promise<string[]> {
+  const ids: string[] = [];
+
+  for (let i = 0; i < count; i++) ids.push(await make(i));
+
+  return ids;
 }
 
 function suggest(args: Record<string, unknown>): Promise<SuggestCandidatesResult> {
@@ -122,7 +128,7 @@ describe("Cursor encoding", () => {
 describe("Paging the review queue", () => {
   it("should walk every candidate exactly once across pages", async () => {
     // Given
-    const ids = Array.from({ length: 11 }, (_, i) =>
+    const ids = await candidates(11, (i) =>
       candidate(0.9 - i * 0.01, `2026-01-0${String((i % 9) + 1)}T00:00:00.000Z`),
     );
 
@@ -137,7 +143,7 @@ describe("Paging the review queue", () => {
 
   it("should not repeat or skip a row when scores and timestamps collide", async () => {
     // Given — the case a non-total order gets wrong: every row identical but for its id.
-    const ids = Array.from({ length: 9 }, () => candidate(0.5, "2026-01-01T00:00:00.000Z"));
+    const ids = await candidates(9, () => candidate(0.5, "2026-01-01T00:00:00.000Z"));
 
     // When
     const seen = await pageThrough(2);
@@ -150,13 +156,13 @@ describe("Paging the review queue", () => {
   it("should not re-show a row when a higher-ranked candidate is inserted mid-walk", async () => {
     // Given
     for (let i = 0; i < 6; i++) {
-      candidate(0.5 - i * 0.01, "2026-01-01T00:00:00.000Z");
+      await candidate(0.5 - i * 0.01, "2026-01-01T00:00:00.000Z");
     }
     const first = await suggest({ page_size: 3 });
     expect(first.next_cursor).toBeDefined();
 
     // When — an offset would shift every later row down by one and repeat one.
-    candidate(0.99, "2026-01-01T00:00:00.000Z");
+    await candidate(0.99, "2026-01-01T00:00:00.000Z");
     const second = await suggest({ page_size: 3, cursor: first.next_cursor });
 
     // Then
@@ -166,8 +172,8 @@ describe("Paging the review queue", () => {
 
   it("should stop without a cursor on the last page", async () => {
     // Given
-    candidate(0.5, "2026-01-01T00:00:00.000Z");
-    candidate(0.4, "2026-01-01T00:00:00.000Z");
+    await candidate(0.5, "2026-01-01T00:00:00.000Z");
+    await candidate(0.4, "2026-01-01T00:00:00.000Z");
 
     // When
     const page = await suggest({ page_size: 10 });
@@ -179,8 +185,8 @@ describe("Paging the review queue", () => {
 
   it("should keep the filter across pages", async () => {
     // Given
-    for (let i = 0; i < 4; i++) candidate(0.5 - i * 0.01, "2026-01-01T00:00:00.000Z");
-    env.db.prepare("UPDATE consolidation_candidates SET kind = 'link' WHERE score < 0.49").run();
+    for (let i = 0; i < 4; i++) await candidate(0.5 - i * 0.01, "2026-01-01T00:00:00.000Z");
+    await env.sql.run("UPDATE consolidation_candidates SET kind = 'link' WHERE score < 0.49");
 
     // When
     const first = await suggest({ kind: ConsolidationKind.MERGE, page_size: 1 });
@@ -198,7 +204,7 @@ describe("Paging the review queue", () => {
 
   it("should refuse a cursor it did not issue rather than silently restarting", async () => {
     // Given
-    candidate(0.5, "2026-01-01T00:00:00.000Z");
+    await candidate(0.5, "2026-01-01T00:00:00.000Z");
 
     // When / Then — silently restarting would make a client loop forever.
     await expect(suggest({ page_size: 1, cursor: "garbage" })).rejects.toBeInstanceOf(
@@ -208,7 +214,7 @@ describe("Paging the review queue", () => {
 
   it("should answer a pre-cursor caller exactly as before", async () => {
     // Given
-    for (let i = 0; i < 3; i++) candidate(0.5 - i * 0.01, "2026-01-01T00:00:00.000Z");
+    for (let i = 0; i < 3; i++) await candidate(0.5 - i * 0.01, "2026-01-01T00:00:00.000Z");
 
     // When — no page_size and no cursor is the old contract.
     const page = await suggest({ limit: 2 });

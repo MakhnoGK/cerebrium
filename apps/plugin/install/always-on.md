@@ -3,7 +3,7 @@
 # Agent memory (Cerebrium)
 
 `Cerebrium` is your cross-session working memory and the single durable knowledge base — a
-stdio MCP server owning one SQLite file (FTS5 + vector search + a typed graph). It is where
+kernel on a host owning one Postgres store (BM25 + vector search + a typed graph). It is where
 you record and recall everything across sessions: facts and how-tos learned, decisions made
 (with reasons), entities, and where you left off. Agents are the only writers.
 

@@ -2,12 +2,10 @@ import pg from "pg";
 import { ulid } from "ulid";
 import { PgDatabase } from "@/db/postgres/database";
 
-// The Postgres half of the suite. `CEREBRIUM_TEST_PG_URL` names a server the suite may
-// create and drop databases on (never a real store); `CEREBRIUM_TEST_BACKEND=postgres`
-// reruns the ordinary suites against it.
-export const TEST_PG_URL = process.env.CEREBRIUM_TEST_PG_URL ?? null;
-export const TEST_BACKEND =
-  process.env.CEREBRIUM_TEST_BACKEND === "postgres" ? "postgres" : "sqlite";
+// `CEREBRIUM_TEST_PG_URL` names a server the suite may create and drop databases on (never
+// a real store). The default is the one `npm run pg:up` starts.
+export const TEST_PG_URL =
+  process.env.CEREBRIUM_TEST_PG_URL ?? "postgres://cerebrium:cerebrium@localhost:55432/postgres";
 export const TEMPLATE_DB = "cerebrium_tpl";
 export const TEST_DB_PREFIX = "t_";
 
@@ -24,8 +22,6 @@ export function databaseUrl(base: string, name: string): string {
 let admin: pg.Pool | null = null;
 
 function adminPool(): pg.Pool {
-  if (TEST_PG_URL === null) throw new Error("CEREBRIUM_TEST_PG_URL is not set");
-
   admin ??= new pg.Pool({ connectionString: TEST_PG_URL, max: 2, allowExitOnIdle: true });
 
   return admin;
@@ -107,7 +103,7 @@ export async function releasePgDatabases(): Promise<void> {
 function createPgDatabase(spaceModel: string): Current {
   const name = `${TEST_DB_PREFIX}${ulid().toLowerCase()}`;
   const settled = retiring;
-  const url = databaseUrl(TEST_PG_URL ?? "", name);
+  const url = databaseUrl(TEST_PG_URL, name);
   const db = new PgDatabase({
     url,
     poolMax: 4,

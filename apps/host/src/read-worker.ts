@@ -4,9 +4,8 @@ import type { DependencyContainer } from "tsyringe";
 import { isReadName, READ_SURFACE, type UseCase } from "@cerebrium/kernel/application/use-cases";
 import { buildContainer } from "@cerebrium/kernel/container";
 
-// One worker of the read pool. It holds its own read-only connection to the same database
-// file, so several of these run genuinely concurrently — WAL allows any number of readers,
-// and better-sqlite3 is synchronous only per connection.
+// One worker of the read pool. It holds its own read-only connection to the store, so
+// several of these run genuinely concurrently off the daemon's main thread.
 //
 // No embedding model lives here. A query vector arrives in the arguments, because embedding
 // is ~3ms of a ~200ms search and a model per worker would cost ~150MB each.

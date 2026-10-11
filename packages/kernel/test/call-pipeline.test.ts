@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -18,20 +17,21 @@ let env: TestEnv;
 let session: string;
 let pipeline: CallPipeline;
 
-function events(): { action: string; session_id: string; node_id: string | null }[] {
-  return env.db.prepare("SELECT action, session_id, node_id FROM events ORDER BY ts, id").all() as {
-    action: string;
-    session_id: string;
-    node_id: string | null;
-  }[];
+function events(): Promise<{ action: string; session_id: string; node_id: string | null }[]> {
+  return env.sql.all("SELECT action, session_id, node_id FROM events ORDER BY ts, id");
 }
 
-function useCount(id: string): number {
-  const row = env.db.prepare("SELECT use_count FROM nodes WHERE id = ?").get(id) as {
-    use_count: number;
-  };
+async function useCount(id: string): Promise<number> {
+  const row = await env.sql.one<{ use_count: number }>(
+    "SELECT use_count FROM nodes WHERE id = @id",
+    { id },
+  );
 
-  return row.use_count;
+  return row!.use_count;
+}
+
+async function nodeCount(): Promise<number> {
+  return (await env.sql.one<{ n: number }>("SELECT COUNT(*)::int AS n FROM nodes"))!.n;
 }
 
 const write = (title: string): Record<string, unknown> => ({
@@ -106,7 +106,7 @@ describe("Call pipeline invariants", () => {
 
     // Then — the node id is what the read-loop report joins on, and write_memory answers
     // {envelope:{id}} rather than {id}.
-    const audit = events().filter((e) => e.action === "write");
+    const audit = (await events()).filter((e) => e.action === "write");
     expect(audit).toHaveLength(1);
     expect(audit[0]!.session_id).toBe(session);
     expect(audit[0]!.node_id).toBe(result.envelope.id);
@@ -122,12 +122,12 @@ describe("Call pipeline invariants", () => {
     ).rejects.toThrow();
 
     // Then — a failed call is still provenance.
-    expect(events().filter((e) => e.action === "invalidate")).toHaveLength(1);
+    expect((await events()).filter((e) => e.action === "invalidate")).toHaveLength(1);
   });
 
   it("should reject an unknown session before the call runs, not after", async () => {
     // Given
-    const before = env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get() as { n: number };
+    const before = await nodeCount();
 
     // When
     await expect(
@@ -138,8 +138,7 @@ describe("Call pipeline invariants", () => {
     ).rejects.toThrow();
 
     // Then — nothing was written.
-    const after = env.db.prepare("SELECT COUNT(*) AS n FROM nodes").get() as { n: number };
-    expect(after.n).toBe(before.n);
+    expect(await nodeCount()).toBe(before);
   });
 
   it("should refuse a call that is not on the surface", async () => {
@@ -183,7 +182,7 @@ describe("Call pipeline invariants", () => {
     });
 
     // Then — provenance must not depend on which thread served the call.
-    expect(events().filter((e) => e.action === "search")).toHaveLength(1);
+    expect((await events()).filter((e) => e.action === "search")).toHaveLength(1);
   });
 
   it("should record the use a dispatched `get` could not write itself", async () => {
@@ -201,7 +200,7 @@ describe("Call pipeline invariants", () => {
     await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id] });
 
     // Then
-    expect(useCount(id)).toBe(1);
+    expect(await useCount(id)).toBe(1);
   });
 
   it("should not double-count a `get` that ran in-process", async () => {
@@ -215,19 +214,19 @@ describe("Call pipeline invariants", () => {
     await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id] });
 
     // Then
-    expect(useCount(id)).toBe(1);
+    expect(await useCount(id)).toBe(1);
   });
 
   it("should log nothing for a call that carries no session to attribute it to", async () => {
     // Given — events.session_id is NOT NULL, so an unattributable call logs nothing rather
     // than inventing an attribution.
-    const before = events().length;
+    const before = (await events()).length;
 
     // When
     await pipeline.invoke(container, "suggest_candidates", {});
 
     // Then
-    expect(events()).toHaveLength(before);
+    expect(await events()).toHaveLength(before);
   });
 
   it("should stamp the writer from the transport over anything the caller claims", async () => {
@@ -243,7 +242,9 @@ describe("Call pipeline invariants", () => {
 
     // Then
     expect(
-      env.db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
+      await env.sql.one("SELECT client, client_version FROM sessions WHERE id = @id", {
+        id: session_id,
+      }),
     ).toEqual({ client: "claude-code", client_version: "2.1.224" });
   });
 
@@ -256,7 +257,7 @@ describe("Call pipeline invariants", () => {
 
     // Then
     expect(
-      events().filter((e) => e.action === "session_start" && e.session_id === session_id),
+      (await events()).filter((e) => e.action === "session_start" && e.session_id === session_id),
     ).toHaveLength(1);
   });
 });

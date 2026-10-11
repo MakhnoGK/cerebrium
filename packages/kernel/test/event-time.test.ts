@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -71,7 +70,9 @@ describe("Recording when a fact was true", () => {
     const node = await write("Retry budget");
 
     // When
-    const row = env.db.prepare("SELECT event_from, event_to FROM nodes WHERE id = ?").get(node.id);
+    const row = await env.sql.one("SELECT event_from, event_to FROM nodes WHERE id = @id", {
+      id: node.id,
+    });
 
     // Then
     expect(row).toEqual({ event_from: null, event_to: null });
@@ -94,12 +95,13 @@ describe("Recording when a fact was true", () => {
       .invoke({ session_id: session, id: node.id, event_from: JULY });
 
     // Then
-    const row = env.db.prepare("SELECT event_from FROM nodes WHERE id = ?").get(node.id);
+    const row = await env.sql.one("SELECT event_from FROM nodes WHERE id = @id", { id: node.id });
     expect(row).toEqual({ event_from: JULY });
-    const revs = env.db
-      .prepare("SELECT count(*) AS n FROM revisions WHERE node_id = ?")
-      .get(node.id) as { n: number };
-    expect(revs.n).toBe(1);
+    const revs = await env.sql.one<{ n: number }>(
+      "SELECT count(*)::int AS n FROM revisions WHERE node_id = @id",
+      { id: node.id },
+    );
+    expect(revs?.n).toBe(1);
   });
 });
 

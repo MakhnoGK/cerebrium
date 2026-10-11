@@ -24,7 +24,6 @@ import {
   reciprocalRank,
   sample,
 } from "@scripts/metrics";
-import type Database from "better-sqlite3";
 import { container, type DependencyContainer } from "tsyringe";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
 import {
@@ -34,7 +33,6 @@ import {
 import { HintsService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
 import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
-import { DB_TOKEN } from "@/db/sqlite/base";
 import { matchesSection, sectionName } from "@/core/chunk";
 import { LinkTool } from "@/presentation/mcp/tools/link";
 import { SearchTool } from "@/presentation/mcp/tools/search";
@@ -48,7 +46,7 @@ import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infr
 // identical documents, identical embeddings and identical queries. Not part of `npm test`
 // (it may download models); run with `npm run eval:retrieval`.
 //
-// The corpus is 36 short docs in an in-memory DB. That is enough to answer "does this knob
+// The seed corpus is 36 short docs in an empty database. That is enough to answer "does this knob
 // help on labelled data" and NOT enough to reproduce the anisotropy and candidate starvation
 // of a 125k-node store — an arm that wins here has stopped being a guess, not become proven.
 
@@ -110,21 +108,24 @@ interface Run {
 const HELP = `
 eval-retrieval — labelled relevance eval across configuration arms.
 
-  npm run eval:retrieval -- [--arm NAME[:KEY=VAL,KEY=VAL]] ...
+  npm run eval:retrieval -- (--pg URL | --seed-into URL) [--arm NAME[:KEY=VAL,KEY=VAL]] ...
 
   --arm      An arm to measure. Repeatable. "NAME" alone runs the ambient environment;
              "NAME:KEY=VAL" overlays those variables on top of it. With no --arm, a single
              'base' arm runs.
-  --db PATH  Measure against a real store instead of the seeded corpus. Opened READ-ONLY
-             and the session-hint write is stubbed out, so the run cannot touch it. Gold
-             labels are mined from the retrieval-outcome log: within a session, a node a
-             \`get\` fetched after a \`search\` returned it counts as relevant to that query.
-             Prints the volume it found and refuses to score below ${MIN_GOLD_QUERIES} labelled queries.
-  --pg URL   The same against a Postgres store. An arm may point at another one with
-             MEMORY_PG_URL; labels are then kept only for nodes live in every arm's store.
+  --pg URL   Measure a real Postgres store, in a read-only session; the session-hint write
+             is stubbed out, so the run cannot touch it. Gold labels are mined from the
+             retrieval-outcome log: within a session, a node a \`get\` fetched after a
+             \`search\` returned it counts as relevant to that query. Prints the volume it
+             found and refuses to score below ${MIN_GOLD_QUERIES} labelled queries. An arm may point at
+             another store with MEMORY_PG_URL; labels are then kept only for nodes live in
+             every arm's store.
+  --seed-into URL
+             Write the labelled seed corpus (eval-retrieval.dataset.json) into this EMPTY
+             Postgres database and measure that. Refuses a database that already has nodes.
   --gold P   JSONL gold file (see scripts/gold.ts) merged with the mined labels: the same
              question from two sources becomes one query with the union of its labels.
-             Labels pointing at nodes no longer live are dropped and counted. Needs --db or --pg.
+             Labels pointing at nodes no longer live are dropped and counted. Needs --pg.
   --origin O Comma-separated subset of generated,adjudicated,mined — score only labels of
              those origins, e.g. to check whether synthetic questions and real ones agree.
   --sample N Score a stable subset of N queries, chosen by hashing the query text — the
@@ -138,18 +139,17 @@ eval-retrieval — labelled relevance eval across configuration arms.
              or to peek at early data, not to draw conclusions.
   --as-of T  Score the store as it stood at T (ISO-8601, or "now"). Repeatable: one table
              per horizon. Every query runs with \`as_of\`, and a label counts only if its
-             node was live at T. Needs --db or --pg. The text index holds current wording,
+             node was live at T. Needs --pg. The text index holds current wording,
              so T picks which nodes compete, not how they read then.
   --dump P   Write one JSONL line per scored query to P (horizon, query, gold ids, and
              nDCG@${K} and reciprocal rank per arm), for joining with per-node data.
   --help     This text.
 
 Examples
-  npm run eval:retrieval -- --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
-  npm run eval:retrieval -- --arm flat:MEMORY_USE_WEIGHT=0 --arm usage:MEMORY_USE_WEIGHT=0.25
-  npm run eval:retrieval -- --db ~/.cerebrium/memory.db --gold ~/.cerebrium/gold.jsonl
-  npm run eval:retrieval -- --db snap.db --kinds semantic,episodic --arm sqlite \
-    --arm pg:MEMORY_STORE_BACKEND=postgres,MEMORY_PG_URL=postgres://u:p@localhost/snap
+  npm run eval:retrieval -- --seed-into postgres://u:p@localhost/scratch \
+    --arm relevance:MEMORY_MMR_LAMBDA=1.0 --arm diverse:MEMORY_MMR_LAMBDA=0.7
+  npm run eval:retrieval -- --pg postgres://u:p@localhost/snap --gold ~/.cerebrium/gold.jsonl \
+    --arm flat:MEMORY_USE_WEIGHT=0 --arm usage:MEMORY_USE_WEIGHT=0.25
   npm run eval:retrieval -- --pg postgres://u:p@localhost/after \
     --arm before:MEMORY_PG_URL=postgres://u:p@localhost/before --arm after
   npm run eval:retrieval -- --pg postgres://u:p@localhost/snap --gold ~/.cerebrium/gold.jsonl \
@@ -276,16 +276,22 @@ const mean = (xs: number[]): number =>
 const pct = (x: number): string => (Number.isNaN(x) ? "    -" : (x * 100).toFixed(1).padStart(5));
 
 // Docs are stored under ULIDs, so dataset ids are resolved by title.
-function titlesToIds(db: Database.Database): Map<string, string> {
-  const rows = db.prepare("SELECT id, title FROM nodes WHERE memory_kind = 'semantic'").all() as {
-    id: string;
-    title: string;
-  }[];
+async function titlesToIds(db: PgDatabase): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ id: string; title: string }>(
+    "SELECT id, title FROM nodes WHERE memory_kind = 'semantic'",
+  );
 
   return new Map(rows.map((r) => [r.title, r.id]));
 }
 
 async function seed(root: DependencyContainer, data: Dataset): Promise<Map<string, string>> {
+  const db = root.resolve<PgDatabase>(PG_TOKEN);
+  const existing = await db.query<{ n: string }>("SELECT COUNT(*) AS n FROM nodes");
+
+  if (Number(existing.rows[0]?.n ?? 0) > 0) {
+    throw new Error("--seed-into needs an empty database; this one already has nodes");
+  }
+
   const sid = (await root.resolve(SessionStartTool).invoke({})).session_id;
   const writeTool = root.resolve(WriteTool);
 
@@ -300,7 +306,7 @@ async function seed(root: DependencyContainer, data: Dataset): Promise<Map<strin
     });
   }
 
-  const byTitle = titlesToIds(root.resolve<Database.Database>(DB_TOKEN));
+  const byTitle = await titlesToIds(db);
   const idOf = (datasetId: string): string | undefined =>
     byTitle.get(data.docs.find((d) => d.id === datasetId)?.title ?? "");
 
@@ -452,19 +458,12 @@ function redacted(url: string): string {
 type Rows = <T>(sql: string) => Promise<T[]>;
 
 function rowsOf(scope: DependencyContainer): Rows {
-  if (scope.isRegistered(PG_TOKEN, true)) {
-    const pg = scope.resolve<PgDatabase>(PG_TOKEN);
+  const pg = scope.resolve<PgDatabase>(PG_TOKEN);
 
-    return async <T,>(sql: string) => (await pg.query(sql)).rows as T[];
-  }
-
-  const db = scope.resolve<Database.Database>(DB_TOKEN);
-
-  return <T,>(sql: string) => Promise.resolve(db.prepare(sql).all() as T[]);
+  return async <T,>(sql: string) => (await pg.query(sql)).rows as T[];
 }
 
 interface Shared {
-  db: Database.Database | null;
   base: Record<string, string>;
   provider: EmbeddingProvider;
   readonly: boolean;
@@ -473,7 +472,7 @@ interface Shared {
 }
 
 // A fresh container per arm so every config section is rebuilt from the arm's overlay,
-// sharing the embeddings — and, on SQLite, the DB — so only the knob differs.
+// sharing the embeddings so only the knob differs.
 function armScope(arm: Arm, shared: Shared): DependencyContainer {
   const scope = container.createChildContainer();
 
@@ -486,7 +485,6 @@ function armScope(arm: Arm, shared: Shared): DependencyContainer {
     ),
     into: scope,
   });
-  if (shared.db !== null) scope.register(DB_TOKEN, { useValue: shared.db });
 
   // An arm that names its own embedding model embeds its queries with it.
   if (!("MEMORY_EMBED_MODEL" in arm.env) && !("MEMORY_EMBED_PROVIDER" in arm.env)) {
@@ -553,12 +551,17 @@ async function main() {
 
   const here = dirname(fileURLToPath(import.meta.url));
   const arms = parseArms(argv);
-  const store = argv.includes("--db") ? argv[argv.indexOf("--db") + 1] : undefined;
   const pgUrl = argv.includes("--pg") ? argv[argv.indexOf("--pg") + 1] : undefined;
-  const readonly = !!store || !!pgUrl;
-  const base: Record<string, string> = pgUrl
-    ? { MEMORY_STORE_BACKEND: "postgres", MEMORY_PG_URL: pgUrl }
-    : { MEMORY_DB_PATH: store ?? ":memory:" };
+  const seedUrl = argv.includes("--seed-into") ? argv[argv.indexOf("--seed-into") + 1] : undefined;
+
+  if (!pgUrl === !seedUrl) {
+    console.error("eval-retrieval: pass exactly one of --pg URL or --seed-into URL (see --help)");
+    process.exitCode = 1;
+    return;
+  }
+
+  const readonly = !!pgUrl;
+  const base: Record<string, string> = { MEMORY_PG_URL: (pgUrl ?? seedUrl)! };
   const mode = argv.includes("--mode")
     ? (argv[argv.indexOf("--mode") + 1] as "hybrid" | "text" | "vector")
     : undefined;
@@ -576,9 +579,8 @@ async function main() {
     into: container.createChildContainer(),
   });
 
-  const db = pgUrl ? null : root.resolve<Database.Database>(DB_TOKEN);
   const provider = root.resolve<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN);
-  const shared: Shared = { db, base, provider, readonly, mode, kinds };
+  const shared: Shared = { base, provider, readonly, mode, kinds };
   const scopes = arms.map((arm) => armScope(arm, shared));
   const horizons = parseHorizons(argv);
   const runs: Run[] = [];
@@ -586,7 +588,7 @@ async function main() {
   let facetOf = new Map<string, string>();
 
   if (!readonly && horizons.some((h) => h.asOf !== undefined)) {
-    console.error("--as-of needs a real store (--db or --pg)");
+    console.error("--as-of needs a real store (--pg)");
     process.exitCode = 1;
     return;
   }
@@ -609,7 +611,7 @@ async function main() {
 
     spans = storeSpans[0]!;
 
-    console.log(`store: ${pgUrl ? redacted(pgUrl) : store} (read-only)`);
+    console.log(`store: ${redacted(pgUrl)} (read-only)`);
 
     if (goldPath) {
       console.log(
@@ -651,7 +653,7 @@ async function main() {
       console.log(
         `\nNot enough labelled data to measure anything: ${floor} usable queries is the floor.\n` +
           `Mined labels grow only with use; manufacture the rest with \`gold-generate\` and \`gold-adjudicate\`,\n` +
-          `then pass the file with --gold. The seeded corpus (no --db) works today.`,
+          `then pass the file with --gold. The seeded corpus (--seed-into) works today.`,
       );
       return;
     }
@@ -783,7 +785,10 @@ function printAges(run: Run, table: Table, spans: Map<string, NodeSpan>): void {
   }
 }
 
-main().catch((e: unknown) => {
-  console.error("eval failed:", e);
-  process.exit(1);
-});
+main().then(
+  () => process.exit(),
+  (e: unknown) => {
+    console.error("eval failed:", e);
+    process.exit(1);
+  },
+);
