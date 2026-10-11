@@ -2,13 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ageBucket,
   appendGold,
   countByOrigin,
   filterByOrigin,
   lexicalOverlap,
+  liveAt,
   parseGoldLine,
   parseOrigins,
   pruneStale,
+  queryAge,
   readGoldFile,
   toEvalQueries,
   type GoldEntry,
@@ -136,6 +139,50 @@ describe("pruneStale", () => {
     // Then
     expect(kept).toHaveLength(1);
     expect(droppedQueries).toBe(1);
+  });
+});
+
+describe("liveAt", () => {
+  const span = { created: "2026-08-10T00:00:00.000Z", invalidated: "2026-09-10T00:00:00.000Z" };
+
+  it("should count a node live between its creation and its retirement", () => {
+    // Given / When / Then
+    expect(liveAt(span, "2026-08-01T00:00:00.000Z")).toBe(false);
+    expect(liveAt(span, "2026-08-10T00:00:00.000Z")).toBe(true);
+    expect(liveAt(span, "2026-09-10T00:00:00.000Z")).toBe(false);
+  });
+
+  it("should read no horizon as today", () => {
+    // Given / When / Then
+    expect(liveAt(span, undefined)).toBe(false);
+    expect(liveAt({ ...span, invalidated: null }, undefined)).toBe(true);
+    expect(liveAt(undefined, undefined)).toBe(false);
+  });
+});
+
+describe("queryAge", () => {
+  const spans = new Map([
+    ["old", { created: "2026-06-01T00:00:00.000Z", invalidated: null }],
+    ["mid", { created: "2026-09-20T00:00:00.000Z", invalidated: null }],
+    ["new", { created: "2026-10-09T00:00:00.000Z", invalidated: null }],
+  ]);
+  const at = "2026-10-11T00:00:00.000Z";
+
+  it("should bucket a query by its youngest answer", () => {
+    // Given / When / Then
+    expect(queryAge(["old"], spans, at)).toBe(">90d");
+    expect(queryAge(["old", "mid"], spans, at)).toBe("7-30d");
+    expect(queryAge(["old", "new"], spans, at)).toBe("<7d");
+  });
+
+  it("should leave a query unbucketed when none of its answers is known", () => {
+    // Given / When / Then
+    expect(queryAge(["ghost"], spans, at)).toBeUndefined();
+  });
+
+  it("should put a boundary age in the older bucket", () => {
+    // Given / When / Then
+    expect(ageBucket("2026-10-04T00:00:00.000Z", at)).toBe("7-30d");
   });
 });
 

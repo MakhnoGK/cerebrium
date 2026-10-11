@@ -148,6 +148,58 @@ export function pruneStale(
   return { kept, droppedLabels, droppedQueries };
 }
 
+export interface NodeSpan {
+  created: string;
+  invalidated: string | null;
+}
+
+// The store's own `as_of` predicate, so a label counts at a horizon exactly when the node it
+// points at could have been returned then. No horizon means today: live is not retired.
+export function liveAt(span: NodeSpan | undefined, asOf: string | undefined): boolean {
+  if (!span) return false;
+
+  if (asOf === undefined) return span.invalidated === null;
+
+  return span.created <= asOf && (span.invalidated === null || span.invalidated > asOf);
+}
+
+export const AGE_BUCKETS = [
+  { label: "<7d", days: 7 },
+  { label: "7-30d", days: 30 },
+  { label: "30-90d", days: 90 },
+  { label: ">90d", days: Infinity },
+] as const;
+
+export type AgeBucket = (typeof AGE_BUCKETS)[number]["label"];
+
+const DAY_MS = 86_400_000;
+
+export function ageBucket(created: string, at: string): AgeBucket {
+  const days = (Date.parse(at) - Date.parse(created)) / DAY_MS;
+
+  return AGE_BUCKETS.find((bucket) => days < bucket.days)!.label;
+}
+
+// A query is as old as its youngest answer: it lands in an old bucket only when nothing
+// written since could have answered it.
+export function queryAge(
+  gold: Iterable<string>,
+  spans: Map<string, NodeSpan>,
+  at: string,
+): AgeBucket | undefined {
+  let youngest: string | undefined;
+
+  for (const id of gold) {
+    const created = spans.get(id)?.created;
+
+    if (created !== undefined && (youngest === undefined || created > youngest)) {
+      youngest = created;
+    }
+  }
+
+  return youngest === undefined ? undefined : ageBucket(youngest, at);
+}
+
 const normalize = (query: string): string => query.trim().toLowerCase().replace(/\s+/g, " ");
 
 // One question asked twice — generated and then adjudicated, or mined in two sessions — is

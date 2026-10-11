@@ -1,6 +1,13 @@
 import "reflect-metadata";
 import { createHash } from "node:crypto";
-import { appendGold, lexicalOverlap, readGoldFile, type GoldEntry } from "@scripts/gold";
+import {
+  ageBucket,
+  appendGold,
+  lexicalOverlap,
+  readGoldFile,
+  type AgeBucket,
+  type GoldEntry,
+} from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
 import type Database from "better-sqlite3";
 import { DB_TOKEN } from "@/db/sqlite/base";
@@ -38,6 +45,8 @@ gold-generate — manufacture labelled queries from the store's own sections.
   --sample N      Only these N sections of the eligible set, spread over the whole store
                   rather than its oldest nodes. The pick is a stable hash order, so a
                   re-run with the same N resumes the same sample.
+  --stratify-age  With --sample: an even share of N from each node age bucket
+                  (<7d, 7-30d, 30-90d, >90d), so old nodes are not outnumbered by recent ones.
   --project P     Only nodes of this project.
   --min-chars N   Skip sections shorter than this (default 200) — a two-line section
                   yields questions no ranking can distinguish.
@@ -58,6 +67,7 @@ interface Section {
   node: string;
   title: string;
   project: string | null;
+  created: string;
   heading: string;
   text: string;
 }
@@ -89,7 +99,7 @@ function loadSections(db: Database.Database, project: string | undefined): Secti
            AND (? IS NULL OR n.project = ?)
          GROUP BY n.id
        )
-       SELECT c.node_id AS node, n.title, n.project,
+       SELECT c.node_id AS node, n.title, n.project, n.created_at AS created,
               COALESCE(c.heading_path, '(preamble)') AS heading,
               c.text
        FROM chunks c
@@ -111,6 +121,20 @@ function sampleSections(sections: Section[], size: number): Section[] {
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, size)
     .map(({ s }) => s);
+}
+
+function sampleByAge(sections: Section[], size: number, now: string): Section[] {
+  const byBucket = new Map<AgeBucket, Section[]>();
+
+  for (const section of sections) {
+    const bucket = ageBucket(section.created, now);
+
+    byBucket.set(bucket, [...(byBucket.get(bucket) ?? []), section]);
+  }
+
+  const share = Math.ceil(size / byBucket.size);
+
+  return [...byBucket.values()].flatMap((group) => sampleSections(group, share));
 }
 
 function prompt(section: Section, perSection: number): string {
@@ -158,7 +182,11 @@ async function main(): Promise<void> {
   const db = container.resolve<Database.Database>(DB_TOKEN);
   const eligible = loadSections(db, project).filter((s) => s.text.length >= minChars);
   const sample = num(argv, "--sample", Infinity);
-  const sections = Number.isFinite(sample) ? sampleSections(eligible, sample) : eligible;
+  const sections = !Number.isFinite(sample)
+    ? eligible
+    : argv.includes("--stratify-age")
+      ? sampleByAge(eligible, sample, new Date().toISOString())
+      : sampleSections(eligible, sample);
   const done = new Set(
     readGoldFile(out)
       .entries.filter((e) => e.source?.node)
