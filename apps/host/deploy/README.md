@@ -44,6 +44,8 @@ by `.github/workflows/release.yml`:
   `MEMORY_PRINCIPALS`: writes go to review, 60 an hour), and is authenticated only with the
   subscription token in `secrets/claude_oauth_token`. API-key and cloud-provider variables
   are stripped from the CLI's env, and while the file is empty it claims no job.
+- `MEMORY_PRINCIPALS` also gives `cerebrium-consolidation` weight 0.9, so text the sweep
+  wrote — a distill, a merged body — ranks just below what an agent wrote.
 - The daemon applies pending migrations when it opens the store, so there is no separate
   migrate step. Migrations are forward-only: rolling back past one leaves the older code on
   a newer schema.

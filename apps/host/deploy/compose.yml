@@ -47,7 +47,7 @@ services:
       MEMORY_PRINCIPALS: >-
         {"cerebrium-runner": {"capabilities": {"read": "auto", "write": "suggest",
         "consolidate": "off", "admin": "off"}, "quota": {"windowMs": 3600000, "writes": 60},
-        "weight": 0.8}}
+        "weight": 0.8}, "cerebrium-consolidation": {"weight": 0.9}}
     ports:
       # The tailnet address only: the listener has tokens but no TLS.
       - "${CEREBRIUM_RPC_BIND:-100.92.157.103}:7433:7433"
