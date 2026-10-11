@@ -1,16 +1,20 @@
 import "reflect-metadata";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AGE_BUCKETS,
   countByOrigin,
   filterByOrigin,
+  liveAt,
   parseOrigins,
   pruneStale,
+  queryAge,
   readGoldFile,
   toEvalQueries,
   type EvalQuery,
   type GoldEntry,
+  type NodeSpan,
 } from "@scripts/gold";
 import {
   ndcgAtK,
@@ -93,6 +97,16 @@ interface Scores {
   secAcc: number[];
 }
 
+interface Horizon {
+  label: string;
+  asOf?: string;
+}
+
+interface Run {
+  horizon: Horizon;
+  queries: EvalQuery[];
+}
+
 const HELP = `
 eval-retrieval — labelled relevance eval across configuration arms.
 
@@ -122,6 +136,12 @@ eval-retrieval — labelled relevance eval across configuration arms.
              semantic,episodic to compare stores that do not both hold the code mirror.
   --min N    Lower that floor. Numbers below it are noise; use it to smoke-test the path
              or to peek at early data, not to draw conclusions.
+  --as-of T  Score the store as it stood at T (ISO-8601, or "now"). Repeatable: one table
+             per horizon. Every query runs with \`as_of\`, and a label counts only if its
+             node was live at T. Needs --db or --pg. The text index holds current wording,
+             so T picks which nodes compete, not how they read then.
+  --dump P   Write one JSONL line per scored query to P (horizon, query, gold ids, and
+             nDCG@${K} and reciprocal rank per arm), for joining with per-node data.
   --help     This text.
 
 Examples
@@ -132,11 +152,14 @@ Examples
     --arm pg:MEMORY_STORE_BACKEND=postgres,MEMORY_PG_URL=postgres://u:p@localhost/snap
   npm run eval:retrieval -- --pg postgres://u:p@localhost/after \
     --arm before:MEMORY_PG_URL=postgres://u:p@localhost/before --arm after
+  npm run eval:retrieval -- --pg postgres://u:p@localhost/snap --gold ~/.cerebrium/gold.jsonl \
+    --as-of 2026-08-01 --as-of 2026-09-01 --as-of now
 
-Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, Facet@${FACET_K} (the 
-share of distinct gold facets covered by the returned set), and SecAcc@${K} (the share of 
+Metrics are means over the query set: MRR, nDCG@${K}, P@1, Recall@${K}, Facet@${FACET_K} (the
+share of distinct gold facets covered by the returned set), and SecAcc@${K} (the share of
 returned gold nodes whose returned chunk fell into a gold section). Deltas against the first
-arm carry a 95% band for MRR and nDCG from resampling the queries.
+arm carry a 95% band for MRR and nDCG from resampling the queries. Against a real store each
+table is followed by nDCG@${K} per age of the query's youngest answer at that horizon.
 `;
 
 function parseArms(argv: string[]): Arm[] {
@@ -159,6 +182,29 @@ function parseArms(argv: string[]): Arm[] {
   }
 
   return arms.length ? arms : [{ name: "base", env: {} }];
+}
+
+function parseHorizons(argv: string[]): Horizon[] {
+  const horizons: Horizon[] = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== "--as-of") continue;
+
+    const raw = argv[++i] ?? "";
+
+    if (raw === "now") {
+      horizons.push({ label: "now" });
+      continue;
+    }
+
+    const ms = Date.parse(raw);
+
+    if (Number.isNaN(ms)) throw new Error(`--as-of ${raw}: not an ISO-8601 instant or "now"`);
+
+    horizons.push({ label: raw, asOf: new Date(ms).toISOString() });
+  }
+
+  return horizons.length ? horizons : [{ label: "now" }];
 }
 
 function num(argv: string[], name: string, fallback: number): number {
@@ -382,14 +428,16 @@ async function goldFromEvents(rows: Rows): Promise<{
   return { entries, searches, sectionLabels };
 }
 
-// A label is only worth scoring while the node it points at is still live: an invalidated
-// or merged-away node cannot be returned, so keeping it would score a correct ranking as
-// a miss.
-async function liveNodes(rows: Rows): Promise<Set<string>> {
-  return new Set(
-    (await rows<{ id: string }>("SELECT id FROM nodes WHERE invalidated_at IS NULL")).map(
-      (r) => r.id,
-    ),
+// A label is only worth scoring while the node it points at is live at the horizon: an
+// invalidated or merged-away node cannot be returned, so keeping it would score a correct
+// ranking as a miss.
+async function nodeSpans(rows: Rows): Promise<Map<string, NodeSpan>> {
+  const found = await rows<{ id: string; created_at: string; invalidated_at: string | null }>(
+    "SELECT id, created_at, invalidated_at FROM nodes",
+  );
+
+  return new Map(
+    found.map((r) => [r.id, { created: r.created_at, invalidated: r.invalidated_at }]),
   );
 }
 
@@ -462,6 +510,7 @@ async function runArm(
   queries: EvalQuery[],
   shared: Shared,
   facetOf: Map<string, string>,
+  asOf: string | undefined,
 ): Promise<Scores> {
   const tool = scope.resolve(SearchTool);
   const sid = shared.readonly
@@ -476,6 +525,7 @@ async function runArm(
       limit: K,
       ...(shared.mode === undefined ? {} : { mode: shared.mode }),
       ...(shared.kinds === undefined ? {} : { kinds: shared.kinds }),
+      ...(asOf === undefined ? {} : { as_of: asOf }),
     });
     const ranked = res.results.map((r) => r.id);
     const facet = facetCoverage(ranked, q.gold, facetOf, FACET_K);
@@ -530,8 +580,16 @@ async function main() {
   const provider = root.resolve<EmbeddingProvider>(EMBEDDING_PROVIDER_TOKEN);
   const shared: Shared = { db, base, provider, readonly, mode, kinds };
   const scopes = arms.map((arm) => armScope(arm, shared));
-  let queries: EvalQuery[];
+  const horizons = parseHorizons(argv);
+  const runs: Run[] = [];
+  let spans = new Map<string, NodeSpan>();
   let facetOf = new Map<string, string>();
+
+  if (!readonly && horizons.some((h) => h.asOf !== undefined)) {
+    console.error("--as-of needs a real store (--db or --pg)");
+    process.exitCode = 1;
+    return;
+  }
 
   console.log(`embeddings: ${provider.name}`);
 
@@ -542,22 +600,14 @@ async function main() {
     const origins = parseOrigins(
       argv.includes("--origin") ? argv[argv.indexOf("--origin") + 1] : undefined,
     );
-    const live = await liveNodes(rowsOf(root));
+    const entries = filterByOrigin([...fromFile.entries, ...mined], origins);
+    const storeSpans = [
+      await nodeSpans(rowsOf(root)),
+      ...(await Promise.all(scopes.map((scope) => nodeSpans(rowsOf(scope))))),
+    ];
+    const counts = countByOrigin(entries);
 
-    for (const scope of scopes) {
-      const armLive = await liveNodes(rowsOf(scope));
-
-      for (const id of live) if (!armLive.has(id)) live.delete(id);
-    }
-    const { kept, droppedLabels, droppedQueries } = pruneStale(
-      filterByOrigin([...fromFile.entries, ...mined], origins),
-      (id) => live.has(id),
-    );
-
-    queries = sample(toEvalQueries(kept), num(argv, "--sample", Infinity));
-
-    const pairs = queries.reduce((n, q) => n + q.gold.size, 0);
-    const counts = countByOrigin(kept);
+    spans = storeSpans[0]!;
 
     console.log(`store: ${pgUrl ? redacted(pgUrl) : store} (read-only)`);
 
@@ -571,21 +621,35 @@ async function main() {
       `retrieval-outcome log: ${mined.length} queries with a fetch, out of ${searches} logged searches`,
     );
     console.log(
-      `labels: ${kept.length} entries (generated ${counts.generated}, adjudicated ${counts.adjudicated}, mined ${counts.mined}) ` +
-        `-> scoring ${queries.length} distinct queries, ${pairs} query→node pairs`,
+      `labels: ${entries.length} entries (generated ${counts.generated}, adjudicated ${counts.adjudicated}, mined ${counts.mined}), ` +
+        `${sectionLabels} query→node→section labels from the log`,
     );
 
-    if (droppedLabels) {
-      console.log(
-        `dropped ${droppedLabels} labels pointing at nodes no longer live (${droppedQueries} queries lost every label) — regenerate if this share grows`,
+    for (const horizon of horizons) {
+      const { kept, droppedLabels, droppedQueries } = pruneStale(entries, (id) =>
+        storeSpans.every((s) => liveAt(s.get(id), horizon.asOf)),
       );
+      const queries = sample(toEvalQueries(kept), num(argv, "--sample", Infinity));
+      const pairs = queries.reduce((n, q) => n + q.gold.size, 0);
+
+      console.log(
+        `${horizon.label}: scoring ${queries.length} distinct queries, ${pairs} query→node pairs` +
+          (droppedLabels
+            ? `; dropped ${droppedLabels} labels on nodes not live ${horizon.asOf ? "then" : "any more"} (${droppedQueries} queries lost every label)`
+            : ""),
+      );
+
+      if (queries.length < floor) {
+        console.log(`  below the floor of ${floor} queries, not scored`);
+        continue;
+      }
+
+      runs.push({ horizon, queries });
     }
 
-    console.log(`of those, ${sectionLabels} query→node→section labels from the log\n`);
-
-    if (queries.length < floor) {
+    if (!runs.length) {
       console.log(
-        `Not enough labelled data to measure anything: ${queries.length} usable queries, ${floor} is the floor.\n` +
+        `\nNot enough labelled data to measure anything: ${floor} usable queries is the floor.\n` +
           `Mined labels grow only with use; manufacture the rest with \`gold-generate\` and \`gold-adjudicate\`,\n` +
           `then pass the file with --gold. The seeded corpus (no --db) works today.`,
       );
@@ -603,15 +667,18 @@ async function main() {
     const byTitle = await seed(root, data);
     const titleOf = new Map(data.docs.map((d) => [d.id, d.title]));
 
-    queries = data.queries.map((q) => ({
-      query: q.query,
-      gold: new Set(
-        q.relevant
-          .map((datasetId) => byTitle.get(titleOf.get(datasetId) ?? ""))
-          .filter((x): x is string => !!x),
-      ),
-      origins: new Set<never>(),
-    }));
+    runs.push({
+      horizon: horizons[0]!,
+      queries: data.queries.map((q) => ({
+        query: q.query,
+        gold: new Set(
+          q.relevant
+            .map((datasetId) => byTitle.get(titleOf.get(datasetId) ?? ""))
+            .filter((x): x is string => !!x),
+        ),
+        origins: new Set<never>(),
+      })),
+    });
     facetOf = new Map(
       data.docs
         .filter((d) => d.facet)
@@ -619,15 +686,54 @@ async function main() {
     );
   }
 
+  const dumpPath = argv.includes("--dump") ? argv[argv.indexOf("--dump") + 1] : undefined;
+
+  if (dumpPath) writeFileSync(dumpPath, "");
+
+  for (const run of runs) {
+    console.log(`\n=== as of ${run.horizon.label} ===`);
+
+    const table = await scoreRun(run, arms, scopes, shared, facetOf);
+
+    if (spans.size) printAges(run, table, spans);
+    if (dumpPath) dumpRun(dumpPath, run, table);
+  }
+}
+
+function dumpRun(path: string, run: Run, table: Table): void {
+  const perArm = (pick: (scores: Scores) => number[], i: number) =>
+    Object.fromEntries(table.map((row) => [row.arm.name, pick(row.scores)[i]]));
+  const lines = run.queries.map((q, i) =>
+    JSON.stringify({
+      horizon: run.horizon.label,
+      query: q.query,
+      gold: [...q.gold],
+      ndcg: perArm((s) => s.ndcg, i),
+      rr: perArm((s) => s.rr, i),
+    }),
+  );
+
+  appendFileSync(path, lines.join("\n") + "\n", "utf8");
+}
+
+type Table = { arm: Arm; scores: Scores }[];
+
+async function scoreRun(
+  run: Run,
+  arms: Arm[],
+  scopes: DependencyContainer[],
+  shared: Shared,
+  facetOf: Map<string, string>,
+): Promise<Table> {
   console.log(
     `arm          |   MRR | nDCG@${K} |   P@1 | Rec@${K} | Facet@${FACET_K} | SecAcc@${K}`,
   );
   console.log("-------------+-------+---------+-------+--------+---------+----------");
 
-  const table: { arm: Arm; scores: Scores }[] = [];
+  const table: Table = [];
 
   for (const [i, arm] of arms.entries()) {
-    const scores = await runArm(scopes[i]!, queries, shared, facetOf);
+    const scores = await runArm(scopes[i]!, run.queries, shared, facetOf, run.horizon.asOf);
 
     table.push({ arm, scores });
     console.log(
@@ -654,6 +760,26 @@ async function main() {
         `  ${row.arm.name.padEnd(12)} nDCG ${band(first.scores.ndcg, row.scores.ndcg)}   MRR ${band(first.scores.rr, row.scores.rr)}   Rec ${d(first.scores.recall, row.scores.recall)}   Facet ${d(first.scores.facets, row.scores.facets)}   SecAcc ${d(first.scores.secAcc, row.scores.secAcc)}`,
       );
     }
+  }
+
+  return table;
+}
+
+function printAges(run: Run, table: Table, spans: Map<string, NodeSpan>): void {
+  const at = run.horizon.asOf ?? new Date().toISOString();
+  const buckets = run.queries.map((q) => queryAge(q.gold, spans, at));
+
+  console.log(`\nnDCG@${K} by age of the youngest answer:`);
+  console.log(`age     |    n | ${table.map((row) => row.arm.name.padEnd(12)).join(" | ")}`);
+
+  for (const { label } of AGE_BUCKETS) {
+    const picked = buckets.flatMap((bucket, i) => (bucket === label ? [i] : []));
+
+    if (!picked.length) continue;
+
+    const cells = table.map((row) => pct(mean(picked.map((i) => row.scores.ndcg[i]!))).padEnd(12));
+
+    console.log(`${label.padEnd(7)} | ${String(picked.length).padStart(4)} | ${cells.join(" | ")}`);
   }
 }
 

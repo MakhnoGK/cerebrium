@@ -42,6 +42,50 @@ export function precisionAt1(ranked: string[], gold: Set<string>): number {
   return ranked.length > 0 && gold.has(ranked[0]!) ? 1 : 0;
 }
 
+function xorshift(seed: number): () => number {
+  let state = seed >>> 0 || 1;
+
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+
+    return state / 0x100000000;
+  };
+}
+
+// mean(b) − mean(a) for two independent groups, each resampled on its own, with a 95% band.
+export function unpairedBootstrap(
+  a: number[],
+  b: number[],
+  iterations = 2000,
+  seed = 1,
+): { delta: number; low: number; high: number } {
+  if (!a.length || !b.length) return { delta: NaN, low: NaN, high: NaN };
+
+  const next = xorshift(seed);
+  const resampledMean = (xs: number[]): number => {
+    let sum = 0;
+
+    for (let draws = xs.length; draws > 0; draws--) sum += xs[Math.floor(next() * xs.length)]!;
+
+    return sum / xs.length;
+  };
+  const mean = (xs: number[]): number => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const deltas: number[] = [];
+
+  for (let it = 0; it < iterations; it++) deltas.push(resampledMean(b) - resampledMean(a));
+
+  deltas.sort((x, y) => x - y);
+
+  return {
+    delta: mean(b) - mean(a),
+    low: deltas[Math.floor(0.025 * iterations)]!,
+    high: deltas[Math.ceil(0.975 * iterations) - 1]!,
+  };
+}
+
 // The mean paired difference b − a over the same queries, with a 95% band from resampling
 // those queries. Seeded, so a re-run prints the same band.
 export function pairedBootstrap(
@@ -57,15 +101,7 @@ export function pairedBootstrap(
   if (a.length === 0) return { delta: NaN, low: NaN, high: NaN };
 
   const diffs = a.map((x, i) => b[i]! - x);
-  let state = seed >>> 0 || 1;
-  const next = (): number => {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    state >>>= 0;
-
-    return state / 0x100000000;
-  };
+  const next = xorshift(seed);
   const means: number[] = [];
 
   for (let it = 0; it < iterations; it++) {
