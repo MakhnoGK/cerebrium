@@ -1006,8 +1006,8 @@ export class ConsolidationWorker {
     return { survivor: pair.canonical_id, loser };
   }
 
-  // A hand-maintained loser, or a body missing anchors of the duplicate, is recorded as
-  // `duplicate_of` instead of collapsed.
+  // A hand-maintained loser, a body missing anchors of the duplicate, or a pair of different
+  // node types is recorded as `duplicate_of` instead of collapsed.
   private async autoMerge(
     candidateId: string,
     score: number,
@@ -1017,7 +1017,10 @@ export class ConsolidationWorker {
     now: string,
   ): Promise<boolean> {
     const keepBoth =
-      (proposal.missing?.length ?? 0) > 0 || (await this.protection.handMaintained(loser)) !== null;
+      (proposal.missing?.length ?? 0) > 0 ||
+      (await this.protection.handMaintained(loser)) !== null ||
+      (await this.nodesRepo.envelope(survivor))?.type !==
+        (await this.nodesRepo.envelope(loser))?.type;
 
     const resolved = await this.consolidationRepo.resolveCandidateAtomically(
       candidateId,
