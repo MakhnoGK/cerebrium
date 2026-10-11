@@ -8,6 +8,11 @@ export const AUTHORED_REVISION = `(r.reason IS NULL OR (r.reason <> 'merge'
 export const CLAIM_REVISION = `(r.reason IS NULL
   OR (r.reason NOT LIKE 'wikilink [[%' AND r.reason NOT LIKE 'unlinked [[%'))`;
 
+// A revision of `r` that no later revision reverted past.
+export const UNREVERTED_REVISION = `NOT EXISTS (
+  SELECT 1 FROM revisions rv
+   WHERE rv.node_id = r.node_id AND rv.rev > r.rev AND rv.reverts_rev < r.rev)`;
+
 export const ORIGIN_DEPTH = 3;
 
 // Every principal behind each root's current text: its creator, whoever revised what it
@@ -33,7 +38,7 @@ export const ORIGIN_PRINCIPALS = `
     FROM origin o
     JOIN revisions r ON r.node_id = o.id
     JOIN sessions s ON s.id = r.session_id
-   WHERE s.principal_id IS NOT NULL AND ${CLAIM_REVISION}`;
+   WHERE s.principal_id IS NOT NULL AND ${CLAIM_REVISION} AND ${UNREVERTED_REVISION}`;
 
 export function groupPrincipals(
   rows: { id: string; principal: string }[],

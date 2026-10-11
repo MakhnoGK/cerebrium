@@ -641,7 +641,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `search` | Find memories. Hybrid (text + vector, RRF-fused) by default; `mode:'text'|'vector'` and `expand_graph` available. Envelopes only, with `matched`/`best_chunk`/`via`. Ranks semantic steadily, decays episodic by disuse; `history:true` includes invalidated nodes. **Search before writing.** |
 | `get` | Fetch full content + edges for specific ids. The only tool that returns content. `include_revisions` for history; `rev` (single id) for a past revision; `outline`/`sections` to fetch part of a long node instead of all of it. |
 | `write` | Create a node. `semantic` for durable facts; `episodic` for records of what happened. Required `parent_node_id` is an exact live id (atomic `relates_to`) or `null` (intentionally isolated); it is never inferred. Optional `links` add more typed edges. A semantic write runs a duplicate probe and may return `similar_existing`, each candidate carrying a `score` and a `confidence` (`high` = also clears the merge gate). |
-| `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. |
+| `update` | Append a revision to a **semantic** node (episodic is write-once). Old text stays reachable. Changed sections re-embed; unchanged ones keep their vectors. `reverts_rev: N` restores revision N's text instead, and the revisions in between stop counting toward the node's authority. |
 | `invalidate` | Soft-delete a node; optional `superseded_by` records the replacement via a `supersedes` edge, and moves the dead node's authored referrers onto it. |
 | `restore` | The inverse: bring a soft-deleted node back with its id, revision history and edges intact, retiring the `supersedes` edges into it. For a merge that swallowed a living document. |
 | `link` | Connect two existing nodes with a typed, directed edge (`references`/`documents`/`derived_from`/`supersedes`/`relates_to`). Edges drive graph expansion at search time. |
@@ -1315,6 +1315,9 @@ secrets are in [apps/host/deploy/README.md](apps/host/deploy/README.md).
 
 ## Changelog
 
+- **2026-10-11** — `update` takes `reverts_rev`: it restores an earlier revision's text,
+  and the revisions it reverts past no longer count toward the node's authority
+  (`revisions.reverts_rev`, migration 007).
 - **2026-10-11** — SQLite removed: the store is Postgres only, the plugin is remote-only
   (no local kernel or store on an agent's machine), and every test suite runs against
   Postgres. `import:sqlite`, `parity:pg`, `code:repo-map`, `test:pg` and

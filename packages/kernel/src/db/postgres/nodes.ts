@@ -74,7 +74,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
 
   async listRevisions(id: string): Promise<RevisionMeta[]> {
     return this.all<RevisionMeta>(
-      "SELECT rev, ts, session_id, reason FROM revisions WHERE node_id = @id ORDER BY rev",
+      "SELECT rev, ts, session_id, reason, reverts_rev FROM revisions WHERE node_id = @id ORDER BY rev",
       { id },
     );
   }
@@ -287,6 +287,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
       session_id: string;
       reason: string | null;
       ts: string;
+      reverts_rev?: number;
     },
   ): Promise<Envelope> {
     await this.revise(id, fields);
@@ -302,6 +303,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
       session_id: string;
       reason: string | null;
       ts: string;
+      reverts_rev?: number;
     },
   ): Promise<void> {
     await this.tx(async () => {
@@ -332,6 +334,7 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
         fields.session_id,
         fields.reason,
         fields.ts,
+        fields.reverts_rev ?? null,
       );
       await textPut(this.db, id, title, content);
       await syncChunks(this.db, id, nextRev, content, fields.ts);

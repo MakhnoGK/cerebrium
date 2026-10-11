@@ -63,11 +63,12 @@ export async function insertRevision(
   session_id: string,
   reason: string | null,
   ts: string,
+  reverts_rev: number | null = null,
 ): Promise<void> {
   await db.query(
-    `INSERT INTO revisions (node_id, rev, content, session_id, reason, ts)
-     VALUES (@id, @rev, @content, @session_id, @reason, @ts)`,
-    { id, rev, content, session_id, reason, ts },
+    `INSERT INTO revisions (node_id, rev, content, session_id, reason, ts, reverts_rev)
+     VALUES (@id, @rev, @content, @session_id, @reason, @ts, @reverts_rev)`,
+    { id, rev, content, session_id, reason, ts, reverts_rev },
   );
 }
 

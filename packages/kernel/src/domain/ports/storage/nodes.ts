@@ -49,6 +49,7 @@ export interface NodesRepo extends UseRecorder {
       session_id: string;
       reason: string | null;
       ts: string;
+      reverts_rev?: number;
     },
   ): Promise<Envelope>;
   eventWindow(
