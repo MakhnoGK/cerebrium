@@ -1,6 +1,6 @@
 import { inject } from "tsyringe";
 import { summaryIsRedundant, toEnvelope } from "@cerebrium/contracts/types";
-import type { SearchRow, VectorRow } from "@cerebrium/contracts/types";
+import type { Authority, SearchRow, VectorRow } from "@cerebrium/contracts/types";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
@@ -105,7 +105,7 @@ export class LocalSearchMemory implements SearchMemory {
       useWeight: this.retrieval.useWeight,
     });
 
-    await this.applyTrust(entries);
+    const authority = await this.applyTrust(entries);
 
     if ((args.expand_graph ?? true) && entries.size) {
       const expanded = await this.expandByRank(entries, args.as_of, args.valid_at, activeSince);
@@ -146,6 +146,12 @@ export class LocalSearchMemory implements SearchMemory {
 
       if (entry.via) {
         envelope.via = entry.via;
+      }
+
+      const trust = authority.get(entry.row.id);
+
+      if (trust) {
+        envelope.authority = trust;
       }
 
       return envelope;
@@ -364,6 +370,11 @@ export class LocalSearchMemory implements SearchMemory {
         const normalized = best < 0 ? row.text_rank / best : 1;
         const chunk = ftsChunks.get(row.id);
         const envelope: SearchResult = toEnvelope(row);
+        const authority = trust.get(row.id);
+
+        if (authority) {
+          envelope.authority = authority;
+        }
 
         if (chunk) {
           envelope.best_chunk = chunk.chunk_text.slice(0, BEST_CHUNK_CHARS);
@@ -383,7 +394,7 @@ export class LocalSearchMemory implements SearchMemory {
             memoryFactor(row, now, history) *
             symbolFactor(row, penalty) *
             strengthFactor(row, this.retrieval.useWeight) *
-            (trust.get(row.id) ?? 1),
+            (authority?.weight ?? 1),
         };
       })
       .sort(
@@ -421,11 +432,11 @@ export class LocalSearchMemory implements SearchMemory {
 
   // The weight multiplies what its principal wrote, and a revoked principal's nodes leave
   // the candidate set outright — before graph expansion, so they cannot seed it either.
-  private async applyTrust(entries: Map<string, Entry>): Promise<void> {
+  private async applyTrust(entries: Map<string, Entry>): Promise<Map<string, Authority>> {
     const trust = await this.trust.factors([...entries.keys()]);
 
-    for (const [id, factor] of trust) {
-      if (isRevoked(factor)) {
+    for (const [id, authority] of trust) {
+      if (isRevoked(authority)) {
         entries.delete(id);
 
         continue;
@@ -433,8 +444,10 @@ export class LocalSearchMemory implements SearchMemory {
 
       const entry = entries.get(id);
 
-      if (entry) entry.score *= factor;
+      if (entry) entry.score *= authority.weight;
     }
+
+    return trust;
   }
 
   // Diffusion seeded by the query-matched nodes in proportion to their relevance, over the

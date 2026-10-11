@@ -8,7 +8,7 @@ import type {
   ReviewDecisionResult,
   ReviewPage,
 } from "@cerebrium/contracts/dashboard";
-import type { ConsolidationCandidate } from "@cerebrium/contracts/types";
+import type { Authority, ConsolidationCandidate } from "@cerebrium/contracts/types";
 import type {
   WikilinkDangler,
   WikilinkFix,
@@ -27,6 +27,7 @@ interface FetchedNode {
   content?: string;
   source?: string;
   invalidated?: boolean;
+  authority?: Authority;
 }
 
 function preview(id: string, node: FetchedNode | undefined): NodePreview {
@@ -40,6 +41,7 @@ function preview(id: string, node: FetchedNode | undefined): NodePreview {
       project: null,
       content: null,
       invalidated: false,
+      authority: null,
     };
   }
 
@@ -52,6 +54,7 @@ function preview(id: string, node: FetchedNode | undefined): NodePreview {
     project: node.project ?? null,
     content: node.content ?? node.source ?? null,
     invalidated: node.invalidated === true,
+    authority: node.authority ?? null,
   };
 }
 

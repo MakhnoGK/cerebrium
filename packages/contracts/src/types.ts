@@ -20,6 +20,14 @@ export interface Envelope {
   rev: number;
   edges: number;
   invalidated: boolean;
+  // Present only when the node ranks below neutral trust.
+  authority?: Authority;
+}
+
+// The trust weight a node ranks with, and the principal behind its text that set it.
+export interface Authority {
+  weight: number;
+  weakest: string;
 }
 
 // One addressable section of a node's body: the heading path chunks were filed under

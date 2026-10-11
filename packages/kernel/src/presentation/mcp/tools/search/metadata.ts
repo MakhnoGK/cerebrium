@@ -28,7 +28,10 @@ export const metadata = {
     "listed under the kept result as `duplicates:[{id,title,score}]` and the freed slot goes to the next distinct " +
     "hit, so `limit` buys more. Nothing is hidden — a folded node is `get`-able by the id shown there — and two " +
     "nodes joined by `supersedes` never fold into one another. A pair carrying a reviewed `duplicate_of` edge folds " +
-    "regardless of the gate, marked `recorded:true`.Use `mode:'text'` for the cheapest exact Phase-1 behavior. " +
+    "regardless of the gate, marked `recorded:true`. " +
+    "A result ranked below neutral trust carries `authority:{weight,weakest}`: the weakest principal behind its " +
+    "text (its writer, a reviser, or a note it was distilled from or superseded) and the weight that set. " +
+    "Use `mode:'text'` for the cheapest exact Phase-1 behavior. " +
     "Code `symbol` mirrors are " +
     "down-weighted as direct hits so authored knowledge ranks first; ask for them " +
     "explicitly (`types:['symbol']` or `kinds:['mirror']`) to rank them normally. The code index sits in " +

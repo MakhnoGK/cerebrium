@@ -4,7 +4,7 @@ import { toEnvelope } from "@cerebrium/contracts/types";
 import { EdgeType } from "@cerebrium/contracts/vocab";
 import type { NodesRepo } from "@/domain/ports/storage";
 import type { UseRecorder } from "@/domain/ports/use-recorder";
-import { AUTHORED_REVISION } from "@/db/sql-fragments";
+import { AUTHORED_REVISION, groupPrincipals, ORIGIN_PRINCIPALS } from "@/db/sql-fragments";
 import { BaseRepo } from "@/db/sqlite/base";
 import {
   edgesOf,
@@ -393,20 +393,19 @@ export class SqliteNodesRepo extends BaseRepo implements NodesRepo {
   // Authored nodes only. A code mirror's session is whichever run indexed it, so
   // attributing it to that run's principal would weight derived rows by who happened to
   // refresh the index.
-  async principalsOf(ids: string[]): Promise<Map<string, string>> {
+  async originPrincipalsOf(ids: string[]): Promise<Map<string, Set<string>>> {
     if (!ids.length) return new Map();
 
     const ph = ids.map(() => "?").join(",");
     const rows = this.db
       .prepare(
-        `SELECT n.id AS id, s.principal_id AS principal
-           FROM nodes n JOIN sessions s ON s.id = n.created_by_session
-          WHERE n.id IN (${ph}) AND n.memory_kind IN ('semantic','episodic')
-            AND s.principal_id IS NOT NULL`,
+        `WITH RECURSIVE roots AS (
+           SELECT id FROM nodes WHERE id IN (${ph}) AND memory_kind IN ('semantic', 'episodic')
+         ), ${ORIGIN_PRINCIPALS}`,
       )
       .all(...ids) as { id: string; principal: string }[];
 
-    return new Map(rows.map((row) => [row.id, row.principal]));
+    return groupPrincipals(rows);
   }
 
   async recordUse(ids: string[], ts: string): Promise<void> {

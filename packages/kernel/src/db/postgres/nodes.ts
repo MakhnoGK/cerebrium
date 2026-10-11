@@ -15,7 +15,7 @@ import {
   syncChunks,
   textPut,
 } from "@/db/postgres/internal";
-import { AUTHORED_REVISION } from "@/db/sql-fragments";
+import { AUTHORED_REVISION, groupPrincipals, ORIGIN_PRINCIPALS } from "@/db/sql-fragments";
 import { newId } from "@/core/ids";
 
 @injectable()
@@ -378,18 +378,17 @@ export class PgNodesRepo extends PgBaseRepo implements NodesRepo {
     );
   }
 
-  async principalsOf(ids: string[]): Promise<Map<string, string>> {
+  async originPrincipalsOf(ids: string[]): Promise<Map<string, Set<string>>> {
     if (!ids.length) return new Map();
 
     const rows = await this.all<{ id: string; principal: string }>(
-      `SELECT n.id AS id, s.principal_id AS principal
-         FROM nodes n JOIN sessions s ON s.id = n.created_by_session
-        WHERE n.id = ANY(@ids) AND n.memory_kind IN ('semantic','episodic')
-          AND s.principal_id IS NOT NULL`,
+      `WITH RECURSIVE roots AS (
+         SELECT id FROM nodes WHERE id = ANY(@ids) AND memory_kind IN ('semantic', 'episodic')
+       ), ${ORIGIN_PRINCIPALS}`,
       { ids },
     );
 
-    return new Map(rows.map((row) => [row.id, row.principal]));
+    return groupPrincipals(rows);
   }
 
   async recordUse(ids: string[], ts: string): Promise<void> {

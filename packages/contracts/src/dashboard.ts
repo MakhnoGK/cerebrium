@@ -1,4 +1,4 @@
-import type { ConsolidationCandidate, TechStats } from "@cerebrium/contracts/types";
+import type { Authority, ConsolidationCandidate, TechStats } from "@cerebrium/contracts/types";
 
 // The wire between the dashboard's backend and its browser app. The backend shapes what the
 // kernel answers into these; nothing here is a kernel call.
@@ -141,6 +141,7 @@ export interface NodePreview {
   project: string | null;
   content: string | null;
   invalidated: boolean;
+  authority: Authority | null;
 }
 
 export interface CandidateView {

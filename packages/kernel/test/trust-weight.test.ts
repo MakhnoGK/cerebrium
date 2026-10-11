@@ -160,10 +160,10 @@ describe("Trust weight at read time", () => {
     // When
     const principals = await container
       .resolve<NodesRepo>(NODES_REPO_TOKEN)
-      .principalsOf([authored, "01ZZZZZZZZZZZZZZZZZZZZZZZZ"]);
+      .originPrincipalsOf([authored, "01ZZZZZZZZZZZZZZZZZZZZZZZZ"]);
 
     // Then — the authored node resolves to its writer, the mirror row to nobody.
-    expect(principals.get(authored)).toBe("codex-mcp-client");
+    expect(principals.get(authored)).toEqual(new Set(["codex-mcp-client"]));
     expect(principals.has("01ZZZZZZZZZZZZZZZZZZZZZZZZ")).toBe(false);
   });
 });
