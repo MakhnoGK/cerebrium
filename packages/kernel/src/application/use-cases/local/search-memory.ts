@@ -11,11 +11,9 @@ import {
 import {
   EDGES_REPO_TOKEN,
   SEARCH_REPO_TOKEN,
-  STORE_TOKEN,
   type BranchScope,
   type EdgesRepo,
   type SearchRepo,
-  type Store,
 } from "@/domain/ports/storage";
 import {
   BEST_CHUNK_CHARS,
@@ -60,7 +58,6 @@ export class LocalSearchMemory implements SearchMemory {
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
     private readonly retrieval: RetrievalConfig,
     private readonly trust: PrincipalTrustService,
-    @inject(STORE_TOKEN) private readonly store: Store,
     private readonly code: CodeReadService,
   ) {}
 
@@ -185,8 +182,6 @@ export class LocalSearchMemory implements SearchMemory {
   private async codeScopes(
     args: SearchQuery,
   ): Promise<{ scopes: BranchScope[]; notes: string[]; direct: boolean } | null> {
-    if (!this.store.capabilities.branchCode) return null;
-
     const direct = this.wantsSymbols(args);
 
     if (!direct && args.expand_graph === false) return null;

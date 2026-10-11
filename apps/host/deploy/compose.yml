@@ -28,7 +28,6 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      MEMORY_JOBS_CODE_INDEX_MS: "0"
       MEMORY_PG_URL_FILE: /run/secrets/pg_url
       MEMORY_RPC_LISTEN: 0.0.0.0:7433
       # Ollama runs natively on the host for the GPU; host.docker.internal is its loopback.

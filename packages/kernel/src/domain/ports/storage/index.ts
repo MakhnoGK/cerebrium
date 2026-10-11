@@ -15,7 +15,6 @@ export {
   type UnitRefs,
 } from "@/domain/ports/storage/branch-code";
 export { CHUNKS_REPO_TOKEN, type ChunksRepo } from "@/domain/ports/storage/chunks";
-export { CODE_REPO_TOKEN, type CodeRepo } from "@/domain/ports/storage/code";
 export {
   type AuthoredBody,
   candidateHash,
@@ -80,7 +79,6 @@ export {
 export { SESSIONS_REPO_TOKEN, type SessionsRepo } from "@/domain/ports/storage/sessions";
 export { STATS_REPO_TOKEN, type StatsRepo } from "@/domain/ports/storage/stats";
 export {
-  BackendCapabilityError,
   STORE_TOKEN,
   type Store,
   type StoreBackend,

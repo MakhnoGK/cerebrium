@@ -150,7 +150,6 @@ export interface ConsolidationRepo extends ConsolidationReporter {
     capPerNode?: number;
   }): Promise<{ project: string | null; member_ids: string[]; score: number }[]>;
   duplicatePairFor(a: string, b: string, score: number): Promise<DuplicatePair | null>;
-  citableSymbols(): Promise<{ name: string; node_id: string; repo: string }[]>;
   authoredBodies(): Promise<AuthoredBody[]>;
   revisionCount(): Promise<number>;
   retiredAuthoredTitles(): Promise<{ id: string; title: string }[]>;
@@ -163,8 +162,6 @@ export interface ConsolidationRepo extends ConsolidationReporter {
   // Marks the node's live system relates_to/references edges that have nothing left to
   // re-check as checked at `ts`, so a revision at `ts` does not queue them again.
   confirmSettledLinks(nodeId: string, ts: string): Promise<void>;
-  codeIndexWatermark(): Promise<string | null>;
-  deadMirrorNodes(limit: number, unreachable?: readonly string[]): Promise<string[]>;
   unannotatedSemantic(
     limit: number,
   ): Promise<{ id: string; rev: number; title: string; content: string; project: string | null }[]>;

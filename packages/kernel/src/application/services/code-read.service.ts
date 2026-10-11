@@ -19,7 +19,7 @@ import {
   type ResolvedCodeRef,
 } from "@/domain/ports/storage";
 import type { FileExtract } from "@/code/extract";
-import { resolveCalls, resolveImports, resolverFrom, type Resolver } from "@/code/indexer";
+import { resolveCalls, resolveImports, resolverFrom, type Resolver } from "@/code/resolver";
 import type { TextQuery } from "@/core/fts";
 
 const NEIGHBOR_CAP = 100;

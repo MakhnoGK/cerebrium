@@ -3,7 +3,6 @@ import { instanceCachingFactory, type DependencyContainer } from "tsyringe";
 import {
   BRANCH_CODE_REPO_TOKEN,
   CHUNKS_REPO_TOKEN,
-  CODE_REPO_TOKEN,
   CONSOLIDATION_REPO_TOKEN,
   EDGES_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
@@ -22,7 +21,6 @@ import {
 } from "@/domain/ports/storage";
 import { PgBranchCodeRepo } from "@/db/postgres/branch-code";
 import { PgChunksRepo } from "@/db/postgres/chunks";
-import { PgCodeRepo } from "@/db/postgres/code";
 import { PgConsolidationRepo } from "@/db/postgres/consolidation";
 import { PG_TOKEN, PgDatabase } from "@/db/postgres/database";
 import { PgEdgesRepo } from "@/db/postgres/edges";
@@ -69,7 +67,6 @@ export function registerPostgresRepositories(
   });
   c.register(CHUNKS_REPO_TOKEN, { useClass: PgChunksRepo });
   c.register(BRANCH_CODE_REPO_TOKEN, { useClass: PgBranchCodeRepo });
-  c.register(CODE_REPO_TOKEN, { useClass: PgCodeRepo });
   c.register(CONSOLIDATION_REPO_TOKEN, { useClass: PgConsolidationRepo });
   c.register(EDGES_REPO_TOKEN, { useClass: PgEdgesRepo });
   c.register(EMBEDDING_QUEUE_REPO_TOKEN, { useClass: PgEmbeddingQueueRepo });

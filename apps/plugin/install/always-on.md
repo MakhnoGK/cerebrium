@@ -41,8 +41,9 @@ know this?". Anything durable you then learn from code, an issue tracker, or the
   wrong retirement with id, history and edges intact.
 - **`link`** — connect two nodes with a typed edge (`references`/`documents`/`derived_from`/
   `supersedes`/`relates_to`); edges drive graph expansion at search time.
-- **`code_index`** / **`code_lookup`** — index a repo into `symbol` mirror nodes; look code up
-  structurally by `name` or `file`. Use `search` with `types:['symbol']` for code by meaning.
+- **`code_index`** / **`code_lookup`** — index the checkout you are in on its current branch
+  (only files the host lacks upload; commit hooks keep it fresh); look code up structurally by
+  `name` or `file`. Use `search` with `types:['symbol']` for code by meaning.
 - **`consolidate_suggest`** / **`consolidate_apply`** — review and resolve what the background
   sweep queued. **`stats`** — operational snapshot, no content.
 
@@ -62,7 +63,7 @@ successor named when there is exactly one; retry with that returned id only afte
 
 ## Code is a mirror, not authored knowledge
 
-`symbol` nodes are derived from source and maintained only by `code_index` — never
+`symbol`s are derived from source and maintained only by `code_index` — never
 `write`/`update` them by hand. When you learn something *about* code (a decision, a gotcha,
 why it is shaped that way), write a normal `semantic` node and `link` it to the symbol with a
 `documents` edge; that link survives re-indexing.
@@ -71,7 +72,7 @@ For "where is X / what calls it / how does X work" in an **indexed** repo, query
 before scanning files — envelopes and exact source-by-id cost far less than reading or
 grepping. Reserve file reads for what the mirror cannot cover (non-indexed languages, configs,
 docs), for editing (disk is authoritative — always re-read before an edit), and when the index
-is stale (refresh with `code_index`, it is incremental).
+is stale (refresh with `code_index`, only changed files upload).
 
 **The mirror locates and explains; disk is the source of truth for edits.**
 

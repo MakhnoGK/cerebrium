@@ -1,12 +1,8 @@
 export type StoreBackend = "postgres";
 
 export interface StoreCapabilities {
-  // The structural code mirror (`symbols`, `code_files`, the code vector pool).
-  codeIndex: boolean;
   // Per-principal tokens, which the network listener authenticates against.
   principalTokens: boolean;
-  // The per-branch index that clients upload into (`code_repos`, `code_units`, ...).
-  branchCode: boolean;
 }
 
 export const STORE_TOKEN = Symbol("Store");
@@ -21,11 +17,4 @@ export interface Store {
   // Resolves when the store answers a trivial query; rejects with why it cannot.
   ping(): Promise<void>;
   close(): Promise<void>;
-}
-
-export class BackendCapabilityError extends Error {
-  constructor(capability: string, backend: StoreBackend) {
-    super(`${capability} is not available on the ${backend} backend`);
-    this.name = "BackendCapabilityError";
-  }
 }

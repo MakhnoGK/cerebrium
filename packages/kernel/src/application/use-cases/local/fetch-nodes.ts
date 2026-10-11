@@ -2,13 +2,9 @@ import { inject } from "tsyringe";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import {
   CHUNKS_REPO_TOKEN,
-  CODE_REPO_TOKEN,
   NODES_REPO_TOKEN,
-  STORE_TOKEN,
   type ChunksRepo,
-  type CodeRepo,
   type NodesRepo,
-  type Store,
 } from "@/domain/ports/storage";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
 import { CodeReadService, PrincipalTrustService } from "@/application/services";
@@ -24,11 +20,9 @@ import {
 export class LocalFetchNodes implements FetchNodes {
   constructor(
     @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
-    @inject(CODE_REPO_TOKEN) private readonly code: CodeRepo,
     @inject(CHUNKS_REPO_TOKEN) private readonly chunks: ChunksRepo,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
     @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
-    @inject(STORE_TOKEN) private readonly store: Store,
     private readonly branches: CodeReadService,
     private readonly trust: PrincipalTrustService,
   ) {}
@@ -71,18 +65,6 @@ export class LocalFetchNodes implements FetchNodes {
       const trust = authority.get(id);
 
       if (trust) node.authority = trust;
-
-      if (full.envelope.type === "symbol") {
-        const detail = await this.code.symbolDetail(id);
-
-        if (detail) {
-          // For a code mirror, `get` is the sanctioned place to return the raw source
-          // slice + structured facets (search/code_lookup return envelopes only).
-          const { source, ...facets } = detail;
-          node.symbol = facets;
-          node.source = source;
-        }
-      }
 
       const window = await this.nodes.eventWindow(id);
 
@@ -128,8 +110,6 @@ export class LocalFetchNodes implements FetchNodes {
     id: string,
     args: FetchNodesArgs,
   ): Promise<Record<string, unknown> | undefined> {
-    if (!this.store.capabilities.branchCode) return undefined;
-
     const node = await this.branches.fetch(id, args.code_context);
 
     if (!node) return undefined;
@@ -180,9 +160,6 @@ export class LocalFetchNodes implements FetchNodes {
     const outline = await this.chunks.sections(id);
 
     node.outline = outline;
-    // Whatever is asked for, it is a slice of the body; the raw source of a code
-    // mirror is not addressable by heading and would defeat the narrowing.
-    delete node.source;
 
     if (sections === undefined) {
       delete node.content;

@@ -32,12 +32,10 @@ export const metadata = {
     "A result ranked below neutral trust carries `authority:{weight,weakest}`: the weakest principal behind its " +
     "text (its writer, a reviser, or a note it was distilled from or superseded) and the weight that set. " +
     "Use `mode:'text'` for the cheapest exact Phase-1 behavior. " +
-    "Code `symbol` mirrors are " +
-    "down-weighted as direct hits so authored knowledge ranks first; ask for them " +
-    "explicitly (`types:['symbol']` or `kinds:['mirror']`) to rank them normally. The code index sits in " +
-    "its own vector pool, so filtering it out (`kinds` without `mirror`) is not just a post-filter: the " +
-    "vector branch then sweeps authored memory exhaustively rather than spending its candidate budget on " +
-    "code, which is what makes a narrow `kinds` filter genuinely worth passing. ALWAYS search before writing.",
+    "Code `symbol`s come from the per-branch code index the plugin uploads, read on the branches of your " +
+    "checkout. They are searched directly only when asked for (`types:['symbol']` or `kinds:['mirror']`); " +
+    "otherwise code arrives one hop from the notes that document it, never above the best direct hit. " +
+    "ALWAYS search before writing.",
 
   schema: {
     session_id: sessionIdSchema,

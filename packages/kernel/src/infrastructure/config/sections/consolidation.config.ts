@@ -54,7 +54,6 @@ export class ConsolidationPostureConfig extends SectionOf("consolidation.posture
   linkPrune: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_LINK_PRUNE"),
   distill: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_DISTILL"),
   merge: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_MERGE"),
-  prune: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_PRUNE"),
   annotate: enumOf(Posture, Posture.AUTO).env("MEMORY_CONSOLIDATE_ANNOTATE"),
   reconcile: enumOf(Posture, Posture.SUGGEST).env("MEMORY_CONSOLIDATE_RECONCILE"),
   // `auto` because the ambiguity is already resolved before a citation is ever proposed:
@@ -103,7 +102,6 @@ export class ConsolidationBatchConfig extends SectionOf("consolidation.batch", {
   linkPrune: int(200).positive().env("MEMORY_CONSOLIDATE_LINK_PRUNE_BATCH"),
   distill: int(200).positive().env("MEMORY_CONSOLIDATE_DISTILL_BATCH"),
   merge: int(200).positive().env("MEMORY_CONSOLIDATE_MERGE_BATCH"),
-  prune: int(200).positive().env("MEMORY_CONSOLIDATE_PRUNE_BATCH"),
   annotate: int(50).positive().env("MEMORY_CONSOLIDATE_ANNOTATE_BATCH"),
   backfill: int(10).positive().env("MEMORY_CONSOLIDATE_BACKFILL_BATCH"),
   reattach: int(20).positive().env("MEMORY_CONSOLIDATE_REATTACH_BATCH"),

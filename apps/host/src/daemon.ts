@@ -2,7 +2,6 @@
 import "reflect-metadata";
 import type { DependencyContainer } from "tsyringe";
 import { parseHostPort } from "@cerebrium/contracts/rpc";
-import { JobKind } from "@cerebrium/contracts/vocab";
 import { CallPipeline } from "@cerebrium/kernel/application/call-pipeline";
 import {
   ActivityFeed,
@@ -19,10 +18,8 @@ import {
   CodeEmbeddingWorker,
   ConsolidationWorker,
   EmbeddingWorker,
-  JobWorker,
 } from "@cerebrium/kernel/application/workers";
 import { buildContainer } from "@cerebrium/kernel/container";
-import { newId } from "@cerebrium/kernel/core/ids";
 import { CODE_PARSER_TOKEN } from "@cerebrium/kernel/domain/ports/code-parser";
 import type { ConsolidationTickResult } from "@cerebrium/kernel/domain/ports/consolidation-reporter";
 import {
@@ -48,7 +45,6 @@ import {
   DaemonConfig,
   DatabaseConfig,
   EmbeddingConfig,
-  JobsConfig,
 } from "@cerebrium/kernel/infrastructure/config";
 import {
   createDaemonMethods,
@@ -218,12 +214,6 @@ export async function runDaemon(
     // Called with each sweep's result, for whoever wants to tell somebody about it. The
     // loop does not know about the socket, and should not.
     onSwept?: (result: ConsolidationTickResult) => void;
-    jobs?: JobWorker;
-    jobsPerTick?: number;
-    // The kernel's own recurring maintenance. The loop owns the cadence, the caller owns
-    // what enqueueing means — same split as the sweep and `onSwept`.
-    scheduleCodeIndex?: () => Promise<void>;
-    codeIndexIntervalMs?: number;
     // Symbol summaries of the per-branch index, embedded once the notes are caught up.
     codeEmbeddings?: { tick(): Promise<{ embedded: number }> };
   } = {},
@@ -241,34 +231,14 @@ export async function runDaemon(
 
   await worker.reconcile();
 
-  const jobs = opts.jobs;
-  const codeIndexInterval = opts.codeIndexIntervalMs ?? 0;
-
   let idleState: IdleState = { idleSinceMs: null };
   let lastConsolidateMs = -Infinity;
-  let lastCodeIndexMs = -Infinity;
 
   while (!stopped()) {
     await worker.tick();
     const { backlog } = await queue.embeddingStats();
     const codeEmbedded =
       backlog === 0 && opts.codeEmbeddings ? (await opts.codeEmbeddings.tick()).embedded : 0;
-
-    // Jobs run under the same two gates as the sweep — caught up on embeddings, nobody
-    // waiting — but on every pass rather than on an interval: a submitted job is something
-    // a caller is polling for, not background maintenance.
-    if (jobs && backlog === 0 && !busy()) {
-      if (codeIndexInterval > 0 && now() - lastCodeIndexMs >= codeIndexInterval) {
-        lastCodeIndexMs = now();
-        await opts.scheduleCodeIndex?.();
-      }
-
-      const ran = await jobs.tick({ shouldYield: busy, max: opts.jobsPerTick });
-
-      if (ran.succeeded > 0 || ran.failed > 0) {
-        process.stderr.write(`jobs: ${String(ran.succeeded)} done, ${String(ran.failed)} failed\n`);
-      }
-    }
 
     // Consolidate only when caught up on embeddings (kNN over half-embedded content is
     // noise) and no more than once per interval. Runs promptly on reaching idle, before
@@ -457,10 +427,9 @@ async function main(): Promise<void> {
     process.stderr.write(`closed ${String(abandoned)} abandoned sweep(s)\n`);
   }
 
-  const jobsConfig = container.resolve(JobsConfig);
-  const jobsRepo = container.resolve<JobsRepo>(JOBS_REPO_TOKEN);
-  const jobs = jobsConfig.enabled ? container.resolve(JobWorker) : null;
-  const reopened = (await jobs?.reconcile()) ?? 0;
+  const reopened = await container
+    .resolve<JobsRepo>(JOBS_REPO_TOKEN)
+    .reconcileAbandoned(new Date().toISOString(), "the job runner exited before the job finished");
 
   if (reopened > 0) {
     process.stderr.write(`reopened ${String(reopened)} abandoned job(s)\n`);
@@ -587,8 +556,6 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     stopping = true;
 
-    jobs?.stop();
-
     await Promise.all([
       worker.stop(),
       consolidation.stop(),
@@ -642,35 +609,13 @@ async function main(): Promise<void> {
       busy: () => !activity.isQuiet(daemonConfig.quietMs) || (pool?.depth ?? 0) > 0,
       consolidateIntervalMs: container.resolve(ConsolidationConfig).intervalMs,
       onSwept: publishSweep,
-      ...(jobs === null ? {} : { jobs }),
-      jobsPerTick: jobsConfig.maxPerTick,
       codeEmbeddings: container.resolve(CodeEmbeddingWorker),
-      codeIndexIntervalMs: container.resolve<Store>(STORE_TOKEN).capabilities.codeIndex
-        ? jobsConfig.codeIndexIntervalMs
-        : 0,
-      // Every configured root, hash-gated: an unchanged repo costs a stat per file. Skipped
-      // while one is still queued or running, so a slow index cannot stack up behind itself.
-      scheduleCodeIndex: async () => {
-        if (await jobsRepo.hasOpen(JobKind.CODE_INDEX)) return;
-
-        const at = new Date().toISOString();
-
-        await jobsRepo.submit({
-          id: newId(),
-          kind: JobKind.CODE_INDEX,
-          payload: {},
-          scheduled_for: at,
-          now: at,
-        });
-      },
     });
   } finally {
     // `stopping` is flipped by the SIGTERM/SIGINT handler above; eslint's flow
     // analysis can't see that closure mutation and reads it as always-false.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!stopping) {
-      jobs?.stop();
-
       await Promise.all([
         worker.stop(),
         consolidation.stop(),

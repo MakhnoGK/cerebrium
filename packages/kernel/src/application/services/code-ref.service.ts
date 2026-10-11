@@ -3,11 +3,9 @@ import type { CodeContext } from "@cerebrium/contracts/code";
 import {
   BRANCH_CODE_REPO_TOKEN,
   NODES_REPO_TOKEN,
-  STORE_TOKEN,
   type BranchCodeRepo,
   type CodeRefRow,
   type NodesRepo,
-  type Store,
 } from "@/domain/ports/storage";
 
 export type CodeRefTarget = Omit<CodeRefRow, "src" | "type">;
@@ -18,15 +16,12 @@ export type CodeRefTarget = Omit<CodeRefRow, "src" | "type">;
 @injectable()
 export class CodeRefService {
   constructor(
-    @inject(STORE_TOKEN) private readonly store: Store,
     @inject(NODES_REPO_TOKEN) private readonly nodes: NodesRepo,
     @inject(BRANCH_CODE_REPO_TOKEN) private readonly code: BranchCodeRepo,
   ) {}
 
   // The ref a link to `id` would record, or null when `id` is not a code symbol here.
   async target(id: string, ctx?: CodeContext): Promise<CodeRefTarget | null> {
-    if (!this.store.capabilities.branchCode) return null;
-
     if ((await this.nodes.referenceState(id)) !== "missing") return null;
 
     const detail = await this.code.symbolDetail(id);

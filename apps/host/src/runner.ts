@@ -133,8 +133,7 @@ export async function runOnce(deps: {
     return "ran";
   }
 
-  // A run can outlast the lease, so renew while it is in flight — the same reason the
-  // daemon's own job worker renews from a timer.
+  // A run can outlast the lease, so renew while it is in flight.
   const renew = setInterval(() => {
     void call("job_renew", { id: job.id, owner: deps.owner }).catch(() => undefined);
   }, RENEW_MS);

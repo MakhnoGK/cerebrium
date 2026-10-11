@@ -1,81 +1,5 @@
-import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { langForPath, SKIP_DIRS, SKIP_FILES } from "@cerebrium/contracts/code";
 import type { SymbolDirEntry } from "@cerebrium/contracts/types";
-import { type CodeRepo } from "@/domain/ports/storage";
 import type { FileExtract } from "@/code/extract";
-import { compileIgnore } from "@/code/ignore";
-
-export { looksBinary, MAX_BYTES } from "@cerebrium/contracts/code";
-
-// Yield the event loop this often during a long index so a big repo can't
-// monopolize the shared DB — other server processes' writes (and this process's
-// own embedding worker) get scheduling gaps between per-file transactions.
-export const YIELD_EVERY = 8;
-
-export function sha256(buf: Buffer): string {
-  return createHash("sha256").update(buf).digest("hex");
-}
-
-export function yieldToLoop(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
-interface Candidate {
-  rel: string;
-  abs: string;
-  lang: string;
-  wasm: string;
-  vendored: boolean;
-}
-
-// Walk `root`, yielding indexable files (known grammar, not ignored/binary/oversized).
-// A directory's own .gitignore extends the inherited rules for its subtree.
-export function walk(root: string): Candidate[] {
-  const out: Candidate[] = [];
-  const rootIgnore = existsSync(join(root, ".gitignore"))
-    ? compileIgnore(readFileSync(join(root, ".gitignore"), "utf8"))
-    : null;
-  const ignorers = rootIgnore ? [rootIgnore] : [];
-
-  const recur = (
-    dir: string,
-    rel: string,
-    matchers: ((p: string, d: boolean) => boolean)[],
-  ): void => {
-    let localMatchers = matchers;
-    const gi = join(dir, ".gitignore");
-    if (rel && existsSync(gi))
-      localMatchers = [...matchers, compileIgnore(readFileSync(gi, "utf8"))];
-
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name)) continue;
-        if (localMatchers.some((m) => m(childRel, true))) continue;
-        recur(join(dir, entry.name), childRel, localMatchers);
-      } else if (entry.isFile()) {
-        const def = langForPath(entry.name);
-        if (!def) continue; // no grammar -> not a code file
-        if (SKIP_FILES.some((re) => re.test(entry.name))) continue;
-        if (localMatchers.some((m) => m(childRel, false))) continue;
-        out.push({
-          rel: childRel,
-          abs: join(dir, entry.name),
-          lang: def.lang,
-          wasm: def.wasm,
-          vendored: def.vendored ?? false,
-        });
-      }
-    }
-  };
-
-  recur(root, "", ignorers);
-  return out;
-}
-
-// ---- cross-file edge resolution --------------------------------------------
 
 export interface Resolver {
   byQualified: Map<string, string>;
@@ -103,10 +27,6 @@ export function resolverFrom(entries: SymbolDirEntry[]): Resolver {
     else if (!r.byName.has(e.name)) r.byName.set(e.name, e.node_id); // modules excluded — they collide on basenames
   }
   return r;
-}
-
-export async function buildResolver(code: CodeRepo, name: string): Promise<Resolver> {
-  return resolverFrom(await code.repoSymbolDirectory(name));
 }
 
 export function resolveImports(

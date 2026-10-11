@@ -50,7 +50,7 @@ describe("Sweep cost", () => {
 
     // Then
     expect(Object.keys(result.stage_ms ?? {})).toEqual(
-      expect.arrayContaining(["neighbours", "links", "distill", "merge", "mirrors", "backfill"]),
+      expect.arrayContaining(["neighbours", "links", "distill", "merge", "backfill"]),
     );
 
     const stored = (await env.sql.one<{ stage_ms: string | null }>(

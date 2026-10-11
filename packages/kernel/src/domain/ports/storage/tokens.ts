@@ -1,6 +1,5 @@
 import { BRANCH_CODE_REPO_TOKEN } from "@/domain/ports/storage/branch-code";
 import { CHUNKS_REPO_TOKEN } from "@/domain/ports/storage/chunks";
-import { CODE_REPO_TOKEN } from "@/domain/ports/storage/code";
 import { CONSOLIDATION_REPO_TOKEN } from "@/domain/ports/storage/consolidation";
 import { EDGES_REPO_TOKEN } from "@/domain/ports/storage/edges";
 import { EMBEDDING_QUEUE_REPO_TOKEN } from "@/domain/ports/storage/embedding-queue";
@@ -21,7 +20,6 @@ import { VECTOR_SPACES_REPO_TOKEN } from "@/domain/ports/storage/vector-spaces";
 export const STORAGE_TOKENS = {
   branchCodeRepo: BRANCH_CODE_REPO_TOKEN,
   chunksRepo: CHUNKS_REPO_TOKEN,
-  codeRepo: CODE_REPO_TOKEN,
   consolidationRepo: CONSOLIDATION_REPO_TOKEN,
   edgesRepo: EDGES_REPO_TOKEN,
   embeddingQueueRepo: EMBEDDING_QUEUE_REPO_TOKEN,
