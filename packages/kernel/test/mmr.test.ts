@@ -56,15 +56,15 @@ async function write(s: string, title: string, marker: string): Promise<Envelope
 }
 
 // Two twins on the same angle (cosine 1.0) plus one orthogonal node, all three matching
-// the query by text so every candidate reaches the cut. The twins tie on score, so `twin`
-// is written a millisecond later to win the tie on `updated`; ULIDs minted in one
-// millisecond do not sort by creation order.
+// the query by text so every candidate reaches the cut. The twins tie, and ties fall to
+// the id; ULIDs minted in one millisecond do not sort by creation order, so `twin` gets a
+// millisecond of its own.
 async function twinsAndOutlier(env: TestEnv) {
   const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+  const twin = await write(s, "Alpha one", "alpha");
+  await new Promise((resolve) => setTimeout(resolve, 2));
   const nearDuplicate = await write(s, "Alpha two", "alpha");
   const outlier = await write(s, "Beta", "beta");
-  env.clock.advanceMs(1);
-  const twin = await write(s, "Alpha one", "alpha");
 
   await env.worker.tick();
 
