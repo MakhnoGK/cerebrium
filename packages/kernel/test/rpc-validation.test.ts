@@ -85,6 +85,17 @@ describe("Socket argument validation", () => {
     expect(() => validateCall("write_memory", { ...goodWrite, invented_later: 1 })).not.toThrow();
   });
 
+  it("should hand reverts_rev through to the update use case", () => {
+    // Given / When
+    const parsed = validateCall("update_memory", { session_id: ID, id: ID, reverts_rev: 1 });
+
+    // Then
+    expect(parsed.reverts_rev).toBe(1);
+    expect(() => validateCall("update_memory", { session_id: ID, id: ID, reverts_rev: 0 })).toThrow(
+      InvalidArgsError,
+    );
+  });
+
   it("should reject an empty query rather than searching for nothing", () => {
     // Given / When / Then
     expect(() => validateCall("search_memory", { query: "" })).toThrow(InvalidArgsError);

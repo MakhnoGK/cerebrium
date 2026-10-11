@@ -109,6 +109,7 @@ const SCHEMAS = {
     content: z.string().optional(),
     title: z.string().optional(),
     reason: z.string().optional(),
+    reverts_rev: z.number().int().positive().optional(),
     ...eventWindow,
   }),
   fix_wikilink: session.extend({
