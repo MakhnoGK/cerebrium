@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { inject, injectable } from "tsyringe";
 import { projectFamily } from "@cerebrium/contracts/graph";
 import type { ConsolidationProposal } from "@cerebrium/contracts/types";
@@ -30,16 +29,13 @@ import {
 } from "@/domain/ports/consolidation-reporter";
 import {
   BRANCH_CODE_REPO_TOKEN,
-  CODE_REPO_TOKEN,
   CONSOLIDATION_REPO_TOKEN,
   EDGES_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
   NODES_REPO_TOKEN,
   pairKey,
   SESSIONS_REPO_TOKEN,
-  STORE_TOKEN,
   type BranchCodeRepo,
-  type CodeRepo,
   type ConsolidationRepo,
   type DuplicatePair,
   type EdgesRepo,
@@ -47,7 +43,6 @@ import {
   type NodesRepo,
   type RelationInput,
   type SessionsRepo,
-  type Store,
   type SweepSeed,
 } from "@/domain/ports/storage";
 import { ActivityFeed } from "@/application/services/activity-feed.service";
@@ -110,7 +105,7 @@ function breather(budgetMs: number): () => Promise<void> {
 interface CitableSymbol {
   node_id: string;
   repo: string;
-  ref: CodeRefTarget | null;
+  ref: CodeRefTarget;
 }
 
 // A neighbour hit, carrying the seed it was found from: the seed's kind decides whether
@@ -171,7 +166,6 @@ export class ConsolidationWorker {
   // The run this worker has open, so a stop can close it. A tick that is killed mid-await
   // never reaches `finish`, and an unclosed row reads as a sweep still in progress forever.
   private currentRun: string | null = null;
-  private lastOrphanScan: { watermark: string | null; clean: boolean } | null = null;
   private stageMark: { stage: string; at: number } | null = null;
   private lastCitationScan: {
     revisions: number;
@@ -192,10 +186,8 @@ export class ConsolidationWorker {
     @inject(EMBEDDING_QUEUE_REPO_TOKEN) private readonly queueRepo: EmbeddingQueueRepo,
     @inject(CONSOLIDATION_REPO_TOKEN) private readonly consolidationRepo: ConsolidationRepo,
     @inject(EDGES_REPO_TOKEN) private readonly edgesRepo: EdgesRepo,
-    @inject(CODE_REPO_TOKEN) private readonly codeRepo: CodeRepo,
     @inject(BRANCH_CODE_REPO_TOKEN) private readonly branchCode: BranchCodeRepo,
     @inject(NODES_REPO_TOKEN) private readonly nodesRepo: NodesRepo,
-    @inject(STORE_TOKEN) private readonly store: Store,
     @inject(SESSIONS_REPO_TOKEN) private readonly sessionsRepo: SessionsRepo,
 
     private readonly sessionService: SessionService,
@@ -331,11 +323,6 @@ export class ConsolidationWorker {
 
       await this.report(runId, "merge", result);
       await this.mergeDuplicates(now, result, neighbours);
-
-      if (yielded(opts, result)) return await this.finish(runId, result);
-
-      await this.report(runId, "mirrors", result);
-      await this.pruneMirrors(now, result);
 
       if (yielded(opts, result)) return await this.finish(runId, result);
 
@@ -568,9 +555,7 @@ export class ConsolidationWorker {
   // code. Both need every live body, so they share the read and the watermark.
   private async resolveCitations(now: string, result: ConsolidationTickResult): Promise<void> {
     const revisions = await this.consolidationRepo.revisionCount();
-    const codeIndex = this.store.capabilities.branchCode
-      ? await this.branchCode.indexWatermark()
-      : await this.consolidationRepo.codeIndexWatermark();
+    const codeIndex = await this.branchCode.indexWatermark();
 
     if (
       this.lastCitationScan?.revisions === revisions &&
@@ -623,54 +608,36 @@ export class ConsolidationWorker {
     };
   }
 
-  // Cited symbols, by name. On the per-branch index a citation is kept as a ref to what the
-  // symbol is, so each carries that target. On the local mirror, repos whose root is gone are
-  // left out: a detached repo cannot be checked against source.
+  // Cited symbols, by name. A citation is kept as a ref to what the symbol is, so each
+  // carries that target.
   private async citableSymbolIndex(): Promise<Map<string, CitableSymbol[]>> {
     const index = new Map<string, CitableSymbol[]>();
 
-    if (this.store.capabilities.branchCode) {
-      for (const s of await this.branchCode.citableSymbols()) {
-        const ref: CodeRefTarget = {
-          repo: s.repo,
-          remote_key: s.remote_key,
-          path: s.path,
-          qualified: s.qualified,
-          symbol_kind: s.kind,
-        };
+    for (const s of await this.branchCode.citableSymbols()) {
+      const ref: CodeRefTarget = {
+        repo: s.repo,
+        remote_key: s.remote_key,
+        path: s.path,
+        qualified: s.qualified,
+        symbol_kind: s.kind,
+      };
 
-        index.set(s.name, [...(index.get(s.name) ?? []), { node_id: s.id, repo: s.repo, ref }]);
-      }
-
-      return index;
-    }
-
-    const attached = new Set(
-      (await this.codeRepo.allRepoProvenance())
-        .filter((provenance) => !provenance.detached)
-        .map((provenance) => provenance.repo),
-    );
-
-    for (const symbol of await this.consolidationRepo.citableSymbols()) {
-      if (!attached.has(symbol.repo)) continue;
-
-      index.set(symbol.name, [...(index.get(symbol.name) ?? []), { ...symbol, ref: null }]);
+      index.set(s.name, [...(index.get(s.name) ?? []), { node_id: s.id, repo: s.repo, ref }]);
     }
 
     return index;
   }
 
   private async cited(note: string, symbol: CitableSymbol): Promise<boolean> {
-    return symbol.ref
-      ? this.branchCode.hasRef(note, symbol.ref.remote_key!, symbol.ref.path, symbol.ref.qualified)
-      : this.edgesRepo.pairIsConnected(note, symbol.node_id);
+    return this.branchCode.hasRef(
+      note,
+      symbol.ref.remote_key!,
+      symbol.ref.path,
+      symbol.ref.qualified,
+    );
   }
 
   private async linkDocuments(note: string, symbol: CitableSymbol, now: string): Promise<boolean> {
-    if (!symbol.ref) {
-      return this.edgesRepo.insertSystemDocumentsIfLive(note, symbol.node_id, this.ownerId, now);
-    }
-
     await this.branchCode.insertRef({ src: note, type: EdgeType.DOCUMENTS, ...symbol.ref }, now);
 
     return true;
@@ -1717,63 +1684,6 @@ export class ConsolidationWorker {
         result.rejected++;
       } else {
         result.proposals_backfilled++;
-      }
-    }
-  }
-
-  // Tier-1 mirror prune. Deterministic, no generation. auto soft-invalidates
-  // dead mirror nodes (they then never surface in default search or graph expansion);
-  // suggest queues for a prune candidate; off skips. Never touches authored memory.
-  // Repos whose root is no longer on disk. Their symbols cannot be re-verified against
-  // source, but neither were they deleted from it — the checkout moved, the volume is
-  // unmounted, or the remembered root is stale — so the prune must leave them alone.
-  private async unreachableRepos(): Promise<string[]> {
-    return (await this.codeRepo.storedRepoRoots())
-      .filter((repo) => !existsSync(repo.root))
-      .map((repo) => repo.name);
-  }
-
-  private async pruneMirrors(now: string, result: ConsolidationTickResult): Promise<void> {
-    const posture = this.posture.prune;
-
-    if (posture === Posture.OFF) {
-      return;
-    }
-
-    const watermark = await this.consolidationRepo.codeIndexWatermark();
-
-    if (this.lastOrphanScan?.clean === true && this.lastOrphanScan.watermark === watermark) {
-      return;
-    }
-
-    const dead = await this.consolidationRepo.deadMirrorNodes(
-      this.batch.prune,
-      await this.unreachableRepos(),
-    );
-
-    // Not clean means the batch limit may have truncated the list, so the next sweep looks
-    // again whatever the watermark says.
-    this.lastOrphanScan = { watermark, clean: dead.length === 0 };
-
-    const breath = breather(this.batch.msPerBreath);
-
-    for (const id of dead) {
-      await breath();
-
-      if (posture === Posture.AUTO) {
-        await this.nodesRepo.invalidateNode(id, { ts: now, session_id: this.ownerId });
-        result.pruned++;
-      } else {
-        const cid = await this.consolidationRepo.insertCandidate({
-          kind: ConsolidationKind.PRUNE,
-          member_ids: [id],
-          score: 1,
-          detected_at: now,
-        });
-
-        if (cid) {
-          result.prune_suggested++;
-        }
       }
     }
   }

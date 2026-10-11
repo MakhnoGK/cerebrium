@@ -9,14 +9,8 @@ import {
   EMBEDDING_PROVIDER_TOKEN,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import { STATS_REPO_TOKEN, STORE_TOKEN, type StatsRepo, type Store } from "@/domain/ports/storage";
-import {
-  CodeIndexService,
-  DaemonService,
-  EmbeddingService,
-  ProcessRegistryService,
-  ReviewService,
-} from "@/application/services";
+import { STATS_REPO_TOKEN, type StatsRepo } from "@/domain/ports/storage";
+import { DaemonService, ProcessRegistryService, ReviewService } from "@/application/services";
 import {
   INDEX_CODE,
   OPERATOR_SNAPSHOT,
@@ -24,7 +18,6 @@ import {
   useCase,
   type GenerationReport,
   type IndexCode,
-  type IndexCodeArgs,
   type IndexCodeResult,
   type OperatorSnapshot,
   type OperatorSnapshotResult,
@@ -33,29 +26,14 @@ import {
 import { describeRoles, resolveRoles } from "@/consolidation/roles";
 import { ConfigRegistry, ConsolidationConfig } from "@/infrastructure/config";
 
+export const INDEXED_BY_PLUGIN =
+  "this kernel has no checkouts to read: code is indexed by the plugin, which uploads " +
+  "the files of the checkout it runs in. Call code_index through cerebrium-plugin.";
+
 @useCase(INDEX_CODE)
 export class LocalIndexCode implements IndexCode {
-  constructor(
-    private readonly embeddings: EmbeddingService,
-    private readonly indexer: CodeIndexService,
-    @inject(STORE_TOKEN) private readonly store: Store,
-  ) {}
-
-  async invoke(args: IndexCodeArgs): Promise<IndexCodeResult> {
-    if (!this.store.capabilities.codeIndex) {
-      throw new Error(
-        "this kernel has no checkouts to read: code is indexed by the plugin, which uploads " +
-          "the files of the checkout it runs in. Call code_index through cerebrium-plugin.",
-      );
-    }
-
-    const targets = await this.indexer.resolveTargets({ repo: args.repo, path: args.path });
-    const results = await this.indexer.indexTargets(targets, {
-      session_id: args.session_id,
-      force: args.force,
-    });
-
-    return { results, notes: await this.embeddings.getEmbeddingNotes() };
+  invoke(): Promise<IndexCodeResult> {
+    return Promise.reject(new Error(INDEXED_BY_PLUGIN));
   }
 }
 

@@ -12,7 +12,6 @@ import { USE_RECORDER_TOKEN } from "@/domain/ports/use-recorder";
 import "@/application/use-cases/local";
 import {
   CHUNKS_REPO_TOKEN,
-  CODE_REPO_TOKEN,
   CONSOLIDATION_REPO_TOKEN,
   EDGES_REPO_TOKEN,
   EMBEDDING_QUEUE_REPO_TOKEN,
@@ -22,7 +21,6 @@ import {
   SESSIONS_REPO_TOKEN,
   STATS_REPO_TOKEN,
   type ChunksRepo,
-  type CodeRepo,
   type ConsolidationRepo,
   type EdgesRepo,
   type EmbeddingQueueRepo,
@@ -99,7 +97,6 @@ export interface TestEnv {
   edges: EdgesRepo;
   search: SearchRepo;
   chunks: ChunksRepo;
-  code: CodeRepo;
   consolidation: ConsolidationRepo;
   jobs: JobsRepo;
   stats: StatsRepo;
@@ -139,7 +136,6 @@ export function setup(opts?: {
     edges: container.resolve<EdgesRepo>(EDGES_REPO_TOKEN),
     search: container.resolve<SearchRepo>(SEARCH_REPO_TOKEN),
     chunks: container.resolve<ChunksRepo>(CHUNKS_REPO_TOKEN),
-    code: container.resolve<CodeRepo>(CODE_REPO_TOKEN),
     consolidation: container.resolve<ConsolidationRepo>(CONSOLIDATION_REPO_TOKEN),
     jobs: container.resolve<JobsRepo>(JOBS_REPO_TOKEN),
     stats: container.resolve<StatsRepo>(STATS_REPO_TOKEN),

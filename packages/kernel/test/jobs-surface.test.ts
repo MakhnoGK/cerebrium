@@ -39,7 +39,7 @@ describe("job call surface", () => {
     );
   });
 
-  it("should refuse a code index job when the store has no code index", async () => {
+  it("should refuse a code index job and point at the plugin", async () => {
     // Given
     setup();
 
@@ -47,7 +47,7 @@ describe("job call surface", () => {
     const submitted = submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
 
     // Then
-    await expect(submitted).rejects.toThrow("not available on the postgres backend");
+    await expect(submitted).rejects.toThrow(/indexed by the plugin/);
   });
 
   it("should refuse an unknown kind when a caller invents one", async () => {

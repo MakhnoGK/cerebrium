@@ -52,14 +52,17 @@ The MCP server is registered (user scope) as `cerebrium`; its tools appear as
   `derived_from`/`supersedes`/`relates_to`); edges drive graph expansion at search time.
 - **`checkpoint`** — call BEFORE ending a substantial work block: summary, decisions
   (with reasons), open threads, touched node ids — so the next session resumes cleanly.
-- **`code_index`** — index/refresh a repo into `symbol` mirror nodes + code edges
-  (TS/TSX/JS/PHP/Rust/C/C++/Lua). Run after pulling/changing a repo. Incremental (per-file hash-gate);
-  returns a compact summary, never code. Pass `repo` (a configured `MEMORY_CODE_ROOTS`
-  name — `cerebrium` is wired) or `path` (any directory). Indexing runs in-process in
-  the one server (no second writer, so never index via a shell/hook).
+- **`code_index`** — index the git checkout I'm in (or `path`) on its current branch into
+  the host's per-branch code index: `symbol`s + code edges (TS/TSX/JS/PHP/Rust/C/C++/Lua).
+  The plugin walks the working tree and uploads only files the host lacks (contents are
+  addressed by hash); the host parses them. Returns a compact summary, never code. The
+  first call opts the checkout into git hooks that re-index it on every commit; call it
+  by hand after a pull or uncommitted edits I want searchable.
 - **`code_lookup`** — exact structural code lookup by `name` or `file`, returning symbol
   envelopes + `defines`/`calls`/`imports` neighbor stubs. Use `search` with
-  `types:['symbol']` for code-by-meaning; `get` a symbol id for its raw source.
+  `types:['symbol']` for code-by-meaning; `get` a symbol id for its raw source. All three
+  read the branch my working directory is on, or the repo's default branch when that one
+  is not indexed yet (said so in `notes`); `code_lookup`'s `branch` reads another one.
 - **`consolidate_suggest` / `consolidate_apply` / `consolidate_retry`** — review what the background sweep queued
   (`distill`/`merge`/`link`/`prune`) and resolve it with `apply` or `reject`. If a candidate fails, `retry` bumps it for another attempt. Review
   destructive applies on index nodes with care; one has already eaten a hand-maintained
@@ -72,11 +75,13 @@ Every session/node/candidate id is opaque. Copy it exactly from a Cerebrium resp
 synthesize one. Stale node references are rejected with the terminal live successor when
 one can be determined.
 
-**Code is a mirror, not authored knowledge.** `symbol` nodes are derived from source
-and maintained only by `code_index` — never `write`/`update` them by hand. When I learn
+**Code is a mirror, not authored knowledge.** `symbol`s are derived from source and
+maintained only by `code_index` — never `write`/`update` them by hand. A symbol id names
+one version of one file, so after the file changes I look it up again. When I learn
 something *about* code (a decision, a gotcha, why it's shaped that way), I write a normal
 `semantic` node and `link` it to the symbol with a `documents` edge; that note→code link
-survives re-indexing and a later search surfaces the code via graph expansion.
+points at the symbol by repo, path and name, so it survives re-indexing and holds on every
+branch, and a later search surfaces the code via graph expansion.
 
 ## Code navigation — Cerebrium before `Read`/`Grep` (token discipline)
 For any "where is X / what calls it / what's in this file / how does X work" question about
@@ -91,12 +96,13 @@ and exact source-by-id, far cheaper than reading or grepping whole files:
 
 Reserve `Read`/`Grep` for where the mirror can't help or can't be trusted:
 1. **Coverage** — files the index doesn't cover: non-`TS/TSX/JS/PHP/Rust/C/C++/Lua` (configs, SQL, docs,
-   YAML), or a repo not wired into `MEMORY_CODE_ROOTS`.
+   YAML), or a checkout `code_index` has never been run in.
 2. **Editing** — the moment I'm about to change a file. `Edit` needs a fresh `Read` and
    disk is authoritative; never edit from the mirror.
-3. **Staleness** — the mirror reflects the last `code_index` run (a branch/commit snapshot;
-   check provenance `dirty`). If the file changed since — I just edited it, or the working
-   tree is dirty — refresh with `code_index` (incremental, cheap) or read the file.
+3. **Staleness** — the mirror reflects the last `code_index` of that branch (the commit
+   hooks keep it at the last commit). If the file changed since — I just edited it, or the
+   working tree is dirty — refresh with `code_index` (only changed files upload) or read
+   the file.
 
 Rule of thumb: **the mirror locates and explains; disk is the source of truth for edits.**
 Keeping the index fresh (`code_index` after pulls/edits) is what makes this discipline safe.

@@ -5,12 +5,7 @@ import {
   EmbeddingRole,
   type EmbeddingProvider,
 } from "@/domain/ports/embedding-provider";
-import {
-  BRANCH_CODE_REPO_TOKEN,
-  STORE_TOKEN,
-  type BranchCodeRepo,
-  type Store,
-} from "@/domain/ports/storage";
+import { BRANCH_CODE_REPO_TOKEN, type BranchCodeRepo } from "@/domain/ports/storage";
 
 const BATCH = 32;
 
@@ -25,13 +20,10 @@ export class CodeEmbeddingWorker {
   constructor(
     @inject(BRANCH_CODE_REPO_TOKEN) private readonly code: BranchCodeRepo,
     @inject(EMBEDDING_PROVIDER_TOKEN) private readonly provider: EmbeddingProvider,
-    @inject(STORE_TOKEN) private readonly store: Store,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   async tick(): Promise<{ embedded: number; failed: boolean }> {
-    if (!this.store.capabilities.branchCode) return { embedded: 0, failed: false };
-
     const now = Date.parse(this.clock.now());
 
     if (now < this.resumeAt) return { embedded: 0, failed: false };
@@ -65,6 +57,6 @@ export class CodeEmbeddingWorker {
   }
 
   backlog(): Promise<number> {
-    return this.store.capabilities.branchCode ? this.code.embeddingBacklog() : Promise.resolve(0);
+    return this.code.embeddingBacklog();
   }
 }

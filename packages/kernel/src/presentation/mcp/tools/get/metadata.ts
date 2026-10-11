@@ -8,7 +8,7 @@ export const metadata = {
     "Fetch full node content by id: envelope + current markdown content + the node's incoming/outgoing edges " +
     "(neighbor stubs). This is the ONLY tool that returns full content — `search` and `session_start` return envelopes " +
     "only, so call `get` after deciding which ids are worth the tokens. Set `include_revisions` to see the edit history, " +
-    "or pass `rev` (with a single id) to read a specific superseded revision. For a `symbol` (code mirror) node the result " +
+    "or pass `rev` (with a single id) to read a specific superseded revision. For a code `symbol` the result " +
     "also carries `source` (the raw source slice) and `symbol` (repo/path/lang/kind/signature/line span). " +
     "Fetching a node also records the use: it earns a small bounded ranking boost, and for an episodic node it restarts " +
     "the decay clock, so what you actually come back to stays retrievable. Pass `as_of` to read the node as the store " +

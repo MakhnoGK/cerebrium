@@ -48,8 +48,7 @@ export class AgentRunService {
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
-  // Only `agent.*`. The daemon's own JobWorker owns everything else, and a runner that
-  // could claim `code.index` would be running kernel work in the wrong process.
+  // Only `agent.*`: a runner claims nothing that is kernel work.
   async claim(kinds: string[], owner: string): Promise<JobRow | null> {
     const agentKinds = kinds.filter((kind) => kind.startsWith(AGENT_JOB_PREFIX));
 

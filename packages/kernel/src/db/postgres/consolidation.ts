@@ -81,8 +81,6 @@ function toCandidate(r: CandidateRow): ConsolidationCandidate {
   };
 }
 
-// There is no code mirror in `nodes`, so the symbol-backed inputs (citations, the prune
-// watermark, dead mirrors) are empty rather than absent.
 @injectable()
 export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo {
   async insertCandidate(input: NewCandidate): Promise<string | null> {
@@ -671,10 +669,6 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
     };
   }
 
-  async citableSymbols(): Promise<{ name: string; node_id: string; repo: string }[]> {
-    return [];
-  }
-
   async authoredBodies(): Promise<AuthoredBody[]> {
     return this.all(
       `SELECT n.id AS id, n.memory_kind AS kind, n.title AS title, n.project AS project,
@@ -756,14 +750,6 @@ export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo
        ON CONFLICT (src, dst, type) DO UPDATE SET checked_at = excluded.checked_at`,
       { nodeId, ts },
     );
-  }
-
-  async codeIndexWatermark(): Promise<string | null> {
-    return null;
-  }
-
-  async deadMirrorNodes(): Promise<string[]> {
-    return [];
   }
 
   async unannotatedSemantic(

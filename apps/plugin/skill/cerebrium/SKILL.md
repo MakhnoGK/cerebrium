@@ -137,15 +137,15 @@ BAD:  cram both into one node titled "auth stuff".
 
 ## Code
 
-The kernel indexes source repos (TypeScript/TSX/JavaScript/PHP/Rust/C/C++/Lua) into `symbol` mirror
-nodes (functions, methods, classes, interfaces, types, enums, traits, consts,
+The host keeps a per-branch code index of source repos (TypeScript/TSX/JavaScript/PHP/Rust/C/C++/Lua):
+`symbol`s (functions, methods, classes, interfaces, types, enums, traits, consts,
 modules) with code edges (`defines`/`imports`/`calls`). Symbols are **mirrors**: derived from source, not
 authored — never `write`/`update` them by hand (both are rejected). They are
 maintained by re-indexing.
 
-- **After a repo changes** (you pulled, or edited files), call `code_index`. It is
-  incremental: unchanged files are hash-gated and cost nothing; only changed symbols
-  re-parse and re-embed; removed symbols are soft-invalidated. It returns a compact
+- **After a repo changes** (you pulled, or edited files), call `code_index`. The plugin
+  walks the checkout and uploads only files the host lacks — contents are addressed by
+  hash, so unchanged files cost nothing — and the host parses them. It returns a compact
   summary, never the code itself.
 - **Find code by meaning** with `search` (`types:['symbol']` scopes to code); **find
   it by structure** with `code_lookup` (`name:` to resolve a symbol + its
@@ -157,7 +157,7 @@ maintained by re-indexing.
   searches traverse it: a search for the note's topic surfaces the symbol via graph
   expansion (`via:{edge:'documents'}`). This is the payoff — design notes that point
   straight at the code they describe.
-- **Against a Cerebrium host, code is per branch.** `code_index` uploads the checkout
+- **Code is per branch.** `code_index` uploads the checkout
   you are in (only files the host lacks) on its current branch, and the first call opts
   the checkout into git hooks that re-index it on every commit; `code_lookup`, symbol
   `search` and `get` read the branch your working directory is on, or the repo's default
@@ -193,7 +193,7 @@ from before the removal: treat them as read-only history — cite them, `link` t
 | `restore` | Undo a wrong retirement — same id, history and edges kept. |
 | `link` | Connect two existing nodes with a typed edge (references/documents/…). |
 | `checkpoint` | Before ending work: summary + decisions + open threads + touched ids. |
-| `code_index` | Index/refresh a repo into symbol mirrors. Incremental; run after changes. |
+| `code_index` | Index the checkout you are in on its current branch. Uploads only what the host lacks; run after changes. |
 | `code_lookup` | Structural code lookup by `name`/`file` + defines/calls/imports stubs. |
 | `consolidate_suggest` | Review what the background sweep queued: distill/merge/link/prune candidates. |
 | `consolidate_apply` | Resolve a candidate — `apply` or `reject`. Destructive applies on index nodes deserve care; `restore` exists because one already ate a hand-maintained index. |

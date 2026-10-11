@@ -513,7 +513,6 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_LINKS` | `auto` | Posture for `similar_to` link discovery: `off` \| `suggest` \| `auto`. |
 | `MEMORY_CONSOLIDATE_DISTILL` | `suggest` | Posture for episodic->semantic distillation. `auto` writes the generated fact and records the candidate as `applied`; each sweep also applies pending distills whose proposal says `apply`. The host runs `auto`. |
 | `MEMORY_CONSOLIDATE_MERGE` | `suggest` | Posture for semantic dedup/merge. `auto` collapses the pair into the survivor, which keeps its body verbatim plus the generated additions (the loser is superseded, `restore` brings it back), and records the candidate as `applied`. A hand-maintained node is always the survivor; when the loser is hand-maintained too, or the draft lost anchors of the duplicate, `auto` records `duplicate_of` and keeps both. Each sweep also applies pending merges whose proposal says `apply`; only a pair with no generation yet waits, for the backfill. A by-hand apply without `collapse` records `duplicate_of`. The host runs `auto`. |
-| `MEMORY_CONSOLIDATE_PRUNE` | `auto` | Posture for Tier-1 mirror prune. |
 | `MEMORY_CONSOLIDATE_LINK_PRUNE` | `auto` | Posture for retiring over-cap `similar_to` edges: `off` \| `auto`. |
 | `MEMORY_CONSOLIDATE_RECONCILE` | `suggest` | Write-time dedup judgment posture: `suggest` returns a judged `reconcile` action (`noop`\|`update`\|`supersede`) + target in the `write` response; `off` disables it (the advisory `similar_existing` hint still fires). Never auto-applies. Needs a generating provider. |
 | `MEMORY_CONSOLIDATE_ANNOTATE` | `auto` | Attribute-enrichment posture: `auto` mines keywords/tags/context for each semantic node during the sweep and folds them into its indexed text for wider recall; `off` skips it. Needs a generating provider. |
@@ -532,7 +531,6 @@ declared range fails at startup rather than being quietly replaced.
 | `MEMORY_CONSOLIDATE_LINK_BATCH` | `200` | Max candidate pairs examined for link discovery per sweep. |
 | `MEMORY_CONSOLIDATE_DISTILL_BATCH` | `200` | Max episodic clusters considered for distillation per sweep. |
 | `MEMORY_CONSOLIDATE_MERGE_BATCH` | `200` | Max duplicate semantic pairs considered per sweep. |
-| `MEMORY_CONSOLIDATE_PRUNE_BATCH` | `200` | Max dead mirror nodes reconciled per sweep. |
 | `MEMORY_CONSOLIDATE_LINK_PRUNE_BATCH` | `200` | Max over-cap `similar_to` edges retired per sweep. |
 | `MEMORY_CONSOLIDATE_BACKFILL_BATCH` | `10` | Max pending candidates a newly-enabled provider drafts proposals for per sweep. |
 | `MEMORY_CONSOLIDATE_REATTACH` | `auto` | Graph integrity: attach edgeless notes (an episodic record to its session's or project's last checkpoint, otherwise to a nearest note the model relates it to) and move system edges off superseded nodes. `off` skips it. |
@@ -646,7 +644,7 @@ node, and candidate id as opaque and never invent or transform one.
 | `restore` | The inverse: bring a soft-deleted node back with its id, revision history and edges intact, retiring the `supersedes` edges into it. For a merge that swallowed a living document. |
 | `link` | Connect two existing nodes with a typed, directed edge (`references`/`documents`/`derived_from`/`supersedes`/`relates_to`). Edges drive graph expansion at search time. |
 | `checkpoint` | Before ending a work block: writes an episodic checkpoint (Summary / Decisions / Open threads) linked to touched nodes, so the next session picks up where you left off. |
-| `code_index` | Index/refresh source repos into `symbol` mirror nodes + code edges. Incremental (per-file hash-gate); run after pulling/changing a repo. Returns a compact per-repo summary, never code. |
+| `code_index` | Index the checkout the plugin runs in (or `path`) on its current branch: uploads only the contents the host lacks, which the host parses into `symbol`s + code edges. Run after pulling/changing a repo. Returns a compact summary, never code. See [Code indexing](#code-indexing). |
 | `code_lookup` | Exact structural code lookup: by `name` (simple/qualified) or `file`, returning symbol envelopes + `defines`/`calls`/`imports` neighbor stubs. Raw source via `get`. |
 | `consolidate_suggest` | List pending consolidation candidates (`distill`/`merge`/`link`/`prune`) the background sweep queued for review — envelopes with score, member ids, and a proposal when pre-generated. Paged: pass `page_size` and feed `next_cursor` back until it is absent (`limit` alone still returns one unpaged batch). |
 | `consolidate_apply` | Resolve a candidate: `apply` carries it out (write the `similar_to` edge / distilled fact / merge / prune), `reject` dismisses it. `override` supplies the summary/merged body for distill/merge. |
@@ -787,8 +785,6 @@ into durable knowledge:
   for 19% of correct ones delayed by a sweep. It delays rather than loses: the pair stays
   detectable and returns once it is older than the window, and the skip is counted as
   `merge_delayed` on the run rather than passing silently.
-- **Tier-1 mirror prune** — soft-invalidates dead mirror nodes (orphaned symbols) so
-  they leave retrieval.
 
 Each behavior has an independent posture — `off` | `suggest` | `auto` (see the
 `MEMORY_CONSOLIDATE_*` table above; the shipped defaults are *Balanced*: `auto` for

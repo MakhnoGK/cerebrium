@@ -18,13 +18,7 @@ import {
 } from "@cerebrium/contracts/code";
 import { CLOCK_TOKEN, type Clock } from "@/domain/ports/clock";
 import { CODE_PARSER_TOKEN, type CodeParser } from "@/domain/ports/code-parser";
-import {
-  BackendCapabilityError,
-  BRANCH_CODE_REPO_TOKEN,
-  STORE_TOKEN,
-  type BranchCodeRepo,
-  type Store,
-} from "@/domain/ports/storage";
+import { BRANCH_CODE_REPO_TOKEN, type BranchCodeRepo } from "@/domain/ports/storage";
 
 const PARSE_BATCH = 16;
 const MAX_MANIFEST_HASHES = 50_000;
@@ -39,13 +33,10 @@ export class BranchCodeService {
   constructor(
     @inject(BRANCH_CODE_REPO_TOKEN) private readonly code: BranchCodeRepo,
     @inject(CODE_PARSER_TOKEN) private readonly parser: CodeParser,
-    @inject(STORE_TOKEN) private readonly store: Store,
     @inject(CLOCK_TOKEN) private readonly clock: Clock,
   ) {}
 
   async manifest(args: CodeManifestArgs): Promise<CodeManifestResult> {
-    this.requireBackend();
-
     if (args.hashes.length > MAX_MANIFEST_HASHES) {
       throw new Error(`a manifest names at most ${String(MAX_MANIFEST_HASHES)} hashes`);
     }
@@ -54,8 +45,6 @@ export class BranchCodeService {
   }
 
   async upload(args: CodeUploadArgs): Promise<CodeUploadResult> {
-    this.requireBackend();
-
     if (args.blobs.length > UPLOAD_FRAME_BLOBS) {
       throw new Error(`an upload carries at most ${String(UPLOAD_FRAME_BLOBS)} blobs`);
     }
@@ -75,8 +64,6 @@ export class BranchCodeService {
   }
 
   async commit(args: CodeCommitArgs): Promise<CodeCommitResult> {
-    this.requireBackend();
-
     const started = Date.parse(this.clock.now());
     const now = this.clock.now();
 
@@ -179,12 +166,6 @@ export class BranchCodeService {
 
         tally.failures++;
       }
-    }
-  }
-
-  private requireBackend(): void {
-    if (!this.store.capabilities.branchCode) {
-      throw new BackendCapabilityError("the per-branch code index", this.store.backend);
     }
   }
 }

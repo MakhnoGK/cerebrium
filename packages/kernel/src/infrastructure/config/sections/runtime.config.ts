@@ -1,14 +1,5 @@
 import { join } from "node:path";
-import {
-  bool,
-  configSection,
-  custom,
-  int,
-  nullableStr,
-  num,
-  SectionOf,
-  str,
-} from "@/domain/ports/config";
+import { bool, configSection, int, nullableStr, num, SectionOf, str } from "@/domain/ports/config";
 import { cerebriumHome } from "@/runtime/paths";
 
 const home = (...parts: string[]): string => join(cerebriumHome(), ...parts);
@@ -115,32 +106,4 @@ export class DaemonConfig extends SectionOf("daemon", {
 export class KernelConfig extends SectionOf("kernel", {
   url: nullableStr(null).env("MEMORY_KERNEL_URL"),
   tokenFile: nullableStr(null).env("MEMORY_KERNEL_TOKEN_FILE"),
-}) {}
-
-export interface CodeRoot {
-  name: string;
-  root: string;
-}
-
-// MEMORY_CODE_ROOTS = "name=path,name2=path2". Malformed entries are skipped rather than
-// failing the parse. These are merged with the roots remembered in the DB by `code_index`;
-// this is only the environment half of that merge.
-function parseRoots(raw: string): CodeRoot[] | undefined {
-  const roots = raw.split(",").reduce<CodeRoot[]>((acc, part) => {
-    const eq = part.indexOf("=");
-
-    if (eq < 0) return acc;
-
-    const name = part.slice(0, eq).trim();
-    const root = part.slice(eq + 1).trim();
-
-    return name && root ? [...acc, { name, root }] : acc;
-  }, []);
-
-  return roots.length ? roots : undefined;
-}
-
-@configSection()
-export class CodeConfig extends SectionOf("code", {
-  roots: custom<CodeRoot[]>([], parseRoots).env("MEMORY_CODE_ROOTS"),
 }) {}

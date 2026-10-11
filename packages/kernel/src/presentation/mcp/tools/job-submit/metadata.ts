@@ -7,12 +7,10 @@ export const metadata = {
 
   description:
     "Queue long-running kernel work and get a job id back immediately, instead of holding a tool call open " +
-    "until it finishes. Use this for `code_index` whenever the index might outlast your client's own request " +
-    "timeout — an incremental index of one repo measures ~20s, a cold or forced one far longer, and an MCP " +
-    "client that gives up first reports a timeout for work that is still running and will still succeed. " +
-    "Submitting returns at once; poll `job_status` with the returned id to see how it ended. " +
-    `Submittable kinds: ${SUBMITTABLE_JOB_KINDS.join(", ")}. Jobs that would spawn an external process are ` +
-    "not submittable here — they are enqueued by the host that runs them, never by asking the kernel.",
+    "until it finishes. Submitting returns at once; poll `job_status` with the returned id to see how it ended. " +
+    `Submittable kinds: ${SUBMITTABLE_JOB_KINDS.join(", ")}. A \`code.index\` job is refused: code is indexed ` +
+    "by the plugin, so call `code_index` through cerebrium-plugin instead. Jobs that would spawn an external " +
+    "process are not submittable here — they are enqueued by the host that runs them, never by asking the kernel.",
 
   schema: {
     session_id: sessionIdSchema,
@@ -20,10 +18,7 @@ export const metadata = {
     payload: z
       .record(z.unknown())
       .optional()
-      .describe(
-        "Arguments for the job, shaped like the synchronous call's own. For `code.index`: " +
-          "`repo`, `path`, `force` — all optional, and omitting them all indexes every configured root.",
-      ),
+      .describe("Arguments for the job, shaped like the synchronous call's own."),
     scheduled_for: z
       .string()
       .datetime({ offset: true })

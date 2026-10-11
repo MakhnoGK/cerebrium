@@ -13,7 +13,7 @@ export const metadata = {
     "edge from the duplicate to the canonical node and leaves BOTH live, so retrieval shows one of them and nothing " +
     "is destroyed — pass `collapse:true` to instead rewrite the survivor from `override`/proposal, re-point authored " +
     "edges and supersede the loser, which is lossy and cannot be undone except through `restore`; " +
-    "a `prune` candidate soft-invalidates a dead mirror node. Superseded/consolidated/pruned nodes stay " +
+    "a `prune` candidate soft-invalidates its node. Superseded/consolidated/pruned nodes stay " +
     "queryable via history. Application and candidate resolution are atomic; a stale link/merge whose endpoints are " +
     "no longer live is dismissed without mutation. Idempotent per candidate — one already applied or dismissed cannot " +
     "be resolved again.",
