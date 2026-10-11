@@ -27,6 +27,7 @@ export class UpdateTool implements McpTool<Schema, unknown> {
       content: args.content,
       title: args.title,
       reason: args.reason,
+      ...(args.reverts_rev === undefined ? {} : { reverts_rev: args.reverts_rev }),
       event_from: args.event_from,
       event_to: args.event_to,
     });

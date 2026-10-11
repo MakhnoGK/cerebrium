@@ -140,6 +140,59 @@ describe("Trust weight follows origin", () => {
     });
   });
 
+  it("should drop the sweep's weight once its merge is reverted", async () => {
+    // Given
+    const merged = await writeAs("claude-code", "Retry budget");
+    await reviseAs(SWEEP, merged, "merge");
+    policy({ [SWEEP]: weighted(0.5) });
+
+    // When
+    await invoke(
+      "update_memory",
+      { session_id: await sessionAs("claude-code"), id: merged, reverts_rev: 1 },
+      "claude-code",
+    );
+
+    // Then
+    expect((await search()).find((r) => r.id === merged)).not.toHaveProperty("authority");
+    const fetched = await invoke<{ nodes: { content: string }[] }>("fetch_nodes", {
+      ids: [merged],
+    });
+    expect(fetched.nodes[0]?.content).toBe(TOPIC);
+  });
+
+  it("should keep the sweep's weight when a later edit only builds on its merge", async () => {
+    // Given
+    const merged = await writeAs("claude-code", "Retry budget");
+    await reviseAs(SWEEP, merged, "merge");
+    await reviseAs("claude-code", merged, "extended");
+    policy({ [SWEEP]: weighted(0.5) });
+
+    // When
+    const results = await search();
+
+    // Then
+    expect(results.find((r) => r.id === merged)?.authority).toEqual({
+      weight: 0.5,
+      weakest: SWEEP,
+    });
+  });
+
+  it("should refuse a revert that also carries new content", async () => {
+    // Given
+    const merged = await writeAs("claude-code", "Retry budget");
+    await reviseAs(SWEEP, merged, "merge");
+
+    // When / Then
+    await expect(
+      invoke(
+        "update_memory",
+        { session_id: await sessionAs("claude-code"), id: merged, reverts_rev: 1, content: "x" },
+        "claude-code",
+      ),
+    ).rejects.toThrow(/reverts_rev/);
+  });
+
   it("should report a node's authority on get", async () => {
     // Given
     const merged = await writeAs("claude-code", "Retry budget");

@@ -9,7 +9,9 @@ export const metadata = {
     "`get` with `rev`). Use this to correct or extend a fact/decision rather than writing a near-duplicate. Episodic " +
     "nodes are write-once and CANNOT be updated — record what changed as a new node instead. A revision that leaves the " +
     "body long enough for every reader to pay for it draws a `context_notes` line saying so; it is advice, never a limit. " +
-    "Returns the updated envelope.",
+    "To undo a wrong revision — a consolidation merge that rewrote the note, say — pass `reverts_rev` with the last good " +
+    "revision instead of `content`: its text comes back as a new revision, and the revisions in between stop counting " +
+    "toward the node's authority. Returns the updated envelope.",
 
   schema: {
     session_id: sessionIdSchema,
@@ -20,6 +22,14 @@ export const metadata = {
       .describe("New markdown body (replaces current). Omit to change only the title."),
     title: z.string().min(1).optional().describe("New title."),
     reason: z.string().optional().describe("Why this revision — stored in the node's history."),
+    reverts_rev: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Restore the text of this earlier revision as a new one. Not combinable with `content`; `title` may be set alongside.",
+      ),
     event_from: z
       .string()
       .datetime()

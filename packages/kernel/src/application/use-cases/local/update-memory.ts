@@ -38,8 +38,9 @@ export class LocalUpdateMemory implements UpdateMemory {
 
     const window = { event_from: args.event_from, event_to: args.event_to };
     const touchesWindow = args.event_from !== undefined || args.event_to !== undefined;
+    const content = await this.revertedContent(args, current.rev);
 
-    if (args.content === undefined && args.title === undefined && !touchesWindow) {
+    if (content === undefined && args.title === undefined && !touchesWindow) {
       throw new Error("nothing to update — provide `content`, `title` and/or an event window.");
     }
 
@@ -66,19 +67,47 @@ export class LocalUpdateMemory implements UpdateMemory {
     // The event window is node metadata, not content, so correcting it alone does not mint
     // a revision — there is no new body to keep.
     const envelope =
-      args.content === undefined && args.title === undefined
+      content === undefined && args.title === undefined
         ? (await this.nodes.envelope(args.id))!
         : await this.nodes.addRevision(args.id, {
-            content: args.content,
+            content,
             title: args.title,
             session_id: args.session_id,
             reason: args.reason ?? null,
             ts: this.clock.now(),
+            ...(args.reverts_rev === undefined ? {} : { reverts_rev: args.reverts_rev }),
           });
 
     return Promise.resolve({
       envelope,
       notes: args.content === undefined ? [] : this.hints.getLongBodyNotes(args.content),
     });
+  }
+
+  private async revertedContent(
+    args: UpdateMemoryArgs,
+    currentRev: number,
+  ): Promise<string | undefined> {
+    if (args.reverts_rev === undefined) return args.content;
+
+    if (args.content !== undefined) {
+      throw new Error(
+        "`reverts_rev` restores that revision's text as it was; pass `content` in a separate update.",
+      );
+    }
+
+    if (args.reverts_rev >= currentRev) {
+      throw new Error(
+        `\`reverts_rev\` must name an earlier revision; node ${args.id} is at rev ${String(currentRev)}.`,
+      );
+    }
+
+    const content = await this.nodes.revisionContent(args.id, args.reverts_rev);
+
+    if (content === undefined) {
+      throw new Error(`node ${args.id} has no revision ${String(args.reverts_rev)}.`);
+    }
+
+    return content;
   }
 }

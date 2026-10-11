@@ -32,7 +32,9 @@ export const metadata = {
     include_revisions: z
       .boolean()
       .optional()
-      .describe("Include the revision history (rev, ts, session, reason) — not old content."),
+      .describe(
+        "Include the revision history (rev, ts, session, reason, reverts_rev) — not old content.",
+      ),
     rev: z
       .number()
       .int()

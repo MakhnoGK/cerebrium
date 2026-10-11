@@ -53,6 +53,7 @@ export interface UpdateMemoryArgs extends EventWindow {
   content?: string;
   title?: string;
   reason?: string;
+  reverts_rev?: number;
 }
 
 export interface UpdateMemoryResult {

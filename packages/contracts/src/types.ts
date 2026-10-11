@@ -50,6 +50,7 @@ export interface RevisionMeta {
   ts: string;
   session_id: string;
   reason: string | null;
+  reverts_rev: number | null;
 }
 
 export interface EnrichedRow {
