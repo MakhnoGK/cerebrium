@@ -11,7 +11,7 @@ import {
   type Store,
 } from "@/domain/ports/storage";
 import { USE_RECORDER_TOKEN, type UseRecorder } from "@/domain/ports/use-recorder";
-import { CodeReadService } from "@/application/services";
+import { CodeReadService, PrincipalTrustService } from "@/application/services";
 import {
   FETCH_NODES,
   useCase,
@@ -30,6 +30,7 @@ export class LocalFetchNodes implements FetchNodes {
     @inject(USE_RECORDER_TOKEN) private readonly uses: UseRecorder,
     @inject(STORE_TOKEN) private readonly store: Store,
     private readonly branches: CodeReadService,
+    private readonly trust: PrincipalTrustService,
   ) {}
 
   async invoke(args: FetchNodesArgs): Promise<FetchNodesResult> {
@@ -39,6 +40,7 @@ export class LocalFetchNodes implements FetchNodes {
     const nodes: unknown[] = [];
     const not_found: string[] = [];
     const used: string[] = [];
+    const authority = await this.trust.factors(args.ids);
 
     for (const id of args.ids) {
       const full = await this.nodes.fullNode(id);
@@ -66,6 +68,9 @@ export class LocalFetchNodes implements FetchNodes {
         content: full.content,
         edges: full.edges,
       };
+      const trust = authority.get(id);
+
+      if (trust) node.authority = trust;
 
       if (full.envelope.type === "symbol") {
         const detail = await this.code.symbolDetail(id);

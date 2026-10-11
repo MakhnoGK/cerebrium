@@ -715,6 +715,15 @@ function Member({ node, role }: { node: NodePreview; role: [Tone, string] | null
         {role && <Badge tone={role[0]}>{role[1]}</Badge>}
         {!node.found && <Badge tone="err">not found</Badge>}
         {node.invalidated && <Badge tone="err">invalidated</Badge>}
+        {node.authority && (
+          <span
+            title={`ranks at ${String(node.authority.weight)}× because of ${node.authority.weakest}`}
+          >
+            <Badge tone={node.authority.weight === 0 ? "err" : "warn"}>
+              trust {node.authority.weight} · {node.authority.weakest}
+            </Badge>
+          </span>
+        )}
         <strong className="member-title">{node.title ?? "(untitled)"}</strong>
       </div>
       <div className="member-meta sub muted">

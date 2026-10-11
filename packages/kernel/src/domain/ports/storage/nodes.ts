@@ -56,7 +56,7 @@ export interface NodesRepo extends UseRecorder {
   ): Promise<{ event_from: string | null; event_to: string | null } | undefined>;
   setEventWindow(id: string, window: { event_from?: string; event_to?: string }): Promise<void>;
   stateAt(id: string, asOf: string): Promise<{ rev: number; content: string } | undefined>;
-  principalsOf(ids: string[]): Promise<Map<string, string>>;
+  originPrincipalsOf(ids: string[]): Promise<Map<string, Set<string>>>;
   recordUse(ids: string[], ts: string): Promise<void>;
   invalidateNode(
     id: string,
