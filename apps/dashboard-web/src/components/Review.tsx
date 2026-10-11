@@ -377,6 +377,7 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
 
   const survivor = members.find((node) => node.id === candidate.canonical_id);
   const duplicate = members.find((node) => node.id !== candidate.canonical_id);
+  const mixedTypes = kind === "merge" && typeMismatch(survivor, duplicate);
 
   const submitDraft = (draft: Draft) => {
     if (kind === "merge") {
@@ -472,6 +473,14 @@ function CandidateCard({ view, hidden, retrying, error, onDecide, onRetry }: Car
           <Notice tone="warn">
             A member was retired after this was detected, so there is nothing left to consolidate.
             Reject it; the next sweep dismisses it anyway.
+          </Notice>
+        )}
+
+        {!retired && mixedTypes && (
+          <Notice tone="warn">
+            These are different kinds of note ({survivor?.type} and {duplicate?.type}). Merging them
+            into one is usually wrong — keep both and mark duplicate unless one truly restates the
+            other.
           </Notice>
         )}
 
@@ -654,6 +663,10 @@ function MergeConfirm({
       </div>
     </div>
   );
+}
+
+function typeMismatch(a: NodePreview | undefined, b: NodePreview | undefined): boolean {
+  return a?.type != null && b?.type != null && a.type !== b.type;
 }
 
 function Missing({ anchors }: { anchors: string[] | undefined }) {
