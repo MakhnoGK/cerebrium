@@ -19,13 +19,13 @@ import { setup, TestEnv } from "@test/helpers";
 const SHARED =
   "the payment service authorizes the card then captures the amount and emits a receipt event to the downstream ledger";
 
-async function mk(s: string, title: string, content: string): Promise<string> {
+async function mk(s: string, title: string, content: string, type = "fact"): Promise<string> {
   return (
     (await container.resolve(WriteTool).invoke({
       session_id: s,
       parent_node_id: null,
       memory_kind: MemoryKind.SEMANTIC,
-      type: "fact",
+      type,
       title,
       content,
       project: "cerebrium",
@@ -260,6 +260,32 @@ describe("Semantic dedup / merge", () => {
     expect((await env.edges.edgesOf(a)).some((e) => e.id === b && e.edge === "duplicate_of")).toBe(
       true,
     );
+  });
+
+  it("should record duplicate_of instead of collapsing a task into a decision under auto", async () => {
+    // Given
+    process.env.MEMORY_CONSOLIDATE_MERGE = "auto";
+    const env = setup({ consolidator: stubProvider });
+    const s = (await container.resolve(SessionStartTool).invoke({})).session_id;
+    const decision = await mk(s, "Payments rule", SHARED, "decision");
+    const task = await mk(s, "Payments work", `${SHARED} duplicate`, "task");
+    await env.worker.tick();
+    env.clock.advanceDays(1);
+
+    // When
+    const r = await container.resolve(ConsolidationWorker).tick();
+
+    // Then
+    expect(r.merged).toBe(1);
+    expect((await env.nodes.envelope(decision))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(task))!.invalidated).toBe(false);
+    expect((await env.nodes.envelope(decision))!.title).toBe("Payments rule");
+    expect((await env.nodes.envelope(task))!.title).toBe("Payments work");
+    const recorded = [];
+    for (const id of [decision, task]) {
+      if ((await env.edges.edgesOf(id)).some((e) => e.edge === "duplicate_of")) recorded.push(id);
+    }
+    expect(recorded).toHaveLength(2);
   });
 
   it("should apply a pending merge that already carries an apply proposal under auto", async () => {
