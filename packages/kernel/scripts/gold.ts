@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
-// The gold set: labelled queries for `eval:retrieval --db`, held as JSONL so a long
+// The gold set: labelled queries for `eval:retrieval --pg`, held as JSONL so a long
 // generation run can append as it goes and resume after an interrupt.
 //
 // It is NOT checked into the repo. Labels are derived from a private store (work records,

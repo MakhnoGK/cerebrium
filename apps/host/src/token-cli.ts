@@ -3,7 +3,6 @@ import type { DependencyContainer } from "tsyringe";
 import { PrincipalTokenService } from "@cerebrium/kernel/application/services";
 import { buildContainer } from "@cerebrium/kernel/container";
 import { STORE_TOKEN, type Store } from "@cerebrium/kernel/domain/ports/storage";
-import { StorageConfig, STORE_BACKENDS } from "@cerebrium/kernel/infrastructure/config";
 
 export const TOKEN_USAGE = `cerebrium-service token <command>
 
@@ -119,13 +118,6 @@ export async function tokenCli(
   }
 
   const container = build();
-  const backend = container.resolve(StorageConfig).backend;
-
-  if (backend !== STORE_BACKENDS.POSTGRES) {
-    io.err(`token commands need the postgres store; this one is ${backend}\n`);
-
-    return 1;
-  }
 
   try {
     return await runTokenCommand(argv, container.resolve(PrincipalTokenService), io);

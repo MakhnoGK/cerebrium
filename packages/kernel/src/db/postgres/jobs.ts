@@ -6,7 +6,7 @@ import { PgBaseRepo } from "@/db/postgres/base";
 const TERMINAL = TERMINAL_JOB_STATES.map((s) => `'${s}'`).join(", ");
 
 // Claims are conditional on the row still being claimable, and completions on the caller
-// still holding the lease. See db/sqlite/jobs.ts.
+// still holding the lease.
 @injectable()
 export class PgJobsRepo extends PgBaseRepo implements JobsRepo {
   async submit(job: SubmitJob): Promise<JobRow> {

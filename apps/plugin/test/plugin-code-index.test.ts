@@ -25,7 +25,6 @@ import {
 } from "@cerebrium/kernel/presentation/rpc";
 import { readIndexConfig, writeIndexConfig } from "@plugin/src/code/index-config";
 import { freshStore } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 import { pluginBundle, runToExit } from "./plugin-bundle";
 
 const UTIL = `export function hashToken(input: string): string {
@@ -155,7 +154,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe.skipIf(TEST_BACKEND !== "postgres")("Code indexing through the plugin bundle", () => {
+describe("Code indexing through the plugin bundle", () => {
   it("should upload the checkout, let the host parse it, and read it back on each branch", async () => {
     // Given
     const main = await plugin();

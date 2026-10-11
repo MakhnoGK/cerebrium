@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -116,9 +115,9 @@ describe("Trust weight at read time", () => {
     expect(await search()).not.toContain(revoked);
 
     // When / Then
-    const row = env.db
-      .prepare("SELECT id, invalidated_at FROM nodes WHERE id = ?")
-      .get(revoked) as { id: string; invalidated_at: string | null };
+    const row = await env.sql.one("SELECT id, invalidated_at FROM nodes WHERE id = @id", {
+      id: revoked,
+    });
 
     expect(row).toEqual({ id: revoked, invalidated_at: null });
   });
@@ -140,22 +139,15 @@ describe("Trust weight at read time", () => {
     // Given — a symbol's session is whichever run indexed it, so weighting it by that
     // run's principal would score derived rows by who last refreshed the index.
     const authored = await writeAs("codex-mcp-client", "Retry budget");
-    const session = (
-      env.db.prepare("SELECT created_by_session AS s FROM nodes WHERE id = ?").get(authored) as {
-        s: string;
-      }
-    ).s;
-    env.db
-      .prepare(
-        `INSERT INTO nodes (id, memory_kind, type, title, valid_from, created_by_session, created_at)
-         VALUES (?, 'mirror', 'symbol', 'retry.ts', ?, ?, ?)`,
-      )
-      .run(
-        "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
-        "2026-01-01T00:00:00.000Z",
-        session,
-        "2026-01-01T00:00:00.000Z",
-      );
+    const { s: session } = (await env.sql.one<{ s: string }>(
+      "SELECT created_by_session AS s FROM nodes WHERE id = @id",
+      { id: authored },
+    ))!;
+    await env.sql.run(
+      `INSERT INTO nodes (id, memory_kind, type, title, valid_from, created_by_session, created_at)
+       VALUES ('01ZZZZZZZZZZZZZZZZZZZZZZZZ', 'mirror', 'symbol', 'retry.ts', @ts, @session, @ts)`,
+      { ts: "2026-01-01T00:00:00.000Z", session },
+    );
 
     // When
     const principals = await container

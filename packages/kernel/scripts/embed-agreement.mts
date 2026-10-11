@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import type Database from "better-sqlite3";
 import { EmbeddingRole } from "@/domain/ports/embedding-provider";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { HttpProvider } from "@/embeddings/http";
 import { buildContainer } from "@/container";
-import { DatabaseConfig, EmbeddingConfig } from "@/infrastructure/config";
+import {
+  EmbeddingConfig,
+  EnvConfigSource,
+  LayeredConfigSource,
+  StaticConfigSource,
+} from "@/infrastructure/config";
 
 // The gate in front of switching the embedding provider: `npm run eval:embedding`. Answers
 // the only question that matters — would vectors from the HTTP model land in the same space
 // as the ones already in the store — by comparing a fresh remote embedding against the
-// STORED vector for the same chunk text. Read-only, `cli` role, never a second writer.
+// STORED vector (active space) for the same chunk text. Read-only, `cli` role, never a
+// second writer.
 //
 // Cosine is what search compares, so cosine is what this reports. A dimension mismatch
 // throws inside the provider; this is for the case where the dimensions agree and the
@@ -24,22 +29,38 @@ interface Sample {
   stored: number[];
 }
 
+const USAGE =
+  "usage: npm run eval:embedding -- --pg URL [--n 64] [--model TAG] [--url URL] [--json]\n";
+
 function main(): Promise<void> {
   if (process.argv.includes("--help")) {
-    process.stdout.write(
-      "usage: npm run eval:embedding -- [--n 64] [--model TAG] [--url URL] [--json]\n",
-    );
+    process.stdout.write(USAGE);
 
     return Promise.resolve();
   }
 
-  const container = buildContainer({ role: "cli" });
-  const db = container.resolve<Database.Database>(DB_TOKEN);
+  const store = flag("--pg");
+
+  if (!store) {
+    process.stderr.write(USAGE);
+    process.exitCode = 1;
+
+    return Promise.resolve();
+  }
+
+  const container = buildContainer({
+    role: "cli",
+    source: new LayeredConfigSource(
+      new StaticConfigSource({ MEMORY_PG_URL: store }),
+      new EnvConfigSource(),
+    ),
+  });
+  const db = container.resolve<PgDatabase>(PG_TOKEN);
   const config = container.resolve(EmbeddingConfig);
 
   return report({
     db,
-    dbPath: container.resolve(DatabaseConfig).path,
+    dbPath: redactUrl(store),
     n: Number(flag("--n") ?? SAMPLE),
     model: flag("--model") ?? config.model,
     url: flag("--url") ?? config.url,
@@ -50,7 +71,7 @@ function main(): Promise<void> {
 }
 
 async function report(opts: {
-  db: Database.Database;
+  db: PgDatabase;
   dbPath: string;
   n: number;
   model: string;
@@ -59,7 +80,7 @@ async function report(opts: {
   batchSize: number;
   asJson: boolean;
 }): Promise<void> {
-  const samples = loadSamples(opts.db, opts.n);
+  const samples = await loadSamples(opts.db, opts.n);
 
   if (!samples.length) {
     process.stdout.write("no embedded chunks in this store — nothing to compare\n");
@@ -74,7 +95,7 @@ async function report(opts: {
     batchSize: opts.batchSize,
   });
 
-  // Passage role: it is what wrote every vector in `chunk_vec`, and the prefix is part of
+  // Passage role: it is what wrote every vector in `chunk_vectors`, and the prefix is part of
   // what is being compared.
   const fresh = await provider.embed(
     samples.map((s) => s.text),
@@ -105,7 +126,7 @@ async function report(opts: {
 
     L.push(`store   ${opts.dbPath}`);
     L.push(`remote  ${opts.model} at ${opts.url}`);
-    L.push(`wrote the stored vectors: ${storedModels(opts.db)}`);
+    L.push(`wrote the stored vectors: ${await storedModels(opts.db)}`);
     L.push("");
     L.push(`cosine against the stored vector, ${String(scores.length)} chunks`);
     L.push(`  min   ${fmt(Math.min(...scores))}`);
@@ -126,19 +147,19 @@ async function report(opts: {
   if (!passes) process.exitCode = 1;
 }
 
-function loadSamples(db: Database.Database, n: number): Sample[] {
+async function loadSamples(db: PgDatabase, n: number): Promise<Sample[]> {
   // Ordered by id, not random: two runs of this script compare the same chunks, so a
   // number that moved means the model moved.
-  const rows = db
-    .prepare(
-      `SELECT c.id AS id, c.text AS text, vec_to_json(v.embedding) AS embedding
-         FROM chunks c
-         JOIN chunk_vec v ON v.chunk_id = c.id
-        WHERE c.stale = 0
-        ORDER BY c.id
-        LIMIT ?`,
-    )
-    .all(n) as { id: string; text: string; embedding: string }[];
+  const { rows } = await db.query<{ id: string; text: string; embedding: string }>(
+    `SELECT c.id AS id, c.text AS text, v.embedding::text AS embedding
+       FROM chunks c
+       JOIN chunk_vectors v ON v.chunk_id = c.id
+       JOIN vector_spaces s ON s.id = v.space_id AND s.active
+      WHERE c.stale = 0
+      ORDER BY c.id
+      LIMIT @n`,
+    { n },
+  );
 
   return rows.map((row) => ({
     id: row.id,
@@ -147,16 +168,15 @@ function loadSamples(db: Database.Database, n: number): Sample[] {
   }));
 }
 
-function storedModels(db: Database.Database): string {
-  const rows = db
-    .prepare(
-      `SELECT model, model_version AS version, COUNT(*) AS c
-         FROM embedding_meta GROUP BY model, model_version ORDER BY c DESC`,
-    )
-    .all() as { model: string; version: string; c: number }[];
+async function storedModels(db: PgDatabase): Promise<string> {
+  const { rows } = await db.query<{ model: string; version: string; c: string }>(
+    `SELECT s.model, v.model_version AS version, COUNT(*) AS c
+       FROM chunk_vectors v JOIN vector_spaces s ON s.id = v.space_id AND s.active
+      GROUP BY s.model, v.model_version ORDER BY c DESC`,
+  );
 
   return rows.length
-    ? rows.map((r) => `${r.model}@${r.version} x${String(r.c)}`).join(", ")
+    ? rows.map((r) => `${r.model}@${r.version} x${r.c}`).join(", ")
     : "nothing recorded";
 }
 
@@ -202,3 +222,4 @@ function fmt(x: number): string {
 }
 
 await main();
+process.exit();

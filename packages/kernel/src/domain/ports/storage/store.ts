@@ -1,4 +1,4 @@
-export type StoreBackend = "sqlite" | "postgres";
+export type StoreBackend = "postgres";
 
 export interface StoreCapabilities {
   // The structural code mirror (`symbols`, `code_files`, the code vector pool).

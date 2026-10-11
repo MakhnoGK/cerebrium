@@ -10,21 +10,10 @@ export function createProvider(
   model?: string,
   cacheDir?: string,
   remote?: { url?: string; timeoutMs?: number; batchSize?: number },
-  fixedDim?: number,
 ): EmbeddingProvider {
-  const provider =
-    name === "local-null"
-      ? new LocalNullProvider()
-      : name === "http"
-        ? new HttpProvider({ ...remote, ...(model === undefined ? {} : { model }) })
-        : new LocalProvider(model, cacheDir);
-
-  if (fixedDim !== undefined && provider.dim !== fixedDim) {
-    throw new Error(
-      `Embedding provider '${provider.name}' has dim ${provider.dim}, but chunk_vec is FLOAT[${fixedDim}]. ` +
-        `A dimension change needs a new vec0 table — recreate the DB or add a migration for the new dimension.`,
-    );
-  }
-
-  return provider;
+  return name === "local-null"
+    ? new LocalNullProvider()
+    : name === "http"
+      ? new HttpProvider({ ...remote, ...(model === undefined ? {} : { model }) })
+      : new LocalProvider(model, cacheDir);
 }

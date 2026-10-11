@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it, vi } from "vitest";
 import { JobKind, JobState } from "@cerebrium/contracts/vocab";
@@ -71,7 +70,7 @@ describe("JobWorker", () => {
 
     // Then
     const clients = (
-      env.db.prepare("SELECT DISTINCT client FROM sessions").all() as { client: string | null }[]
+      await env.sql.all<{ client: string | null }>("SELECT DISTINCT client FROM sessions")
     ).map((r) => r.client);
     expect(clients).toContain("cerebrium-jobs");
   });
@@ -152,7 +151,10 @@ describe("JobWorker", () => {
     const env = setup();
     const job = await queue(env);
 
-    env.db.prepare("UPDATE jobs SET payload_json = ? WHERE id = ?").run("{not json", job.id);
+    await env.sql.run("UPDATE jobs SET payload_json = @payload WHERE id = @id", {
+      payload: "{not json",
+      id: job.id,
+    });
 
     // When
     await worker(() => Promise.resolve([])).tick();

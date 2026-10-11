@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 
@@ -6,8 +5,6 @@ interface RuntimeProcess {
   execPath: string;
   version: string;
 }
-
-type Probe = (file: string, args: string[], options: { cwd: string; stdio: "pipe" }) => unknown;
 
 /** Resolve the exact runtime selected by this repo's simple numeric `.nvmrc`. */
 export function resolveNodeRuntime(repoRoot: string, current: RuntimeProcess = process): string {
@@ -37,27 +34,4 @@ export function resolveNodeRuntime(repoRoot: string, current: RuntimeProcess = p
   }
 
   return realpathSync(current.execPath);
-}
-
-/** Prove the selected runtime can load the installed native SQLite addon before config writes. */
-export function assertNativeRuntime(
-  repoRoot: string,
-  nodePath: string,
-  probe: Probe = execFileSync,
-): void {
-  try {
-    probe(
-      nodePath,
-      [
-        "-e",
-        "const Database=require('better-sqlite3');const db=new Database(':memory:');db.close()",
-      ],
-      { cwd: repoRoot, stdio: "pipe" },
-    );
-  } catch {
-    throw new Error(
-      `Node runtime ${nodePath} cannot load better-sqlite3; run \`nvm use && npm install\` ` +
-        "before agent setup",
-    );
-  }
 }

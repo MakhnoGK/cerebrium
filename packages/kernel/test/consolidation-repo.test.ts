@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { describe, expect, it } from "vitest";
 import { ConsolidationKind, ConsolidationStatus, MemoryKind } from "@cerebrium/contracts/vocab";
 import { candidateHash } from "@/domain/ports/storage";
@@ -172,9 +171,10 @@ describe("ConsolidationRepo kNN seeding", () => {
     const orphan = await mk("Kafka", "ingestion consumes kafka topics by tenant");
     await env.worker.tick();
 
-    env.db
-      .prepare("DELETE FROM chunk_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE node_id = ?)")
-      .run(orphan.id);
+    await env.sql.run(
+      "DELETE FROM chunk_vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE node_id = @id)",
+      { id: orphan.id },
+    );
 
     return { ...env, twinA: twinA.id, twinB: twinB.id, orphan: orphan.id };
   }

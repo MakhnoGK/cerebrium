@@ -1,26 +1,25 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { EventAction } from "@cerebrium/contracts/vocab";
 import { EventLogService } from "@/application/services";
-import { setup } from "@test/helpers";
+import { setup, type TestSql } from "@test/helpers";
 
 interface EventRow {
   session_id: string;
-  action: string;
+  action: EventAction;
   node_id: string | null;
   detail: string | null;
   ts: string;
 }
 
-function rows(db: { prepare: (sql: string) => { all: () => unknown[] } }): EventRow[] {
-  return db.prepare("SELECT * FROM events ORDER BY rowid").all() as EventRow[];
+function rows(sql: TestSql): Promise<EventRow[]> {
+  return sql.all<EventRow>("SELECT * FROM events");
 }
 
 describe("EventLogService", () => {
   it("should write one row per draft, stamped with the clock", async () => {
     // Given
-    const { db, clock } = setup({ start: "2026-03-01T10:00:00.000Z" });
+    const { sql, clock } = setup({ start: "2026-03-01T10:00:00.000Z" });
     const log = container.resolve(EventLogService);
 
     // When
@@ -30,42 +29,45 @@ describe("EventLogService", () => {
     ]);
 
     // Then
-    const written = rows(db);
-    expect(written).toHaveLength(2);
-    expect(written.map((r) => r.action)).toEqual([EventAction.WRITE, EventAction.GET]);
+    const written = await rows(sql);
+    expect(written.map((r) => r.action).sort()).toEqual(
+      [EventAction.WRITE, EventAction.GET].sort(),
+    );
     expect(written.every((r) => r.ts === clock.now())).toBe(true);
-    expect(JSON.parse(written[0]!.detail!)).toEqual({ type: "fact" });
+    expect(JSON.parse(written.find((r) => r.action === EventAction.WRITE)!.detail!)).toEqual({
+      type: "fact",
+    });
   });
 
   it("should store nulls when a draft omits node_id and detail", async () => {
     // Given
-    const { db } = setup();
+    const { sql } = setup();
     const log = container.resolve(EventLogService);
 
     // When
     await log.record([{ action: EventAction.STATS, session_id: "s1" }]);
 
     // Then
-    expect(rows(db)[0]).toMatchObject({ node_id: null, detail: null });
+    expect((await rows(sql))[0]).toMatchObject({ node_id: null, detail: null });
   });
 
   it("should be a no-op when handed no drafts", async () => {
     // Given
-    const { db } = setup();
+    const { sql } = setup();
     const log = container.resolve(EventLogService);
 
     // When
     await log.record([]);
 
     // Then
-    expect(rows(db)).toHaveLength(0);
+    expect(await rows(sql)).toHaveLength(0);
   });
 
   it("should swallow the error when the audit row cannot be written", async () => {
     // Given
-    const { db } = setup();
+    const { sql } = setup();
     const log = container.resolve(EventLogService);
-    db.exec("DROP TABLE events");
+    await sql.run("DROP TABLE events");
 
     // When / Then
     await expect(

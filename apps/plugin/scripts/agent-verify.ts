@@ -1,22 +1,20 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   hookScript,
   isHostEnv,
   piExtension,
   pluginServerPath,
-  serverPath,
   type HostId,
   type PlanInput,
 } from "@plugin/scripts/agent-hosts";
 
 // Proves the install by exercising it, because a config file that mentions Cerebrium is
-// not evidence that a host can call it. The server smoke runs against a throwaway store
-// with the offline provider: it answers "does this bundle boot and inject", never
-// "what is in the real memory", and it writes nothing the user keeps.
+// not evidence that a host can call it. The plugin bundle is booted against a port nothing
+// listens on, and a registered host is asked for a real session; nothing is written.
 
 export interface VerifyResult {
   name: string;
@@ -63,71 +61,6 @@ export function parseRpcResponses(buffer: string): RpcResponse[] {
         return [];
       }
     });
-}
-
-/** The nearest existing ancestor decides: the server creates the rest on first use. */
-export function storeWritable(dbPath: string): boolean {
-  let dir = dirname(dbPath);
-  while (!existsSync(dir)) {
-    const parent = dirname(dir);
-    if (parent === dir) return false;
-    dir = parent;
-  }
-  try {
-    accessSync(dir, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function bundle(input: PlanInput): VerifyResult {
-  const path = serverPath(input.repoRoot);
-  return {
-    name: "bundle",
-    ok: existsSync(path),
-    detail: existsSync(path) ? path : `${path} is missing — run npm run build`,
-  };
-}
-
-function store(input: PlanInput): VerifyResult {
-  const db = input.env.MEMORY_DB_PATH ?? "";
-  const ok = db !== "" && storeWritable(db);
-  return {
-    name: "store",
-    ok,
-    detail: ok ? `${db} is writable` : `cannot write to ${db || "(no MEMORY_DB_PATH)"}`,
-  };
-}
-
-async function server(input: PlanInput): Promise<VerifyResult> {
-  const path = serverPath(input.repoRoot);
-  if (!existsSync(path)) {
-    return { name: "server", ok: false, detail: "skipped — no bundle to run" };
-  }
-  const scratch = mkdtempSync(join(tmpdir(), "cerebrium-verify-"));
-  try {
-    const out = await speak(input.nodePath, path, {
-      MEMORY_DB_PATH: join(scratch, "verify.db"),
-      MEMORY_EMBED_PROVIDER: "local-null",
-    });
-    const responses = parseRpcResponses(out);
-    const call = responses.find((r) => r.id === 2);
-    const list = responses.find((r) => r.id === 3);
-    const tools = Array.isArray(list?.result?.tools) ? list.result.tools.length : 0;
-    const failed = call === undefined || call.error !== undefined;
-    return {
-      name: "server",
-      ok: !failed && tools > 0,
-      detail: failed
-        ? `session_start failed: ${call?.error?.message ?? "no response"}`
-        : `session_start answered; ${tools} tools exposed`,
-    };
-  } catch (err) {
-    return { name: "server", ok: false, detail: `could not run the server: ${String(err)}` };
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
 }
 
 function speak(nodePath: string, path: string, env: Record<string, string>): Promise<string> {
@@ -352,7 +285,7 @@ export async function verifyHostEntry(input: PlanInput): Promise<VerifyResult> {
 export async function verify(input: PlanInput, hosts: readonly HostId[]): Promise<VerifyResult[]> {
   const results = isHostEnv(input.env)
     ? [await verifyHostEntry(input), await pluginBundle(input)]
-    : [bundle(input), store(input), await server(input), await pluginBundle(input)];
+    : [await pluginBundle(input)];
   for (const host of hosts) {
     results.push(host === "pi" ? await piBridge(input) : await hook(input, host));
   }

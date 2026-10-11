@@ -48,9 +48,7 @@ export function postgresUrl(storage: StorageConfig): string {
 
   if (storage.postgresUrlFile) return readFileSync(storage.postgresUrlFile, "utf8").trim();
 
-  throw new Error(
-    "storage.backend is postgres but neither MEMORY_PG_URL nor MEMORY_PG_URL_FILE is set",
-  );
+  throw new Error("no store configured: set MEMORY_PG_URL or MEMORY_PG_URL_FILE");
 }
 
 // The handle is lazy: nothing connects until a repository runs its first query.

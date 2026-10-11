@@ -26,8 +26,8 @@ by `.github/workflows/release.yml`:
 - The store is Postgres (`paradedb/paradedb:0.25.10-pg18`: pg_search + pgvector) in the
   `postgres` service, volume `cerebrium-pg`. It publishes no port; only the daemon reaches
   it, over the compose network. `cerebrium-data` (mounted at `/data`, `CEREBRIUM_HOME`)
-  keeps the embedding model, the daemon's socket and pidfile, and the SQLite file the
-  releases before Postgres used. Both volumes survive every deploy and rollback.
+  keeps the embedding model and the daemon's socket and pidfile. Both volumes survive every
+  deploy and rollback.
 - The first deploy generates the database password into `secrets/` (never printed) and
   the connection URL the daemon reads from `MEMORY_PG_URL_FILE`.
 - This store is the one being written: every machine's agents reach it through the plugin.
@@ -85,67 +85,11 @@ A scratch database must come from `template0`: the image's `template1` already h
 `paradedb`, `tiger` and `topology` schemas, so a restore into a copy of it reports "schema
 already exists" and carries on.
 
-## Importing the Mac's store
+## Connecting a machine
 
-On the Mac, copy the live store without stopping it and send the copy over:
-
-```bash
-sqlite3 ~/.cerebrium/memory.db ".backup /tmp/cerebrium-copy.db"
-scp /tmp/cerebrium-copy.db hk-obrio@<host>:/tmp/
-```
-
-On the host, move it into the daemon's volume and import inside the container, where the
-URL is a mounted secret and Postgres needs no published port:
-
-```bash
-docker cp /tmp/cerebrium-copy.db cerebrium-daemon-1:/data/import.db
-docker exec -u root cerebrium-daemon-1 chown 1000:1000 /data/import.db
-docker exec cerebrium-daemon-1 node dist/import-sqlite.js \
-  --from /data/import.db --to-file /run/secrets/pg_url --verify
-docker exec cerebrium-daemon-1 rm -f /data/import.db /data/import.db-shm /data/import.db-wal
-```
-
-`docker cp` keeps the file's owner from the Mac, which the container's `node` user (uid
-1000) cannot read, hence the `chown`. Re-running converges; `--verify` compares per-table
-counts and content hashes and exits 1 on a mismatch. Rows the host wrote itself (its own
-session and sweep runs) are reported as `target_only`, not failed.
-
-## The cutover from the Mac's store
-
-Done once, in this order. The Mac's `~/.cerebrium/memory.db` and its launchd agents stay as a
-cold rollback and are not used.
-
-1. **Freeze** — on the Mac, stop the local daemon and runner (`node dist/service-cli.js
-   uninstall all` from the live checkout keeps the store and removes only the agents), close
-   the agent sessions that hold the local `cerebrium` entry, then take the copy:
-   `sqlite3 ~/.cerebrium/memory.db ".backup /tmp/cerebrium-final.db"`.
-2. **Dump** — on the host, `pg_dump -Fc` the running store into `backups/` (the rehearsal
-   copy, kept for rollback).
-3. **Recreate** — stop the daemon, rename the database to `cerebrium_rehearsal` (kept for
-   rollback, never dropped), create an empty one from `template0`, start the daemon so it
-   migrates the empty schema:
-
-   ```bash
-   cd ~/cerebrium-host/current
-   export CEREBRIUM_TAG=$(basename "$(readlink ~/cerebrium-host/current)") CEREBRIUM_SECRETS=~/cerebrium-host/secrets
-   docker compose stop daemon
-   docker compose exec -T postgres psql -U cerebrium -d postgres -c 'ALTER DATABASE cerebrium RENAME TO cerebrium_rehearsal'
-   docker compose exec -T postgres createdb -U cerebrium -T template0 --locale=C --encoding=UTF8 cerebrium
-   docker compose start daemon
-   ```
-
-4. **Import** — the copy, filtered to the projects that move, as in *Importing the Mac's
-   store* with `--projects 'cerebrium,toonspace*' --global --repo-map /data/repo-map.json
-   --verify`. The repo map comes from `npm run code:repo-map` on the Mac.
-5. **Host-only rows** — nodes an agent wrote straight to the host before the cutover are
-   not in the Mac's copy. Copy them from `cerebrium_rehearsal` by id, with their revisions,
-   text, chunks, vectors, edges, code_refs, events and sessions.
-6. **Tokens** — issue one per machine (principal `mac`) as in *By hand*; the session's
-   `client` names the agent host. The new database has none of the old tokens.
-7. **Switch** — on the Mac, `npm run agent:setup -- --kernel tcp://100.92.157.103:7433
-   --token-file ~/.cerebrium/host-token --index-repo <each checkout> --apply --verify`.
-8. **Check** — in a fresh session, `session_start`, `search` and `code_lookup` answer from
-   the host.
+Issue a token for the machine (principal `mac`, say) as in *By hand*, then on that machine:
+`npm run agent:setup -- --kernel tcp://100.92.157.103:7433 --token-file ~/.cerebrium/host-token
+--index-repo <each checkout> --apply --verify`.
 
 ## Ollama
 

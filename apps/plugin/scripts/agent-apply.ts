@@ -19,9 +19,9 @@ import {
   antigravityPermissionTargets,
   claudeModDir,
   desiredMcp,
-  entryServerPath,
   HOOK_SCRIPT_SUFFIX,
   hookCommand,
+  HOST_REQUIRED,
   isHostEnv,
   MOD_DIR_SUFFIX,
   pending,
@@ -31,6 +31,7 @@ import {
   planHost,
   PLUGIN_DIRS_ENV,
   pluginDirs,
+  pluginServerPath,
   skillPath,
   skillRoot,
   TRIAL_ENTRY,
@@ -283,7 +284,7 @@ function cerebriumEntry(input: PlanInput): CliEntry {
     name: "cerebrium",
     env: input.env,
     command: input.nodePath,
-    args: [entryServerPath(input.repoRoot, input.env)],
+    args: [pluginServerPath(input.repoRoot)],
   };
 }
 
@@ -307,9 +308,7 @@ function registerCerebrium(
     ),
   ];
   if (out[0]!.outcome === "failed" || out[0]!.outcome === "skipped") return out;
-  if (!isHostEnv(input.env) || !trialRegistered(cli, input.home)) {
-    return out;
-  }
+  if (!trialRegistered(cli, input.home)) return out;
   try {
     opts.run(cli, ["mcp", "remove", TRIAL_ENTRY, ...extra]);
     out.push(done("mcp", "updated", `${cli} mcp remove ${TRIAL_ENTRY}`));
@@ -431,5 +430,17 @@ const APPLIERS: Record<
 };
 
 export function applyHost(host: HostId, input: PlanInput, opts: ApplyOptions): Applied[] {
-  return APPLIERS[host](input, opts, pending(planHost(host, input)));
+  const todo = pending(planHost(host, input));
+
+  if (isHostEnv(input.env)) return APPLIERS[host](input, opts, todo);
+
+  const rest = APPLIERS[host](
+    input,
+    opts,
+    todo.filter((t) => t.surface !== "mcp"),
+  );
+
+  return todo.some((t) => t.surface === "mcp")
+    ? [done("mcp", "skipped", HOST_REQUIRED), ...rest]
+    : rest;
 }

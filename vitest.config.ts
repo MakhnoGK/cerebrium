@@ -9,8 +9,11 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
     environment: "node",
     setupFiles: ["packages/kernel/test/setup.ts"],
+    // Every test runs against Postgres: `npm run pg:up` starts the server it expects.
     globalSetup: ["packages/kernel/test/pg-global-setup.ts"],
     // Deterministic, offline embeddings for every test (incl. buildCtx-based ones).
     env: { MEMORY_EMBED_PROVIDER: "local-null" },
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
 });

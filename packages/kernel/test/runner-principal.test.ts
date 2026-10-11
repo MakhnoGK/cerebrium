@@ -5,14 +5,13 @@ import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { CONSOLIDATION_PROVIDER_TOKEN } from "@/domain/ports/consolidation-provider";
 import { EMBEDDING_PROVIDER_TOKEN } from "@/domain/ports/embedding-provider";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
 import { ClientIdentity, UNKNOWN_WRITER } from "@/runtime/client-identity";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { Server } from "@/presentation/mcp/server";
 import { createConsolidator } from "@/consolidation";
 import { createProvider } from "@/embeddings";
 import { IdentityConfig, StaticConfigSource } from "@/infrastructure/config";
+import { freshStore } from "@test/helpers";
 
 // Brings up a real MCP server whose host environment may pin an identity, connects a client
 // that names itself `claude-code` the way both interactive and headless Claude Code do, and
@@ -20,7 +19,7 @@ import { IdentityConfig, StaticConfigSource } from "@/infrastructure/config";
 async function writerAfterHandshake(env: Record<string, string | undefined>) {
   const scope = container.createChildContainer();
 
-  scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+  freshStore(scope);
   scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
   scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
   scope.register(IdentityConfig, { useValue: new IdentityConfig(new StaticConfigSource(env)) });
@@ -70,7 +69,7 @@ describe("runner principal", () => {
     // Given
     const scope = container.createChildContainer();
 
-    scope.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
+    freshStore(scope);
     scope.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: createConsolidator() });
     scope.register(EMBEDDING_PROVIDER_TOKEN, { useValue: createProvider("local-null") });
     scope.register(IdentityConfig, {

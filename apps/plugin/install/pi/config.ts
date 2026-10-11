@@ -57,7 +57,7 @@ export function repoRootFromHere(here: string = fileURLToPath(import.meta.url)):
 }
 
 export function serverPath(repoRoot: string): string {
-  return join(repoRoot, "dist", "server.js");
+  return join(repoRoot, "apps", "plugin", "dist", "server.js");
 }
 
 export function skillRoot(repoRoot: string): string {

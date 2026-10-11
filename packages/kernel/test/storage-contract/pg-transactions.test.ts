@@ -113,7 +113,7 @@ describePostgres("PgDatabase transactions", (fresh) => {
     const db = fresh();
     await db.ready();
     const other = new PgDatabase({
-      url: databaseUrl(TEST_PG_URL!, new URL(db.identity).pathname.slice(1)),
+      url: databaseUrl(TEST_PG_URL, new URL(db.identity).pathname.slice(1)),
       poolMax: 2,
       readOnly: false,
     });
@@ -160,7 +160,7 @@ describePostgres("PgDatabase transactions", (fresh) => {
     const db = fresh();
     await db.ready();
     const reader = new PgDatabase({
-      url: databaseUrl(TEST_PG_URL!, new URL(db.identity).pathname.slice(1)),
+      url: databaseUrl(TEST_PG_URL, new URL(db.identity).pathname.slice(1)),
       poolMax: 1,
       readOnly: true,
     });

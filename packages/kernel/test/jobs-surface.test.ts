@@ -9,36 +9,23 @@ import {
   type JobStatus,
   type SubmitJob,
 } from "@/application/use-cases";
-import { ClientIdentity } from "@/runtime/client-identity";
-import { setup } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
+import { newId } from "@/core/ids";
+import { setup, type TestEnv } from "@test/helpers";
 
 const submitter = () => container.resolve<SubmitJob>(SUBMIT_JOB);
 const status = () => container.resolve<JobStatus>(JOB_STATUS);
 const SESSION = "01M0PHDX6C60XPFTCCSYPETR33";
 
+const queue = (env: TestEnv) =>
+  env.jobs.submit({
+    id: newId(),
+    kind: JobKind.AGENT_SELFTEST,
+    payload: {},
+    scheduled_for: env.clock.now(),
+    now: env.clock.now(),
+  });
+
 describe("job call surface", () => {
-  it.skipIf(TEST_BACKEND === "postgres")(
-    "should queue the job and stamp the submitting principal when a kernel kind is submitted",
-    async () => {
-      // Given
-      const env = setup();
-      container.resolve(ClientIdentity).set({ client: "claude-code", version: "1" });
-
-      // When
-      const { job } = await submitter().invoke({
-        session_id: SESSION,
-        kind: JobKind.CODE_INDEX,
-        payload: { repo: "cerebrium" },
-      });
-
-      // Then
-      expect(job.state).toBe(JobState.PENDING);
-      expect(job.kind).toBe(JobKind.CODE_INDEX);
-      expect((await env.jobs.byId(job.id))!.submitted_by).toBe("claude-code");
-    },
-  );
-
   it("should refuse an agent kind naming why when a caller tries to enqueue external work", async () => {
     // Given
     setup();
@@ -52,19 +39,16 @@ describe("job call surface", () => {
     );
   });
 
-  it.runIf(TEST_BACKEND === "postgres")(
-    "should refuse a code index job when the store has no code index",
-    async () => {
-      // Given
-      setup();
+  it("should refuse a code index job when the store has no code index", async () => {
+    // Given
+    setup();
 
-      // When
-      const submitted = submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
+    // When
+    const submitted = submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
 
-      // Then
-      await expect(submitted).rejects.toThrow("not available on the postgres backend");
-    },
-  );
+    // Then
+    await expect(submitted).rejects.toThrow("not available on the postgres backend");
+  });
 
   it("should refuse an unknown kind when a caller invents one", async () => {
     // Given
@@ -83,22 +67,19 @@ describe("job call surface", () => {
     expect(callCapability("job_status")).toBe(Capability.READ);
   });
 
-  it.skipIf(TEST_BACKEND === "postgres")(
-    "should return just that job when status is asked for one id",
-    async () => {
-      // Given
-      setup();
-      const { job } = await submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
-      await submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
+  it("should return just that job when status is asked for one id", async () => {
+    // Given
+    const env = setup();
+    const job = await queue(env);
+    await queue(env);
 
-      // When
-      const { jobs } = await status().invoke({ id: job.id });
+    // When
+    const { jobs } = await status().invoke({ id: job.id });
 
-      // Then
-      expect(jobs).toHaveLength(1);
-      expect(jobs[0]!.id).toBe(job.id);
-    },
-  );
+    // Then
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.id).toBe(job.id);
+  });
 
   it("should return nothing rather than fail when status is asked for an id that does not exist", async () => {
     // Given
@@ -111,45 +92,39 @@ describe("job call surface", () => {
     expect(jobs).toEqual([]);
   });
 
-  it.skipIf(TEST_BACKEND === "postgres")(
-    "should report the stored result parsed when a finished job is read back",
-    async () => {
-      // Given
-      const env = setup();
-      const { job } = await submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
+  it("should report the stored result parsed when a finished job is read back", async () => {
+    // Given
+    const env = setup();
+    const job = await queue(env);
 
-      await env.jobs.claim({
-        kinds: [JobKind.CODE_INDEX],
-        owner: "daemon",
-        now: env.clock.now(),
-        leaseMs: 1000,
-      });
-      await env.jobs.succeed(job.id, "daemon", { files_indexed: 4 }, env.clock.now());
+    await env.jobs.claim({
+      kinds: [JobKind.AGENT_SELFTEST],
+      owner: "runner",
+      now: env.clock.now(),
+      leaseMs: 1000,
+    });
+    await env.jobs.succeed(job.id, "runner", { files_indexed: 4 }, env.clock.now());
 
-      // When
-      const { jobs } = await status().invoke({ id: job.id });
+    // When
+    const { jobs } = await status().invoke({ id: job.id });
 
-      // Then
-      expect(jobs[0]!.state).toBe(JobState.DONE);
-      expect(jobs[0]!.result).toEqual({ files_indexed: 4 });
-    },
-  );
+    // Then
+    expect(jobs[0]!.state).toBe(JobState.DONE);
+    expect(jobs[0]!.result).toEqual({ files_indexed: 4 });
+  });
 
-  it.skipIf(TEST_BACKEND === "postgres")(
-    "should cap how many rows one status call returns when a large limit is asked for",
-    async () => {
-      // Given
-      setup();
+  it("should cap how many rows one status call returns when a large limit is asked for", async () => {
+    // Given
+    const env = setup();
 
-      for (let i = 0; i < 3; i++) {
-        await submitter().invoke({ session_id: SESSION, kind: JobKind.CODE_INDEX });
-      }
+    for (let i = 0; i < 3; i++) {
+      await queue(env);
+    }
 
-      // When
-      const { jobs } = await status().invoke({ limit: 5000 });
+    // When
+    const { jobs } = await status().invoke({ limit: 5000 });
 
-      // Then
-      expect(jobs).toHaveLength(3);
-    },
-  );
+    // Then
+    expect(jobs).toHaveLength(3);
+  });
 });

@@ -23,7 +23,6 @@ import { buildContainer } from "@/container";
 import { createProvider } from "@/embeddings";
 import { StaticConfigSource } from "@/infrastructure/config";
 import { freshStore } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 
 let daemon: DependencyContainer;
 let rpc: RpcServer;
@@ -147,7 +146,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe.skipIf(TEST_BACKEND !== "postgres")("MCP server on a network kernel", () => {
+describe("MCP server on a network kernel", () => {
   it("should serve a session end to end as the token's principal", async () => {
     // Given
     const { file } = await issue("mac-claude");

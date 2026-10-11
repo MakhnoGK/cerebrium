@@ -1,5 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
-import { createRequire } from "node:module";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -8,11 +6,6 @@ import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { UpdateTool } from "@/presentation/mcp/tools/update";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup, TestEnv } from "@test/helpers";
-
-const require = createRequire(import.meta.url);
-const { up } = require("../src/db/sqlite/migrations/014_purge_stale_chunk_vectors.cjs") as {
-  up: (db: import("better-sqlite3").Database) => void;
-};
 
 const LONG = Array.from({ length: 12 }, (_, i) => `## Heading ${i}\n${"body text ".repeat(60)}`);
 
@@ -37,30 +30,38 @@ async function drain(env: TestEnv): Promise<void> {
   }
 }
 
-function staleWithVectors(env: TestEnv): number {
-  return (
-    env.db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM chunks c
-         JOIN chunk_vec v ON v.chunk_id = c.id WHERE c.stale = 1`,
-      )
-      .get() as { c: number }
-  ).c;
+async function staleWithVectors(env: TestEnv): Promise<number> {
+  return (await env.sql.one<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM chunks c
+     JOIN chunk_vectors v ON v.chunk_id = c.id WHERE c.stale = 1`,
+  ))!.c;
 }
 
-function staleChunks(env: TestEnv): number {
-  return (env.db.prepare("SELECT COUNT(*) AS c FROM chunks WHERE stale = 1").get() as { c: number })
-    .c;
+async function staleChunks(env: TestEnv): Promise<number> {
+  return (await env.sql.one<{ c: number }>(
+    "SELECT COUNT(*)::int AS c FROM chunks WHERE stale = 1",
+  ))!.c;
+}
+
+async function liveCoverage(
+  env: TestEnv,
+  node: string,
+): Promise<{ total: number; embedded: number }> {
+  return (await env.sql.one<{ total: number; embedded: number }>(
+    `SELECT COUNT(*)::int AS total, COUNT(v.chunk_id)::int AS embedded FROM chunks c
+     LEFT JOIN chunk_vectors v ON v.chunk_id = c.id WHERE c.node_id = @node AND c.stale = 0`,
+    { node },
+  ))!;
 }
 
 describe("Stale chunk vectors", () => {
-  it("should drop the vector and its provenance when a revision supersedes a chunk", async () => {
+  it("should drop the vector when a revision supersedes a chunk", async () => {
     // Given
     const env = setup();
     const s = await session();
     const node = await writeLong(s);
     await drain(env);
-    expect(staleChunks(env)).toBe(0);
+    expect(await staleChunks(env)).toBe(0);
 
     // When
     await container.resolve(UpdateTool).invoke({
@@ -71,15 +72,8 @@ describe("Stale chunk vectors", () => {
     await drain(env);
 
     // Then
-    expect(staleChunks(env)).toBeGreaterThan(0);
-    expect(staleWithVectors(env)).toBe(0);
-    const orphanMeta = env.db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM embedding_meta m
-         JOIN chunks c ON c.id = m.chunk_id WHERE c.stale = 1`,
-      )
-      .get() as { c: number };
-    expect(orphanMeta.c).toBe(0);
+    expect(await staleChunks(env)).toBeGreaterThan(0);
+    expect(await staleWithVectors(env)).toBe(0);
   });
 
   it("should keep the node's live chunks embedded when its stale ones are dropped", async () => {
@@ -98,12 +92,7 @@ describe("Stale chunk vectors", () => {
     await drain(env);
 
     // Then
-    const live = env.db
-      .prepare(
-        `SELECT COUNT(*) AS total, SUM(v.chunk_id IS NOT NULL) AS embedded FROM chunks c
-         LEFT JOIN chunk_vec v ON v.chunk_id = c.id WHERE c.node_id = ? AND c.stale = 0`,
-      )
-      .get(node.id) as { total: number; embedded: number };
+    const live = await liveCoverage(env, node.id);
     expect(live.total).toBeGreaterThan(0);
     expect(live.embedded).toBe(live.total);
   });
@@ -123,44 +112,7 @@ describe("Stale chunk vectors", () => {
     await drain(env);
 
     // Then
-    const live = env.db
-      .prepare(
-        `SELECT COUNT(*) AS total, SUM(v.chunk_id IS NOT NULL) AS embedded FROM chunks c
-         LEFT JOIN chunk_vec v ON v.chunk_id = c.id WHERE c.node_id = ? AND c.stale = 0`,
-      )
-      .get(node.id) as { total: number; embedded: number };
+    const live = await liveCoverage(env, node.id);
     expect(live.embedded).toBe(live.total);
-  });
-});
-
-describe("Migration 014: purge stale chunk vectors", () => {
-  it("should clear the backlog a pre-014 store accumulated when it is migrated", async () => {
-    // Given — the old behaviour: chunks go stale, their vectors stay.
-    const env = setup();
-    const s = await session();
-    const node = await writeLong(s);
-    await drain(env);
-    const before = env.db.prepare("SELECT id, text FROM chunks WHERE node_id = ?").all(node.id) as {
-      id: string;
-      text: string;
-    }[];
-    await container.resolve(UpdateTool).invoke({
-      session_id: s,
-      id: node.id,
-      content: "a much shorter body that keeps none of the old chunks",
-    });
-    await drain(env);
-    const revive = env.db.prepare(
-      "INSERT OR REPLACE INTO chunk_vec (chunk_id, embedding) VALUES (?, vec_f32(?))",
-    );
-    for (const row of before) revive.run(row.id, JSON.stringify(Array(384).fill(0.1)));
-    expect(staleWithVectors(env)).toBeGreaterThan(0);
-
-    // When
-    up(env.db);
-
-    // Then
-    expect(staleWithVectors(env)).toBe(0);
-    expect(staleChunks(env)).toBeGreaterThan(0);
   });
 });

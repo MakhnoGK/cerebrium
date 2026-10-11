@@ -3,8 +3,8 @@ import { EdgeType } from "@cerebrium/contracts/vocab";
 import type { PgDatabase } from "@/db/postgres/database";
 import { chunkContent } from "@/core/chunk";
 
-// The Postgres counterparts of db/sqlite/internal.ts. Every helper is async and runs on
-// whatever the caller is in: inside a `tx` it joins that transaction through the ALS-held
+// The cross-aggregate write/read primitives. Every helper is async and runs on whatever the
+// caller is in: inside a `tx` it joins that transaction through the ALS-held
 // client, outside one it is a single autocommit statement.
 
 export const MAX_EMBED_ATTEMPTS = 5;

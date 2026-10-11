@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseRpcResponses, storeWritable, verify } from "@plugin/scripts/agent-verify";
+import { parseRpcResponses, verify } from "@plugin/scripts/agent-verify";
 
 let dir: string;
 const REPO = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
@@ -50,23 +50,6 @@ describe("parseRpcResponses", () => {
   });
 });
 
-describe("storeWritable", () => {
-  it("should accept a store whose directory does not exist yet", () => {
-    // Given / When / Then
-    expect(storeWritable(join(dir, "not-created-yet", "memory.db"))).toBe(true);
-  });
-
-  it("should accept a store in an existing writable directory", () => {
-    // Given / When / Then
-    expect(storeWritable(join(dir, "memory.db"))).toBe(true);
-  });
-
-  it("should reject a store under a path that cannot be reached", () => {
-    // Given / When / Then
-    expect(storeWritable("/proc/nonexistent/memory.db")).toBe(false);
-  });
-});
-
 describe("Antigravity session reminder", () => {
   function invoke(invocationNum: number): Record<string, unknown> {
     const output = execFileSync(
@@ -98,20 +81,21 @@ describe("Antigravity session reminder", () => {
 });
 
 describe("verify runtime", () => {
-  it("should boot the server with the planned absolute Node executable", async () => {
+  it("should boot the plugin bundle with the planned absolute Node executable", async () => {
     // Given / When
     const results = await verify(
       {
         home: dir,
         repoRoot: REPO,
         nodePath: join(dir, "missing-node"),
-        env: { MEMORY_DB_PATH: join(dir, "memory.db") },
+        env: {},
         hasCommand: () => false,
       },
       [],
     );
 
     // Then
-    expect(results.find((result) => result.name === "server")).toMatchObject({ ok: false });
+    expect(results.map((result) => result.name)).toEqual(["plugin bundle"]);
+    expect(results[0]).toMatchObject({ ok: false });
   });
 });

@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -63,12 +62,12 @@ describe("RestoreTool", () => {
 
     // Then
     expect(out.invalidated).toBe(false);
-    const live = env.db
-      .prepare(
-        "SELECT COUNT(*) AS c FROM edges WHERE dst = ? AND type = ? AND invalidated_at IS NULL",
-      )
-      .get(wronglyRetired, EdgeType.SUPERSEDES) as { c: number };
-    expect(live.c).toBe(0);
+    const live = await env.sql.one<{ c: number }>(
+      `SELECT COUNT(*)::int AS c FROM edges
+        WHERE dst = @dst AND type = @type AND invalidated_at IS NULL`,
+      { dst: wronglyRetired, type: EdgeType.SUPERSEDES },
+    );
+    expect(live?.c).toBe(0);
   });
 
   it("should keep the id, the revision history and the edges it had", async () => {
@@ -100,9 +99,10 @@ describe("RestoreTool", () => {
     expect(full.content).toBe("the second body of the living index");
     expect(full.revisions).toHaveLength(2);
     expect(
-      env.db
-        .prepare("SELECT invalidated_at FROM edges WHERE src = ? AND dst = ?")
-        .get(referrer, id),
+      await env.sql.one("SELECT invalidated_at FROM edges WHERE src = @referrer AND dst = @id", {
+        referrer,
+        id,
+      }),
     ).toEqual({ invalidated_at: null });
   });
 
@@ -147,9 +147,9 @@ describe("RestoreTool", () => {
     await t.restore.invoke({ session_id: s, id: doomed, reason: "wrong call" });
 
     // Then
-    const edges = env.db
-      .prepare("SELECT src, dst, type FROM edges WHERE invalidated_at IS NULL ORDER BY dst")
-      .all() as { src: string; dst: string; type: string }[];
+    const edges = await env.sql.all<{ src: string; dst: string; type: string }>(
+      "SELECT src, dst, type FROM edges WHERE invalidated_at IS NULL ORDER BY dst",
+    );
     expect(edges).toEqual([{ src: referrer, dst: successor, type: EdgeType.REFERENCES }]);
   });
 

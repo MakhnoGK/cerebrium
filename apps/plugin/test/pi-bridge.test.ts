@@ -55,12 +55,12 @@ describe("resolveConfig", () => {
     expect(resolved.options).toEqual(DEFAULT_OPTIONS);
   });
 
-  it("should prefer the pinned runtime and store recorded by setup", () => {
+  it("should prefer the pinned runtime and host recorded by setup", () => {
     // Given
     writeConfig({
       command: "/pinned/node",
-      args: ["/checkout/dist/server.js"],
-      env: { MEMORY_DB_PATH: "/store/memory.db" },
+      args: ["/checkout/apps/plugin/dist/server.js"],
+      env: { MEMORY_KERNEL_URL: "tcp://host:7433" },
     });
 
     // When
@@ -69,25 +69,29 @@ describe("resolveConfig", () => {
     // Then
     expect(resolved.source).toBe("config file");
     expect(resolved.launch.command).toBe("/pinned/node");
-    expect(resolved.launch.args).toEqual(["/checkout/dist/server.js"]);
-    expect(resolved.launch.env.MEMORY_DB_PATH).toBe("/store/memory.db");
+    expect(resolved.launch.args).toEqual(["/checkout/apps/plugin/dist/server.js"]);
+    expect(resolved.launch.env.MEMORY_KERNEL_URL).toBe("tcp://host:7433");
   });
 
   it("should layer the config file over an exported environment rather than replacing it", () => {
     // Given
-    writeConfig({ command: "/pinned/node", env: { MEMORY_DB_PATH: "/store/memory.db" } });
+    writeConfig({ command: "/pinned/node", env: { MEMORY_KERNEL_URL: "tcp://host:7433" } });
 
     // When
     const resolved = resolveConfig({
       repoRoot: REPO,
       home,
-      env: { MEMORY_DB_PATH: "/ignored.db", MEMORY_EMBED_PROVIDER: "local", PATH: "/bin" },
+      env: {
+        MEMORY_KERNEL_URL: "tcp://ignored:7433",
+        MEMORY_KERNEL_TOKEN_FILE: "/tokens/cerebrium",
+        PATH: "/bin",
+      },
     });
 
     // Then
     expect(resolved.launch.env).toEqual({
-      MEMORY_DB_PATH: "/store/memory.db",
-      MEMORY_EMBED_PROVIDER: "local",
+      MEMORY_KERNEL_URL: "tcp://host:7433",
+      MEMORY_KERNEL_TOKEN_FILE: "/tokens/cerebrium",
     });
   });
 

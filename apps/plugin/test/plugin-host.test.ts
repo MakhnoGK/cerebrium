@@ -23,7 +23,6 @@ import {
   surfaceMethods,
 } from "@cerebrium/kernel/presentation/rpc";
 import { freshStore } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 import { pluginBundle } from "./plugin-bundle";
 
 let daemon: DependencyContainer;
@@ -122,7 +121,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe.skipIf(TEST_BACKEND !== "postgres")("The plugin bundle against a host", () => {
+describe("The plugin bundle against a host", () => {
   it("should serve a session end to end as the token's principal and keep nothing locally", async () => {
     // Given
     const home = join(dir, "home");

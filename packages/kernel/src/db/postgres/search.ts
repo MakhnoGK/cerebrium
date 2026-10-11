@@ -16,7 +16,6 @@ import {
 import { ACTIVE_EPISODIC } from "@/db/sql-fragments";
 import type { TextQuery } from "@/core/fts";
 
-// The same exact-KNN budget as the SQLite authored pool.
 const VEC_K = 1000;
 
 interface TextClause {

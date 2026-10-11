@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import type BetterSqlite3 from "better-sqlite3";
+import type pg from "pg";
 import { container, type DependencyContainer } from "tsyringe";
 import { ZodRawShape } from "zod";
 import { Clock, CLOCK_TOKEN } from "@/domain/ports/clock";
@@ -34,16 +34,14 @@ import {
 } from "@/domain/ports/storage";
 import { PrincipalQuotaService } from "@/application/services";
 import { EmbeddingWorker } from "@/application/workers";
-import { PG_TOKEN } from "@/db/postgres/database";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
+import { PG_TOKEN, type Params, type PgDatabase } from "@/db/postgres/database";
 import { LocalNullProvider } from "@/embeddings/local-null";
 import { ClientIdentity, UNKNOWN_WRITER } from "@/runtime/client-identity";
 import { pipelinedContainer } from "@/runtime/pipelined-kernel";
 import { McpTool } from "@/presentation/mcp/tools/contracts";
 import { ToolArgs } from "@/presentation/mcp/tools/contracts/tool-args";
 import { createConsolidator } from "@/consolidation";
-import { freshPgDatabase, TEST_BACKEND } from "@test/pg";
+import { freshPgDatabase } from "@test/pg";
 
 export interface TestClock extends Clock {
   t: string;
@@ -66,8 +64,32 @@ function makeClock(start: string): TestClock {
   };
 }
 
+// Raw SQL against the test's own database, with the repositories' `@name` parameters.
+export interface TestSql {
+  all<T extends pg.QueryResultRow>(sql: string, params?: Params): Promise<T[]>;
+  one<T extends pg.QueryResultRow>(sql: string, params?: Params): Promise<T | undefined>;
+  run(sql: string, params?: Params): Promise<number>;
+}
+
+export function sqlOf(db: PgDatabase): TestSql {
+  return {
+    all: async <T extends pg.QueryResultRow>(sql: string, params?: Params) =>
+      (await db.query<T>(sql, params)).rows,
+    one: async <T extends pg.QueryResultRow>(
+      sql: string,
+      params?: Params,
+    ): Promise<T | undefined> => {
+      const { rows } = await db.query<T>(sql, params);
+
+      return rows[0];
+    },
+    run: async (sql, params) => (await db.query(sql, params)).rowCount ?? 0,
+  };
+}
+
 export interface TestEnv {
-  db: BetterSqlite3.Database;
+  db: PgDatabase;
+  sql: TestSql;
   clock: TestClock;
   worker: EmbeddingWorker;
   provider: EmbeddingProvider;
@@ -91,11 +113,11 @@ export function setup(opts?: {
   consolidator?: ConsolidationProvider;
 }): TestEnv {
   const provider = opts?.provider ?? new LocalNullProvider();
-  const db = TEST_BACKEND === "postgres" ? usePostgres(provider.name) : openDatabase(":memory:");
+  const db = freshPgDatabase(provider.name);
   const clock = makeClock(opts?.start ?? "2026-01-01T00:00:00.000Z");
   const consolidator = opts?.consolidator ?? createConsolidator("manual");
 
-  if (TEST_BACKEND === "sqlite") container.register(DB_TOKEN, { useValue: db });
+  container.register(PG_TOKEN, { useValue: db });
   container.register(CLOCK_TOKEN, { useValue: clock });
   container.register(EMBEDDING_PROVIDER_TOKEN, { useValue: provider });
   container.register(CONSOLIDATION_PROVIDER_TOKEN, { useValue: consolidator });
@@ -108,6 +130,7 @@ export function setup(opts?: {
 
   return {
     db,
+    sql: sqlOf(db),
     clock,
     provider,
     consolidator,
@@ -125,25 +148,9 @@ export function setup(opts?: {
   };
 }
 
-// A new, empty store for whatever resolves the kernel from `into`, on either backend.
+// A new, empty store for whatever resolves the kernel from `into`.
 export function freshStore(into: DependencyContainer = container, spaceModel = "local-null"): void {
-  if (TEST_BACKEND === "postgres") {
-    into.register(PG_TOKEN, { useValue: freshPgDatabase(spaceModel) });
-  } else {
-    into.register(DB_TOKEN, { useValue: openDatabase(":memory:") });
-  }
-}
-
-// On the Postgres run the raw SQLite handle a test reaches for does not exist; touching it
-// fails loudly instead of quietly reading an empty in-memory file.
-function usePostgres(spaceModel: string): BetterSqlite3.Database {
-  container.register(PG_TOKEN, { useValue: freshPgDatabase(spaceModel) });
-
-  return new Proxy({} as BetterSqlite3.Database, {
-    get(_target, key) {
-      throw new Error(`env.db.${String(key)}: no raw SQLite handle on the postgres backend`);
-    },
-  });
+  into.register(PG_TOKEN, { useValue: freshPgDatabase(spaceModel) });
 }
 
 type ToolClass<Schema extends ZodRawShape, Response> = new (

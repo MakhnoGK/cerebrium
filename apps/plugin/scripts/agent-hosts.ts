@@ -88,25 +88,6 @@ function grantsFor(policy: Readonly<Record<ToolName, PermissionPolicy>>): string
 
 export const ANTIGRAVITY_PERMISSION_GRANTS = grantsFor(ANTIGRAVITY_PERMISSION_POLICY);
 
-export const DEFAULT_ENV_KEYS = [
-  "MEMORY_DB_PATH",
-  "MEMORY_EMBED_PROVIDER",
-  "MEMORY_CODE_ROOTS",
-  "MEMORY_CONSOLIDATE",
-] as const;
-
-export function defaultEnv(home: string, repoRoot: string): Record<string, string> {
-  return {
-    MEMORY_DB_PATH: join(home, ".cerebrium", "memory.db"),
-    MEMORY_EMBED_PROVIDER: "local",
-    MEMORY_CODE_ROOTS: `cerebrium=${repoRoot}`,
-  };
-}
-
-export function serverPath(repoRoot: string): string {
-  return join(repoRoot, "dist", "server.js");
-}
-
 export function pluginRoot(repoRoot: string): string {
   return join(repoRoot, "apps", "plugin");
 }
@@ -124,13 +105,12 @@ export function kernelEnv(kernelUrl: string, tokenFile: string): Record<string, 
   return { MEMORY_KERNEL_URL: kernelUrl, MEMORY_KERNEL_TOKEN_FILE: tokenFile };
 }
 
-/** An env naming a Cerebrium host runs the plugin bundle; any other runs the local one. */
+export const HOST_REQUIRED =
+  "needs a Cerebrium host: pass --kernel tcp://HOST:PORT --token-file PATH";
+
+/** Only an env naming a Cerebrium host can be registered; there is no local store. */
 export function isHostEnv(env: Record<string, string>): boolean {
   return (env.MEMORY_KERNEL_URL ?? "") !== "";
-}
-
-export function entryServerPath(repoRoot: string, env: Record<string, string>): string {
-  return isHostEnv(env) ? pluginServerPath(repoRoot) : serverPath(repoRoot);
 }
 
 function sameEnv(actual: Record<string, unknown>, wanted: Record<string, string>): boolean {
@@ -233,7 +213,7 @@ export function desiredMcp(
   env: Record<string, string>,
   nodePath: string,
 ): McpEntry {
-  return { command: nodePath, args: [entryServerPath(repoRoot, env)], env };
+  return { command: nodePath, args: [pluginServerPath(repoRoot)], env };
 }
 
 export function alwaysOnBlock(repoRoot: string): string {
@@ -305,8 +285,8 @@ function state(
 }
 
 /**
- * A `cerebrium` entry is current when it launches this working tree's bundle on this
- * runtime; a host-backed one must also name the same host and token file.
+ * A `cerebrium` entry is current when it launches this working tree's plugin bundle on this
+ * runtime against the same host and token file.
  */
 function entryCurrent(
   input: PlanInput,
@@ -315,17 +295,19 @@ function entryCurrent(
   env: Record<string, unknown>,
 ): boolean {
   const exactArgs =
-    Array.isArray(args) &&
-    args.length === 1 &&
-    args[0] === entryServerPath(input.repoRoot, input.env);
-  const exactEnv = !isHostEnv(input.env) || sameEnv(env, input.env);
-  return exactArgs && command === input.nodePath && exactEnv;
+    Array.isArray(args) && args.length === 1 && args[0] === pluginServerPath(input.repoRoot);
+  return exactArgs && command === input.nodePath && sameEnv(env, input.env);
 }
 
 function currentDetail(input: PlanInput): string {
-  return isHostEnv(input.env)
-    ? `runs the plugin bundle against ${input.env.MEMORY_KERNEL_URL}`
-    : "registered against this working tree and Node runtime";
+  return `runs the plugin bundle against ${input.env.MEMORY_KERNEL_URL}`;
+}
+
+/** Without a host there is nothing to register; an entry that exists is a local leftover. */
+function hostlessState(registered: boolean, target: string): SurfaceState {
+  return registered
+    ? state("mcp", "stale", target, `a local entry with no MEMORY_KERNEL_URL — ${HOST_REQUIRED}`)
+    : state("mcp", "missing", target, HOST_REQUIRED);
 }
 
 /** Whether the trial entry is still registered in Claude Code or Codex. */
@@ -357,6 +339,7 @@ function withoutTrial(
 
 /** A JSON `mcpServers` entry, checked the same way. */
 function mcpState(entry: unknown, target: string, input: PlanInput): SurfaceState {
+  if (!isHostEnv(input.env)) return hostlessState(entry !== undefined, target);
   if (entry === undefined) return state("mcp", "missing", target, "no cerebrium server registered");
   const config = record(entry);
   return entryCurrent(input, config.command, config.args, record(config.env))
@@ -608,20 +591,22 @@ function planCodex(input: PlanInput): HostPlan {
     host: "codex",
     detected: existsSync(dir) || input.hasCommand("codex"),
     surfaces: [
-      registered
-        ? withoutTrial(
-            "codex",
-            input,
-            state(
-              "mcp",
-              pointsHere ? "ok" : "stale",
-              configToml,
-              pointsHere
-                ? currentDetail(input)
-                : "registered against a different bundle, runtime or env",
-            ),
-          )
-        : state("mcp", "missing", configToml, "no [mcp_servers.cerebrium] table"),
+      !isHostEnv(input.env)
+        ? hostlessState(registered, configToml)
+        : registered
+          ? withoutTrial(
+              "codex",
+              input,
+              state(
+                "mcp",
+                pointsHere ? "ok" : "stale",
+                configToml,
+                pointsHere
+                  ? currentDetail(input)
+                  : "registered against a different bundle, runtime or env",
+              ),
+            )
+          : state("mcp", "missing", configToml, "no [mcp_servers.cerebrium] table"),
       skillLinkState(join(dir, "skills", "cerebrium"), repoRoot),
       rulesState(join(dir, "AGENTS.md"), repoRoot),
       hooks.state === "conflict"
@@ -768,8 +753,9 @@ export function pending(plan: HostPlan): SurfaceState[] {
 }
 
 /**
- * The environment of whichever host is already registered. One store per machine: a
- * second `MEMORY_DB_PATH` is a second memory, which is the failure this prevents.
+ * The environment of whichever host is already registered, so a run without --kernel keeps
+ * the host the machine already uses. A local entry (no MEMORY_KERNEL_URL) comes back as is
+ * and is planned as stale.
  */
 export function discoverEnv(input: PlanInput): Record<string, string> | null {
   const { home } = input;

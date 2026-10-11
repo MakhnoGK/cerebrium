@@ -9,16 +9,17 @@ import {
   ANTIGRAVITY_PERMISSION_GRANTS,
   claudeModDir,
   codexEnv,
-  defaultEnv,
   discoverEnv,
   extractManagedBlock,
   hookScript,
+  HOST_REQUIRED,
+  kernelEnv,
   pending,
   piBridgeConfig,
   piExtension,
   piSettings,
   planHost,
-  serverPath,
+  pluginServerPath,
   skillPath,
   skillRoot,
   upsertManagedBlock,
@@ -29,6 +30,8 @@ import {
 } from "@plugin/scripts/agent-hosts";
 
 const REPO = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
+const HOST_ENV = kernelEnv("tcp://host:7433", "/tokens/cerebrium");
+const BUNDLE = pluginServerPath(REPO);
 
 let home: string;
 
@@ -37,10 +40,18 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
     home,
     repoRoot: REPO,
     nodePath: process.execPath,
-    env: defaultEnv(home, REPO),
+    env: HOST_ENV,
     hasCommand: () => false,
     ...over,
   };
+}
+
+function codexEntry(command: string, args: string[]): string {
+  return (
+    `[mcp_servers.cerebrium]\ncommand = "${command}"\nargs = ${JSON.stringify(args)}\n\n` +
+    `[mcp_servers.cerebrium.env]\nMEMORY_KERNEL_URL = "${HOST_ENV.MEMORY_KERNEL_URL}"\n` +
+    `MEMORY_KERNEL_TOKEN_FILE = "${HOST_ENV.MEMORY_KERNEL_TOKEN_FILE}"\n`
+  );
 }
 
 function status(host: HostId, surface: Surface): SurfaceStatus {
@@ -152,21 +163,69 @@ describe("MCP surface", () => {
   it("should be ok when the registration launches this working tree's bundle", () => {
     // Given
     writeJson(join(home, ".claude.json"), {
-      mcpServers: { cerebrium: { command: process.execPath, args: [serverPath(REPO)] } },
+      mcpServers: { cerebrium: { command: process.execPath, args: [BUNDLE], env: HOST_ENV } },
     });
 
     // When / Then
     expect(status("claude", "mcp")).toBe("ok");
   });
 
-  it("should be stale when a bare node command makes the native ABI PATH-dependent", () => {
+  it("should be stale when a bare node command makes the runtime PATH-dependent", () => {
     // Given
     writeJson(join(home, ".claude.json"), {
-      mcpServers: { cerebrium: { command: "node", args: [serverPath(REPO)] } },
+      mcpServers: { cerebrium: { command: "node", args: [BUNDLE], env: HOST_ENV } },
     });
 
     // When / Then
     expect(status("claude", "mcp")).toBe("stale");
+  });
+
+  it("should be stale when the registration names another host", () => {
+    // Given
+    writeJson(join(home, ".claude.json"), {
+      mcpServers: {
+        cerebrium: {
+          command: process.execPath,
+          args: [BUNDLE],
+          env: kernelEnv("tcp://other:7433", "/tokens/cerebrium"),
+        },
+      },
+    });
+
+    // When / Then
+    expect(status("claude", "mcp")).toBe("stale");
+  });
+
+  it("should be missing and name the flags when no host is configured", () => {
+    // Given / When
+    const plan = planHost("claude", input({ env: {} }));
+
+    // Then
+    expect(plan.surfaces.find((s) => s.surface === "mcp")).toMatchObject({
+      status: "missing",
+      detail: HOST_REQUIRED,
+    });
+  });
+
+  it("should be stale when a local entry with no host is registered", () => {
+    // Given
+    const local = { MEMORY_DB_PATH: "/db/m.db" };
+    writeJson(join(home, ".claude.json"), {
+      mcpServers: {
+        cerebrium: {
+          command: process.execPath,
+          args: [join(REPO, "dist", "server.js")],
+          env: local,
+        },
+      },
+    });
+
+    // When
+    const plan = planHost("claude", input({ env: local }));
+
+    // Then
+    expect(plan.surfaces.find((s) => s.surface === "mcp")).toMatchObject({ status: "stale" });
+    expect(plan.surfaces.find((s) => s.surface === "mcp")?.detail).toContain("--kernel");
   });
 
   it("should be stale when the registration points at another path", () => {
@@ -197,10 +256,7 @@ describe("MCP surface", () => {
 
   it("should read Codex's registration out of the TOML text", () => {
     // Given
-    writeText(
-      join(home, ".codex", "config.toml"),
-      `[mcp_servers.cerebrium]\ncommand = "${process.execPath}"\nargs = ["${serverPath(REPO)}"]\n`,
-    );
+    writeText(join(home, ".codex", "config.toml"), codexEntry(process.execPath, [BUNDLE]));
 
     // When / Then
     expect(status("codex", "mcp")).toBe("ok");
@@ -210,8 +266,8 @@ describe("MCP surface", () => {
     // Given
     writeText(
       join(home, ".codex", "config.toml"),
-      `[mcp_servers.cerebrium]\ncommand = "node"\nargs = ["/old/server.js"]\n` +
-        `[mcp_servers.other]\ncommand = "${process.execPath}"\nargs = ["${serverPath(REPO)}"]\n`,
+      codexEntry("node", ["/old/server.js"]) +
+        `[mcp_servers.other]\ncommand = "${process.execPath}"\nargs = ["${BUNDLE}"]\n`,
     );
 
     // When / Then
@@ -526,8 +582,8 @@ describe("pi surfaces", () => {
     // Given
     writeJson(piBridgeConfig(home), {
       command: process.execPath,
-      args: [serverPath(REPO)],
-      env: {},
+      args: [BUNDLE],
+      env: HOST_ENV,
     });
 
     // When / Then
@@ -556,11 +612,19 @@ describe("discoverEnv", () => {
     // Given
     writeJson(join(home, ".claude.json"), {
       mcpServers: {
-        cerebrium: {
-          command: "node",
-          args: [serverPath(REPO)],
-          env: { MEMORY_DB_PATH: "/db/m.db" },
-        },
+        cerebrium: { command: "node", args: [BUNDLE], env: HOST_ENV },
+      },
+    });
+
+    // When / Then
+    expect(discoverEnv(input())).toEqual(HOST_ENV);
+  });
+
+  it("should return a local entry's environment as is, so the plan can call it stale", () => {
+    // Given
+    writeJson(join(home, ".claude.json"), {
+      mcpServers: {
+        cerebrium: { command: "node", args: [BUNDLE], env: { MEMORY_DB_PATH: "/db/m.db" } },
       },
     });
 
@@ -570,25 +634,18 @@ describe("discoverEnv", () => {
 
   it("should fall back to Codex's TOML when no JSON host is registered", () => {
     // Given
-    writeText(
-      join(home, ".codex", "config.toml"),
-      `[mcp_servers.cerebrium]\ncommand = "node"\nenv = { MEMORY_DB_PATH = "/db/m.db" }\n`,
-    );
+    writeText(join(home, ".codex", "config.toml"), codexEntry("node", [BUNDLE]));
 
     // When / Then
-    expect(discoverEnv(input())).toEqual({ MEMORY_DB_PATH: "/db/m.db" });
+    expect(discoverEnv(input())).toEqual(HOST_ENV);
   });
 
   it("should fall back to pi's launch entry when it is the only registration", () => {
     // Given
-    writeJson(piBridgeConfig(home), {
-      command: process.execPath,
-      args: [serverPath(REPO)],
-      env: { MEMORY_DB_PATH: "/db/m.db" },
-    });
+    writeJson(piBridgeConfig(home), { command: process.execPath, args: [BUNDLE], env: HOST_ENV });
 
     // When / Then
-    expect(discoverEnv(input())).toEqual({ MEMORY_DB_PATH: "/db/m.db" });
+    expect(discoverEnv(input())).toEqual(HOST_ENV);
   });
 
   it("should return null when nothing is registered anywhere", () => {
@@ -630,11 +687,8 @@ describe("pending", () => {
 });
 
 describe("agent:setup exit status", () => {
-  it("should abort before creating host config when the native preflight fails", () => {
+  it("should write no MCP entry and exit nonzero when no host is configured", () => {
     // Given
-    const fakeRepo = join(home, "repo-without-native-addon");
-    mkdirSync(fakeRepo, { recursive: true });
-    writeText(join(fakeRepo, ".nvmrc"), `${process.versions.node.split(".")[0]}\n`);
     const viteNode = join(REPO, "node_modules", "vite-node", "vite-node.mjs");
 
     // When
@@ -645,8 +699,6 @@ describe("agent:setup exit status", () => {
         "--config",
         join(REPO, "vitest.config.ts"),
         join(REPO, "apps", "plugin", "scripts", "agent-setup.mts"),
-        "--repo",
-        fakeRepo,
         "--home",
         home,
         "--host",
@@ -658,8 +710,8 @@ describe("agent:setup exit status", () => {
 
     // Then
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Runtime preflight failed");
-    expect(existsSync(join(home, ".gemini"))).toBe(false);
+    expect(result.stdout).toContain(HOST_REQUIRED);
+    expect(existsSync(join(home, ".gemini", "config", "mcp_config.json"))).toBe(false);
   });
 
   it("should exit nonzero when an apply outcome fails", () => {

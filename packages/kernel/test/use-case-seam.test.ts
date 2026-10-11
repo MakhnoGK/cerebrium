@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -41,14 +40,13 @@ function stubbed<Args, Result>(result: Result) {
   return { calls, scope };
 }
 
-function failedCandidate(id: string): void {
-  env.db
-    .prepare(
-      `INSERT INTO consolidation_candidates
-         (id, kind, status, member_ids, member_hash, score, proposal, detected_at, last_error)
-       VALUES (?, 'merge', 'failed', '[]', ?, 0.9, '{}', ?, 'provider timed out')`,
-    )
-    .run(id, id, "2026-01-01T00:00:00.000Z");
+async function failedCandidate(id: string): Promise<void> {
+  await env.sql.run(
+    `INSERT INTO consolidation_candidates
+       (id, kind, status, member_ids, member_hash, score, proposal, detected_at, last_error)
+     VALUES (@id, 'merge', 'failed', '[]', @id, 0.9, '{}', @ts, 'provider timed out')`,
+    { id, ts: "2026-01-01T00:00:00.000Z" },
+  );
 }
 
 describe("The use-case seam", () => {
@@ -68,17 +66,16 @@ describe("The use-case seam", () => {
 
   it("should reopen a real candidate through the local implementation", async () => {
     // Given
-    failedCandidate(ID);
+    await failedCandidate(ID);
 
     // When
     await container.resolve(ConsolidateRetryTool).invoke({ session_id: ID, id: ID });
 
     // Then
-    const row = env.db
-      .prepare(
-        "SELECT status, attempts, proposal, last_error FROM consolidation_candidates WHERE id = ?",
-      )
-      .get(ID);
+    const row = await env.sql.one(
+      "SELECT status, attempts, proposal, last_error FROM consolidation_candidates WHERE id = @id",
+      { id: ID },
+    );
     expect(row).toEqual({ status: "pending", attempts: 2, proposal: null, last_error: null });
   });
 

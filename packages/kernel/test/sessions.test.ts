@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -11,10 +10,15 @@ import { setup, TestEnv } from "@test/helpers";
 const SESSION = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const UNKNOWN = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
-function countSessions(env: TestEnv, id: string): number {
-  return (
-    env.db.prepare("SELECT COUNT(*) AS c FROM sessions WHERE id = ?").get(id) as { c: number }
-  ).c;
+async function countSessions(env: TestEnv, id: string): Promise<number> {
+  return (await env.sql.one<{ c: number }>(
+    "SELECT COUNT(*)::int AS c FROM sessions WHERE id = @id",
+    { id },
+  ))!.c;
+}
+
+async function writerOf(env: TestEnv, id: string) {
+  return env.sql.one("SELECT client, client_version FROM sessions WHERE id = @id", { id });
 }
 
 describe("SessionService", () => {
@@ -25,7 +29,7 @@ describe("SessionService", () => {
     await service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
     await service.startSession(SESSION, "billing", env.clock.now(), UNKNOWN_WRITER);
 
-    expect(countSessions(env, SESSION)).toBe(1);
+    expect(await countSessions(env, SESSION)).toBe(1);
   });
 
   it("should refresh last_seen for a known session", async () => {
@@ -37,8 +41,8 @@ describe("SessionService", () => {
     await service.requireSession(SESSION, env.clock.now());
 
     expect(
-      env.db.prepare("SELECT last_seen FROM sessions WHERE id = ?").get(SESSION),
-    ).toStrictEqual({ last_seen: env.clock.now() });
+      await env.sql.one("SELECT last_seen FROM sessions WHERE id = @id", { id: SESSION }),
+    ).toEqual({ last_seen: env.clock.now() });
   });
 
   it("should reject an unknown session without creating it", async () => {
@@ -48,7 +52,7 @@ describe("SessionService", () => {
     await expect(service.requireSession(UNKNOWN, env.clock.now())).rejects.toThrow(
       `Unknown session_id ${UNKNOWN}`,
     );
-    expect(countSessions(env, UNKNOWN)).toBe(0);
+    expect(await countSessions(env, UNKNOWN)).toBe(0);
   });
 });
 
@@ -62,9 +66,10 @@ describe("Writer identity", () => {
     const { session_id } = await container.resolve(SessionStartTool).invoke({});
 
     // Then
-    expect(
-      env.db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
-    ).toStrictEqual({ client: "claude-code", client_version: "1.2.3" });
+    expect(await writerOf(env, session_id)).toEqual({
+      client: "claude-code",
+      client_version: "1.2.3",
+    });
   });
 
   it("should leave the writer null when nothing named itself", async () => {
@@ -76,9 +81,7 @@ describe("Writer identity", () => {
     const { session_id } = await container.resolve(SessionStartTool).invoke({});
 
     // Then
-    expect(
-      env.db.prepare("SELECT client, client_version FROM sessions WHERE id = ?").get(session_id),
-    ).toStrictEqual({ client: null, client_version: null });
+    expect(await writerOf(env, session_id)).toEqual({ client: null, client_version: null });
   });
 });
 
@@ -99,7 +102,7 @@ describe("Direct tool calls", () => {
       }),
     ).rejects.toThrow(`Unknown session_id ${UNKNOWN}`);
 
-    expect(countSessions(env, UNKNOWN)).toBe(0);
-    expect((env.db.prepare("SELECT COUNT(*) AS c FROM nodes").get() as { c: number }).c).toBe(0);
+    expect(await countSessions(env, UNKNOWN)).toBe(0);
+    expect(await env.sql.one("SELECT COUNT(*)::int AS c FROM nodes")).toEqual({ c: 0 });
   });
 });

@@ -1,22 +1,24 @@
 #!/usr/bin/env node
 import "reflect-metadata";
-import type Database from "better-sqlite3";
 import { SEARCH_REPO_TOKEN, type SearchRepo } from "@/domain/ports/storage";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { chunkContent } from "@/core/chunk";
 import { parseTextQuery } from "@/core/fts";
 import { buildContainer } from "@/container";
 import {
   ConsolidationThresholdsConfig,
-  DatabaseConfig,
+  EnvConfigSource,
+  LayeredConfigSource,
   RetrievalConfig,
+  StaticConfigSource,
 } from "@/infrastructure/config";
 
 // Threshold calibration report: `npm run calibrate:report`. Answers "where should the
 // similarity gates sit" with measurements from the real store instead of intuition, and
 // keeps the answer re-derivable after a corpus grows or an embedding model is swapped
-// (the constants are specific to both). Read-only — opens the DB via the `cli` role, so
-// it never touches migrations and never becomes a second writer.
+// (the constants are specific to both). Read-only — opens the store via the `cli` role in
+// a read-only session, so it never becomes a second writer. Vectors are read from the
+// active space.
 //
 // Two arms, because only one gate has labels:
 //   labelled — `consolidation_candidates` records the operator's own applied/dismissed
@@ -27,8 +29,8 @@ import {
 //     against a target *volume* instead: how many candidates would a write surface, and
 //     how many edges would link discovery propose per node.
 //
-// Flags: --json, --all-scorers (also run the scorers already rejected by measurement),
-// --help.
+// Flags: --pg URL (required), --json, --all-scorers (also run the scorers already rejected
+// by measurement), --help.
 
 const MERGE_SWEEP = [0.9, 0.905, 0.91, 0.915, 0.92, 0.925, 0.93, 0.935, 0.94, 0.945, 0.95];
 const DENSITY_SWEEP = [0.85, 0.87, 0.89, 0.9, 0.91, 0.92, 0.925, 0.93, 0.94];
@@ -152,15 +154,32 @@ interface LinkRow {
   totalEdges: number;
 }
 
+const USAGE = "usage: npm run calibrate:report -- --pg URL [--json] [--all-scorers]\n";
+
 function main(): Promise<void> {
-  if (process.argv.includes("--help")) {
-    process.stdout.write("usage: npm run calibrate:report -- [--json] [--all-scorers]\n");
+  const argv = process.argv;
+  const url = argv.includes("--pg") ? argv[argv.indexOf("--pg") + 1] : undefined;
+
+  if (argv.includes("--help")) {
+    process.stdout.write(USAGE);
     return Promise.resolve();
   }
 
-  const container = buildContainer({ role: "cli" });
-  const db = container.resolve<Database.Database>(DB_TOKEN);
-  const dbPath = container.resolve(DatabaseConfig).path;
+  if (!url) {
+    process.stderr.write(USAGE);
+    process.exitCode = 1;
+    return Promise.resolve();
+  }
+
+  const container = buildContainer({
+    role: "cli",
+    source: new LayeredConfigSource(
+      new StaticConfigSource({ MEMORY_PG_URL: url }),
+      new EnvConfigSource(),
+    ),
+  });
+  const db = container.resolve<PgDatabase>(PG_TOKEN);
+  const dbPath = redactUrl(url);
   const retrieval = container.resolve(RetrievalConfig);
   const thresholds = container.resolve(ConsolidationThresholdsConfig);
   const searchRepo = container.resolve<SearchRepo>(SEARCH_REPO_TOKEN);
@@ -183,7 +202,7 @@ function main(): Promise<void> {
 }
 
 async function report(opts: {
-  db: Database.Database;
+  db: PgDatabase;
   dbPath: string;
   searchRepo: SearchRepo;
   live: { dedupThreshold: number; sim: number; mergeSim: number };
@@ -191,21 +210,21 @@ async function report(opts: {
   allScorers: boolean;
 }): Promise<void> {
   const { db, live } = opts;
-  const vectors = loadSemanticVectors(db);
-  const pairs = loadLabelledPairs(db, vectors);
+  const vectors = await loadSemanticVectors(db);
+  const pairs = await loadLabelledPairs(db, vectors);
   const scorers = await buildScorers(db, vectors, pairs, opts.allScorers);
 
   const stats = scorers.map(({ name, scored }) => scorerStats(name, scored));
   const sweep = thresholdSweep(pairs, MERGE_SWEEP);
   const fidelity = storedVsRecomputed(pairs, vectors);
   const dedup = await dedupDensity(db, opts.searchRepo, vectors, DENSITY_SWEEP);
-  const link = linkDensity(db, vectors, DENSITY_SWEEP);
+  const link = await linkDensity(db, vectors, DENSITY_SWEEP);
   const lexical = await lexicalDensity(db, opts.searchRepo, LEXICAL_SWEEP);
 
-  const firstChunk = loadFirstChunkVectors(db);
-  const prov = loadProvenance(db);
+  const firstChunk = await loadFirstChunkVectors(db);
+  const prov = await loadProvenance(db);
   const foldLabelledRows = foldLabelled(pairs, firstChunk, prov, FOLD_SWEEP);
-  const foldImpactArm = foldImpact(db, firstChunk, prov, FOLD_SWEEP);
+  const foldImpactArm = await foldImpact(db, firstChunk, prov, FOLD_SWEEP);
   const foldGate = foldRecommendation(foldLabelledRows);
 
   if (opts.asJson) {
@@ -389,17 +408,16 @@ interface NodeVectors {
 
 // Semantic nodes only (the gates never consider mirrors), invalidated included: the
 // members of an applied merge are invalidated by definition, and their chunks survive.
-function loadSemanticVectors(db: Database.Database): Map<string, NodeVectors> {
-  const rows = db
-    .prepare(
-      `SELECT c.node_id AS node_id, c.seq AS seq, vec_to_json(v.embedding) AS embedding
-       FROM chunks c
-       JOIN chunk_vec v ON v.chunk_id = c.id
-       JOIN nodes n ON n.id = c.node_id
-       WHERE c.stale = 0 AND n.memory_kind = 'semantic'
-       ORDER BY c.node_id, c.seq`,
-    )
-    .all() as { node_id: string; seq: number; embedding: string }[];
+async function loadSemanticVectors(db: PgDatabase): Promise<Map<string, NodeVectors>> {
+  const { rows } = await db.query<{ node_id: string; seq: number; embedding: string }>(
+    `SELECT c.node_id AS node_id, c.seq AS seq, v.embedding::text AS embedding
+     FROM chunks c
+     JOIN chunk_vectors v ON v.chunk_id = c.id
+     JOIN vector_spaces s ON s.id = v.space_id AND s.active
+     JOIN nodes n ON n.id = c.node_id
+     WHERE c.stale = 0 AND n.memory_kind = 'semantic'
+     ORDER BY c.node_id, c.seq`,
+  );
 
   const out = new Map<string, NodeVectors>();
   for (const row of rows) {
@@ -412,13 +430,14 @@ function loadSemanticVectors(db: Database.Database): Map<string, NodeVectors> {
   return out;
 }
 
-function loadLabelledPairs(db: Database.Database, vectors: Map<string, NodeVectors>): Pair[] {
-  const rows = db
-    .prepare(
-      `SELECT status, member_ids, score FROM consolidation_candidates
-       WHERE kind = 'merge' AND status IN ('applied','dismissed')`,
-    )
-    .all() as { status: string; member_ids: string; score: number }[];
+async function loadLabelledPairs(
+  db: PgDatabase,
+  vectors: Map<string, NodeVectors>,
+): Promise<Pair[]> {
+  const { rows } = await db.query<{ status: string; member_ids: string; score: number }>(
+    `SELECT status, member_ids, score FROM consolidation_candidates
+     WHERE kind = 'merge' AND status IN ('applied','dismissed')`,
+  );
 
   const out: Pair[] = [];
   let skipped = 0;
@@ -444,7 +463,7 @@ function loadLabelledPairs(db: Database.Database, vectors: Map<string, NodeVecto
 // ---- scorers ----------------------------------------------------------------
 
 async function buildScorers(
-  db: Database.Database,
+  db: PgDatabase,
   vectors: Map<string, NodeVectors>,
   pairs: Pair[],
   allScorers: boolean,
@@ -462,7 +481,7 @@ async function buildScorers(
   if (allScorers) {
     const mean = corpusMean(vectors);
     const dist = neighbourDistributions(vectors);
-    const text = loadText(db);
+    const text = await loadText(db);
     const tokens = new Map([...text].map(([id, t]) => [id, tokenSet(`${t.title} ${t.content}`)]));
     const titles = new Map([...text].map(([id, t]) => [id, tokenSet(t.title)]));
 
@@ -575,16 +594,14 @@ function zScore(
   return (productionSim(vectors, a, b) - d.mean) / d.sd;
 }
 
-function loadText(db: Database.Database): Map<string, { title: string; content: string }> {
-  const rows = db
-    .prepare(
-      `SELECT n.id AS id, n.title AS title, lr.content AS content
-       FROM nodes n
-       JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
-       JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
-       WHERE n.memory_kind = 'semantic'`,
-    )
-    .all() as { id: string; title: string; content: string }[];
+async function loadText(db: PgDatabase): Promise<Map<string, { title: string; content: string }>> {
+  const { rows } = await db.query<{ id: string; title: string; content: string }>(
+    `SELECT n.id AS id, n.title AS title, lr.content AS content
+     FROM nodes n
+     JOIN (SELECT node_id, MAX(rev) AS mrev FROM revisions GROUP BY node_id) m ON m.node_id = n.id
+     JOIN revisions lr ON lr.node_id = n.id AND lr.rev = m.mrev
+     WHERE n.memory_kind = 'semantic'`,
+  );
   return new Map(rows.map((r) => [r.id, { title: r.title, content: r.content }]));
 }
 
@@ -638,17 +655,15 @@ function thresholdSweep(pairs: Pair[], sweep: number[]): SweepRow[] {
 // yet. Same probe text, same FTS candidates, same Jaccard, so the gate it suggests is on
 // the scale the fallback actually produces rather than the cosine scale it used to share.
 async function lexicalDensity(
-  db: Database.Database,
+  db: PgDatabase,
   searchRepo: SearchRepo,
   sweep: number[],
 ): Promise<LexicalRow[]> {
-  const nodes = db
-    .prepare(
-      `SELECT n.id AS id, n.project AS project FROM nodes n
-       WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
-    )
-    .all() as { id: string; project: string | null }[];
-  const text = loadText(db);
+  const { rows: nodes } = await db.query<{ id: string; project: string | null }>(
+    `SELECT n.id AS id, n.project AS project FROM nodes n
+     WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
+  );
+  const text = await loadText(db);
 
   const perProbe: number[][] = [];
   for (const node of nodes) {
@@ -690,17 +705,15 @@ async function lexicalDensity(
 // query, the same filters and cap, itself excluded. Uses SearchRepo, so the measurement
 // inherits the production post-filter behaviour rather than an idealised version of it.
 async function dedupDensity(
-  db: Database.Database,
+  db: PgDatabase,
   searchRepo: SearchRepo,
   vectors: Map<string, NodeVectors>,
   sweep: number[],
 ): Promise<DedupRow[]> {
-  const probes = db
-    .prepare(
-      `SELECT n.id AS id, n.project AS project FROM nodes n
-       WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
-    )
-    .all() as { id: string; project: string | null }[];
+  const { rows: probes } = await db.query<{ id: string; project: string | null }>(
+    `SELECT n.id AS id, n.project AS project FROM nodes n
+     WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
+  );
 
   const perProbe: number[][] = [];
   for (const probe of probes) {
@@ -737,17 +750,16 @@ async function dedupDensity(
 // One vector per node, the lowest-seq chunk of an authored node — exactly what
 // `SearchRepo.vectorsFor` hands MMR, so the gate this arm recommends is on the scale the
 // fold will actually be computed on.
-function loadFirstChunkVectors(db: Database.Database): Map<string, Float64Array> {
-  const rows = db
-    .prepare(
-      `SELECT c.node_id AS node_id, vec_to_json(v.embedding) AS embedding
-       FROM chunks c
-       JOIN chunk_vec v ON v.chunk_id = c.id
-       JOIN nodes n ON n.id = c.node_id
-       WHERE c.stale = 0 AND n.memory_kind IN ('semantic','episodic')
-       ORDER BY c.node_id, c.seq`,
-    )
-    .all() as { node_id: string; embedding: string }[];
+async function loadFirstChunkVectors(db: PgDatabase): Promise<Map<string, Float64Array>> {
+  const { rows } = await db.query<{ node_id: string; embedding: string }>(
+    `SELECT c.node_id AS node_id, v.embedding::text AS embedding
+     FROM chunks c
+     JOIN chunk_vectors v ON v.chunk_id = c.id
+     JOIN vector_spaces s ON s.id = v.space_id AND s.active
+     JOIN nodes n ON n.id = c.node_id
+     WHERE c.stale = 0 AND n.memory_kind IN ('semantic','episodic')
+     ORDER BY c.node_id, c.seq`,
+  );
 
   const out = new Map<string, Float64Array>();
   for (const row of rows) {
@@ -757,12 +769,12 @@ function loadFirstChunkVectors(db: Database.Database): Map<string, Float64Array>
   return out;
 }
 
-function loadProvenance(db: Database.Database): Map<string, Provenance> {
-  const rows = db.prepare(`SELECT id, created_by_session, created_at FROM nodes`).all() as {
+async function loadProvenance(db: PgDatabase): Promise<Map<string, Provenance>> {
+  const { rows } = await db.query<{
     id: string;
     created_by_session: string;
     created_at: string;
-  }[];
+  }>(`SELECT id, created_by_session, created_at FROM nodes`);
 
   return new Map(
     rows.map((r) => [r.id, { session: r.created_by_session, createdAt: Date.parse(r.created_at) }]),
@@ -821,15 +833,15 @@ function foldLabelled(
 // Impact arm. Replays the fold pass over the result sets real searches actually returned:
 // walk the ranked ids, and fold a result only against one already kept — the same
 // representative-only rule L2.2 will use, which is what stops a fold chaining.
-function foldImpact(
-  db: Database.Database,
+async function foldImpact(
+  db: PgDatabase,
   vectors: Map<string, Float64Array>,
   prov: Map<string, Provenance>,
   sweep: number[],
-): { searches: number; rows: FoldImpactRow[] } {
-  const rows = db
-    .prepare(`SELECT detail FROM events WHERE action = 'search' AND detail LIKE '%"ids"%'`)
-    .all() as { detail: string | null }[];
+): Promise<{ searches: number; rows: FoldImpactRow[] }> {
+  const { rows } = await db.query<{ detail: string | null }>(
+    `SELECT detail FROM events WHERE action = 'search' AND detail LIKE '%"ids"%'`,
+  );
 
   const results: string[][] = [];
   for (const row of rows) {
@@ -904,22 +916,21 @@ function foldRecommendation(labelled: FoldLabelledRow[]): number | null {
   );
 }
 
-function linkDensity(
-  db: Database.Database,
+async function linkDensity(
+  db: PgDatabase,
   vectors: Map<string, NodeVectors>,
   sweep: number[],
-): LinkRow[] {
+): Promise<LinkRow[]> {
   const seeds = (
-    db
-      .prepare(
-        `SELECT DISTINCT n.id AS id
-         FROM nodes n
-         JOIN chunks c ON c.node_id = n.id AND c.stale = 0
-         JOIN embedding_meta em ON em.chunk_id = c.id
-         WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
-      )
-      .all() as { id: string }[]
-  ).map((r) => r.id);
+    await db.query<{ id: string }>(
+      `SELECT DISTINCT n.id AS id
+       FROM nodes n
+       JOIN chunks c ON c.node_id = n.id AND c.stale = 0
+       JOIN chunk_vectors v ON v.chunk_id = c.id
+       JOIN vector_spaces s ON s.id = v.space_id AND s.active
+       WHERE n.memory_kind = 'semantic' AND n.invalidated_at IS NULL`,
+    )
+  ).rows.map((r) => r.id);
 
   const live = new Set(seeds);
   const perNode = seeds.map((id) =>
@@ -1037,3 +1048,4 @@ function percentile(values: number[], p: number): number {
 }
 
 await main();
+process.exit();

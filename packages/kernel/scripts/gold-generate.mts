@@ -9,12 +9,11 @@ import {
   type GoldEntry,
 } from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
-import type Database from "better-sqlite3";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 
-// Manufactures the gold set `eval:retrieval --db` cannot mine. For each section of each
+// Manufactures the gold set `eval:retrieval --pg` cannot mine. For each section of each
 // live authored node it asks the local model for questions that section answers; the
 // section is then the label. The store is opened READ-ONLY through the `cli` role — this
 // writes nothing but the output file, which by design lives outside the repo.
@@ -35,9 +34,9 @@ Rules:
 const HELP = `
 gold-generate — manufacture labelled queries from the store's own sections.
 
-  npm run gold:generate -- --db PATH --out PATH [options]
+  npm run gold:generate -- --pg URL --out PATH [options]
 
-  --db PATH       Store to read. Opened READ-ONLY (cli role); never written.
+  --pg URL        Postgres store to read, in a read-only session; never written.
   --out PATH      Gold JSONL to append to (default ~/.cerebrium/gold.jsonl). Existing
                   entries are read first, so an interrupted run resumes where it stopped.
   --per-section N Questions to ask per section (default 3).
@@ -88,27 +87,26 @@ function num(argv: string[], name: string, fallback: number): number {
 // The current revision of every live authored node, one row per section. Mirrors are
 // excluded: code symbols and external records are derived, and a question about them
 // measures the mirror pipeline rather than the memory.
-function loadSections(db: Database.Database, project: string | undefined): Section[] {
-  const rows = db
-    .prepare(
-      `WITH live AS (
-         SELECT n.id, MAX(c.rev) AS rev
-         FROM nodes n JOIN chunks c ON c.node_id = n.id
-         WHERE n.invalidated_at IS NULL
-           AND n.memory_kind IN ('semantic','episodic')
-           AND (? IS NULL OR n.project = ?)
-         GROUP BY n.id
-       )
-       SELECT c.node_id AS node, n.title, n.project, n.created_at AS created,
-              COALESCE(c.heading_path, '(preamble)') AS heading,
-              c.text
-       FROM chunks c
-       JOIN live l ON l.id = c.node_id AND l.rev = c.rev
-       JOIN nodes n ON n.id = c.node_id
-       WHERE c.stale = 0
-       ORDER BY c.node_id, c.seq`,
-    )
-    .all(project ?? null, project ?? null) as Section[];
+async function loadSections(db: PgDatabase, project: string | undefined): Promise<Section[]> {
+  const { rows } = await db.query<Section>(
+    `WITH live AS (
+       SELECT n.id, MAX(c.rev) AS rev
+       FROM nodes n JOIN chunks c ON c.node_id = n.id
+       WHERE n.invalidated_at IS NULL
+         AND n.memory_kind IN ('semantic','episodic')
+         AND (@project::text IS NULL OR n.project = @project)
+       GROUP BY n.id
+     )
+     SELECT c.node_id AS node, n.title, n.project, n.created_at AS created,
+            COALESCE(c.heading_path, '(preamble)') AS heading,
+            c.text
+     FROM chunks c
+     JOIN live l ON l.id = c.node_id AND l.rev = c.rev
+     JOIN nodes n ON n.id = c.node_id
+     WHERE c.stale = 0
+     ORDER BY c.node_id, c.seq`,
+    { project: project ?? null },
+  );
 
   return rows;
 }
@@ -154,10 +152,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const store = arg(argv, "--db");
+  const store = arg(argv, "--pg");
 
   if (!store) {
-    console.error("gold-generate: --db PATH is required (see --help)");
+    console.error("gold-generate: --pg URL is required (see --help)");
     process.exitCode = 1;
     return;
   }
@@ -175,12 +173,12 @@ async function main(): Promise<void> {
   const container = buildContainer({
     role: "cli",
     source: new LayeredConfigSource(
-      new StaticConfigSource({ MEMORY_DB_PATH: store }),
+      new StaticConfigSource({ MEMORY_PG_URL: store }),
       new EnvConfigSource(),
     ),
   });
-  const db = container.resolve<Database.Database>(DB_TOKEN);
-  const eligible = loadSections(db, project).filter((s) => s.text.length >= minChars);
+  const db = container.resolve<PgDatabase>(PG_TOKEN);
+  const eligible = (await loadSections(db, project)).filter((s) => s.text.length >= minChars);
   const sample = num(argv, "--sample", Infinity);
   const sections = !Number.isFinite(sample)
     ? eligible
@@ -196,7 +194,7 @@ async function main(): Promise<void> {
     .filter((s) => !done.has(`${s.node}|${s.heading}`))
     .slice(0, Number.isFinite(limit) ? limit : undefined);
 
-  console.log(`store: ${store} (read-only)`);
+  console.log(`store: ${redactUrl(store)} (read-only)`);
   console.log(
     `sections: ${String(eligible.length)} eligible, ${String(sections.length)} selected, ${String(done.size)} already generated, ${String(pending.length)} to do`,
   );
@@ -276,7 +274,10 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((e: unknown) => {
-  console.error("gold-generate failed:", e);
-  process.exit(1);
-});
+main().then(
+  () => process.exit(),
+  (e: unknown) => {
+    console.error("gold-generate failed:", e);
+    process.exit(1);
+  },
+);

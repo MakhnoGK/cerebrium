@@ -1,6 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { container, type InjectionToken } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -10,8 +7,6 @@ import { CodeLookupTool } from "@/presentation/mcp/tools/code-lookup";
 import { GetTool } from "@/presentation/mcp/tools/get";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { setup, type TestEnv } from "@test/helpers";
-
-const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
 
 // The retrieval-outcome log is what `report:readloop`, the gold set and every calibration
 // run are computed from. It went blind for reads the moment the host became a proxy: the
@@ -36,11 +31,14 @@ async function seed(title: string, content: string): Promise<string> {
   return written.envelope.id;
 }
 
-function rows(action: string): { detail: Record<string, unknown>; node_id: string | null }[] {
+async function rows(
+  action: string,
+): Promise<{ detail: Record<string, unknown>; node_id: string | null }[]> {
   return (
-    env.db
-      .prepare("SELECT node_id, detail FROM events WHERE action = ? AND session_id = ?")
-      .all(action, session) as { node_id: string | null; detail: string | null }[]
+    await env.sql.all<{ node_id: string | null; detail: string | null }>(
+      "SELECT node_id, detail FROM events WHERE action = @action AND session_id = @session",
+      { action, session },
+    )
   ).map((row) => ({
     node_id: row.node_id,
     detail: (row.detail === null ? {} : JSON.parse(row.detail)) as Record<string, unknown>,
@@ -72,7 +70,7 @@ describe("Retrieval-outcome log", () => {
 
     // Then — an unattributed read is not logged at all, so this is the whole difference
     // between having the log and not having it.
-    expect(rows("search")).toHaveLength(1);
+    expect(await rows("search")).toHaveLength(1);
   });
 
   it("should record which ids a search surfaced and how each matched", async () => {
@@ -89,7 +87,7 @@ describe("Retrieval-outcome log", () => {
     });
 
     // Then
-    const [logged] = rows("search");
+    const [logged] = await rows("search");
 
     expect(logged!.detail.ids).toContain(id);
     expect(logged!.detail.matched).toEqual(["text"]);
@@ -105,7 +103,7 @@ describe("Retrieval-outcome log", () => {
     await pipeline.invoke(container, "fetch_nodes", { session_id: session, ids: [id, missing] });
 
     // Then — these ids are what a preceding search's ids are joined against.
-    const [logged] = rows("get");
+    const [logged] = await rows("get");
 
     expect(logged!.detail).toMatchObject({ ids: [id, missing], found: 1, not_found: [missing] });
   });
@@ -123,7 +121,7 @@ describe("Retrieval-outcome log", () => {
     });
 
     // Then
-    expect(rows("get")[0]!.detail.outline).toBe(true);
+    expect((await rows("get"))[0]!.detail.outline).toBe(true);
   });
 
   it("should name the sections a narrowed fetch actually read", async () => {
@@ -141,7 +139,7 @@ describe("Retrieval-outcome log", () => {
     });
 
     // Then — a finer label than the node id, which is what a chunk-level signal needs.
-    expect(rows("get")[0]!.detail.sections).toEqual(["H2: Policy"]);
+    expect((await rows("get"))[0]!.detail.sections).toEqual(["H2: Policy"]);
   });
 
   it("should record the working set a session was handed", async () => {
@@ -153,9 +151,10 @@ describe("Retrieval-outcome log", () => {
     };
 
     // When / Then
-    const row = env.db
-      .prepare("SELECT detail FROM events WHERE action = 'session_start' AND session_id = ?")
-      .get(started.session_id) as { detail: string | null };
+    const row = (await env.sql.one<{ detail: string | null }>(
+      "SELECT detail FROM events WHERE action = 'session_start' AND session_id = @id",
+      { id: started.session_id },
+    ))!;
 
     expect(JSON.parse(row.detail!)).toMatchObject({ project: null });
     expect(Array.isArray((JSON.parse(row.detail!) as { ids: unknown }).ids)).toBe(true);
@@ -170,34 +169,12 @@ describe("Retrieval-outcome log", () => {
     });
 
     // Then
-    const row = env.db
-      .prepare("SELECT detail FROM events WHERE action = 'code_lookup' AND session_id = ?")
-      .get(session) as { detail: string | null };
+    const row = (await env.sql.one<{ detail: string | null }>(
+      "SELECT detail FROM events WHERE action = 'code_lookup' AND session_id = @id",
+      { id: session },
+    ))!;
 
     expect(JSON.parse(row.detail!)).toMatchObject({ results: 0, ids: [], name: "AuthService" });
-  });
-
-  it("should record the ids of symbols a lookup did surface", async () => {
-    // Given — a lookup that finds nothing reports an empty list either way, so the ids can
-    // only be checked against symbols that exist.
-    await pipeline.invoke(container, "index_code", { session_id: session, path: FIXTURE });
-
-    // When
-    const found = (await pipeline.invoke(container, "lookup_code", {
-      session_id: session,
-      file: "util/crypto.ts",
-      limit: 10,
-    })) as { symbols: { envelope: { id: string } }[] };
-
-    // Then
-    const [row] = rows("code_lookup").filter((r) => "file" in r.detail);
-
-    expect(found.symbols.length).toBeGreaterThan(0);
-    expect(row?.detail).toEqual({
-      file: "util/crypto.ts",
-      results: found.symbols.length,
-      ids: found.symbols.map((symbol) => symbol.envelope.id),
-    });
   });
 
   it("should still record the node a write produced", async () => {
@@ -205,7 +182,7 @@ describe("Retrieval-outcome log", () => {
     const id = await seed("Retry budget", "the http client retries with exponential backoff");
 
     // Then
-    expect(rows("write").map((r) => r.node_id)).toContain(id);
+    expect((await rows("write")).map((r) => r.node_id)).toContain(id);
   });
 });
 

@@ -1,20 +1,13 @@
-// sqlite-only: reads or swaps the SQLite handle directly
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type BetterSqlite3 from "better-sqlite3";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { EventAction, MemoryKind } from "@cerebrium/contracts/vocab";
+import type { PgDatabase } from "@/db/postgres/database";
 import { CheckpointTool } from "@/presentation/mcp/tools/checkpoint";
-import { CodeIndexTool } from "@/presentation/mcp/tools/code-index";
-import { CodeLookupTool } from "@/presentation/mcp/tools/code-lookup";
 import { GetTool } from "@/presentation/mcp/tools/get";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { callTool, setup } from "@test/helpers";
-
-const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures/demo-repo");
 
 interface EventRow {
   session_id: string;
@@ -23,10 +16,12 @@ interface EventRow {
   detail: string | null;
 }
 
-function eventsFor(db: BetterSqlite3.Database, action: EventAction): EventRow[] {
-  return db
-    .prepare("SELECT * FROM events WHERE action = ? ORDER BY rowid")
-    .all(action) as EventRow[];
+async function eventsFor(db: PgDatabase, action: EventAction): Promise<EventRow[]> {
+  return (
+    await db.query<EventRow>("SELECT * FROM events WHERE action = @action ORDER BY ts, id", {
+      action,
+    })
+  ).rows;
 }
 
 function detailOf(row: EventRow | undefined): unknown {
@@ -48,7 +43,7 @@ describe("SessionStartTool audit row", () => {
     const result = await callTool(container.resolve(SessionStartTool), { project: "cerebrium" });
 
     // Then
-    const [row] = eventsFor(db, EventAction.SESSION_START);
+    const [row] = await eventsFor(db, EventAction.SESSION_START);
     expect(row?.session_id).toBe(result.session_id);
     expect(detailOf(row)).toEqual({ project: "cerebrium", ids: [] });
   });
@@ -77,8 +72,10 @@ describe("SessionStartTool audit row", () => {
     await callTool(container.resolve(SessionStartTool), { project: "cerebrium" });
 
     // Then
-    const rows = eventsFor(db, EventAction.SESSION_START);
-    const detail = detailOf(rows.at(-1)) as { ids: string[] };
+    const rows = await eventsFor(db, EventAction.SESSION_START);
+    const detail = detailOf(
+      rows.find((row) => (detailOf(row) as { project?: string }).project === "cerebrium"),
+    ) as { ids: string[] };
     expect(detail.ids).toEqual(expect.arrayContaining([task.id, checkpoint.id]));
   });
 });
@@ -100,7 +97,7 @@ describe("WriteTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.WRITE);
+    const [row] = await eventsFor(db, EventAction.WRITE);
     expect(row?.node_id).toBe(envelope.id);
     expect(row?.session_id).toBe(session_id);
     expect(detailOf(row)).toBeNull();
@@ -130,7 +127,7 @@ describe("CheckpointTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.CHECKPOINT);
+    const [row] = await eventsFor(db, EventAction.CHECKPOINT);
     expect(row?.node_id).toBe(envelope.id);
     expect(detailOf(row)).toBeNull();
   });
@@ -154,7 +151,7 @@ describe("GetTool audit row", () => {
     await callTool(container.resolve(GetTool), { session_id, ids: [envelope.id, "missing"] });
 
     // Then
-    const [row] = eventsFor(db, EventAction.GET);
+    const [row] = await eventsFor(db, EventAction.GET);
     expect(row?.node_id).toBeNull();
     expect(detailOf(row)).toEqual({
       ids: [envelope.id, "missing"],
@@ -180,7 +177,7 @@ describe("GetTool audit row", () => {
     await callTool(container.resolve(GetTool), { session_id, ids: [envelope.id] });
 
     // Then
-    const [row] = eventsFor(db, EventAction.GET);
+    const [row] = await eventsFor(db, EventAction.GET);
     expect(detailOf(row)).toEqual({ ids: [envelope.id], found: 1 });
   });
 
@@ -205,7 +202,7 @@ describe("GetTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.GET);
+    const [row] = await eventsFor(db, EventAction.GET);
     expect(detailOf(row)).toEqual({
       ids: [envelope.id],
       found: 1,
@@ -234,7 +231,7 @@ describe("GetTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.GET);
+    const [row] = await eventsFor(db, EventAction.GET);
     expect(detailOf(row)).toEqual({ ids: [envelope.id], found: 1, outline: true });
   });
 });
@@ -270,7 +267,7 @@ describe("SearchTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.SEARCH);
+    const [row] = await eventsFor(db, EventAction.SEARCH);
     expect(result.results.map((e) => e.id)).toEqual([fact.id]);
     expect(detailOf(row)).toMatchObject({
       mode: "hybrid",
@@ -302,7 +299,7 @@ describe("SearchTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.SEARCH);
+    const [row] = await eventsFor(db, EventAction.SEARCH);
     expect(detailOf(row)).toEqual({
       mode: "text",
       query: "release pipeline",
@@ -322,7 +319,7 @@ describe("SearchTool audit row", () => {
     await callTool(container.resolve(SearchTool), { session_id, query: "***", limit: 10 });
 
     // Then
-    const [row] = eventsFor(db, EventAction.SEARCH);
+    const [row] = await eventsFor(db, EventAction.SEARCH);
     expect(detailOf(row)).toEqual({
       mode: "hybrid",
       query: "***",
@@ -354,54 +351,10 @@ describe("SearchTool audit row", () => {
     });
 
     // Then
-    const [row] = eventsFor(db, EventAction.SEARCH);
+    const [row] = await eventsFor(db, EventAction.SEARCH);
     const detail = detailOf(row) as { ids: string[]; matched: string[] };
     expect(detail.ids).toEqual([fact.id]);
     expect(detail.matched).toHaveLength(detail.ids.length);
     expect(detail.matched[0]).toMatch(/^(text|vector|both|graph)$/);
-  });
-});
-
-describe("CodeLookupTool audit row", () => {
-  it("should log the lookup key and the symbol ids it surfaced", async () => {
-    // Given
-    const { db } = setup();
-    const session_id = await session();
-    await callTool(container.resolve(CodeIndexTool), { session_id, path: FIXTURE });
-
-    // When
-    const result = await callTool(container.resolve(CodeLookupTool), {
-      session_id,
-      file: "util/crypto.ts",
-      limit: 10,
-    });
-
-    // Then
-    const [row] = eventsFor(db, EventAction.CODE_LOOKUP);
-    expect(result.symbols.length).toBeGreaterThan(0);
-    expect(detailOf(row)).toEqual({
-      file: "util/crypto.ts",
-      results: result.symbols.length,
-      ids: result.symbols.map((s) => s.id),
-    });
-  });
-});
-
-describe("CodeIndexTool audit row", () => {
-  it("should log one row per indexed repo with its counters and git provenance", async () => {
-    // Given
-    const { db } = setup();
-    const session_id = await session();
-
-    // When
-    await callTool(container.resolve(CodeIndexTool), { session_id, path: FIXTURE });
-
-    // Then
-    const rows = eventsFor(db, EventAction.CODE_INDEX);
-    expect(rows).toHaveLength(1);
-    const [indexed] = (detailOf(rows[0]) as { repos: Record<string, unknown>[] }).repos;
-    expect(indexed).toMatchObject({ repo: "demo-repo", indexed: 2, updated: 0, invalidated: 0 });
-    expect(indexed).toHaveProperty("branch");
-    expect(indexed).toHaveProperty("commit");
   });
 });

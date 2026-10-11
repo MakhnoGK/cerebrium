@@ -20,7 +20,6 @@ import { CodeEmbeddingWorker } from "@/application/workers";
 import { InProcessCodeParser } from "@/code/unit-parser";
 import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 import { setup, type TestEnv } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 
 const REMOTE = "github.com/acme/widgets";
 const MAIN: CodeContext = { remote_key: REMOTE, branch: "main" };
@@ -116,7 +115,7 @@ async function note(title: string, content: string): Promise<string> {
   return written.envelope.id;
 }
 
-describe.skipIf(TEST_BACKEND !== "postgres")("The per-branch code index", () => {
+describe("The per-branch code index", () => {
   beforeEach(async () => {
     env = setup();
     container.register(CODE_PARSER_TOKEN, { useValue: new InProcessCodeParser() });

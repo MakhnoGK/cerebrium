@@ -51,7 +51,7 @@ ensure_secrets() {
 }
 
 # A custom-format dump of the running store, taken before anything changes. No Postgres
-# running (the first deploy, or a previous release on SQLite) is not an error; a dump that
+# running (the first deploy) is not an error; a dump that
 # fails or comes out empty is, and stops the deploy.
 backup() {
   local previous="$1" id="" state="" name partial

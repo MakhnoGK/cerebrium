@@ -1,17 +1,13 @@
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  BackendCapabilityError,
-  PRINCIPAL_TOKENS_REPO_TOKEN,
   PRINCIPALS_REPO_TOKEN,
   STORE_TOKEN,
   type PrincipalsRepo,
-  type PrincipalTokensRepo,
   type Store,
 } from "@/domain/ports/storage";
 import { PrincipalTokenService, TOKEN_RECHECK_MS } from "@/application/services";
 import { setup, type TestEnv } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 
 let env: TestEnv;
 let tokens: PrincipalTokenService;
@@ -21,7 +17,7 @@ beforeEach(() => {
   tokens = container.resolve(PrincipalTokenService);
 });
 
-describe.skipIf(TEST_BACKEND !== "postgres")("Principal tokens", () => {
+describe("Principal tokens", () => {
   it("should authenticate an issued token as its principal", async () => {
     // Given
     const issued = await tokens.issue("mac-claude", "mac × claude-code");
@@ -121,17 +117,5 @@ describe.skipIf(TEST_BACKEND !== "postgres")("Principal tokens", () => {
   it("should report the capability on the store", () => {
     // Given / When / Then
     expect(container.resolve<Store>(STORE_TOKEN).capabilities.principalTokens).toBe(true);
-  });
-});
-
-describe.skipIf(TEST_BACKEND !== "sqlite")("Principal tokens on SQLite", () => {
-  it("should refuse to issue or authenticate", async () => {
-    // Given
-    const repo = container.resolve<PrincipalTokensRepo>(PRINCIPAL_TOKENS_REPO_TOKEN);
-
-    // When / Then
-    await expect(tokens.issue("mac-claude", "x")).rejects.toBeInstanceOf(BackendCapabilityError);
-    await expect(repo.findActiveByHash("x")).rejects.toBeInstanceOf(BackendCapabilityError);
-    expect(container.resolve<Store>(STORE_TOKEN).capabilities.principalTokens).toBe(false);
   });
 });

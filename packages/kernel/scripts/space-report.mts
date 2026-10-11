@@ -96,7 +96,7 @@ async function main() {
   const scope = buildContainer({
     role: "cli",
     source: new LayeredConfigSource(
-      new StaticConfigSource({ MEMORY_STORE_BACKEND: "postgres", MEMORY_PG_URL: url }),
+      new StaticConfigSource({ MEMORY_PG_URL: url }),
       new EnvConfigSource(),
     ),
     into: container.createChildContainer(),

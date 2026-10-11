@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { JobKind, JobState, MemoryKind } from "@cerebrium/contracts/vocab";
@@ -33,9 +32,10 @@ const queue = async (env: TestEnv, kind: string = JobKind.AGENT_SELFTEST) =>
   env.jobs.submit({ id: newId(), kind, payload: {}, scheduled_for: T0, now: T0 });
 
 const runNotes = (env: TestEnv) =>
-  env.db
-    .prepare("SELECT id, title FROM nodes WHERE type = 'event_note' AND memory_kind = ?")
-    .all(MemoryKind.EPISODIC) as { id: string; title: string }[];
+  env.sql.all<{ id: string; title: string }>(
+    "SELECT id, title FROM nodes WHERE type = 'event_note' AND memory_kind = @kind",
+    { kind: MemoryKind.EPISODIC },
+  );
 
 describe("AgentRunService", () => {
   it("should claim an agent job when one is queued", async () => {
@@ -81,7 +81,7 @@ describe("AgentRunService", () => {
     expect(ok).toBe(true);
     expect((await env.jobs.byId(job.id))!.state).toBe(JobState.DONE);
 
-    const notes = runNotes(env);
+    const notes = await runNotes(env);
     expect(notes).toHaveLength(1);
     expect(notes[0]!.title).toContain("agent.selftest run completed");
     expect(notes[0]!.title).toContain("$0.0554");
@@ -102,12 +102,13 @@ describe("AgentRunService", () => {
     });
 
     // Then
-    const notes = runNotes(env);
+    const notes = await runNotes(env);
     expect(notes[0]!.title).toContain("timeout");
 
-    const body = env.db
-      .prepare("SELECT content FROM revisions WHERE node_id = ? ORDER BY rev DESC LIMIT 1")
-      .get(notes[0]!.id) as { content: string };
+    const body = (await env.sql.one<{ content: string }>(
+      "SELECT content FROM revisions WHERE node_id = @id ORDER BY rev DESC LIMIT 1",
+      { id: notes[0]!.id },
+    ))!;
 
     expect(body.content).toContain("wall clock exceeded");
     expect(body.content).toContain("86,587 tokens");
@@ -140,7 +141,7 @@ describe("AgentRunService", () => {
     // Then
     expect(ok).toBe(false);
     expect((await env.jobs.byId(job.id))!.state).toBe(JobState.RUNNING);
-    expect(runNotes(env)).toHaveLength(0);
+    expect(await runNotes(env)).toHaveLength(0);
   });
 
   it("should attribute the run record to the system, not to the runner or the human", async () => {
@@ -155,7 +156,7 @@ describe("AgentRunService", () => {
 
     // Then
     const clients = (
-      env.db.prepare("SELECT DISTINCT client FROM sessions").all() as { client: string | null }[]
+      await env.sql.all<{ client: string | null }>("SELECT DISTINCT client FROM sessions")
     ).map((r) => r.client);
 
     expect(clients).toContain("cerebrium-jobs");
@@ -253,9 +254,10 @@ describe("AgentRunService.enqueue on a cadence", () => {
     const claimed = (await service().claim([JobKind.AGENT_DOCUMENTS], OWNER))!;
 
     await service().finish(claimed.id, OWNER, REPORT);
-    env.db
-      .prepare("UPDATE jobs SET ended_at = ? WHERE id = ?")
-      .run("2020-01-01T00:00:00.000Z", first.id);
+    await env.sql.run("UPDATE jobs SET ended_at = @at WHERE id = @id", {
+      at: "2020-01-01T00:00:00.000Z",
+      id: first.id,
+    });
 
     // When
     const second = await service().enqueue(JobKind.AGENT_DOCUMENTS, {}, HOUR);

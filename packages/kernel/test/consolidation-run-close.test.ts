@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { ConsolidationWorker } from "@/application/workers";
@@ -16,12 +15,10 @@ interface RunRow {
   last_error: string | null;
 }
 
-function runs(env: TestEnv): RunRow[] {
-  return env.db
-    .prepare(
-      "SELECT id, started_at, updated_at, ended_at, stage, last_error FROM consolidation_runs",
-    )
-    .all() as RunRow[];
+function runs(env: TestEnv): Promise<RunRow[]> {
+  return env.sql.all(
+    "SELECT id, started_at, updated_at, ended_at, stage, last_error FROM consolidation_runs",
+  );
 }
 
 async function openRun(
@@ -65,10 +62,10 @@ describe("A sweep that ends on its own", () => {
     await container.resolve(ConsolidationWorker).tick();
 
     // Then
-    const [row] = runs(env);
+    const [row] = await runs(env);
     expect(row?.stage).toBe("idle");
     expect(row?.ended_at).toBe(START);
-    expect(runs(env).filter((r) => r.ended_at === null)).toEqual([]);
+    expect((await runs(env)).filter((r) => r.ended_at === null)).toEqual([]);
   });
 });
 
@@ -88,7 +85,7 @@ describe("A sweep the process abandons", () => {
     });
 
     // Then
-    const [row] = runs(env);
+    const [row] = await runs(env);
     expect(row?.stage).toBe("interrupted");
     expect(row?.ended_at).toBe(START);
     expect(row?.last_error).toBe("the daemon stopped mid-sweep");
@@ -102,7 +99,9 @@ describe("A sweep the process abandons", () => {
     env.clock.advanceMs(60_000);
     await env.consolidation.closeRun("01BBBBBBBBBBBBBBBBBBBBBBBB", env.clock.now(), "unrelated");
     await openRun(env, "01BBBBBBBBBBBBBBBBBBBBBBBB", START);
-    const openedAt = runs(env).find((r) => r.id === "01AAAAAAAAAAAAAAAAAAAAAAAA")!.updated_at;
+    const openedAt = (await runs(env)).find(
+      (r) => r.id === "01AAAAAAAAAAAAAAAAAAAAAAAA",
+    )!.updated_at;
 
     // When
     const closed = await env.consolidation.closeAbandonedRuns(REASON);
@@ -110,7 +109,7 @@ describe("A sweep the process abandons", () => {
     // Then — `ended_at` is when the sweep last reported, not when this process started.
     expect(closed).toBe(2);
 
-    const row = runs(env).find((r) => r.id === "01AAAAAAAAAAAAAAAAAAAAAAAA")!;
+    const row = (await runs(env)).find((r) => r.id === "01AAAAAAAAAAAAAAAAAAAAAAAA")!;
     expect(row.ended_at).toBe(openedAt);
     expect(row.stage).toBe("interrupted");
     expect(row.last_error).toBe(REASON);
@@ -126,7 +125,7 @@ describe("A sweep the process abandons", () => {
     await env.consolidation.closeAbandonedRuns(REASON);
 
     // Then
-    expect(runs(env)[0]?.last_error).toBe("generation failed");
+    expect((await runs(env))[0]?.last_error).toBe("generation failed");
   });
 
   it("should stay closed when a tick that outlived its own close reports again", async () => {
@@ -143,7 +142,7 @@ describe("A sweep the process abandons", () => {
     await openRun(env, "01DDDDDDDDDDDDDDDDDDDDDDDD", START);
 
     // Then
-    const [row] = runs(env);
+    const [row] = await runs(env);
     expect(row?.ended_at).toBe(START);
     expect(row?.stage).toBe("interrupted");
   });
@@ -159,9 +158,10 @@ describe("Whether a sweep is running", () => {
     expect((await env.stats.techStats(env.clock.now())).consolidation.sweep_running).toBe(false);
 
     // When
-    env.db
-      .prepare("INSERT INTO worker_lease (role, owner, expires_at) VALUES (?, ?, ?)")
-      .run("consolidation", "owner-1", "2026-01-01T00:10:00.000Z");
+    await env.sql.run(
+      "INSERT INTO worker_lease (role, owner, expires_at) VALUES ('consolidation', 'owner-1', @at)",
+      { at: "2026-01-01T00:10:00.000Z" },
+    );
 
     // Then
     const held = (await env.stats.techStats(env.clock.now())).consolidation;

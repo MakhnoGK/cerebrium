@@ -1,15 +1,9 @@
-// sqlite-only: reads or swaps the SQLite handle directly
-import { rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { container } from "tsyringe";
 import { describe, expect, it } from "vitest";
 import { EdgeType, MemoryKind } from "@cerebrium/contracts/vocab";
 import { CONFIG_FILE_TOKEN } from "@/domain/ports/config";
 import { PROCESS_PROBE_TOKEN } from "@/domain/ports/process-probe";
-import { PROCESSES_REPO_TOKEN, type ProcessesRepo } from "@/domain/ports/storage";
 import { ProcessRegistryService } from "@/application/services";
-import { openDatabase, openDatabaseReadonly } from "@/db/sqlite/database";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { StatsTool } from "@/presentation/mcp/tools/stats";
 import { WriteTool } from "@/presentation/mcp/tools/write";
@@ -81,15 +75,18 @@ describe("StatsRepo.techStats", () => {
     const nodeId = await writeFact(s, "active without an embedding");
 
     // When
-    const insertChunk = env.db.prepare(
-      "INSERT INTO chunks (id, node_id, rev, heading_path, seq, text, stale) VALUES (?, ?, 1, NULL, ?, ?, 1)",
-    );
-    const insertMeta = env.db.prepare(
-      "INSERT INTO embedding_meta (chunk_id, model, model_version, ts) VALUES (?, 'test', '1', ?)",
-    );
     for (const [seq, id] of ["stale-a", "stale-b"].entries()) {
-      insertChunk.run(id, nodeId, seq, `stale chunk ${seq}`);
-      insertMeta.run(id, env.clock.t);
+      await env.sql.run(
+        `INSERT INTO chunks (id, node_id, rev, heading_path, seq, text, stale)
+         VALUES (@id, @nodeId, 1, NULL, @seq, @text, 1)`,
+        { id, nodeId, seq, text: `stale chunk ${seq}` },
+      );
+      await env.sql.run(
+        `INSERT INTO chunk_vectors (space_id, chunk_id, embedding, model_version, ts)
+         SELECT id, @id, array_fill(0.1, ARRAY[dim])::vector, '1', @ts
+           FROM vector_spaces WHERE active`,
+        { id, ts: env.clock.t },
+      );
     }
 
     // Then
@@ -209,29 +206,6 @@ describe("StatsTool", () => {
   });
 });
 
-describe("Read-only inspection handle", () => {
-  it("should be unable to write, holding the single-writer invariant for the CLI", () => {
-    // Given
-    const dbPath = join(tmpdir(), `mk-stats-${process.pid}.db`);
-    try {
-      openDatabase(dbPath).close(); // create + migrate a file-backed DB
-      const ro = openDatabaseReadonly(dbPath);
-
-      // When / Then
-      expect(() =>
-        ro
-          .prepare(
-            "INSERT INTO sessions (id, project, started_at, last_seen) VALUES ('a',NULL,'t','t')",
-          )
-          .run(),
-      ).toThrow();
-      ro.close();
-    } finally {
-      for (const suffix of ["", "-wal", "-shm"]) rmSync(`${dbPath}${suffix}`, { force: true });
-    }
-  });
-});
-
 describe("StatsTool observability channels", () => {
   it("should list the registered processes and any unusable configuration", async () => {
     // Given
@@ -253,14 +227,5 @@ describe("StatsTool observability channels", () => {
       expect.objectContaining({ role: "server", pid: 700, alive: true }),
     ]);
     expect(out.config.ignored).toEqual([]);
-  });
-
-  it("should report an empty registry rather than failing on a store no writer has migrated", async () => {
-    // Given — a read-only handle never runs migrations, which is the CLI's situation.
-    const env = setup();
-    env.db.exec("DROP TABLE processes");
-
-    // When / Then
-    expect(await container.resolve<ProcessesRepo>(PROCESSES_REPO_TOKEN).list()).toEqual([]);
   });
 });

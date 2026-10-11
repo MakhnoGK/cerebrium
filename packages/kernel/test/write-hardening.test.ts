@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { EmbeddingWorker } from "@/application/workers";
 import type { Envelope } from "@/db/repo";
-import { isBusy, withBusyRetry } from "@/db/sqlite/retry";
 import { SessionStartTool } from "@/presentation/mcp/tools/session-start";
 import { WriteTool } from "@/presentation/mcp/tools/write";
 import { setup } from "@test/helpers";
@@ -21,68 +20,6 @@ async function writeFact(s: string, title: string): Promise<Envelope> {
     content: `a durable fact about ${title} with a few words of body text`,
   });
 }
-
-const busyErr = () => Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-
-describe("Busy-retry wrapper", () => {
-  it("should recognize the busy family and nothing else", () => {
-    // Given / When / Then
-    expect(isBusy(busyErr())).toBe(true);
-    expect(isBusy(Object.assign(new Error("x"), { code: "SQLITE_BUSY_SNAPSHOT" }))).toBe(true);
-    expect(isBusy(new Error("plain"))).toBe(false);
-  });
-
-  it("should retry a busy transaction then succeed", () => {
-    // Given
-    let n = 0;
-
-    // When
-    const r = withBusyRetry(
-      () => {
-        if (n++ < 2) throw busyErr();
-        return "ok";
-      },
-      6,
-      1,
-    );
-
-    // Then
-    expect(r).toBe("ok");
-    expect(n).toBe(3);
-  });
-
-  it("should rethrow a non-busy error immediately without retrying", () => {
-    // Given
-    let n = 0;
-
-    // When / Then
-    expect(() =>
-      withBusyRetry(() => {
-        n++;
-        throw new Error("nope");
-      }),
-    ).toThrow("nope");
-    expect(n).toBe(1);
-  });
-
-  it("should give up after the attempt budget on persistent busy", () => {
-    // Given
-    let n = 0;
-
-    // When / Then
-    expect(() =>
-      withBusyRetry(
-        () => {
-          n++;
-          throw busyErr();
-        },
-        3,
-        1,
-      ),
-    ).toThrow(/locked/);
-    expect(n).toBe(3);
-  });
-});
 
 describe("Embedding worker lease", () => {
   it("should let only the lease holder drain while a second worker stands down", async () => {

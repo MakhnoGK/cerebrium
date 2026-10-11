@@ -81,9 +81,8 @@ function toCandidate(r: CandidateRow): ConsolidationCandidate {
   };
 }
 
-// See db/sqlite/consolidation.ts for what each query is for. On this backend there is no
-// code mirror, so the symbol-backed inputs (citations, the prune watermark, dead mirrors)
-// are empty rather than absent.
+// There is no code mirror in `nodes`, so the symbol-backed inputs (citations, the prune
+// watermark, dead mirrors) are empty rather than absent.
 @injectable()
 export class PgConsolidationRepo extends PgBaseRepo implements ConsolidationRepo {
   async insertCandidate(input: NewCandidate): Promise<string | null> {

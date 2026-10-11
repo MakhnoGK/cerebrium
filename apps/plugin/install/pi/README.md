@@ -52,16 +52,16 @@ for every other host, and `agent:setup --apply` writes it with the Node runtime 
 ```json
 {
   "command": "/path/to/node",
-  "args": ["/path/to/cerebrium/dist/server.js"],
-  "env": { "MEMORY_DB_PATH": "/Users/you/.cerebrium/memory.db" },
+  "args": ["/path/to/cerebrium/apps/plugin/dist/server.js"],
+  "env": { "MEMORY_KERNEL_URL": "tcp://HOST:7433", "MEMORY_KERNEL_TOKEN_FILE": "/path/to/token" },
   "options": { "autoSessionId": true, "rules": true, "skill": true, "greet": true }
 }
 ```
 
 `options` is yours to edit and setup never rewrites it. Without the file the extension still
-runs: it launches the `dist/server.js` beside itself with pi's own Node and whatever `MEMORY_*`
-variables are exported, which is enough for a working tree you are developing in, and not
-enough to pin a native ABI. Environment variables you exported are layered *under* the file, so
+runs: it launches `apps/plugin/dist/server.js` from its own working tree with pi's own Node and
+whatever `MEMORY_*` variables are exported, so `MEMORY_KERNEL_URL` and
+`MEMORY_KERNEL_TOKEN_FILE` must be among them. Environment variables you exported are layered *under* the file, so
 a shell export still reaches the server unless the file names the same key.
 
 ## Layout

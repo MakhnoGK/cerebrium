@@ -2,10 +2,8 @@ import "reflect-metadata";
 import { readFileSync } from "node:fs";
 import { unpairedBootstrap } from "@scripts/metrics";
 import { LintRule, lintWrite, type LintFinding } from "@scripts/write-lint";
-import type Database from "better-sqlite3";
-import { container, type DependencyContainer } from "tsyringe";
+import { container } from "tsyringe";
 import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
-import { DB_TOKEN } from "@/db/sqlite/base";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
 
@@ -16,9 +14,8 @@ import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infr
 const HELP = `
 lint-report — write-lint findings over a store, joined with retrieval scores.
 
-  npm run report:lint -- (--db PATH | --pg URL) [--dump P] [--arm NAME] [--horizon H]
+  npm run report:lint -- --pg URL [--dump P] [--arm NAME] [--horizon H]
 
-  --db PATH    SQLite store, opened READ-ONLY.
   --pg URL     Postgres store, read-only session.
   --dump P     JSONL from \`eval:retrieval --dump\`. Without it only the findings are listed.
   --arm NAME   Arm whose scores to read (default: the first one in each line).
@@ -48,20 +45,6 @@ function arg(argv: string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-type Rows = <T>(sql: string) => Promise<T[]>;
-
-function rowsOf(scope: DependencyContainer): Rows {
-  if (scope.isRegistered(PG_TOKEN, true)) {
-    const pg = scope.resolve<PgDatabase>(PG_TOKEN);
-
-    return async <T,>(sql: string) => (await pg.query(sql)).rows as T[];
-  }
-
-  const db = scope.resolve<Database.Database>(DB_TOKEN);
-
-  return <T,>(sql: string) => Promise.resolve(db.prepare(sql).all() as T[]);
-}
-
 const signed = (x: number): string =>
   Number.isNaN(x) ? "-" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}`;
 const pct = (xs: number[]): string =>
@@ -75,11 +58,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const store = arg(argv, "--db");
   const pgUrl = arg(argv, "--pg");
 
-  if (!store && !pgUrl) {
-    console.error("lint-report: --db PATH or --pg URL is required (see --help)");
+  if (!pgUrl) {
+    console.error("lint-report: --pg URL is required (see --help)");
     process.exitCode = 1;
     return;
   }
@@ -87,16 +69,13 @@ async function main(): Promise<void> {
   const scope = buildContainer({
     role: "cli",
     source: new LayeredConfigSource(
-      new StaticConfigSource(
-        pgUrl
-          ? { MEMORY_STORE_BACKEND: "postgres", MEMORY_PG_URL: pgUrl }
-          : { MEMORY_DB_PATH: store! },
-      ),
+      new StaticConfigSource({ MEMORY_PG_URL: pgUrl }),
       new EnvConfigSource(),
     ),
     into: container.createChildContainer(),
   });
-  const nodes = await rowsOf(scope)<NodeRow>(
+  const pg = scope.resolve<PgDatabase>(PG_TOKEN);
+  const { rows: nodes } = await pg.query<NodeRow>(
     `SELECT n.id, n.title, r.content
        FROM nodes n
        JOIN revisions r ON r.node_id = n.id
@@ -157,7 +136,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e: unknown) => {
-  console.error("lint-report failed:", e);
-  process.exit(1);
-});
+main().then(
+  () => process.exit(),
+  (e: unknown) => {
+    console.error("lint-report failed:", e);
+    process.exit(1);
+  },
+);

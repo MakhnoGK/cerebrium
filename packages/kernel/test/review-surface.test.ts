@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -255,7 +254,7 @@ describe("resolving a review", () => {
     expect(result.undone).toBe(false);
     expect(await pending()).toEqual([]);
     expect(
-      env.db.prepare("SELECT COUNT(*) n FROM edges WHERE invalidated_at IS NULL").get(),
+      await env.sql.one("SELECT COUNT(*)::int n FROM edges WHERE invalidated_at IS NULL"),
     ).toEqual({ n: 1 });
   });
 
@@ -271,7 +270,7 @@ describe("resolving a review", () => {
     expect(result.undone).toBe(true);
     expect(await pending()).toEqual([]);
     expect(
-      env.db.prepare("SELECT COUNT(*) n FROM edges WHERE invalidated_at IS NOT NULL").get(),
+      await env.sql.one("SELECT COUNT(*)::int n FROM edges WHERE invalidated_at IS NOT NULL"),
     ).toEqual({ n: 1 });
   });
 
@@ -318,7 +317,7 @@ describe("resolving a review", () => {
 
     // Then — the edge path is idempotent at the SQL level, so the row stays as it was.
     expect(again.undone).toBe(true);
-    expect(env.db.prepare("SELECT COUNT(*) n FROM review_decisions").get()).toEqual({ n: 1 });
+    expect(await env.sql.one("SELECT COUNT(*)::int n FROM review_decisions")).toEqual({ n: 1 });
   });
 
   it("should let a decision be changed, keeping one row per artifact", async () => {
@@ -332,7 +331,7 @@ describe("resolving a review", () => {
     await resolve(human, ref, ReviewDecision.UNDONE);
 
     // Then
-    expect(env.db.prepare("SELECT decision FROM review_decisions").all()).toEqual([
+    expect(await env.sql.all("SELECT decision FROM review_decisions")).toEqual([
       { decision: ReviewDecision.UNDONE },
     ]);
   });
@@ -356,7 +355,7 @@ describe("resolving a review", () => {
     await resolve(human, ref, ReviewDecision.KEPT);
 
     // Then
-    expect(env.db.prepare("SELECT decided_by FROM review_decisions").get()).toEqual({
+    expect(await env.sql.one("SELECT decided_by FROM review_decisions")).toEqual({
       decided_by: HUMAN,
     });
   });

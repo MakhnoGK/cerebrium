@@ -2,11 +2,10 @@ import "reflect-metadata";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { appendGold, readGoldFile } from "@scripts/gold";
 import { chat, DEFAULT_MODEL, DEFAULT_URL, parseJsonObject } from "@scripts/model";
-import type Database from "better-sqlite3";
 import { container as root } from "tsyringe";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
 import { HintsService } from "@/application/services/hints.service";
-import { DB_TOKEN } from "@/db/sqlite/base";
+import { PG_TOKEN, redactUrl, type PgDatabase } from "@/db/postgres/database";
 import { SearchTool } from "@/presentation/mcp/tools/search";
 import { buildContainer } from "@/container";
 import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infrastructure/config";
@@ -30,7 +29,7 @@ import { EnvConfigSource, LayeredConfigSource, StaticConfigSource } from "@/infr
 // a real cost and must stay visible.
 //
 // The store is opened READ-ONLY through the `cli` role and the session-hint write is
-// stubbed out, exactly as `eval-retrieval --db` does.
+// stubbed out, exactly as `eval-retrieval --pg` does.
 
 const SYSTEM = `You judge whether a stored engineering note answers a question.
 
@@ -43,9 +42,9 @@ Reply with JSON only: {"answers": [1, 4]}`;
 const HELP = `
 gold-adjudicate — label real queries by judging each candidate on its own.
 
-  npm run gold:adjudicate -- --db PATH [options]
+  npm run gold:adjudicate -- --pg URL [options]
 
-  --db PATH     Store to read. Opened READ-ONLY (cli role); never written.
+  --pg URL      Postgres store to read, in a read-only session; never written.
   --out PATH    Gold JSONL to append to (default ~/.cerebrium/gold.jsonl). Queries already
                 adjudicated there are skipped, so an interrupted run resumes.
   --unanswered PATH  Optional file to append unanswered queries to (one query per line).
@@ -90,39 +89,39 @@ function num(argv: string[], name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function queriesFromLog(db: Database.Database): string[] {
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT json_extract(detail, '$.query') AS query
-       FROM events
-       WHERE action = 'search' AND json_extract(detail, '$.query') IS NOT NULL
-       ORDER BY query`,
-    )
-    .all() as { query: string }[];
+async function queriesFromLog(db: PgDatabase): Promise<string[]> {
+  const { rows } = await db.query<{ query: string }>(
+    `SELECT DISTINCT detail::jsonb ->> 'query' AS query
+     FROM events
+     WHERE action = 'search' AND detail::jsonb ->> 'query' IS NOT NULL
+     ORDER BY query`,
+  );
 
   return rows.map((r) => r.query).filter((q) => q.trim().length > 3);
 }
 
 // Title plus the opening of the current revision — enough for a judge to tell "answers it"
 // from "same topic", without paying for whole bodies.
-function excerpts(db: Database.Database, ids: string[], chars: number): Map<string, Candidate> {
+async function excerpts(
+  db: PgDatabase,
+  ids: string[],
+  chars: number,
+): Promise<Map<string, Candidate>> {
   if (!ids.length) return new Map();
 
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = db
-    .prepare(
-      `WITH live AS (
-         SELECT node_id, MAX(rev) AS rev FROM chunks WHERE node_id IN (${placeholders})
-         GROUP BY node_id
-       )
-       SELECT c.node_id AS id, n.title, c.text, c.seq
-       FROM chunks c
-       JOIN live l ON l.node_id = c.node_id AND l.rev = c.rev
-       JOIN nodes n ON n.id = c.node_id
-       WHERE c.stale = 0
-       ORDER BY c.node_id, c.seq`,
-    )
-    .all(...ids) as { id: string; title: string; text: string; seq: number }[];
+  const { rows } = await db.query<{ id: string; title: string; text: string; seq: number }>(
+    `WITH live AS (
+       SELECT node_id, MAX(rev) AS rev FROM chunks WHERE node_id = ANY(@ids)
+       GROUP BY node_id
+     )
+     SELECT c.node_id AS id, n.title, c.text, c.seq
+     FROM chunks c
+     JOIN live l ON l.node_id = c.node_id AND l.rev = c.rev
+     JOIN nodes n ON n.id = c.node_id
+     WHERE c.stale = 0
+     ORDER BY c.node_id, c.seq`,
+    { ids },
+  );
 
   const out = new Map<string, Candidate>();
 
@@ -151,10 +150,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const store = arg(argv, "--db");
+  const store = arg(argv, "--pg");
 
   if (!store) {
-    console.error("gold-adjudicate: --db PATH is required (see --help)");
+    console.error("gold-adjudicate: --pg URL is required (see --help)");
     process.exitCode = 1;
     return;
   }
@@ -174,7 +173,7 @@ async function main(): Promise<void> {
   const container = buildContainer({
     role: "cli",
     source: new LayeredConfigSource(
-      new StaticConfigSource({ MEMORY_DB_PATH: store }),
+      new StaticConfigSource({ MEMORY_PG_URL: store }),
       new EnvConfigSource(),
     ),
     into: root.createChildContainer(),
@@ -187,7 +186,7 @@ async function main(): Promise<void> {
     useValue: { getSessionHints: () => Promise.resolve([]) } as unknown as HintsService,
   });
 
-  const db = container.resolve<Database.Database>(DB_TOKEN);
+  const db = container.resolve<PgDatabase>(PG_TOKEN);
   const tool = container.resolve(SearchTool);
   const existing = readGoldFile(out);
   const adjudicated = new Set(
@@ -205,7 +204,7 @@ async function main(): Promise<void> {
 
   let queries: string[];
 
-  if (from === "log") queries = queriesFromLog(db);
+  if (from === "log") queries = await queriesFromLog(db);
   else if (from === "gold") queries = [...new Set(existing.entries.map((e) => e.query))];
   else
     queries = readFileSync(from, "utf8")
@@ -216,7 +215,7 @@ async function main(): Promise<void> {
     .filter((q) => !adjudicated.has(q.trim().toLowerCase()))
     .slice(0, Number.isFinite(limit) ? limit : undefined);
 
-  console.log(`store: ${store} (read-only)`);
+  console.log(`store: ${redactUrl(store)} (read-only)`);
   console.log(
     `queries from ${from}: ${String(queries.length)}, ${String(adjudicated.size)} already adjudicated, ${String(pending.length)} to do`,
   );
@@ -246,7 +245,7 @@ async function main(): Promise<void> {
       for (const hit of res.results) ids.add(hit.id);
     }
 
-    const candidates = [...excerpts(db, [...ids], excerptChars).values()];
+    const candidates = [...(await excerpts(db, [...ids], excerptChars)).values()];
 
     if (!candidates.length) {
       empty++;
@@ -324,7 +323,10 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((e: unknown) => {
-  console.error("gold-adjudicate failed:", e);
-  process.exit(1);
-});
+main().then(
+  () => process.exit(),
+  (e: unknown) => {
+    console.error("gold-adjudicate failed:", e);
+    process.exit(1);
+  },
+);

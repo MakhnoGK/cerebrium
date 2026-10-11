@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { describe, expect, it } from "vitest";
 import { JobKind, JobState } from "@cerebrium/contracts/vocab";
 import { newId } from "@/core/ids";
@@ -208,13 +207,10 @@ describe("JobsRepo", () => {
     const exhausted = await submit(env);
 
     await claim(env, "dead-worker");
-    await env.jobs.claim({
-      kinds: [JobKind.CODE_INDEX],
-      owner: "dead-worker",
-      now: new Date(Date.parse(T0) + LEASE_MS + 1).toISOString(),
-      leaseMs: LEASE_MS,
+    await claim(env, "dead-worker");
+    await env.sql.run("UPDATE jobs SET attempts = max_attempts WHERE id = @id", {
+      id: exhausted.id,
     });
-    env.db.prepare("UPDATE jobs SET attempts = max_attempts WHERE id = ?").run(exhausted.id);
 
     // When
     const touched = await env.jobs.reconcileAbandoned(T0, "the consumer exited mid-job");

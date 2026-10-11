@@ -1,14 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PrincipalTokenService } from "@cerebrium/kernel/application/services";
-import { buildContainer } from "@cerebrium/kernel/container";
-import { StaticConfigSource } from "@cerebrium/kernel/infrastructure/config";
 import { runTokenCommand, tokenCli, type TokenIo } from "@host/token-cli";
 import { setup } from "@test/helpers";
-import { TEST_BACKEND } from "@test/pg";
 
 let tokens: PrincipalTokenService;
 let dir: string;
@@ -38,7 +35,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe.skipIf(TEST_BACKEND !== "postgres")("Token CLI", () => {
+describe("Token CLI", () => {
   it("should print only the token on stdout when there is no --out", async () => {
     // Given
     const io = capture();
@@ -126,23 +123,18 @@ describe.skipIf(TEST_BACKEND !== "postgres")("Token CLI", () => {
 });
 
 describe("Token CLI entry", () => {
-  it("should refuse a non-postgres store before opening it", async () => {
+  it("should print the usage without opening the store when no command is given", async () => {
     // Given
     const io = capture();
-    const db = join(dir, "never-created.db");
-    const build = () =>
-      buildContainer({
-        role: "server",
-        into: container.createChildContainer(),
-        source: new StaticConfigSource({ MEMORY_STORE_BACKEND: "sqlite", MEMORY_DB_PATH: db }),
-      });
+    const build = () => {
+      throw new Error("the store was opened");
+    };
 
     // When
-    const code = await tokenCli(["list"], io, build);
+    const code = await tokenCli([], io, build);
 
     // Then
-    expect(code).toBe(1);
-    expect(io.stderr).toContain("need the postgres store");
-    expect(existsSync(db)).toBe(false);
+    expect(code).toBe(0);
+    expect(io.stderr).toContain("cerebrium-service token");
   });
 });

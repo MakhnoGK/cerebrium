@@ -226,7 +226,7 @@ describe("ProcessRegistryService", () => {
 
     // Then
     const published = JSON.parse((await repo.list())[0]!.config_json);
-    expect(published.database.path).toBe(":memory:");
+    expect(published.embedding.provider).toBe("local-null");
     expect(published.retrieval).toBeDefined();
   });
 

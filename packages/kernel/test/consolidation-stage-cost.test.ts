@@ -1,4 +1,3 @@
-// sqlite-only: reads or swaps the SQLite handle directly
 import { container } from "tsyringe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryKind } from "@cerebrium/contracts/vocab";
@@ -54,9 +53,9 @@ describe("Sweep cost", () => {
       expect.arrayContaining(["neighbours", "links", "distill", "merge", "mirrors", "backfill"]),
     );
 
-    const stored = env.db.prepare("SELECT stage_ms FROM consolidation_runs").get() as {
-      stage_ms: string | null;
-    };
+    const stored = (await env.sql.one<{ stage_ms: string | null }>(
+      "SELECT stage_ms FROM consolidation_runs",
+    ))!;
 
     expect(JSON.parse(stored.stage_ms ?? "{}")).toMatchObject({ neighbours: expect.any(Number) });
   });

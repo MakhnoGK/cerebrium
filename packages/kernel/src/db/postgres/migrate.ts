@@ -6,8 +6,8 @@ import { nowIso } from "@/core/ids";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// The bundle carries them as `pg-migrations/` beside the bins, where `migrations/` is
-// SQLite's (see scripts/copy-assets.mjs); from source they sit next to this module.
+// The bundle carries them as `pg-migrations/` beside the bins (see scripts/copy-assets.mjs);
+// from source they sit next to this module.
 export function migrationsDir(): string {
   for (const candidate of [join(here, "pg-migrations"), join(here, "migrations")]) {
     if (existsSync(candidate)) return candidate;

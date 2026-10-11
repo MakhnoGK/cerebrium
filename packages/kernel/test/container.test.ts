@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type Database from "better-sqlite3";
 import { container as globalContainer, type InjectionToken } from "tsyringe";
+import { ulid } from "ulid";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CONFIG_FILE_TOKEN, type ConfigFileReport } from "@/domain/ports/config";
 import type { EmbeddingProvider } from "@/domain/ports/embedding-provider";
@@ -14,35 +14,50 @@ import {
   WORKER_OPTIONS_TOKEN,
   type WorkerOptions,
 } from "@/application/workers";
-import { DB_TOKEN } from "@/db/sqlite/base";
-import { openDatabase } from "@/db/sqlite/database";
+import { PG_TOKEN, type PgDatabase } from "@/db/postgres/database";
 import { nowIso } from "@/core/ids";
 import { Server } from "@/presentation/mcp/server";
 import { buildContainer, KERNEL_TOKENS, type HostRole } from "@/container";
 import { ConfigRegistry, StaticConfigSource } from "@/infrastructure/config";
+import {
+  createFromTemplate,
+  databaseUrl,
+  dropDatabase,
+  TEST_DB_PREFIX,
+  TEST_PG_URL,
+} from "@test/pg";
 
 const ROLES: HostRole[] = ["server", "daemon", "cli"];
 
+const DB_NAME = `${TEST_DB_PREFIX}${ulid().toLowerCase()}`;
+
 const OFFLINE = {
-  MEMORY_DB_PATH: ":memory:",
+  MEMORY_PG_URL: databaseUrl(TEST_PG_URL, DB_NAME),
+  MEMORY_PG_URL_FILE: "",
   MEMORY_EMBED_PROVIDER: "local-null",
   MEMORY_CONSOLIDATE: "manual",
 };
+
+const opened: PgDatabase[] = [];
 
 function build(role: HostRole, env: Record<string, string | undefined> = OFFLINE) {
   return buildContainer({ role, source: new StaticConfigSource(env) });
 }
 
-// The `cli` role opens the DB read-only with fileMustExist, so parity across roles has to
-// be proven against a real migrated file rather than ":memory:".
-const DB_FILE = join(tmpdir(), `cerebrium-container-${String(process.pid)}.db`);
-const ON_FILE = { ...OFFLINE, MEMORY_DB_PATH: DB_FILE };
+function dbOf(role: HostRole): PgDatabase {
+  const db = build(role).resolve<PgDatabase>(PG_TOKEN);
 
-beforeAll(() => {
-  openDatabase(DB_FILE).close(); // run the migrations, then release the writer
+  opened.push(db);
+
+  return db;
+}
+
+beforeAll(async () => {
+  await createFromTemplate(DB_NAME);
 });
-afterAll(() => {
-  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${DB_FILE}${suffix}`, { force: true });
+afterAll(async () => {
+  await Promise.all(opened.map((db) => db.close().catch(() => undefined)));
+  await dropDatabase(DB_NAME);
 });
 
 describe("buildContainer", () => {
@@ -73,15 +88,15 @@ describe("buildContainer", () => {
     const c = build("server");
 
     // Then
-    expect(c.resolve(DB_TOKEN)).toBe(c.resolve(DB_TOKEN));
+    expect(c.resolve(PG_TOKEN)).toBe(c.resolve(PG_TOKEN));
   });
 
   it("should not touch the database until something resolves it", () => {
-    // Given / When — a path that cannot be opened read-only.
-    const c = build("cli", { ...OFFLINE, MEMORY_DB_PATH: "/nonexistent/cerebrium/memory.db" });
+    // Given / When — no store configured at all.
+    const c = build("cli", { ...OFFLINE, MEMORY_PG_URL: "", MEMORY_PG_URL_FILE: "" });
 
     // Then — building was lazy; only the resolve fails.
-    expect(() => c.resolve(DB_TOKEN)).toThrow();
+    expect(() => c.resolve(PG_TOKEN)).toThrow(/MEMORY_PG_URL/);
   });
 });
 
@@ -92,7 +107,7 @@ describe("Host role parity", () => {
     // inherited one. That inheritance is exactly why a resolve-based check proves nothing.
     for (const role of ROLES) {
       const scope = globalContainer.createChildContainer();
-      buildContainer({ role, source: new StaticConfigSource(ON_FILE), into: scope });
+      buildContainer({ role, source: new StaticConfigSource(OFFLINE), into: scope });
 
       for (const [name, token] of Object.entries(KERNEL_TOKENS)) {
         expect(
@@ -105,24 +120,26 @@ describe("Host role parity", () => {
 
   it("should resolve what each role actually hosts", async () => {
     // Given / When / Then
-    expect(build("server", ON_FILE).resolve(Server)).toBeDefined();
+    expect(build("server").resolve(Server)).toBeDefined();
 
-    const daemon = build("daemon", ON_FILE);
+    const daemon = build("daemon");
     expect(daemon.resolve(EmbeddingWorker)).toBeDefined();
     expect(daemon.resolve(ConsolidationWorker)).toBeDefined();
 
+    const cli = build("cli");
+    opened.push(cli.resolve<PgDatabase>(PG_TOKEN));
+
     expect(
-      (await build("cli", ON_FILE).resolve<StatsRepo>(STATS_REPO_TOKEN).techStats(nowIso())).content
-        .nodes_total,
+      (await cli.resolve<StatsRepo>(STATS_REPO_TOKEN).techStats(nowIso())).content.nodes_total,
     ).toBe(0);
   });
 
-  it("should refuse a write through the database the cli role resolves", () => {
+  it("should refuse a write through the database the cli role resolves", async () => {
     // Given
-    const db = build("cli", ON_FILE).resolve<Database.Database>(DB_TOKEN);
+    const db = dbOf("cli");
 
     // When / Then
-    expect(() => db.exec("CREATE TABLE nope (x)")).toThrow(/readonly/i);
+    await expect(db.query("CREATE TABLE nope (x int)")).rejects.toThrow(/read-only/i);
   });
 });
 
@@ -132,7 +149,7 @@ describe("Config tiers", () => {
   beforeAll(() => {
     writeFileSync(
       join(HOME, "config.json"),
-      JSON.stringify({ database: { path: DB_FILE }, retrieval: { mmrLambda: 0.42 } }),
+      JSON.stringify({ retrieval: { mmrLambda: 0.42, useWeight: 0.2 } }),
     );
     process.env.CEREBRIUM_HOME = HOME;
   });
