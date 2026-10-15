@@ -1,5 +1,20 @@
+import {
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+  type ForceCollide,
+  type ForceLink,
+  type ForceManyBody,
+  type ForceX,
+  type ForceY,
+  type Simulation,
+  type SimulationLinkDatum,
+  type SimulationNodeDatum,
+} from "d3-force";
 import Graph from "graphology";
-import type { ForceAtlas2Settings } from "graphology-layout-forceatlas2";
 import type { GraphEdge, GraphNode, GraphSnapshot } from "@cerebrium/contracts/graph";
 import { truncate } from "./format";
 
@@ -19,46 +34,40 @@ export interface Palette {
   detached: string;
   edgeless: string;
   label: string;
-  labelShadow: string;
-  surface: string;
   canvas: string;
 }
 
 const LIGHT: Palette = {
-  slots: ["#3a6fc8", "#c4553d", "#15867c", "#a6730f", "#b4467e", "#5c8730", "#7a5bc6"],
-  other: "#86837b",
-  symbol: "#918e86",
-  retired: "#bdbab2",
-  edge: "#c5c9cf",
-  edgeFaint: "#e2e4e6",
+  slots: ["#7d9cc9", "#c98a7a", "#6aa79f", "#c2a165", "#c286a6", "#8fac72", "#a294cc"],
+  other: "#a9a69f",
+  symbol: "#b3b0a9",
+  retired: "#d3d0c9",
+  edge: "#b3b8c0",
+  edgeFaint: "#cfd3d8",
   edgeFocus: "#626d7d",
   dimAlpha: 0.16,
   pulse: "#2f55d4",
   dangling: "#c8372f",
   detached: "#c9611f",
   edgeless: "#a77e00",
-  label: "#1c1f24",
-  labelShadow: "rgba(16, 24, 40, 0.16)",
-  surface: "#ffffff",
+  label: "#3a3d42",
   canvas: "#fafaf8",
 };
 
 const DARK: Palette = {
-  slots: ["#6b9bea", "#e57f63", "#3dbcae", "#d9a43a", "#e27aae", "#8cbb5a", "#a68ef0"],
-  other: "#9a978f",
-  symbol: "#6f7279",
-  retired: "#4a4d54",
-  edge: "#40454e",
-  edgeFaint: "#262a31",
+  slots: ["#7f9fd0", "#cf8f7d", "#6db3aa", "#c7a76a", "#c98cad", "#94b278", "#a89ad4"],
+  other: "#86847e",
+  symbol: "#62656b",
+  retired: "#41444a",
+  edge: "#4a4f59",
+  edgeFaint: "#353941",
   edgeFocus: "#9ca4af",
   dimAlpha: 0.2,
   pulse: "#8aa2ff",
   dangling: "#ef5d53",
   detached: "#ef8a4a",
   edgeless: "#e3b23c",
-  label: "#e6e8ec",
-  labelShadow: "rgba(0, 0, 0, 0.45)",
-  surface: "#23272e",
+  label: "#c9ccd2",
   canvas: "#171a1f",
 };
 
@@ -99,7 +108,6 @@ export interface EdgeAttrs {
   color: string;
   relation: string;
   index: number;
-  pull: number;
 }
 
 export type MemoryGraph = Graph<NodeAttrs, EdgeAttrs>;
@@ -187,66 +195,119 @@ function seeded(id: string): [number, number] {
   return [r * Math.cos(2 * Math.PI * b), r * Math.sin(2 * Math.PI * b)];
 }
 
-const MIN_SIZE = 1.5;
-const MAX_SIZE = 20;
-const SIZE_GAMMA = 1.2;
-const DEGREE_FLOOR = 40;
 const SYMBOL_SCALE = 0.8;
 const HUB_LABELS = 8;
 const HUB_MIN_DEGREE = 4;
+// Sigma's line program draws an edge 2 x size px wide.
+const EDGE_SIZE = 0.5;
 
-export function sizeOf(degree: number, kind: GraphNode["kind"], maxDegree: number): number {
-  const share = Math.min(1, degree / Math.max(maxDegree, DEGREE_FLOOR));
-  const size = MIN_SIZE + (MAX_SIZE - MIN_SIZE) * share ** SIZE_GAMMA;
+export interface Tuning {
+  repel: number;
+  linkDistance: number;
+  collideGap: number;
+  gravityX: number;
+  gravityY: number;
+  nodeScale: number;
+  nodeZoom: number;
+  labelDensity: number;
+  labelFadeFrom: number;
+}
+
+export const TUNING: Tuning = {
+  repel: -200,
+  linkDistance: 20,
+  collideGap: 17,
+  gravityX: 0.003,
+  gravityY: 0.007,
+  nodeScale: 0.25,
+  nodeZoom: 0.75,
+  labelDensity: 0.3,
+  labelFadeFrom: 1.2,
+};
+
+// The radius before `Tuning.nodeScale`, which the node reducer applies.
+export function sizeOf(degree: number, kind: GraphNode["kind"]): number {
+  const size = 2 + Math.sqrt(degree);
 
   return kind === "symbol" ? size * SYMBOL_SCALE : size;
 }
 
-// Sigma's line program draws an edge 2 x size px wide.
-export function edgeSizeOf(weight: number): number {
-  return 0.25 + 0.15 * Math.max(0, Math.min(1, weight));
+export interface SimNode extends SimulationNodeDatum {
+  id: string;
+  r: number;
 }
 
-export function layoutSettings(order: number): ForceAtlas2Settings {
-  return {
-    barnesHutOptimize: order > 400,
-    barnesHutTheta: 0.6,
-    scalingRatio: 40,
-    gravity: 0.05,
-    strongGravityMode: true,
-    outboundAttractionDistribution: true,
-    slowDown: 2 + 1.5 * Math.log(order),
-  };
+type SimLink = SimulationLinkDatum<SimNode>;
+
+export type Layout = Simulation<SimNode, SimLink>;
+
+export function newLayout(tuning: Tuning): Layout {
+  const layout = forceSimulation<SimNode>()
+    .force("charge", forceManyBody<SimNode>())
+    .force(
+      "link",
+      forceLink<SimNode, SimLink>().id((n) => n.id),
+    )
+    .force("collide", forceCollide<SimNode>().iterations(3))
+    .force("x", forceX<SimNode>())
+    .force("y", forceY<SimNode>())
+    .stop();
+  tuneLayout(layout, tuning);
+
+  return layout;
 }
 
-export type Positions = Map<string, [number, number]>;
-
-export function positionsOf(graph: MemoryGraph): Positions {
-  const out: Positions = new Map();
-  graph.forEachNode((id, a) => out.set(id, [a.x, a.y]));
-  return out;
+export function tuneLayout(layout: Layout, t: Tuning): void {
+  layout.force<ForceManyBody<SimNode>>("charge")?.strength(t.repel);
+  layout.force<ForceLink<SimNode, SimLink>>("link")?.distance(t.linkDistance);
+  layout.force<ForceCollide<SimNode>>("collide")?.radius((n) => n.r * t.nodeScale + t.collideGap);
+  layout.force<ForceX<SimNode>>("x")?.strength(t.gravityX);
+  layout.force<ForceY<SimNode>>("y")?.strength(t.gravityY);
 }
 
-// How far nodes moved between two samples, as a share of the picture's diagonal.
-export function movement(before: Positions, after: Positions): number {
-  let sum = 0;
-  let n = 0;
-  let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
+// Keeps the position and velocity of every node the layout already has; true when the shape
+// changed.
+export function syncLayout(layout: Layout, graph: MemoryGraph): boolean {
+  const known = new Map(layout.nodes().map((n) => [n.id, n]));
+  const force = layout.force<ForceLink<SimNode, SimLink>>("link");
+  const before = force?.links().length ?? 0;
+  const nodes = graph.mapNodes((id, a): SimNode => {
+    const node = known.get(id) ?? { id, r: a.size, x: a.x, y: a.y };
+    node.r = a.size;
+    return node;
+  });
 
-  for (const [id, [x, y]] of after) {
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y);
-    maxY = Math.max(maxY, y);
-    const prev = before.get(id);
-    if (!prev) continue;
-    sum += Math.hypot(x - prev[0], y - prev[1]);
-    n += 1;
-  }
+  const seen = new Set<string>();
+  const links: SimLink[] = [];
+  graph.forEachEdge((_, __, src, dst) => {
+    if (src === dst) return;
+    const key = src < dst ? `${src} ${dst}` : `${dst} ${src}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push({ source: src, target: dst });
+  });
 
-  const diagonal = Math.hypot(maxX - minX, maxY - minY);
+  layout.nodes(nodes);
+  force?.links(links);
 
-  return n === 0 || diagonal === 0 ? 0 : sum / n / diagonal;
+  return (
+    nodes.length !== known.size || nodes.some((n) => !known.has(n.id)) || links.length !== before
+  );
+}
+
+export function follow(graph: MemoryGraph, layout: Layout): void {
+  const at = new Map(layout.nodes().map((n) => [n.id, n]));
+  graph.updateEachNodeAttributes(
+    (id, a) => {
+      const node = at.get(id);
+      if (node?.x !== undefined && node.y !== undefined) {
+        a.x = node.x;
+        a.y = node.y;
+      }
+      return a;
+    },
+    { attributes: ["x", "y"] },
+  );
 }
 
 function rank(edge: GraphEdge): number {
@@ -269,8 +330,8 @@ function rank(edge: GraphEdge): number {
   }
 }
 
-// A spanning forest that prefers authored links: the edges the layout pulls along and draws
-// solid. Every other edge stays in the picture, faint.
+// A spanning forest that prefers authored links: the edges drawn solid. Every other edge stays
+// in the picture, faint.
 export function backbone(edges: readonly GraphEdge[]): Set<number> {
   const parent = new Map<string, string>();
   const find = (id: string): string => {
@@ -313,8 +374,6 @@ export function syncGraph(
     degree.set(edge.dst, (degree.get(edge.dst) ?? 0) + 1);
   }
 
-  let maxDegree = 0;
-  for (const d of degree.values()) maxDegree = Math.max(maxDegree, d);
   const hubs = new Set(
     snapshot.nodes
       .filter((n) => n.kind !== "symbol" && (degree.get(n.id) ?? 0) >= HUB_MIN_DEGREE)
@@ -332,7 +391,7 @@ export function syncGraph(
 
   for (const node of snapshot.nodes) {
     const attrs = {
-      size: sizeOf(degree.get(node.id) ?? 0, node.kind, maxDegree),
+      size: sizeOf(degree.get(node.id) ?? 0, node.kind),
       color: colorOf(node, colorBy, palette, slots),
       label: truncate(node.title, 48),
       kind: node.kind,
@@ -353,11 +412,10 @@ export function syncGraph(
   snapshot.edges.forEach((edge, index) => {
     const onSpine = spine.has(index);
     graph.addDirectedEdgeWithKey(String(index), edge.src, edge.dst, {
-      size: edgeSizeOf(edge.weight),
+      size: EDGE_SIZE,
       color: onSpine ? palette.edge : palette.edgeFaint,
       relation: edge.type,
       index,
-      pull: onSpine ? 1 : 0.05,
     });
   });
 
@@ -375,104 +433,4 @@ export function syncGraph(
 
 export function newGraph(): MemoryGraph {
   return new Graph<NodeAttrs, EdgeAttrs>({ type: "directed", multi: true, allowSelfLoops: true });
-}
-
-export type LayoutGraph = Graph<{ x: number; y: number }, { pull: number }>;
-
-export function newLayoutGraph(): LayoutGraph {
-  return new Graph({ type: "directed", multi: true, allowSelfLoops: true });
-}
-
-const RING_MAX = 3;
-
-// The connected components small enough to sit on the ring: orphans, pairs and triples.
-export function ringPieces(graph: MemoryGraph): string[][] {
-  const parent = new Map<string, string>();
-  const find = (id: string): string => {
-    let root = id;
-    while (parent.get(root) !== root) root = parent.get(root) ?? root;
-    parent.set(id, root);
-    return root;
-  };
-
-  graph.forEachNode((id) => parent.set(id, id));
-  graph.forEachEdge((_, __, src, dst) => {
-    const [a, b] = [find(src), find(dst)];
-    if (a !== b) parent.set(a, b);
-  });
-
-  const groups = new Map<string, string[]>();
-  graph.forEachNode((id) => {
-    const root = find(id);
-    const group = groups.get(root);
-    if (group) group.push(id);
-    else groups.set(root, [id]);
-  });
-
-  const small = [...groups.values()].filter((g) => g.length <= RING_MAX);
-  if (small.length === groups.size) return [];
-
-  return small
-    .map((g) => g.sort())
-    .sort((a, b) => b.length - a.length || (a[0] ?? "").localeCompare(b[0] ?? ""));
-}
-
-// The physics runs on everything but the ring.
-export function syncLayout(
-  layout: LayoutGraph,
-  graph: MemoryGraph,
-  ring: ReadonlySet<string>,
-): void {
-  layout.clear();
-  graph.forEachNode((id, a) => {
-    if (!ring.has(id)) layout.addNode(id, { x: a.x, y: a.y });
-  });
-  graph.forEachEdge((_, a, src, dst) => {
-    if (layout.hasNode(src) && layout.hasNode(dst)) layout.addEdge(src, dst, { pull: a.pull });
-  });
-}
-
-// Copies the layout's positions into the picture and lays the ring around them.
-export function follow(graph: MemoryGraph, layout: LayoutGraph, pieces: string[][]): void {
-  let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
-  layout.forEachNode((_, a) => {
-    minX = Math.min(minX, a.x);
-    maxX = Math.max(maxX, a.x);
-    minY = Math.min(minY, a.y);
-    maxY = Math.max(maxY, a.y);
-  });
-
-  const [cx, cy] = layout.order ? [(minX + maxX) / 2, (minY + maxY) / 2] : [0, 0];
-  let radius = 0;
-  layout.forEachNode((_, a) => {
-    radius = Math.max(radius, Math.hypot(a.x - cx, a.y - cy));
-  });
-  radius = radius || 100;
-
-  const ring = new Map<string, [number, number]>();
-  const r = radius * 1.18;
-  pieces.forEach((piece, i) => {
-    const angle = (2 * Math.PI * i) / pieces.length - Math.PI / 2;
-    const [px, py] = [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
-    piece.forEach((id, j) => {
-      const spin = (2 * Math.PI * j) / piece.length;
-      const d = piece.length > 1 ? radius * 0.015 : 0;
-      ring.set(id, [px + d * Math.cos(spin), py + d * Math.sin(spin)]);
-    });
-  });
-
-  graph.updateEachNodeAttributes(
-    (id, a) => {
-      const at = layout.hasNode(id) ? layout.getNodeAttributes(id) : null;
-      const slot = ring.get(id);
-      if (at) {
-        a.x = at.x;
-        a.y = at.y;
-      } else if (slot) {
-        [a.x, a.y] = slot;
-      }
-      return a;
-    },
-    { attributes: ["x", "y"] },
-  );
 }

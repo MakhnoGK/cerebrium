@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import FA2Layout from "graphology-layout-forceatlas2/worker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Sigma from "sigma";
 import type { NodeHoverDrawingFunction, NodeLabelDrawingFunction } from "sigma/rendering";
@@ -15,40 +14,41 @@ import { errorMessage, fetchGraph, type ActivityBus } from "../api";
 import {
   fade,
   follow,
-  layoutSettings,
   legendOf,
-  movement,
   newGraph,
-  newLayoutGraph,
+  newLayout,
   paletteFor,
-  positionsOf,
-  ringPieces,
   syncGraph,
   syncLayout,
+  tuneLayout,
+  TUNING,
   type ColorBy,
   type EdgeAttrs,
+  type Layout,
   type MemoryGraph,
   type NodeAttrs,
   type Palette,
+  type SimNode,
+  type Tuning,
 } from "../graph-model";
 import { Badge, Empty, Mono, Notice, RelTime } from "./common";
 
 export const GRAPH_KEY = ["graph"] as const;
 
 const PULSE_MS = 1_600;
-const LAYOUT_CAP_MS = 30_000;
-const SAMPLE_MS = 500;
-const SETTLED = 0.003;
-const SETTLED_SAMPLES = 3;
 const REFETCH_DEBOUNCE_MS = 2_000;
+const REHEAT = 0.3;
+const DRAG_HEAT = 0.3;
 const FORCED_LABELS = 12;
 const LEAF_LABEL_DEGREE = 2;
-const FOCUS_EDGE_SIZE = 0.5;
+const FOCUS_EDGE_SIZE = 0.6;
 const DANGLING_EDGE_SIZE = 0.6;
-const LABEL_PAD_X = 6;
-const LABEL_PAD_Y = 3;
-const LABEL_GAP = 4;
-const HALO = 2.5;
+const LABEL_GAP = 3;
+const LABEL_HALO = 3;
+const LABEL_FADE_SPAN = 2;
+const TUNING_KEY = "cerebrium.graph.tuning";
+const SHOW_TUNING = false;
+const HOVER_LABEL_SCALE = 1.1;
 const WRITES = new Set([
   "write",
   "update",
@@ -75,6 +75,8 @@ interface View {
   focusLabels: Set<string>;
   selected: string | null;
   pulses: Map<string, Pulse>;
+  tuning: Tuning;
+  ratio: number;
 }
 
 function usePrefersDark(): boolean {
@@ -89,62 +91,81 @@ function usePrefersDark(): boolean {
   return dark;
 }
 
-function shadow(ctx: CanvasRenderingContext2D, color: string | null): void {
-  ctx.shadowColor = color ?? "transparent";
-  ctx.shadowBlur = color ? 6 : 0;
-  ctx.shadowOffsetY = color ? 1 : 0;
+function labelAlpha(ratio: number, from: number): number {
+  return Math.min(1, Math.max(0, (1 / ratio - from) / LABEL_FADE_SPAN));
 }
 
-function pill(
+function zoomToSize(tuning: Tuning): (ratio: number) => number {
+  return (ratio) => (ratio > 1 ? ratio : ratio ** tuning.nodeZoom);
+}
+
+function savedTuning(): Tuning {
+  if (!SHOW_TUNING) return TUNING;
+  try {
+    const raw = localStorage.getItem(TUNING_KEY);
+    return raw ? { ...TUNING, ...(JSON.parse(raw) as Partial<Tuning>) } : TUNING;
+  } catch {
+    return TUNING;
+  }
+}
+
+function saveTuning(tuning: Tuning): void {
+  if (!SHOW_TUNING) return;
+  try {
+    localStorage.setItem(TUNING_KEY, JSON.stringify(tuning));
+  } catch {
+    /* storage blocked */
+  }
+}
+
+function text(
   ctx: CanvasRenderingContext2D,
   palette: Palette,
-  x: number,
-  y: number,
+  data: { x: number; y: number; size: number },
   label: string,
   size: number,
+  settings: { labelWeight: string; labelFont: string },
 ): void {
-  const w = ctx.measureText(label).width + 2 * LABEL_PAD_X;
-  const h = size + 2 * LABEL_PAD_Y;
-
-  ctx.fillStyle = palette.surface;
-  shadow(ctx, palette.labelShadow);
-  ctx.beginPath();
-  ctx.roundRect(x, y - h / 2, w, h, h / 2);
-  ctx.fill();
-  shadow(ctx, null);
-
+  const y = data.y - data.size - LABEL_GAP;
+  ctx.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = LABEL_HALO;
+  ctx.strokeStyle = palette.canvas;
+  ctx.strokeText(label, data.x, y);
   ctx.fillStyle = palette.label;
-  ctx.fillText(label, x + LABEL_PAD_X, y + size / 3);
+  ctx.fillText(label, data.x, y);
 }
 
-function labelDrawer(palette: Palette): NodeLabelDrawingFunction<NodeAttrs, EdgeAttrs> {
+function labelDrawer(
+  palette: Palette,
+  ratio: () => number,
+  view: View,
+): NodeLabelDrawingFunction<NodeAttrs, EdgeAttrs> {
   return (ctx, data, settings) => {
     if (!data.label) return;
-    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
-    pill(ctx, palette, data.x + data.size + LABEL_GAP, data.y, data.label, settings.labelSize);
+    const alpha = data.forceLabel ? 1 : labelAlpha(ratio(), view.tuning.labelFadeFrom);
+    if (alpha === 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    text(ctx, palette, data, data.label, settings.labelSize, settings);
+    ctx.restore();
   };
 }
 
 function hoverDrawer(palette: Palette): NodeHoverDrawingFunction<NodeAttrs, EdgeAttrs> {
   return (ctx, data, settings) => {
-    ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`;
-
-    ctx.fillStyle = palette.surface;
-    shadow(ctx, palette.labelShadow);
-    ctx.beginPath();
-    ctx.arc(data.x, data.y, data.size + HALO, 0, Math.PI * 2);
-    ctx.fill();
-    shadow(ctx, null);
-
-    if (data.label) {
-      pill(ctx, palette, data.x + data.size + LABEL_GAP, data.y, data.label, settings.labelSize);
-    }
+    if (!data.label) return;
+    ctx.save();
+    text(ctx, palette, data, data.label, settings.labelSize * HOVER_LABEL_SCALE, settings);
+    ctx.restore();
   };
 }
 
 function nodeReducer(view: View, graph: MemoryGraph) {
   return (node: string, data: NodeAttrs): Partial<NodeDisplayData> => {
-    const res: Partial<NodeDisplayData> = { ...data };
+    const res: Partial<NodeDisplayData> = { ...data, size: data.size * view.tuning.nodeScale };
     const { palette, integrity } = view;
 
     if (data.hub) res.forceLabel = true;
@@ -173,7 +194,7 @@ function nodeReducer(view: View, graph: MemoryGraph) {
     if (pulse) {
       const t = (performance.now() - pulse.start) / PULSE_MS;
       if (t < 1) {
-        res.size = data.size * (1 + (pulse.strong ? 1.8 : 0.8) * (1 - t));
+        res.size = (res.size ?? data.size) * (1 + (pulse.strong ? 1.8 : 0.8) * (1 - t));
         res.color = palette.pulse;
         res.forceLabel = true;
         res.zIndex = 2;
@@ -206,6 +227,9 @@ function edgeReducer(view: View, graph: MemoryGraph) {
         if (!view.integrityOn) res.color = palette.edgeFocus;
       }
     }
+
+    // Sigma scales edges by zoomToSizeRatioFunction too, not only nodes.
+    res.size = (res.size ?? data.size) * zoomToSize(view.tuning)(view.ratio);
 
     return res;
   };
@@ -249,13 +273,15 @@ export default function GraphView({
   const [integrityOn, setIntegrityOn] = useState(false);
   const [running, setRunning] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
+  const [tuning, setTuning] = useState(savedTuning);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<MemoryGraph>(newGraph());
   const sigmaRef = useRef<Sigma<NodeAttrs, EdgeAttrs> | null>(null);
-  const layoutGraphRef = useRef(newLayoutGraph());
-  const layoutRef = useRef<FA2Layout | null>(null);
-  const piecesRef = useRef<string[][]>([]);
+  const layoutRef = useRef<Layout>(newLayout(tuning));
+  const runningRef = useRef(running);
+  const dragRef = useRef<SimNode | null>(null);
+  const draggedRef = useRef(false);
   const pendingRef = useRef(new Map<string, boolean>());
   const frameRef = useRef(0);
   const viewRef = useRef<View>({
@@ -268,6 +294,8 @@ export default function GraphView({
     focusLabels: new Set(),
     selected: null,
     pulses: new Map(),
+    tuning,
+    ratio: 1,
   });
 
   const query = { invalidated: showRetired, symbols: showSymbols };
@@ -340,48 +368,98 @@ export default function GraphView({
     if (!active || sigmaRef.current || !containerRef.current) return;
     const graph = graphRef.current;
     const view = viewRef.current;
+    const ratio = () => sigmaRef.current?.getCamera().ratio ?? 1;
     const sigma = new Sigma<NodeAttrs, EdgeAttrs>(graph, containerRef.current, {
       allowInvalidContainer: true,
       defaultEdgeType: "line",
       minEdgeThickness: 0.1,
-      zoomToSizeRatioFunction: (ratio) => (ratio > 1 ? ratio : ratio ** 0.3),
+      zoomToSizeRatioFunction: zoomToSize(view.tuning),
       itemSizesReference: "screen",
-      labelRenderedSizeThreshold: Number.POSITIVE_INFINITY,
-      labelDensity: 0.6,
+      labelRenderedSizeThreshold: 0,
+      labelDensity: view.tuning.labelDensity,
       labelFont: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
       labelSize: 11,
-      labelWeight: "500",
+      labelWeight: "400",
       labelColor: { color: view.palette.label },
-      defaultDrawNodeLabel: labelDrawer(view.palette),
+      defaultDrawNodeLabel: labelDrawer(view.palette, ratio, view),
       defaultDrawNodeHover: hoverDrawer(view.palette),
       zIndex: true,
       nodeReducer: nodeReducer(view, graph),
       edgeReducer: edgeReducer(view, graph),
     });
+    sigma.getCamera().on("updated", ({ ratio }) => {
+      if (ratio === view.ratio) return;
+      view.ratio = ratio;
+      sigma.refresh({ skipIndexation: true });
+    });
     sigma.on("enterNode", ({ node }) => {
-      if (viewRef.current.selected === null) setFocus(node);
+      if (viewRef.current.selected === null && !dragRef.current) setFocus(node);
     });
     sigma.on("leaveNode", () => {
+      if (viewRef.current.selected === null && !dragRef.current) setFocus(null);
+    });
+    sigma.on("clickNode", ({ node }) => {
+      if (draggedRef.current) draggedRef.current = false;
+      else select(node);
+    });
+    sigma.on("clickStage", () => {
+      if (draggedRef.current) draggedRef.current = false;
+      else select(null);
+    });
+
+    sigma.on("downNode", ({ node }) => {
+      const layout = layoutRef.current;
+      const drag = layout.nodes().find((n) => n.id === node);
+      if (!drag) return;
+      drag.fx = drag.x;
+      drag.fy = drag.y;
+      dragRef.current = drag;
+      draggedRef.current = false;
+      if (!sigma.getCustomBBox()) sigma.setCustomBBox(sigma.getBBox());
+      if (runningRef.current) layout.alphaTarget(DRAG_HEAT).restart();
+    });
+    const captor = sigma.getMouseCaptor();
+    captor.on("mousemovebody", (e) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const at = sigma.viewportToGraph(e);
+      drag.fx = at.x;
+      drag.fy = at.y;
+      draggedRef.current = true;
+      if (!runningRef.current) {
+        drag.x = at.x;
+        drag.y = at.y;
+        graph.mergeNodeAttributes(drag.id, at);
+      }
+      e.preventSigmaDefault();
+      e.original.preventDefault();
+      e.original.stopPropagation();
+    });
+    captor.on("mouseup", () => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      drag.fx = null;
+      drag.fy = null;
+      dragRef.current = null;
+      layoutRef.current.alphaTarget(0);
+      sigma.setCustomBBox(null);
       if (viewRef.current.selected === null) setFocus(null);
     });
-    sigma.on("clickNode", ({ node }) => select(node));
-    sigma.on("clickStage", () => select(null));
     sigmaRef.current = sigma;
   }, [active]);
 
   useEffect(() => {
-    const layout = layoutGraphRef.current;
-    const onMove = () => follow(graphRef.current, layout, piecesRef.current);
-    layout.on("eachNodeAttributesUpdated", onMove);
+    const layout = layoutRef.current;
+    layout.on("tick", () => follow(graphRef.current, layout));
     return () => {
-      layout.off("eachNodeAttributesUpdated", onMove);
+      layout.on("tick", null);
+      layout.stop();
     };
   }, []);
 
   useEffect(
     () => () => {
       cancelAnimationFrame(frameRef.current);
-      layoutRef.current?.kill();
       sigmaRef.current?.kill();
     },
     [],
@@ -392,19 +470,32 @@ export default function GraphView({
     const sigma = sigmaRef.current;
     if (!sigma) return;
     sigma.setSetting("labelColor", { color: palette.label });
-    sigma.setSetting("defaultDrawNodeLabel", labelDrawer(palette));
+    sigma.setSetting(
+      "defaultDrawNodeLabel",
+      labelDrawer(palette, () => sigma.getCamera().ratio, viewRef.current),
+    );
     sigma.setSetting("defaultDrawNodeHover", hoverDrawer(palette));
   }, [palette]);
+
+  useEffect(() => {
+    viewRef.current.tuning = tuning;
+    saveTuning(tuning);
+    const layout = layoutRef.current;
+    tuneLayout(layout, tuning);
+    if (active && runningRef.current) layout.alpha(Math.max(layout.alpha(), REHEAT)).restart();
+    const sigma = sigmaRef.current;
+    if (!sigma) return;
+    sigma.setSetting("zoomToSizeRatioFunction", zoomToSize(tuning));
+    sigma.setSetting("labelDensity", tuning.labelDensity);
+  }, [tuning]);
 
   useEffect(() => {
     if (!data) return;
     const graph = graphRef.current;
     const view = viewRef.current;
     syncGraph(graph, data, colorBy, palette);
-    const pieces = ringPieces(graph);
-    piecesRef.current = pieces;
-    syncLayout(layoutGraphRef.current, graph, new Set(pieces.flat()));
-    follow(graph, layoutGraphRef.current, pieces);
+    const layout = layoutRef.current;
+    if (syncLayout(layout, graph)) layout.alpha(Math.max(layout.alpha(), REHEAT));
 
     view.integrity = integrity;
     view.danglingTargets = new Set(
@@ -421,38 +512,14 @@ export default function GraphView({
       }
     }
     if (view.pulses.size) animate();
-
-    const layoutGraph = layoutGraphRef.current;
-    if (!layoutRef.current && layoutGraph.order > 0) {
-      layoutRef.current = new FA2Layout(layoutGraph, {
-        settings: layoutSettings(layoutGraph.order),
-        getEdgeWeight: "pull",
-      });
-    }
     sigmaRef.current?.refresh();
   }, [data, colorBy, palette, integrity]);
 
   useEffect(() => {
     const layout = layoutRef.current;
-    if (!layout) return;
-    const graph = graphRef.current;
-    if (!active || !running) {
-      layout.stop();
-      return;
-    }
-    layout.start();
-    const started = performance.now();
-    let last = positionsOf(graph);
-    let calm = 0;
-    const timer = window.setInterval(() => {
-      const now = positionsOf(graph);
-      calm = movement(last, now) < SETTLED ? calm + 1 : 0;
-      last = now;
-      if (calm >= SETTLED_SAMPLES || performance.now() - started > LAYOUT_CAP_MS) {
-        setRunning(false);
-      }
-    }, SAMPLE_MS);
-    return () => window.clearInterval(timer);
+    runningRef.current = running;
+    if (active && running) layout.restart();
+    else layout.stop();
   }, [active, running, data]);
 
   useEffect(() => {
@@ -533,7 +600,11 @@ export default function GraphView({
         <button
           type="button"
           className={running ? "btn btn-active" : "btn"}
-          onClick={() => setRunning((r) => !r)}
+          onClick={() => {
+            const layout = layoutRef.current;
+            if (!running) layout.alpha(Math.max(layout.alpha(), REHEAT));
+            setRunning(!running);
+          }}
           disabled={!data}
         >
           {running ? "Pause layout" : "Run layout"}
@@ -661,9 +732,68 @@ export default function GraphView({
               </p>
             )
           )}
+
+          {SHOW_TUNING && <TuningPanel tuning={tuning} onChange={setTuning} />}
         </aside>
       </div>
     </div>
+  );
+}
+
+const SLIDERS: { key: keyof Tuning; label: string; min: number; max: number; step: number }[] = [
+  { key: "repel", label: "Repel", min: -600, max: -10, step: 10 },
+  { key: "linkDistance", label: "Link distance", min: 10, max: 250, step: 5 },
+  { key: "collideGap", label: "Node gap", min: 0, max: 100, step: 1 },
+  { key: "gravityX", label: "Gravity X", min: 0, max: 0.1, step: 0.001 },
+  { key: "gravityY", label: "Gravity Y", min: 0, max: 0.1, step: 0.001 },
+  { key: "nodeScale", label: "Node size", min: 0.1, max: 1.5, step: 0.05 },
+  { key: "nodeZoom", label: "Node growth on zoom", min: 0, max: 1, step: 0.05 },
+  { key: "labelDensity", label: "Label density", min: 0.05, max: 2, step: 0.05 },
+  { key: "labelFadeFrom", label: "Labels appear at zoom", min: 0.5, max: 5, step: 0.1 },
+];
+
+function TuningPanel({ tuning, onChange }: { tuning: Tuning; onChange: (t: Tuning) => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    void navigator.clipboard.writeText(JSON.stringify(tuning, null, 2)).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_500);
+    });
+  };
+
+  return (
+    <section className="card">
+      <header className="card-head">
+        <h2>Tuning</h2>
+        <span className="graph-tune-actions">
+          <button type="button" className="link-btn" onClick={copy}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button type="button" className="link-btn" onClick={() => onChange(TUNING)}>
+            Reset
+          </button>
+        </span>
+      </header>
+      <div className="card-body graph-tune">
+        {SLIDERS.map((s) => (
+          <label key={s.key}>
+            <span className="graph-tune-head">
+              <span>{s.label}</span>
+              <span className="num muted">{tuning[s.key]}</span>
+            </span>
+            <input
+              type="range"
+              min={s.min}
+              max={s.max}
+              step={s.step}
+              value={tuning[s.key]}
+              onChange={(e) => onChange({ ...tuning, [s.key]: Number(e.target.value) })}
+            />
+          </label>
+        ))}
+      </div>
+    </section>
   );
 }
 

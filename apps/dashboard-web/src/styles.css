@@ -1108,6 +1108,33 @@ td.what {
   font-size: 13px;
 }
 
+.graph-tune {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.graph-tune label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.graph-tune-head {
+  display: flex;
+  justify-content: space-between;
+}
+
+.graph-tune input[type="range"] {
+  width: 100%;
+}
+
+.graph-tune-actions {
+  display: flex;
+  gap: 10px;
+}
+
 @media (max-width: 900px) {
   .graph-layout {
     grid-template-columns: 1fr;
